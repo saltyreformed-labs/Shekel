@@ -256,7 +256,7 @@ def load_form_or_refuse(schema: Any, refuse: FormRefusal) -> dict[str, Any] | Re
         The deserialized payload when it is valid, or *refuse*'s
         :class:`Response` when it is not.  The caller distinguishes them with
         ``isinstance(result, Response)``, the idiom
-        ``recurrence_spec_from_form`` already uses for the same
+        ``author_recurrence_for_create``'s callers already use for the same
         two-outcome shape.
     """
     try:

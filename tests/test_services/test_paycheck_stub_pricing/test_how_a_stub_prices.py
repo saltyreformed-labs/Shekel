@@ -20,11 +20,11 @@ from app.services.payroll_basis import PayrollBasis
 from app.services.salary_paydays import paycheck_on
 from app.services.tax_config_service import (
     configs_by_year,
-    load_tax_configs_for_year,
     profile_tax_series,
 )
 from app.tax_law import TaxLaw
 from tests._made_up_federal import made_up_credits, made_up_federal
+from tests._tax_configs import hand_built_law, tax_configs_for
 from tests._test_helpers import (
     add_test_pay_stub,
     made_up_fica,
@@ -294,7 +294,7 @@ class TestAStubIsPricedOnItsOwnYearsLaw:
         with pytest.raises(ValueError, match="R-SAL77"):
             paycheck_calculator.project_salary(
                 PayrollBasis(profile, ctx.calendar()), [period],
-                load_tax_configs_for_year(profile, 2027),
+                tax_configs_for(profile, 2027),
             )
 
     def test_a_per_year_law_missing_the_stubs_year_is_refused(self, owner, db):
@@ -411,14 +411,15 @@ class TestTheStubSideTakesTheRhythmOnItsOwnPayday:
         )]
         state = FakeStateTaxRules(flat_rate="0.045")
         state.standard_deduction = Decimal("12000.00")
-        configs = {
-            "bracket_set": FakeFederalRules(
+        configs = hand_built_law(
+            2026,
+            bracket_set=FakeFederalRules(
                 standard_deduction=Decimal("0"),
                 brackets=[FakeBracket(Decimal("0"), None, Decimal("0"), 0)],
             ),
-            "state_config": state,
-            "fica_config": FakeFicaRules(),
-        }
+            state_config=state,
+            fica_config=FakeFicaRules(),
+        )
         period = next(p for p in calendar.periods if p.start_date == date(2026, 7, 2))
 
         paycheck = paycheck_calculator.calculate_paycheck(

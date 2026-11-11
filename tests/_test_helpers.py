@@ -1201,7 +1201,7 @@ def create_loan_account(
     # avoidance as the loan helpers above; these pull the models/services
     # package, which must not load at tests/_test_helpers import time.
     from app import ref_cache
-    from app.enums import AcctTypeEnum
+    from app.enums import AcctTypeEnum, InterestAccrualConventionEnum
     from app.models.loan_params import LoanParams
     from app.services import account_service
 
@@ -1268,6 +1268,9 @@ def create_loan_account(
     params = LoanParams(
         account_id=account.id,
         original_principal=principal,
+        interest_accrual_convention_id=ref_cache.interest_accrual_convention_id(
+            InterestAccrualConventionEnum.MONTHLY_1_12,
+        ),
         term_months=term,
         origination_date=origination_date,
         payment_day=payment_day,
@@ -7989,12 +7992,12 @@ def validated_cadence(
     unit=None, interval_n=1, placement=None, starts_on=None, nominal_day=None,
     states_a_start=True, max_per_month=None,
 ):
-    """Return one cadence as a SCHEMA hands it to a route helper.
+    """Return one cadence as a SCHEMA's fields deserialize it.
 
-    The post-``load()`` shape: enum members, a real ``int`` and a real
-    ``date``, which is what
-    :func:`app.routes._recurrence_form_helpers.recurrence_spec_from_form`
-    and its siblings read.
+    The deserialized shape: enum members, a real ``int`` and a real ``date``,
+    which the schema's ``@post_load`` consumes into the submission a route
+    helper reads, as :func:`~tests.test_routes._recurrence_submission.submission_from`
+    does (the route helpers read this dict's keys directly until plan step R7e).
 
     **``starts_on`` rides WITH the cadence since plan step R7c-b**, and it is
     not optional garnish: the rule's first occurrence is authored (ruling

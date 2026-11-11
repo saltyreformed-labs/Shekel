@@ -1,0 +1,1598 @@
+{
+ "scratch": {
+  "numbers": [
+   266
+  ],
+  "ids": [
+   6314228665
+  ],
+  "nodes": [
+   "I_kwDOVSOvzs8AAAABeFt7uQ"
+  ],
+  "items": [],
+  "board": "PVT_kwDOFB5GWc4BoEsZ",
+  "place": [
+   "saltyreformed-labs",
+   "plan-views-demo",
+   "Plan views demo"
+  ]
+ },
+ "exchanges": [
+  {
+   "method": "POST",
+   "url": "https://api.github.com/graphql",
+   "body": {
+    "query": "query { repository(owner: \"saltyreformed-labs\", name: \"plan-views-demo\") {\n  issueFields(first: 100) { totalCount nodes {\n    ... on IssueFieldSingleSelect { fullDatabaseId name } } } } }",
+    "variables": {}
+   },
+   "status": 200,
+   "answer": {
+    "data": {
+     "repository": {
+      "issueFields": {
+       "totalCount": 5,
+       "nodes": [
+        {
+         "fullDatabaseId": "47847921",
+         "name": "Priority"
+        },
+        {},
+        {},
+        {
+         "fullDatabaseId": "47847924",
+         "name": "Effort"
+        },
+        {
+         "fullDatabaseId": "48771436",
+         "name": "Arc"
+        }
+       ]
+      }
+     }
+    }
+   }
+  },
+  {
+   "method": "POST",
+   "url": "https://api.github.com/repos/saltyreformed-labs/plan-views-demo/issues",
+   "body": {
+    "title": "[L2 measurement] scratch: a card whose reasons quill reads back",
+    "body": "Scratch for plan#3301's recording; deleted when it ends.",
+    "type": "step",
+    "labels": [
+     "balance",
+     "filing"
+    ],
+    "issue_field_values": [
+     {
+      "field_id": 48771436,
+      "value": "balance"
+     }
+    ]
+   },
+   "status": 201,
+   "answer": {
+    "url": "https://api.github.com/repos/saltyreformed-labs/plan-views-demo/issues/266",
+    "repository_url": "https://api.github.com/repos/saltyreformed-labs/plan-views-demo",
+    "labels_url": "https://api.github.com/repos/saltyreformed-labs/plan-views-demo/issues/266/labels{/name}",
+    "comments_url": "https://api.github.com/repos/saltyreformed-labs/plan-views-demo/issues/266/comments",
+    "events_url": "https://api.github.com/repos/saltyreformed-labs/plan-views-demo/issues/266/events",
+    "html_url": "https://github.com/saltyreformed-labs/plan-views-demo/issues/266",
+    "id": 6314228665,
+    "node_id": "I_kwDOVSOvzs8AAAABeFt7uQ",
+    "number": 266,
+    "title": "[L2 measurement] scratch: a card whose reasons quill reads back",
+    "user": {
+     "login": "SaltyReformed",
+     "id": 136745390,
+     "node_id": "U_kgDOCCaRrg",
+     "avatar_url": "[redacted: not a scratch card]",
+     "gravatar_id": "[redacted: not a scratch card]",
+     "url": "[redacted: not a scratch card]",
+     "html_url": "[redacted: not a scratch card]",
+     "followers_url": "[redacted: not a scratch card]",
+     "following_url": "[redacted: not a scratch card]",
+     "gists_url": "[redacted: not a scratch card]",
+     "starred_url": "[redacted: not a scratch card]",
+     "subscriptions_url": "[redacted: not a scratch card]",
+     "organizations_url": "[redacted: not a scratch card]",
+     "repos_url": "[redacted: not a scratch card]",
+     "events_url": "[redacted: not a scratch card]",
+     "received_events_url": "[redacted: not a scratch card]",
+     "type": "User",
+     "user_view_type": "[redacted: not a scratch card]",
+     "site_admin": false
+    },
+    "labels": [
+     {
+      "id": 12780871728,
+      "node_id": "LA_kwDOVSOvzs8AAAAC-cygMA",
+      "url": "[redacted: not a scratch card]",
+      "name": "balance",
+      "color": "[redacted: not a scratch card]",
+      "default": false,
+      "description": "[redacted: not a scratch card]",
+      "archived_at": null,
+      "archived_by": null
+     },
+     {
+      "id": 12780874739,
+      "node_id": "LA_kwDOVSOvzs8AAAAC-cyr8w",
+      "url": "[redacted: not a scratch card]",
+      "name": "filing",
+      "color": "[redacted: not a scratch card]",
+      "default": false,
+      "description": "[redacted: not a scratch card]",
+      "archived_at": null,
+      "archived_by": null
+     }
+    ],
+    "state": "open",
+    "locked": false,
+    "assignees": [],
+    "milestone": null,
+    "comments": 0,
+    "created_at": "2026-11-10T19:28:02Z",
+    "updated_at": "2026-11-10T19:28:02Z",
+    "closed_at": null,
+    "assignee": null,
+    "author_association": "MEMBER",
+    "issue_field_values": [
+     {
+      "issue_field_id": 48771436,
+      "node_id": "IFSSV_kgDOAQWmqw",
+      "data_type": "single_select",
+      "issue_field_name": "Arc",
+      "value": 85383809,
+      "single_select_option": {
+       "id": 85383809,
+       "name": "balance",
+       "color": "[redacted: not a scratch card]"
+      }
+     }
+    ],
+    "type": {
+     "id": 891387282,
+     "node_id": "IT_kwDOFB5GWc41IX2S",
+     "name": "step",
+     "description": "[redacted: not a scratch card]",
+     "color": "[redacted: not a scratch card]",
+     "created_at": "[redacted: not a scratch card]",
+     "updated_at": "[redacted: not a scratch card]",
+     "is_enabled": true
+    },
+    "active_lock_reason": null,
+    "sub_issues_summary": {
+     "total": 0,
+     "completed": 0,
+     "percent_completed": 0
+    },
+    "issue_dependencies_summary": {
+     "blocked_by": 0,
+     "total_blocked_by": 0,
+     "blocking": 0,
+     "total_blocking": 0
+    },
+    "body": "Scratch for plan#3301's recording; deleted when it ends.",
+    "closed_by": null,
+    "reactions": {
+     "url": "[redacted: not a scratch card]",
+     "total_count": 0,
+     "+1": 0,
+     "-1": 0,
+     "laugh": 0,
+     "hooray": 0,
+     "confused": 0,
+     "heart": 0,
+     "rocket": 0,
+     "eyes": 0
+    },
+    "timeline_url": "https://api.github.com/repos/saltyreformed-labs/plan-views-demo/issues/266/timeline",
+    "performed_via_github_app": null,
+    "state_reason": null,
+    "pinned_comment": null
+   }
+  },
+  {
+   "method": "DELETE",
+   "url": "https://api.github.com/repos/saltyreformed-labs/plan-views-demo/issues/266/labels/filing",
+   "body": null,
+   "status": 200,
+   "answer": [
+    {
+     "id": 12780871728,
+     "node_id": "LA_kwDOVSOvzs8AAAAC-cygMA",
+     "url": "[redacted: not a scratch card]",
+     "name": "balance",
+     "color": "[redacted: not a scratch card]",
+     "default": false,
+     "description": "[redacted: not a scratch card]",
+     "archived_at": null,
+     "archived_by": null
+    }
+   ]
+  },
+  {
+   "method": "POST",
+   "url": "https://api.github.com/graphql",
+   "body": {
+    "query": "query { repository(owner: \"saltyreformed-labs\", name: \"plan-views-demo\") { c266: issue(number: 266) { \n  id number fullDatabaseId title state stateReason\n  issueType { name }\n  labels(first: 100) { totalCount nodes { name } }\n  issueFieldValues(first: 10) { totalCount nodes { ... on IssueFieldSingleSelectValue {\n    name field { ... on IssueFieldSingleSelect { name } } } } }\n  parent { number repository { nameWithOwner } }\n  subIssues(first: 100) { totalCount nodes {\n    number state issueType { name } repository { nameWithOwner } } }\n  blockedBy(first: 100) { totalCount nodes { number repository { nameWithOwner } } }\n  projectItems(first: 100) { totalCount nodes { id project { id } } }\n  timelineItems(itemTypes: [CLOSED_EVENT, REOPENED_EVENT], last: 1) { nodes {\n    __typename\n    ... on ClosedEvent { actor { login } }\n    ... on ReopenedEvent { actor { login } } } }\n } } }",
+    "variables": {}
+   },
+   "status": 200,
+   "answer": {
+    "data": {
+     "repository": {
+      "c266": {
+       "id": "I_kwDOVSOvzs8AAAABeFt7uQ",
+       "number": 266,
+       "fullDatabaseId": "6314228665",
+       "title": "[L2 measurement] scratch: a card whose reasons quill reads back",
+       "state": "OPEN",
+       "stateReason": null,
+       "issueType": {
+        "name": "step"
+       },
+       "labels": {
+        "totalCount": 1,
+        "nodes": [
+         {
+          "name": "balance"
+         }
+        ]
+       },
+       "issueFieldValues": {
+        "totalCount": 1,
+        "nodes": [
+         {
+          "name": "balance",
+          "field": {
+           "name": "Arc"
+          }
+         }
+        ]
+       },
+       "parent": null,
+       "subIssues": {
+        "totalCount": 0,
+        "nodes": []
+       },
+       "blockedBy": {
+        "totalCount": 0,
+        "nodes": []
+       },
+       "projectItems": {
+        "totalCount": 0,
+        "nodes": []
+       },
+       "timelineItems": {
+        "nodes": []
+       }
+      }
+     }
+    }
+   }
+  },
+  {
+   "method": "POST",
+   "url": "https://api.github.com/graphql",
+   "body": {
+    "query": "query { repository(owner: \"saltyreformed-labs\", name: \"plan-views-demo\") {\n  issueFields(first: 100) { totalCount nodes {\n    ... on IssueFieldSingleSelect { id name options { id name } } } } } }",
+    "variables": {}
+   },
+   "status": 200,
+   "answer": {
+    "data": {
+     "repository": {
+      "issueFields": {
+       "totalCount": 5,
+       "nodes": [
+        {
+         "id": "IFSS_kgDOAtoZ8Q",
+         "name": "Priority",
+         "options": [
+          {
+           "id": "IFSSO_kgDOBP4aVA",
+           "name": "Urgent"
+          },
+          {
+           "id": "IFSSO_kgDOBP4aVQ",
+           "name": "High"
+          },
+          {
+           "id": "IFSSO_kgDOBP4aVg",
+           "name": "Medium"
+          },
+          {
+           "id": "IFSSO_kgDOBP4aVw",
+           "name": "Low"
+          },
+          {
+           "id": "IFSSO_kgDOBSkdVg",
+           "name": "On hold"
+          }
+         ]
+        },
+        {},
+        {},
+        {
+         "id": "IFSS_kgDOAtoZ9A",
+         "name": "Effort",
+         "options": [
+          {
+           "id": "IFSSO_kgDOBSWlQA",
+           "name": "1"
+          },
+          {
+           "id": "IFSSO_kgDOBSWlQQ",
+           "name": "2"
+          },
+          {
+           "id": "IFSSO_kgDOBSWlQg",
+           "name": "3"
+          },
+          {
+           "id": "IFSSO_kgDOBSWlQw",
+           "name": "4"
+          },
+          {
+           "id": "IFSSO_kgDOBSWlRA",
+           "name": "5+"
+          }
+         ]
+        },
+        {
+         "id": "IFSS_kgDOAugxbA",
+         "name": "Arc",
+         "options": [
+          {
+           "id": "IFSSO_kgDOBRbagQ",
+           "name": "balance"
+          },
+          {
+           "id": "IFSSO_kgDOBRbagg",
+           "name": "recurrence"
+          },
+          {
+           "id": "IFSSO_kgDOBRbagw",
+           "name": "pay_calendar"
+          },
+          {
+           "id": "IFSSO_kgDOBRbahA",
+           "name": "credit_card"
+          },
+          {
+           "id": "IFSSO_kgDOBRbahQ",
+           "name": "bank_import"
+          },
+          {
+           "id": "IFSSO_kgDOBRbahg",
+           "name": "salary"
+          },
+          {
+           "id": "IFSSO_kgDOBSJQoQ",
+           "name": "tooling"
+          }
+         ]
+        }
+       ]
+      }
+     }
+    }
+   }
+  },
+  {
+   "method": "POST",
+   "url": "https://api.github.com/graphql",
+   "body": {
+    "query": "mutation($issue: ID!, $field: ID!, $option: ID!, $why: String!) { setIssueFieldValue(input: {issueId: $issue, issueFields: [{fieldId: $field, singleSelectOptionId: $option, suggest: true, rationale: $why}]}) { clientMutationId } }",
+    "variables": {
+     "issue": "I_kwDOVSOvzs8AAAABeFt7uQ",
+     "field": "IFSS_kgDOAtoZ8Q",
+     "option": "IFSSO_kgDOBP4aVw",
+     "why": "A scratch card\u2019s reason: caf\u00e9."
+    }
+   },
+   "status": 200,
+   "answer": {
+    "data": {
+     "setIssueFieldValue": {
+      "clientMutationId": null
+     }
+    }
+   }
+  },
+  {
+   "method": "POST",
+   "url": "https://api.github.com/graphql",
+   "body": {
+    "query": "query($number: Int!) { repository(owner: \"saltyreformed-labs\", name: \"plan-views-demo\") {\n  issue(number: $number) { number pendingSuggestions { __typename\n    ... on PendingFieldSuggestion { actor { login ... on Node { id } } suggestedValue\n      rationale } } } } }",
+    "variables": {
+     "number": 266
+    }
+   },
+   "status": 200,
+   "answer": {
+    "data": {
+     "repository": {
+      "issue": {
+       "number": 266,
+       "pendingSuggestions": [
+        {
+         "__typename": "PendingFieldSuggestion",
+         "actor": {
+          "login": "SaltyReformed",
+          "id": "U_kgDOCCaRrg"
+         },
+         "suggestedValue": "Low",
+         "rationale": "A scratch card\u2019s reason: caf\u00e9."
+        }
+       ]
+      }
+     }
+    }
+   }
+  },
+  {
+   "method": "POST",
+   "url": "https://api.github.com/graphql",
+   "body": {
+    "query": "query($number: Int!) { repository(owner: \"saltyreformed-labs\", name: \"plan-views-demo\") {\n  issue(number: $number) { number pendingSuggestions { __typename\n    ... on PendingFieldSuggestion { actor { login ... on Node { id } } suggestedValue\n      rationale } } } } }",
+    "variables": {
+     "number": 266
+    }
+   },
+   "status": 200,
+   "answer": {
+    "data": {
+     "repository": {
+      "issue": {
+       "number": 266,
+       "pendingSuggestions": [
+        {
+         "__typename": "PendingFieldSuggestion",
+         "actor": {
+          "login": "SaltyReformed",
+          "id": "U_kgDOCCaRrg"
+         },
+         "suggestedValue": "Low",
+         "rationale": "A scratch card\u2019s reason: caf\u00e9."
+        }
+       ]
+      }
+     }
+    }
+   }
+  },
+  {
+   "method": "POST",
+   "url": "https://api.github.com/graphql",
+   "body": {
+    "query": "query { repository(owner: \"saltyreformed-labs\", name: \"plan-views-demo\") {\n  issueFields(first: 100) { totalCount nodes {\n    ... on IssueFieldSingleSelect { id name options { id name } } } } } }",
+    "variables": {}
+   },
+   "status": 200,
+   "answer": {
+    "data": {
+     "repository": {
+      "issueFields": {
+       "totalCount": 5,
+       "nodes": [
+        {
+         "id": "IFSS_kgDOAtoZ8Q",
+         "name": "Priority",
+         "options": [
+          {
+           "id": "IFSSO_kgDOBP4aVA",
+           "name": "Urgent"
+          },
+          {
+           "id": "IFSSO_kgDOBP4aVQ",
+           "name": "High"
+          },
+          {
+           "id": "IFSSO_kgDOBP4aVg",
+           "name": "Medium"
+          },
+          {
+           "id": "IFSSO_kgDOBP4aVw",
+           "name": "Low"
+          },
+          {
+           "id": "IFSSO_kgDOBSkdVg",
+           "name": "On hold"
+          }
+         ]
+        },
+        {},
+        {},
+        {
+         "id": "IFSS_kgDOAtoZ9A",
+         "name": "Effort",
+         "options": [
+          {
+           "id": "IFSSO_kgDOBSWlQA",
+           "name": "1"
+          },
+          {
+           "id": "IFSSO_kgDOBSWlQQ",
+           "name": "2"
+          },
+          {
+           "id": "IFSSO_kgDOBSWlQg",
+           "name": "3"
+          },
+          {
+           "id": "IFSSO_kgDOBSWlQw",
+           "name": "4"
+          },
+          {
+           "id": "IFSSO_kgDOBSWlRA",
+           "name": "5+"
+          }
+         ]
+        },
+        {
+         "id": "IFSS_kgDOAugxbA",
+         "name": "Arc",
+         "options": [
+          {
+           "id": "IFSSO_kgDOBRbagQ",
+           "name": "balance"
+          },
+          {
+           "id": "IFSSO_kgDOBRbagg",
+           "name": "recurrence"
+          },
+          {
+           "id": "IFSSO_kgDOBRbagw",
+           "name": "pay_calendar"
+          },
+          {
+           "id": "IFSSO_kgDOBRbahA",
+           "name": "credit_card"
+          },
+          {
+           "id": "IFSSO_kgDOBRbahQ",
+           "name": "bank_import"
+          },
+          {
+           "id": "IFSSO_kgDOBRbahg",
+           "name": "salary"
+          },
+          {
+           "id": "IFSSO_kgDOBSJQoQ",
+           "name": "tooling"
+          }
+         ]
+        }
+       ]
+      }
+     }
+    }
+   }
+  },
+  {
+   "method": "POST",
+   "url": "https://api.github.com/graphql",
+   "body": {
+    "query": "mutation($issue: ID!, $actor: ID!, $field: ID!) { rejectPendingIssueSuggestions(input: {issueId: $issue, actorId: $actor, suggestions: [{kind: FIELD, issueFieldId: $field}]}) { clientMutationId } }",
+    "variables": {
+     "issue": "I_kwDOVSOvzs8AAAABeFt7uQ",
+     "actor": "U_kgDOCCaRrg",
+     "field": "IFSS_kgDOAtoZ8Q"
+    }
+   },
+   "status": 200,
+   "answer": {
+    "data": {
+     "rejectPendingIssueSuggestions": {
+      "clientMutationId": null
+     }
+    }
+   }
+  },
+  {
+   "method": "POST",
+   "url": "https://api.github.com/graphql",
+   "body": {
+    "query": "query($number: Int!) { repository(owner: \"saltyreformed-labs\", name: \"plan-views-demo\") {\n  issue(number: $number) { number pendingSuggestions { __typename\n    ... on PendingFieldSuggestion { actor { login ... on Node { id } } suggestedValue\n      rationale } } } } }",
+    "variables": {
+     "number": 266
+    }
+   },
+   "status": 200,
+   "answer": {
+    "data": {
+     "repository": {
+      "issue": {
+       "number": 266,
+       "pendingSuggestions": []
+      }
+     }
+    }
+   }
+  },
+  {
+   "method": "POST",
+   "url": "https://api.github.com/graphql",
+   "body": {
+    "query": "query { repository(owner: \"saltyreformed-labs\", name: \"plan-views-demo\") {\n  issueFields(first: 100) { totalCount nodes {\n    ... on IssueFieldSingleSelect { id name options { id name } } } } } }",
+    "variables": {}
+   },
+   "status": 200,
+   "answer": {
+    "data": {
+     "repository": {
+      "issueFields": {
+       "totalCount": 5,
+       "nodes": [
+        {
+         "id": "IFSS_kgDOAtoZ8Q",
+         "name": "Priority",
+         "options": [
+          {
+           "id": "IFSSO_kgDOBP4aVA",
+           "name": "Urgent"
+          },
+          {
+           "id": "IFSSO_kgDOBP4aVQ",
+           "name": "High"
+          },
+          {
+           "id": "IFSSO_kgDOBP4aVg",
+           "name": "Medium"
+          },
+          {
+           "id": "IFSSO_kgDOBP4aVw",
+           "name": "Low"
+          },
+          {
+           "id": "IFSSO_kgDOBSkdVg",
+           "name": "On hold"
+          }
+         ]
+        },
+        {},
+        {},
+        {
+         "id": "IFSS_kgDOAtoZ9A",
+         "name": "Effort",
+         "options": [
+          {
+           "id": "IFSSO_kgDOBSWlQA",
+           "name": "1"
+          },
+          {
+           "id": "IFSSO_kgDOBSWlQQ",
+           "name": "2"
+          },
+          {
+           "id": "IFSSO_kgDOBSWlQg",
+           "name": "3"
+          },
+          {
+           "id": "IFSSO_kgDOBSWlQw",
+           "name": "4"
+          },
+          {
+           "id": "IFSSO_kgDOBSWlRA",
+           "name": "5+"
+          }
+         ]
+        },
+        {
+         "id": "IFSS_kgDOAugxbA",
+         "name": "Arc",
+         "options": [
+          {
+           "id": "IFSSO_kgDOBRbagQ",
+           "name": "balance"
+          },
+          {
+           "id": "IFSSO_kgDOBRbagg",
+           "name": "recurrence"
+          },
+          {
+           "id": "IFSSO_kgDOBRbagw",
+           "name": "pay_calendar"
+          },
+          {
+           "id": "IFSSO_kgDOBRbahA",
+           "name": "credit_card"
+          },
+          {
+           "id": "IFSSO_kgDOBRbahQ",
+           "name": "bank_import"
+          },
+          {
+           "id": "IFSSO_kgDOBRbahg",
+           "name": "salary"
+          },
+          {
+           "id": "IFSSO_kgDOBSJQoQ",
+           "name": "tooling"
+          }
+         ]
+        }
+       ]
+      }
+     }
+    }
+   }
+  },
+  {
+   "method": "POST",
+   "url": "https://api.github.com/graphql",
+   "body": {
+    "query": "mutation($issue: ID!, $field: ID!, $option: ID!, $why: String!) { setIssueFieldValue(input: {issueId: $issue, issueFields: [{fieldId: $field, singleSelectOptionId: $option, suggest: true, rationale: $why}]}) { clientMutationId } }",
+    "variables": {
+     "issue": "I_kwDOVSOvzs8AAAABeFt7uQ",
+     "field": "IFSS_kgDOAtoZ8Q",
+     "option": "IFSSO_kgDOBP4aVw",
+     "why": "A scratch card\u2019s reason outside ASCII, caf\u00e9 and all, padded to the cap: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa."
+    }
+   },
+   "status": 200,
+   "answer": {
+    "data": {
+     "setIssueFieldValue": {
+      "clientMutationId": null
+     }
+    }
+   }
+  },
+  {
+   "method": "POST",
+   "url": "https://api.github.com/graphql",
+   "body": {
+    "query": "query($number: Int!) { repository(owner: \"saltyreformed-labs\", name: \"plan-views-demo\") {\n  issue(number: $number) { number pendingSuggestions { __typename\n    ... on PendingFieldSuggestion { actor { login ... on Node { id } } suggestedValue\n      rationale } } } } }",
+    "variables": {
+     "number": 266
+    }
+   },
+   "status": 200,
+   "answer": {
+    "data": {
+     "repository": {
+      "issue": {
+       "number": 266,
+       "pendingSuggestions": [
+        {
+         "__typename": "PendingFieldSuggestion",
+         "actor": {
+          "login": "SaltyReformed",
+          "id": "U_kgDOCCaRrg"
+         },
+         "suggestedValue": "Low",
+         "rationale": "A scratch card\u2019s reason outside ASCII, caf\u00e9 and all, padded to the cap: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa."
+        }
+       ]
+      }
+     }
+    }
+   }
+  },
+  {
+   "method": "POST",
+   "url": "https://api.github.com/graphql",
+   "body": {
+    "query": "query($number: Int!) { repository(owner: \"saltyreformed-labs\", name: \"plan-views-demo\") {\n  issue(number: $number) { number pendingSuggestions { __typename\n    ... on PendingFieldSuggestion { actor { login ... on Node { id } } suggestedValue\n      rationale } } } } }",
+    "variables": {
+     "number": 266
+    }
+   },
+   "status": 200,
+   "answer": {
+    "data": {
+     "repository": {
+      "issue": {
+       "number": 266,
+       "pendingSuggestions": [
+        {
+         "__typename": "PendingFieldSuggestion",
+         "actor": {
+          "login": "SaltyReformed",
+          "id": "U_kgDOCCaRrg"
+         },
+         "suggestedValue": "Low",
+         "rationale": "A scratch card\u2019s reason outside ASCII, caf\u00e9 and all, padded to the cap: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa."
+        }
+       ]
+      }
+     }
+    }
+   }
+  },
+  {
+   "method": "POST",
+   "url": "https://api.github.com/graphql",
+   "body": {
+    "query": "query { repository(owner: \"saltyreformed-labs\", name: \"plan-views-demo\") {\n  issueFields(first: 100) { totalCount nodes {\n    ... on IssueFieldSingleSelect { id name options { id name } } } } } }",
+    "variables": {}
+   },
+   "status": 200,
+   "answer": {
+    "data": {
+     "repository": {
+      "issueFields": {
+       "totalCount": 5,
+       "nodes": [
+        {
+         "id": "IFSS_kgDOAtoZ8Q",
+         "name": "Priority",
+         "options": [
+          {
+           "id": "IFSSO_kgDOBP4aVA",
+           "name": "Urgent"
+          },
+          {
+           "id": "IFSSO_kgDOBP4aVQ",
+           "name": "High"
+          },
+          {
+           "id": "IFSSO_kgDOBP4aVg",
+           "name": "Medium"
+          },
+          {
+           "id": "IFSSO_kgDOBP4aVw",
+           "name": "Low"
+          },
+          {
+           "id": "IFSSO_kgDOBSkdVg",
+           "name": "On hold"
+          }
+         ]
+        },
+        {},
+        {},
+        {
+         "id": "IFSS_kgDOAtoZ9A",
+         "name": "Effort",
+         "options": [
+          {
+           "id": "IFSSO_kgDOBSWlQA",
+           "name": "1"
+          },
+          {
+           "id": "IFSSO_kgDOBSWlQQ",
+           "name": "2"
+          },
+          {
+           "id": "IFSSO_kgDOBSWlQg",
+           "name": "3"
+          },
+          {
+           "id": "IFSSO_kgDOBSWlQw",
+           "name": "4"
+          },
+          {
+           "id": "IFSSO_kgDOBSWlRA",
+           "name": "5+"
+          }
+         ]
+        },
+        {
+         "id": "IFSS_kgDOAugxbA",
+         "name": "Arc",
+         "options": [
+          {
+           "id": "IFSSO_kgDOBRbagQ",
+           "name": "balance"
+          },
+          {
+           "id": "IFSSO_kgDOBRbagg",
+           "name": "recurrence"
+          },
+          {
+           "id": "IFSSO_kgDOBRbagw",
+           "name": "pay_calendar"
+          },
+          {
+           "id": "IFSSO_kgDOBRbahA",
+           "name": "credit_card"
+          },
+          {
+           "id": "IFSSO_kgDOBRbahQ",
+           "name": "bank_import"
+          },
+          {
+           "id": "IFSSO_kgDOBRbahg",
+           "name": "salary"
+          },
+          {
+           "id": "IFSSO_kgDOBSJQoQ",
+           "name": "tooling"
+          }
+         ]
+        }
+       ]
+      }
+     }
+    }
+   }
+  },
+  {
+   "method": "POST",
+   "url": "https://api.github.com/graphql",
+   "body": {
+    "query": "mutation($issue: ID!, $actor: ID!, $field: ID!) { rejectPendingIssueSuggestions(input: {issueId: $issue, actorId: $actor, suggestions: [{kind: FIELD, issueFieldId: $field}]}) { clientMutationId } }",
+    "variables": {
+     "issue": "I_kwDOVSOvzs8AAAABeFt7uQ",
+     "actor": "U_kgDOCCaRrg",
+     "field": "IFSS_kgDOAtoZ8Q"
+    }
+   },
+   "status": 200,
+   "answer": {
+    "data": {
+     "rejectPendingIssueSuggestions": {
+      "clientMutationId": null
+     }
+    }
+   }
+  },
+  {
+   "method": "POST",
+   "url": "https://api.github.com/graphql",
+   "body": {
+    "query": "query($number: Int!) { repository(owner: \"saltyreformed-labs\", name: \"plan-views-demo\") {\n  issue(number: $number) { number pendingSuggestions { __typename\n    ... on PendingFieldSuggestion { actor { login ... on Node { id } } suggestedValue\n      rationale } } } } }",
+    "variables": {
+     "number": 266
+    }
+   },
+   "status": 200,
+   "answer": {
+    "data": {
+     "repository": {
+      "issue": {
+       "number": 266,
+       "pendingSuggestions": []
+      }
+     }
+    }
+   }
+  },
+  {
+   "method": "POST",
+   "url": "https://api.github.com/graphql",
+   "body": {
+    "query": "query { repository(owner: \"saltyreformed-labs\", name: \"plan-views-demo\") {\n  issueFields(first: 100) { totalCount nodes {\n    ... on IssueFieldSingleSelect { id name options { id name } } } } } }",
+    "variables": {}
+   },
+   "status": 200,
+   "answer": {
+    "data": {
+     "repository": {
+      "issueFields": {
+       "totalCount": 5,
+       "nodes": [
+        {
+         "id": "IFSS_kgDOAtoZ8Q",
+         "name": "Priority",
+         "options": [
+          {
+           "id": "IFSSO_kgDOBP4aVA",
+           "name": "Urgent"
+          },
+          {
+           "id": "IFSSO_kgDOBP4aVQ",
+           "name": "High"
+          },
+          {
+           "id": "IFSSO_kgDOBP4aVg",
+           "name": "Medium"
+          },
+          {
+           "id": "IFSSO_kgDOBP4aVw",
+           "name": "Low"
+          },
+          {
+           "id": "IFSSO_kgDOBSkdVg",
+           "name": "On hold"
+          }
+         ]
+        },
+        {},
+        {},
+        {
+         "id": "IFSS_kgDOAtoZ9A",
+         "name": "Effort",
+         "options": [
+          {
+           "id": "IFSSO_kgDOBSWlQA",
+           "name": "1"
+          },
+          {
+           "id": "IFSSO_kgDOBSWlQQ",
+           "name": "2"
+          },
+          {
+           "id": "IFSSO_kgDOBSWlQg",
+           "name": "3"
+          },
+          {
+           "id": "IFSSO_kgDOBSWlQw",
+           "name": "4"
+          },
+          {
+           "id": "IFSSO_kgDOBSWlRA",
+           "name": "5+"
+          }
+         ]
+        },
+        {
+         "id": "IFSS_kgDOAugxbA",
+         "name": "Arc",
+         "options": [
+          {
+           "id": "IFSSO_kgDOBRbagQ",
+           "name": "balance"
+          },
+          {
+           "id": "IFSSO_kgDOBRbagg",
+           "name": "recurrence"
+          },
+          {
+           "id": "IFSSO_kgDOBRbagw",
+           "name": "pay_calendar"
+          },
+          {
+           "id": "IFSSO_kgDOBRbahA",
+           "name": "credit_card"
+          },
+          {
+           "id": "IFSSO_kgDOBRbahQ",
+           "name": "bank_import"
+          },
+          {
+           "id": "IFSSO_kgDOBRbahg",
+           "name": "salary"
+          },
+          {
+           "id": "IFSSO_kgDOBSJQoQ",
+           "name": "tooling"
+          }
+         ]
+        }
+       ]
+      }
+     }
+    }
+   }
+  },
+  {
+   "method": "POST",
+   "url": "https://api.github.com/graphql",
+   "body": {
+    "query": "mutation($issue: ID!, $field: ID!, $option: ID!, $why: String!) { setIssueFieldValue(input: {issueId: $issue, issueFields: [{fieldId: $field, singleSelectOptionId: $option, suggest: true, rationale: $why}]}) { clientMutationId } }",
+    "variables": {
+     "issue": "I_kwDOVSOvzs8AAAABeFt7uQ",
+     "field": "IFSS_kgDOAtoZ8Q",
+     "option": "IFSSO_kgDOBP4aVw",
+     "why": "A scratch card's reason holding a run of  two spaces."
+    }
+   },
+   "status": 200,
+   "answer": {
+    "data": {
+     "setIssueFieldValue": {
+      "clientMutationId": null
+     }
+    }
+   }
+  },
+  {
+   "method": "POST",
+   "url": "https://api.github.com/graphql",
+   "body": {
+    "query": "query($number: Int!) { repository(owner: \"saltyreformed-labs\", name: \"plan-views-demo\") {\n  issue(number: $number) { number pendingSuggestions { __typename\n    ... on PendingFieldSuggestion { actor { login ... on Node { id } } suggestedValue\n      rationale } } } } }",
+    "variables": {
+     "number": 266
+    }
+   },
+   "status": 200,
+   "answer": {
+    "data": {
+     "repository": {
+      "issue": {
+       "number": 266,
+       "pendingSuggestions": [
+        {
+         "__typename": "PendingFieldSuggestion",
+         "actor": {
+          "login": "SaltyReformed",
+          "id": "U_kgDOCCaRrg"
+         },
+         "suggestedValue": "Low",
+         "rationale": "A scratch card's reason holding a run of  two spaces."
+        }
+       ]
+      }
+     }
+    }
+   }
+  },
+  {
+   "method": "POST",
+   "url": "https://api.github.com/graphql",
+   "body": {
+    "query": "query($number: Int!) { repository(owner: \"saltyreformed-labs\", name: \"plan-views-demo\") {\n  issue(number: $number) { number pendingSuggestions { __typename\n    ... on PendingFieldSuggestion { actor { login ... on Node { id } } suggestedValue\n      rationale } } } } }",
+    "variables": {
+     "number": 266
+    }
+   },
+   "status": 200,
+   "answer": {
+    "data": {
+     "repository": {
+      "issue": {
+       "number": 266,
+       "pendingSuggestions": [
+        {
+         "__typename": "PendingFieldSuggestion",
+         "actor": {
+          "login": "SaltyReformed",
+          "id": "U_kgDOCCaRrg"
+         },
+         "suggestedValue": "Low",
+         "rationale": "A scratch card's reason holding a run of  two spaces."
+        }
+       ]
+      }
+     }
+    }
+   }
+  },
+  {
+   "method": "POST",
+   "url": "https://api.github.com/graphql",
+   "body": {
+    "query": "query { repository(owner: \"saltyreformed-labs\", name: \"plan-views-demo\") {\n  issueFields(first: 100) { totalCount nodes {\n    ... on IssueFieldSingleSelect { id name options { id name } } } } } }",
+    "variables": {}
+   },
+   "status": 200,
+   "answer": {
+    "data": {
+     "repository": {
+      "issueFields": {
+       "totalCount": 5,
+       "nodes": [
+        {
+         "id": "IFSS_kgDOAtoZ8Q",
+         "name": "Priority",
+         "options": [
+          {
+           "id": "IFSSO_kgDOBP4aVA",
+           "name": "Urgent"
+          },
+          {
+           "id": "IFSSO_kgDOBP4aVQ",
+           "name": "High"
+          },
+          {
+           "id": "IFSSO_kgDOBP4aVg",
+           "name": "Medium"
+          },
+          {
+           "id": "IFSSO_kgDOBP4aVw",
+           "name": "Low"
+          },
+          {
+           "id": "IFSSO_kgDOBSkdVg",
+           "name": "On hold"
+          }
+         ]
+        },
+        {},
+        {},
+        {
+         "id": "IFSS_kgDOAtoZ9A",
+         "name": "Effort",
+         "options": [
+          {
+           "id": "IFSSO_kgDOBSWlQA",
+           "name": "1"
+          },
+          {
+           "id": "IFSSO_kgDOBSWlQQ",
+           "name": "2"
+          },
+          {
+           "id": "IFSSO_kgDOBSWlQg",
+           "name": "3"
+          },
+          {
+           "id": "IFSSO_kgDOBSWlQw",
+           "name": "4"
+          },
+          {
+           "id": "IFSSO_kgDOBSWlRA",
+           "name": "5+"
+          }
+         ]
+        },
+        {
+         "id": "IFSS_kgDOAugxbA",
+         "name": "Arc",
+         "options": [
+          {
+           "id": "IFSSO_kgDOBRbagQ",
+           "name": "balance"
+          },
+          {
+           "id": "IFSSO_kgDOBRbagg",
+           "name": "recurrence"
+          },
+          {
+           "id": "IFSSO_kgDOBRbagw",
+           "name": "pay_calendar"
+          },
+          {
+           "id": "IFSSO_kgDOBRbahA",
+           "name": "credit_card"
+          },
+          {
+           "id": "IFSSO_kgDOBRbahQ",
+           "name": "bank_import"
+          },
+          {
+           "id": "IFSSO_kgDOBRbahg",
+           "name": "salary"
+          },
+          {
+           "id": "IFSSO_kgDOBSJQoQ",
+           "name": "tooling"
+          }
+         ]
+        }
+       ]
+      }
+     }
+    }
+   }
+  },
+  {
+   "method": "POST",
+   "url": "https://api.github.com/graphql",
+   "body": {
+    "query": "mutation($issue: ID!, $actor: ID!, $field: ID!) { rejectPendingIssueSuggestions(input: {issueId: $issue, actorId: $actor, suggestions: [{kind: FIELD, issueFieldId: $field}]}) { clientMutationId } }",
+    "variables": {
+     "issue": "I_kwDOVSOvzs8AAAABeFt7uQ",
+     "actor": "U_kgDOCCaRrg",
+     "field": "IFSS_kgDOAtoZ8Q"
+    }
+   },
+   "status": 200,
+   "answer": {
+    "data": {
+     "rejectPendingIssueSuggestions": {
+      "clientMutationId": null
+     }
+    }
+   }
+  },
+  {
+   "method": "POST",
+   "url": "https://api.github.com/graphql",
+   "body": {
+    "query": "query($number: Int!) { repository(owner: \"saltyreformed-labs\", name: \"plan-views-demo\") {\n  issue(number: $number) { number pendingSuggestions { __typename\n    ... on PendingFieldSuggestion { actor { login ... on Node { id } } suggestedValue\n      rationale } } } } }",
+    "variables": {
+     "number": 266
+    }
+   },
+   "status": 200,
+   "answer": {
+    "data": {
+     "repository": {
+      "issue": {
+       "number": 266,
+       "pendingSuggestions": []
+      }
+     }
+    }
+   }
+  },
+  {
+   "method": "POST",
+   "url": "https://api.github.com/graphql",
+   "body": {
+    "query": "query { repository(owner: \"saltyreformed-labs\", name: \"plan-views-demo\") {\n  issueFields(first: 100) { totalCount nodes {\n    ... on IssueFieldSingleSelect { id name options { id name } } } } } }",
+    "variables": {}
+   },
+   "status": 200,
+   "answer": {
+    "data": {
+     "repository": {
+      "issueFields": {
+       "totalCount": 5,
+       "nodes": [
+        {
+         "id": "IFSS_kgDOAtoZ8Q",
+         "name": "Priority",
+         "options": [
+          {
+           "id": "IFSSO_kgDOBP4aVA",
+           "name": "Urgent"
+          },
+          {
+           "id": "IFSSO_kgDOBP4aVQ",
+           "name": "High"
+          },
+          {
+           "id": "IFSSO_kgDOBP4aVg",
+           "name": "Medium"
+          },
+          {
+           "id": "IFSSO_kgDOBP4aVw",
+           "name": "Low"
+          },
+          {
+           "id": "IFSSO_kgDOBSkdVg",
+           "name": "On hold"
+          }
+         ]
+        },
+        {},
+        {},
+        {
+         "id": "IFSS_kgDOAtoZ9A",
+         "name": "Effort",
+         "options": [
+          {
+           "id": "IFSSO_kgDOBSWlQA",
+           "name": "1"
+          },
+          {
+           "id": "IFSSO_kgDOBSWlQQ",
+           "name": "2"
+          },
+          {
+           "id": "IFSSO_kgDOBSWlQg",
+           "name": "3"
+          },
+          {
+           "id": "IFSSO_kgDOBSWlQw",
+           "name": "4"
+          },
+          {
+           "id": "IFSSO_kgDOBSWlRA",
+           "name": "5+"
+          }
+         ]
+        },
+        {
+         "id": "IFSS_kgDOAugxbA",
+         "name": "Arc",
+         "options": [
+          {
+           "id": "IFSSO_kgDOBRbagQ",
+           "name": "balance"
+          },
+          {
+           "id": "IFSSO_kgDOBRbagg",
+           "name": "recurrence"
+          },
+          {
+           "id": "IFSSO_kgDOBRbagw",
+           "name": "pay_calendar"
+          },
+          {
+           "id": "IFSSO_kgDOBRbahA",
+           "name": "credit_card"
+          },
+          {
+           "id": "IFSSO_kgDOBRbahQ",
+           "name": "bank_import"
+          },
+          {
+           "id": "IFSSO_kgDOBRbahg",
+           "name": "salary"
+          },
+          {
+           "id": "IFSSO_kgDOBSJQoQ",
+           "name": "tooling"
+          }
+         ]
+        }
+       ]
+      }
+     }
+    }
+   }
+  },
+  {
+   "method": "POST",
+   "url": "https://api.github.com/graphql",
+   "body": {
+    "query": "mutation($issue: ID!, $field: ID!, $option: ID!, $why: String!) { setIssueFieldValue(input: {issueId: $issue, issueFields: [{fieldId: $field, singleSelectOptionId: $option, suggest: true, rationale: $why}]}) { clientMutationId } }",
+    "variables": {
+     "issue": "I_kwDOVSOvzs8AAAABeFt7uQ",
+     "field": "IFSS_kgDOAtoZ8Q",
+     "option": "IFSSO_kgDOBP4aVw",
+     "why": "A scratch card's reason one character over the cap, all ASCII: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa."
+    }
+   },
+   "status": 200,
+   "answer": {
+    "data": {
+     "setIssueFieldValue": null
+    },
+    "errors": [
+     {
+      "path": [
+       "setIssueFieldValue"
+      ],
+      "locations": [
+       {
+        "line": 1,
+        "column": 67
+       }
+      ],
+      "message": "rationale is too long (maximum is 280)"
+     }
+    ]
+   }
+  },
+  {
+   "method": "POST",
+   "url": "https://api.github.com/graphql",
+   "body": {
+    "query": "query($number: Int!) { repository(owner: \"saltyreformed-labs\", name: \"plan-views-demo\") {\n  issue(number: $number) { number pendingSuggestions { __typename\n    ... on PendingFieldSuggestion { actor { login ... on Node { id } } suggestedValue\n      rationale } } } } }",
+    "variables": {
+     "number": 266
+    }
+   },
+   "status": 200,
+   "answer": {
+    "data": {
+     "repository": {
+      "issue": {
+       "number": 266,
+       "pendingSuggestions": []
+      }
+     }
+    }
+   }
+  },
+  {
+   "method": "PATCH",
+   "url": "https://api.github.com/repos/saltyreformed-labs/plan-views-demo/issues/266",
+   "body": {
+    "state": "closed",
+    "state_reason": "not_planned"
+   },
+   "status": 200,
+   "answer": {
+    "url": "https://api.github.com/repos/saltyreformed-labs/plan-views-demo/issues/266",
+    "repository_url": "https://api.github.com/repos/saltyreformed-labs/plan-views-demo",
+    "labels_url": "https://api.github.com/repos/saltyreformed-labs/plan-views-demo/issues/266/labels{/name}",
+    "comments_url": "https://api.github.com/repos/saltyreformed-labs/plan-views-demo/issues/266/comments",
+    "events_url": "https://api.github.com/repos/saltyreformed-labs/plan-views-demo/issues/266/events",
+    "html_url": "https://github.com/saltyreformed-labs/plan-views-demo/issues/266",
+    "id": 6314228665,
+    "node_id": "I_kwDOVSOvzs8AAAABeFt7uQ",
+    "number": 266,
+    "title": "[L2 measurement] scratch: a card whose reasons quill reads back",
+    "user": {
+     "login": "SaltyReformed",
+     "id": 136745390,
+     "node_id": "U_kgDOCCaRrg",
+     "avatar_url": "[redacted: not a scratch card]",
+     "gravatar_id": "[redacted: not a scratch card]",
+     "url": "[redacted: not a scratch card]",
+     "html_url": "[redacted: not a scratch card]",
+     "followers_url": "[redacted: not a scratch card]",
+     "following_url": "[redacted: not a scratch card]",
+     "gists_url": "[redacted: not a scratch card]",
+     "starred_url": "[redacted: not a scratch card]",
+     "subscriptions_url": "[redacted: not a scratch card]",
+     "organizations_url": "[redacted: not a scratch card]",
+     "repos_url": "[redacted: not a scratch card]",
+     "events_url": "[redacted: not a scratch card]",
+     "received_events_url": "[redacted: not a scratch card]",
+     "type": "User",
+     "user_view_type": "[redacted: not a scratch card]",
+     "site_admin": false
+    },
+    "labels": [
+     {
+      "id": 12780871728,
+      "node_id": "LA_kwDOVSOvzs8AAAAC-cygMA",
+      "url": "[redacted: not a scratch card]",
+      "name": "balance",
+      "color": "[redacted: not a scratch card]",
+      "default": false,
+      "description": "[redacted: not a scratch card]",
+      "archived_at": null,
+      "archived_by": null
+     }
+    ],
+    "state": "closed",
+    "locked": false,
+    "assignees": [],
+    "milestone": null,
+    "comments": 0,
+    "created_at": "2026-11-10T19:28:02Z",
+    "updated_at": "2026-11-10T19:28:12Z",
+    "closed_at": "2026-11-10T19:28:12Z",
+    "assignee": null,
+    "author_association": "MEMBER",
+    "issue_field_values": [
+     {
+      "issue_field_id": 48771436,
+      "node_id": "IFSSV_kgDOAQWmqw",
+      "data_type": "single_select",
+      "issue_field_name": "Arc",
+      "value": 85383809,
+      "single_select_option": {
+       "id": 85383809,
+       "name": "balance",
+       "color": "[redacted: not a scratch card]"
+      }
+     }
+    ],
+    "type": {
+     "id": 891387282,
+     "node_id": "IT_kwDOFB5GWc41IX2S",
+     "name": "step",
+     "description": "[redacted: not a scratch card]",
+     "color": "[redacted: not a scratch card]",
+     "created_at": "[redacted: not a scratch card]",
+     "updated_at": "[redacted: not a scratch card]",
+     "is_enabled": true
+    },
+    "active_lock_reason": null,
+    "sub_issues_summary": {
+     "total": 0,
+     "completed": 0,
+     "percent_completed": 0
+    },
+    "issue_dependencies_summary": {
+     "blocked_by": 0,
+     "total_blocked_by": 0,
+     "blocking": 0,
+     "total_blocking": 0
+    },
+    "body": "Scratch for plan#3301's recording; deleted when it ends.",
+    "closed_by": {
+     "login": "SaltyReformed",
+     "id": 136745390,
+     "node_id": "U_kgDOCCaRrg",
+     "avatar_url": "[redacted: not a scratch card]",
+     "gravatar_id": "[redacted: not a scratch card]",
+     "url": "[redacted: not a scratch card]",
+     "html_url": "[redacted: not a scratch card]",
+     "followers_url": "[redacted: not a scratch card]",
+     "following_url": "[redacted: not a scratch card]",
+     "gists_url": "[redacted: not a scratch card]",
+     "starred_url": "[redacted: not a scratch card]",
+     "subscriptions_url": "[redacted: not a scratch card]",
+     "organizations_url": "[redacted: not a scratch card]",
+     "repos_url": "[redacted: not a scratch card]",
+     "events_url": "[redacted: not a scratch card]",
+     "received_events_url": "[redacted: not a scratch card]",
+     "type": "User",
+     "user_view_type": "[redacted: not a scratch card]",
+     "site_admin": false
+    },
+    "reactions": {
+     "url": "[redacted: not a scratch card]",
+     "total_count": 0,
+     "+1": 0,
+     "-1": 0,
+     "laugh": 0,
+     "hooray": 0,
+     "confused": 0,
+     "heart": 0,
+     "rocket": 0,
+     "eyes": 0
+    },
+    "timeline_url": "https://api.github.com/repos/saltyreformed-labs/plan-views-demo/issues/266/timeline",
+    "performed_via_github_app": null,
+    "state_reason": "not_planned",
+    "pinned_comment": null
+   }
+  }
+ ]
+}

@@ -22,13 +22,14 @@ from app.models.salary_profile import SalaryProfile
 from app.services.tax_config_service import (
     FederalTaxRules,
     StateTaxRules,
+    TaxLawBasis,
     configs_by_year,
-    load_tax_configs_for_year,
     profile_tax_series,
     resolve_tax_year,
 )
 from app.tax_law import ChildDeductionTier, TaxLaw, ladder
 from tests._made_up_federal import made_up_credits, made_up_federal
+from tests._tax_configs import tax_configs_for
 from tests._test_helpers import (
     EMPTY_TAX_LAW,
     made_up_fica,
@@ -37,13 +38,16 @@ from tests._test_helpers import (
     start_test_pay_list,
 )
 
-# pylint: disable=redefined-outer-name
-
 
 class _FakePeriod:
     """Minimal stand-in exposing the ``start_date`` the resolver reads."""
 
     def __init__(self, start_date):
+        """Hold the one date a caller derives a period's tax year from.
+
+        Args:
+            start_date: The period's payday.
+        """
         self.start_date = start_date
 
 
@@ -163,7 +167,7 @@ class TestResolveTaxYear:
 class TestProfileTaxSeries:
     """profile_tax_series: three INDEPENDENT candidate sets, scoped as the loader is."""
 
-    def test_each_kind_keeps_its_own_years(self, app, db, seed_user, tax_law):
+    def test_each_kind_keeps_its_own_years(self, app, seed_user, tax_law):
         """The three series are separate; the state's years are not the others'.
 
         The law states federal rules and FICA for every year it carries, so
@@ -183,7 +187,7 @@ class TestProfileTaxSeries:
 
 
     def test_the_state_is_sliced_to_the_profiles_filing_status(
-        self, app, db, seed_user, tax_law,
+        self, app, seed_user, tax_law,
     ):
         """A profile's state rules are its OWN status's deduction and tiers.
 
@@ -284,7 +288,7 @@ class TestOneKindsYearsDoNotDecideAnotherKinds:
     """
 
     def test_a_year_without_the_state_strands_nothing(
-        self, app, db, seed_user, tax_law,
+        self, app, seed_user, tax_law,
     ):
         """2027 lists no state; federal and FICA take 2027, the state stays on 2026."""
         year_2026 = _nc_year(2026, Decimal("0.0399"))
@@ -302,7 +306,7 @@ class TestOneKindsYearsDoNotDecideAnotherKinds:
             profile = _make_profile(seed_user)
 
             for requested in (2027, 2028):
-                result = load_tax_configs_for_year(profile, requested)
+                result = tax_configs_for(profile, requested)
                 assert result["bracket_set"] == _federal_slice(year_2027), requested
                 assert result["fica_config"] is year_2027.fica, requested
                 assert result["fica_config"].ss_wage_base == Decimal("190000.00")
@@ -311,23 +315,23 @@ class TestOneKindsYearsDoNotDecideAnotherKinds:
                 assert result["state_config"] == _state_slice(year_2026), requested
 
 
-class TestLoadTaxConfigsForYear:
-    """load_tax_configs_for_year: resolve which year applies, then load it (DH-#30)."""
+class TestOneYearsLaw:
+    """One year's law for a profile: slice the law, then pick the year that applies (DH-#30)."""
 
-    def test_returns_target_year_configs_when_present(self, app, db, seed_user, tax_law):
+    def test_returns_target_year_configs_when_present(self, app, seed_user, tax_law):
         """A year the law HAS returns its own rules, with no substitution."""
         year_2026 = _nc_year(2026, Decimal("0.0500"))
         tax_law(TaxLaw(years=(_nc_year(2025, Decimal("0.0399")), year_2026)))
         with app.app_context():
             profile = _make_profile(seed_user)
 
-            result = load_tax_configs_for_year(profile, 2026)
+            result = tax_configs_for(profile, 2026)
 
             assert result["state_config"].flat_rate == Decimal("0.0500")
             assert result["state_config"] == _state_slice(year_2026)
 
     def test_an_unconfigured_year_loads_the_latest_configured_year(
-        self, app, db, seed_user, tax_law,
+        self, app, seed_user, tax_law,
     ):
         """A year the law lacks loads the newest year's rules."""
         year_2026 = _nc_year(2026, Decimal("0.0399"))
@@ -335,12 +339,12 @@ class TestLoadTaxConfigsForYear:
         with app.app_context():
             profile = _make_profile(seed_user)
 
-            result = load_tax_configs_for_year(profile, 2031)
+            result = tax_configs_for(profile, 2031)
 
             assert result["state_config"].flat_rate == Decimal("0.0399")
             assert result["state_config"] == _state_slice(year_2026)
 
-    def test_an_empty_law_refuses_every_profile(self, app, db, seed_user, tax_law):
+    def test_an_empty_law_refuses_every_profile(self, app, seed_user, tax_law):
         """A law with no year lists no state, so it refuses the profile.
 
         Until plan step salary:X-at-3 this was the ONE way all three kinds
@@ -355,13 +359,13 @@ class TestLoadTaxConfigsForYear:
             profile = _make_profile(seed_user)
 
             with pytest.raises(UnsupportedStateError) as refused:
-                load_tax_configs_for_year(profile, date.today().year)
+                tax_configs_for(profile, date.today().year)
 
             assert refused.value.supported == ()
             assert refused.value.state_code == "NC"
 
     def test_the_resolution_does_not_move_with_the_calendar(
-        self, app, db, seed_user, tax_law,
+        self, app, seed_user, tax_law,
     ):
         """The same request resolves the same way whatever year it is asked in.
 
@@ -376,7 +380,7 @@ class TestLoadTaxConfigsForYear:
             profile = _make_profile(seed_user)
 
             for requested in (2027, 2028, 2029):
-                result = load_tax_configs_for_year(profile, requested)
+                result = tax_configs_for(profile, requested)
                 assert result["state_config"] == _state_slice(year_2026), requested
 
 
@@ -392,7 +396,7 @@ class TestConfigsByYear:
     series reads the law in the code and issues no query at all.)
     """
 
-    def test_maps_each_distinct_period_year(self, app, db, seed_user, tax_law):
+    def test_maps_each_distinct_period_year(self, app, seed_user, tax_law):
         """Returns {year: configs} for every distinct year present in periods."""
         current_year = date.today().year
         future_year = current_year + 1
@@ -418,7 +422,7 @@ class TestConfigsByYear:
             assert result[future_year]["state_config"].flat_rate == Decimal("0.0500")
 
     def test_an_unconfigured_period_year_resolves_in_its_own_slot(
-        self, app, db, seed_user, tax_law,
+        self, app, seed_user, tax_law,
     ):
         """A period year the law lacks keys its own slot to the resolved year.
 
@@ -444,12 +448,166 @@ class TestConfigsByYear:
             assert result[2030]["state_config"].flat_rate == Decimal("0.0399")
             assert result[2030]["state_config"] == _state_slice(year_2026)
 
-    def test_empty_years_returns_empty_mapping(self, app, db, seed_user):
+    def test_empty_years_returns_empty_mapping(self, app, seed_user):
         """No years -> empty mapping, and no resolution attempted."""
         with app.app_context():
             profile = _make_profile(seed_user)
             assert configs_by_year(profile_tax_series(profile), set()) == {}
 
+    def test_each_slot_carries_its_own_years_basis(self, app, seed_user, tax_law):
+        """A slot's basis is the slot's own year's resolution, not a sibling's.
+
+        2026 is in the law and 2030 is not, so the same call hands back one
+        exact basis and one substituted one.
+        """
+        tax_law(TaxLaw(years=(_nc_year(2026, Decimal("0.0399")),)))
+        with app.app_context():
+            profile = _make_profile(seed_user)
+
+            result = configs_by_year(profile_tax_series(profile), {2026, 2030})
+
+            assert result[2026]["basis"] == TaxLawBasis(2026, 2026, 2026, 2026)
+            assert result[2030]["basis"] == TaxLawBasis(2030, 2026, 2026, 2026)
+
+
+class TestTheBasis:
+    """The resolver hands back each part's own year (ruling R-SAL75, plan step X-at-5).
+
+    The years were thrown away inside the resolver until X-at-5, so a figure
+    priced on another year's rules showed as a plain dollar amount (finding
+    N-235).  Each case asserts all four years, because each part resolves on
+    its own series and a basis built from one part's year would pass a test
+    that read only that part.
+    """
+
+    def test_a_year_the_law_carries_is_priced_on_itself(
+        self, app, seed_user, tax_law,
+    ):
+        """Every part of 2026 is 2026's: nothing substituted, one rules year."""
+        tax_law(TaxLaw(years=(
+            _nc_year(2025, Decimal("0.0425")), _nc_year(2026, Decimal("0.0399")),
+        )))
+        with app.app_context():
+            profile = _make_profile(seed_user)
+
+            basis = tax_configs_for(profile, 2026)["basis"]
+
+            assert basis == TaxLawBasis(
+                tax_year=2026, federal_year=2026, state_year=2026, fica_year=2026,
+            )
+            assert basis.substituted is False
+            assert basis.rules_year == 2026
+            assert basis.has_some_own_rules is True
+
+    def test_a_year_after_the_newest_is_priced_on_the_newest(
+        self, app, seed_user, tax_law,
+    ):
+        """2028 is past the law's newest year, 2027: every part is 2027's (R-SAL76)."""
+        tax_law(TaxLaw(years=(
+            _nc_year(2026, Decimal("0.0399")), _nc_year(2027, Decimal("0.0349")),
+        )))
+        with app.app_context():
+            profile = _make_profile(seed_user)
+
+            basis = tax_configs_for(profile, 2028)["basis"]
+
+            assert basis == TaxLawBasis(
+                tax_year=2028, federal_year=2027, state_year=2027, fica_year=2027,
+            )
+            assert basis.substituted is True
+            assert basis.rules_year == 2027
+            assert basis.has_some_own_rules is False
+
+    def test_a_year_before_the_first_is_priced_on_the_first(
+        self, app, seed_user, tax_law,
+    ):
+        """A typed 2019 reaches forward to the law's first year, 2025, for every part."""
+        tax_law(TaxLaw(years=(
+            _nc_year(2025, Decimal("0.0425")), _nc_year(2026, Decimal("0.0399")),
+        )))
+        with app.app_context():
+            profile = _make_profile(seed_user)
+
+            basis = tax_configs_for(profile, 2019)["basis"]
+
+            assert basis == TaxLawBasis(
+                tax_year=2019, federal_year=2025, state_year=2025, fica_year=2025,
+            )
+            assert basis.substituted is True
+            assert basis.rules_year == 2025
+            assert basis.has_some_own_rules is False
+
+    def test_a_year_lacking_the_state_names_the_states_own_year(
+        self, app, seed_user, tax_law,
+    ):
+        """2027 ships without NC (R-SAL86): federal and FICA are 2027's, NC 2026's.
+
+        The parts differ, so there is no one rules year, and the year is
+        substituted although 2027's federal law is in.
+        """
+        tax_law(TaxLaw(years=(_nc_year(2026, Decimal("0.0399")), made_up_year(2027))))
+        with app.app_context():
+            profile = _make_profile(seed_user)
+
+            basis = tax_configs_for(profile, 2027)["basis"]
+
+            assert basis == TaxLawBasis(
+                tax_year=2027, federal_year=2027, state_year=2026, fica_year=2027,
+            )
+            assert basis.substituted is True
+            assert basis.rules_year is None
+            assert basis.has_some_own_rules is True
+
+    def test_a_year_past_a_newest_lacking_the_state_has_none_of_its_own(
+        self, app, seed_user, tax_law,
+    ):
+        """2028 with 2027 shipped without NC: the parts differ, and none is 2028's.
+
+        Federal and FICA resolve on 2027, NC on 2026, so there is no one
+        rules year -- yet unlike 2027 itself no part is the year asked for.
+        The Taxes tab's note says "all of" only when some part is
+        (plan#3363), so this case is the one that tells the two apart.
+        """
+        tax_law(TaxLaw(years=(_nc_year(2026, Decimal("0.0399")), made_up_year(2027))))
+        with app.app_context():
+            profile = _make_profile(seed_user)
+
+            basis = tax_configs_for(profile, 2028)["basis"]
+
+            assert basis == TaxLawBasis(
+                tax_year=2028, federal_year=2027, state_year=2026, fica_year=2027,
+            )
+            assert basis.substituted is True
+            assert basis.rules_year is None
+            assert basis.has_some_own_rules is False
+
+    def test_the_rules_handed_back_are_the_basis_years_rules(
+        self, app, seed_user, tax_law,
+    ):
+        """The basis names the years whose rules the same set carries.
+
+        2028 lacks a state in its newest year, 2027, so the state is 2026's;
+        the rules in the set are those years' own -- FICA the year's own
+        object, the federal and state rules the years' slices for the
+        profile's status -- so the label can never name a year other than
+        the one that priced.  2027's federal rules and credits differ from
+        2026's zero ones, so the federal slice tells the two years apart.
+        """
+        year_2026 = _nc_year(2026, Decimal("0.0399"))
+        year_2027 = made_up_year(
+            2027, federal=made_up_federal(), federal_credits=made_up_credits(),
+        )
+        tax_law(TaxLaw(years=(year_2026, year_2027)))
+        assert _federal_slice(year_2027) != _federal_slice(year_2026)
+        with app.app_context():
+            profile = _make_profile(seed_user)
+
+            configs = tax_configs_for(profile, 2028)
+
+            assert configs["basis"] == TaxLawBasis(2028, 2027, 2026, 2027)
+            assert configs["bracket_set"] == _federal_slice(year_2027)
+            assert configs["fica_config"] is year_2027.fica
+            assert configs["state_config"] == _state_slice(year_2026)
 
 class TestWithholdingRules:
     """``FederalTaxRules.withholding_rules``: what a paycheck withholds on (ruling plan#3213).

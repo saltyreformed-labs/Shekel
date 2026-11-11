@@ -16,8 +16,9 @@ return's $2,200 a qualifying child, so a 2026 paycheck withholds on the
 figures below.  (Pub 15-T's ladder for married filing separately is the
 single filer's, which the law does not state: finding plan#3243.)
 
-North Carolina's standard deduction is the enacted, unindexed statutory amount;
-re-verify it against the 2026 Form D-401 instructions when NCDOR posts them.
+North Carolina's standard and child deductions are the unindexed tables in
+:mod:`app.tax_law._north_carolina`, graded there; step plan#3346 re-checks
+them against the 2026 Form D-401 instructions when NCDOR posts them.
 """
 
 from decimal import Decimal
@@ -44,8 +45,10 @@ SOURCES = (
     "$2,200)",
     "SSA 2026 COLA fact sheet (Social Security wage base $184,500)",
     "IRC sec. 3101(a) and (b)(1) (Social Security 6.2%, Medicare 1.45%); "
-    "sec. 3102(f) (Additional Medicare 0.9% withheld on wages over $200,000)",
-    "N.C.G.S. 105-153.7(a) (North Carolina flat rate 3.99% after 2025)",
+    "sec. 3101(b)(2) (Additional Medicare 0.9%) and sec. 3102(f) (withheld "
+    "on wages over $200,000)",
+    "N.C.G.S. 105-153.7(a) as rewritten by S.L. 2026-41 sec. 44.1(a) (North "
+    "Carolina flat rate 3.99% in 2026)",
     "N.C.G.S. 105-153.5(a)(1) and (a1) (North Carolina standard and child "
     "deductions)",
 )

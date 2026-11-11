@@ -79,6 +79,7 @@ from app.services.paycheck_calculator._calendar_questions import (
 from app.services.payroll_basis import PayrollBasis
 from app.utils.dates import display_today
 from tests._stub_period import STUB_PERIOD_ENDS_DAYS_BEFORE, stub_period_on
+from tests._tax_configs import hand_built_law
 from tests._test_helpers import (
     era_of,
     fica_only_law,
@@ -160,18 +161,21 @@ def _tax_configs(ss_wage_base="168600"):
     Federal: a $15,000 standard deduction, 10% to $50,000, 22% above.  State:
     a flat 4.5% with no deduction.  FICA: 6.2% Social Security to
     *ss_wage_base*, 1.45% Medicare, the surtax far above every figure here.
+    A 2026 set, the year nearly every payday here is in; no case reads which
+    year's rules it names.
     """
-    return {
-        "bracket_set": FakeFederalRules(
+    return hand_built_law(
+        2026,
+        bracket_set=FakeFederalRules(
             standard_deduction=Decimal("15000"),
             brackets=[
                 FakeBracket(Decimal("0"), Decimal("50000"), Decimal("0.10"), 0),
                 FakeBracket(Decimal("50000"), None, Decimal("0.22"), 1),
             ],
         ),
-        "state_config": FakeStateTaxRules(flat_rate="0.045"),
-        "fica_config": FakeFicaRules(ss_wage_base=ss_wage_base),
-    }
+        state_config=FakeStateTaxRules(flat_rate="0.045"),
+        fica_config=FakeFicaRules(ss_wage_base=ss_wage_base),
+    )
 
 
 def _profile(

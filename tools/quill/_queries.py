@@ -1,5 +1,6 @@
 """The GraphQL text of each read quill makes of a tracker: the fields of a card, each
-listing of cards, a card's histories, and the board's order and links.
+listing of cards, a card's histories and pending suggestions, the issue fields, and the board's
+order and links.
 
 What pins each text: the recordings (``_recorded.Replay``) replay most of them word for
 word, so a change to one no longer matches its recording: re-record it, never edit an
@@ -220,6 +221,35 @@ def issue_fields(place: Place) -> str:
         """query { repository(owner: "%s", name: "%s") {
   issueFields(first: 100) { totalCount nodes {
     ... on IssueFieldSingleSelect { fullDatabaseId name } } } } }"""
+        % (place.owner, place.name)
+    )
+
+
+def select_options(place: Place) -> str:
+    """The read of ``place``'s issue fields, each single select's node id, name and options,
+    each option's node id and name: what a suggestion's write names, GraphQL's ids where
+    :func:`issue_fields` reads REST's (``_suggestion.Suggestions``).  Measured 2026-11-10 with
+    quill's App token: it reads them through the repository (Priority's ``IFSS_kgDOAtoZ8Q``,
+    its five options), where a read of the field's own node is answered FORBIDDEN."""
+    return (
+        """query { repository(owner: "%s", name: "%s") {
+  issueFields(first: 100) { totalCount nodes {
+    ... on IssueFieldSingleSelect { id name options { id name } } } } } }"""
+        % (place.owner, place.name)
+    )
+
+
+def pending_suggestions(place: Place) -> str:
+    """The read of card ``$number``'s pending suggestions, each one on an issue field with who
+    made it (its login and node id), the value it suggests and its reason
+    (``_suggestion.Suggestions.pending``).  It asks no suggestion's ``issueField``, which
+    quill's App is answered FORBIDDEN (measured 2026-11-10 on plan#3178).  The card's
+    ``number`` is read so a recording keeps a scratch card's suggestions as its own."""
+    return (
+        """query($number: Int!) { repository(owner: "%s", name: "%s") {
+  issue(number: $number) { number pendingSuggestions { __typename
+    ... on PendingFieldSuggestion { actor { login ... on Node { id } } suggestedValue
+      rationale } } } } }"""
         % (place.owner, place.name)
     )
 

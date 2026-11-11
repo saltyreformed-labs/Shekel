@@ -10,8 +10,9 @@ from dataclasses import replace
 
 import pytest
 
-from tools.quill._fake import (AnswerLostOnce, FailOnce, FakeTracker, claim, leaf_filing,
-                              ruling_filing, run, ship)
+from tools.quill._fake import (SUGGESTED, AnswerLostOnce, FailOnce, FakeTracker, claim,
+                              leaf_filing, ruling_filing, run, ship, split_in_two,
+                              suggested)
 from tools.quill._github import GitHubError
 from tools.quill._tracker import Child
 from tools.quill.setup_tracker import FILING
@@ -25,7 +26,7 @@ def test_a_leaf_and_a_ruling_are_created_marked_and_unmarked_by_their_last_write
     finding's and a question's writes are pinned in ``test_quill_file.py``.)"""
     tracker = FakeTracker()
     for number in (1, 2, 3):
-        tracker.add(number)
+        tracker.add(number, priority="Medium")
     assert run(tracker, code, *leaf_filing(tmp_path, "half", "plan#2")) == 0
     assert tracker.writes == [("create", 4, "step", "half", ("balance", FILING), "balance"),
                               ("add_child", 2, 4), ("board_add", 4), ("board_place", 4, "PVTI_2"),
@@ -63,13 +64,13 @@ def test_a_mark_removed_by_hand_mid_filing_fails_its_unmark_and_the_same_command
     tracker = FakeTracker()
     spec = tmp_path / "spec.md"
     spec.write_text("Build it.")
-    args = ("file", "step", "--effort", "2", "--arc", "balance", "--title", "Alone",
+    args = ("file", "step", *SUGGESTED, "--effort", "2", "--arc", "balance", "--title", "Alone",
             "--body-file", str(spec))
     _HandUnmarks(tracker)
     assert run(tracker, code, *args) == 2
     assert "Label does not exist" in capsys.readouterr().err
     assert tracker.writes == [("create", 1, "step", "Alone", ("balance", FILING), "balance"),
-                              ("board_add", 1)]
+                              suggested(1), ("board_add", 1)]
     tracker.writes.clear()
     assert run(tracker, code, *args) == 0
     assert not tracker.writes and "filed already" in capsys.readouterr().out
@@ -87,7 +88,7 @@ def test_a_leaf_cut_short_after_its_create_is_never_offered_and_the_same_command
     plan#1's wait."""
     tracker = FakeTracker()
     tracker.add(9, "question")
-    tracker.add(1, blocked_by=(9,))
+    tracker.add(1, priority="Medium", blocked_by=(9,))
     if failure == "link":
         FailOnce(tracker, "add_child")
     elif failure == "move":
@@ -119,7 +120,7 @@ def test_dropping_the_split_step_reaches_a_marked_leaf_linked_under_it(code, tmp
     """Review cp5 MEDIUM-1, R-BAL202: the leaf is linked by its second write, so a drop of the
     split step drops it too, and a dropped card's unfinished filing is moot."""
     tracker = FakeTracker()
-    tracker.add(1)
+    tracker.add(1, priority="Medium")
     FailOnce(tracker.board, "place")
     assert run(tracker, code, *leaf_filing(tmp_path, "Trailer check")) == 2
     assert run(tracker, code, "drop", "plan#1", "--why", "replanned") == 0
@@ -136,7 +137,7 @@ def test_a_leaf_cut_short_before_its_link_is_reported_after_its_split_step_is_dr
     never offered, and ``next`` and ``sync`` name it until ``quill drop`` drops it -- under
     R-BAL201's order it was offered as work, and sync said nothing."""
     tracker = FakeTracker()
-    tracker.add(1)
+    tracker.add(1, priority="Medium")
     FailOnce(tracker, "add_child")
     args = leaf_filing(tmp_path, "Trailer check")
     assert run(tracker, code, *args) == 2
@@ -155,20 +156,12 @@ def test_a_leaf_cut_short_before_its_link_is_reported_after_its_split_step_is_dr
     assert run(tracker, code, "sync", "--dry-run") == 0
 
 
-def _split(tracker):
-    """plan#1, split into plan#2 and plan#3 and off the board; plan#4 below its leaves."""
-    tracker.add(1, children=(Child(2, "step", True), Child(3, "step", True)), on_board=False)
-    tracker.add(2, parent=1)
-    tracker.add(3, parent=1)
-    tracker.add(4)
-
-
 def test_a_card_added_below_a_leaf_cut_short_leaves_its_move_to_the_same_command(code,
                                                                                 tmp_path):
     """Review cp4e M1 (a), R-BAL202: whatever joined the board below the leaf, the re-run
     moves it after the leaves filed before it."""
     tracker = FakeTracker()
-    _split(tracker)
+    split_in_two(tracker)
     FailOnce(tracker.board, "place")
     args = leaf_filing(tmp_path, "Trailer check")
     assert run(tracker, code, *args) == 2
@@ -184,7 +177,7 @@ def test_no_leaf_is_filed_while_another_leaf_of_its_split_step_is_unfinished(cod
     refused, naming it, with nothing written, until plan#5's own command finishes it --
     then the board holds the leaves in their filing order."""
     tracker = FakeTracker()
-    _split(tracker)
+    split_in_two(tracker)
     FailOnce(tracker.board, "place")
     first = leaf_filing(tmp_path, "First")
     assert run(tracker, code, *first) == 2
@@ -211,7 +204,7 @@ def test_a_first_leaf_whose_link_failed_goes_above_the_leaf_that_took_its_place(
     and plan#6 was not refused; plan#6 took plan#1's place and took plan#1 off the board;
     plan#5's re-run links it, adds it, and puts it just above plan#6."""
     tracker = FakeTracker()
-    tracker.add(1)
+    tracker.add(1, priority="Medium")
     tracker.add(4)
     FailOnce(tracker, "add_child")
     first = leaf_filing(tmp_path, "First")
@@ -229,7 +222,7 @@ def test_a_leaf_whose_move_into_its_split_steps_place_failed_is_finished_first(c
     still on the board and plan#6 is refused until plan#5's re-run puts plan#5 in plan#1's
     place; plan#6 then follows it."""
     tracker = FakeTracker()
-    tracker.add(1)
+    tracker.add(1, priority="Medium")
     tracker.add(4)
     FailOnce(tracker.board, "place")
     first = leaf_filing(tmp_path, "First")
@@ -252,7 +245,7 @@ def test_a_placed_leaf_whose_unmark_failed_holds_the_next_leaf_until_it_is_finis
     plan#10 follows it: [7, 9, 10, 8], where the leaf-A build gave [7, 8, 9, 10]."""
     tracker = FakeTracker()
     for number in (7, 1, 8):
-        tracker.add(number)
+        tracker.add(number, priority="Medium")
     FailOnce(tracker, "unmark")
     first = leaf_filing(tmp_path, "First")
     second = leaf_filing(tmp_path, "Second")
@@ -277,7 +270,7 @@ def test_a_step_filed_at_the_top_level_is_never_refiled_as_a_leaf(code, tmp_path
     same title and text filed with a parent is a re-homing, a person's call: refused with
     nothing written, where b5213af4d linked it and left it below the leaves."""
     tracker = FakeTracker()
-    _split(tracker)
+    split_in_two(tracker)
     tracker.add(5, body="Build Trailer check.", title="Trailer check")
     assert run(tracker, code, *leaf_filing(tmp_path, "Trailer check")) == 1
     assert ("its filing finished at the top level, not under plan#1: re-homing a card is done "
@@ -292,7 +285,7 @@ def test_a_split_step_a_leaf_filing_left_on_the_board_takes_no_leaf_above_it(cod
     plan#4 in plan#2's place."""
     tracker = FakeTracker()
     for number in (1, 2, 3):
-        tracker.add(number)
+        tracker.add(number, priority="Medium")
     FailOnce(tracker.board, "remove")
     first = leaf_filing(tmp_path, "First", "plan#2")
     second = leaf_filing(tmp_path, "Second", "plan#2")
@@ -374,7 +367,7 @@ def test_a_card_dropped_before_its_filing_finished_is_never_finished(code, tmp_p
     text.write_text("Which day?")
     tracker = FakeTracker()
     FailOnce(tracker.board, "add")
-    args = ("file", "question", "--arc", "recurrence", "--title", "Day", "--body-file",
+    args = ("file", "question", *SUGGESTED, "--arc", "recurrence", "--title", "Day", "--body-file",
             str(text))
     assert run(tracker, code, *args) == 2
     assert run(tracker, code, "drop", "plan#1", "--why", "asked elsewhere") == 0
@@ -423,7 +416,7 @@ def test_dropping_a_leaf_whose_filing_never_finished_undoes_the_split(code, tmp_
     it was, offered as work, and Q (plan#2) keeps waiting on S -- where R-BAL187 dropped S
     and offered Q, though nobody built S."""
     tracker = FakeTracker()
-    tracker.add(1)
+    tracker.add(1, priority="Medium")
     tracker.add(2, blocked_by=(1,))
     FailOnce(tracker.board, "add")
     assert run(tracker, code, *leaf_filing(tmp_path, "Trailer check")) == 2
@@ -451,7 +444,7 @@ def test_a_marked_leaf_dropped_with_its_split_step_is_unlinked_before_the_step_c
     the step's, since no sync reaches a closed split step to do it, and a person reopening
     the leaf would make it a leaf again and revive the dropped step."""
     tracker = FakeTracker()
-    tracker.add(1)
+    tracker.add(1, priority="Medium")
     FailOnce(tracker.board, "add")
     assert run(tracker, code, *leaf_filing(tmp_path, "Trailer check")) == 2
     writes = list(tracker.writes)
@@ -467,7 +460,7 @@ def test_a_marked_leaf_shows_its_filing_until_it_finishes(code, tmp_path, capsys
     how to finish it by hand; once it finishes it says nothing (a card dropped while marked:
     ``test_a_dropped_card_still_carrying_the_mark_shows_no_unfinished_filing``)."""
     tracker = FakeTracker()
-    tracker.add(1)
+    tracker.add(1, priority="Medium")
     FailOnce(tracker.board, "add")
     args = leaf_filing(tmp_path, "Trailer check")
     assert run(tracker, code, *args) == 2
@@ -521,7 +514,7 @@ def test_a_re_run_waits_on_another_leaf_whose_filing_has_not_finished(code, tmp_
     was linked beside the unfinished L and the board ended [A, X, M, L]."""
     tracker = FakeTracker()
     for number in (3, 1, 4):
-        tracker.add(number)
+        tracker.add(number, priority="Medium")
     first, second = leaf_filing(tmp_path, "M"), leaf_filing(tmp_path, "L")
     FailOnce(tracker, "add_child")
     assert run(tracker, code, *first) == 2
@@ -544,7 +537,7 @@ def test_only_an_unfinished_leaf_holds_a_new_leaf(code, tmp_path, capsys):
     builds, which is a different refusal."""
     marked = ("balance", FILING)
     tracker = FakeTracker()
-    tracker.add(1, children=(Child(2, "step", False), Child(3, "finding", True),
+    tracker.add(1, priority="Medium", children=(Child(2, "step", False), Child(3, "finding", True),
                              Child(4, "step", True)), on_board=False)
     tracker.add(2, parent=1, labels=marked, is_open=False, state_reason="NOT_PLANNED",
                 touched_by_hand=True, on_board=False)
@@ -569,7 +562,7 @@ def test_a_finished_leaf_a_lagging_listing_still_shows_marked_is_left_alone(code
     listing of marked cards that has not caught up with the unmark neither moves the leaf
     again nor sends an unmark the card no longer carries."""
     tracker = FakeTracker()
-    tracker.add(1)
+    tracker.add(1, priority="Medium")
     tracker.add(4)
     args = leaf_filing(tmp_path, "Trailer check")
     assert run(tracker, code, *args) == 0
@@ -606,7 +599,7 @@ def test_a_lone_leaf_dropped_after_its_split_step_left_the_board_puts_it_back(co
     (plan#4) keeps waiting on it -- S was left off the board, offered by nothing."""
     tracker = FakeTracker()
     for number in (1, 2, 3):
-        tracker.add(number)
+        tracker.add(number, priority="Medium")
     tracker.add(4, blocked_by=(2,), on_board=False)
     claim(code, 1)
     FailOnce(tracker, "unmark")
@@ -629,7 +622,7 @@ def test_a_drop_whose_unlink_failed_after_the_board_add_is_finished_by_the_same_
     adding the split step to the board no second time."""
     tracker = FakeTracker()
     for number in (1, 2, 3):
-        tracker.add(number)
+        tracker.add(number, priority="Medium")
     FailOnce(tracker, "unmark")
     assert run(tracker, code, *leaf_filing(tmp_path, "Half", "plan#2")) == 2
     FailOnce(tracker, "remove_child")
@@ -687,7 +680,7 @@ def test_a_drop_whose_board_add_failed_unlinked_nothing_and_is_finished_by_the_s
     step off the board."""
     tracker = FakeTracker()
     for number in (1, 2, 3):
-        tracker.add(number)
+        tracker.add(number, priority="Medium")
     claim(code, 1)
     FailOnce(tracker, "unmark")
     assert run(tracker, code, *leaf_filing(tmp_path, "Half", "plan#2")) == 2
@@ -707,7 +700,7 @@ def test_a_marked_leaf_dropped_beside_finished_leaves_leaves_its_split_step_spli
     second unlinks it, and plan#2, still split by the first, stays off the board."""
     tracker = FakeTracker()
     for number in (1, 2, 3):
-        tracker.add(number)
+        tracker.add(number, priority="Medium")
     assert run(tracker, code, *leaf_filing(tmp_path, "First", "plan#2")) == 0
     FailOnce(tracker, "unmark")
     assert run(tracker, code, *leaf_filing(tmp_path, "Second", "plan#2")) == 2

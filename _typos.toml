@@ -57,7 +57,7 @@ extend-ignore-re = ["`[0-9a-f]{7,40}`", "\\bR-[A-Z]{1,3}\\b"]
 
 [default.extend-words]
 # Domain vocabulary and library names -- correct as written, not typos.
-HSA = "HSA"             # Health Savings Account (app/enums.py)
+HSA = "HSA"             # Health Savings Account (app/enums/)
 hsa = "hsa"
 astroid = "astroid"    # the pylint AST library (tools/pylint/)
 selectin = "selectin"   # SQLAlchemy's lazy="selectin" loader strategy (app/models/pay_stub.py)

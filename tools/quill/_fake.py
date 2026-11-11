@@ -41,6 +41,7 @@ from tools.quill._board_fields import STATUS_OPTIONS
 from tools.quill._command import on_board as goes_on_board
 from tools.quill._fields import FIELDS
 from tools.quill._github import GitHubError
+from tools.quill._suggestion import Pending
 from tools.quill._filed import filed_labels
 from tools.quill._tracker import Card, Child, Comment, Edit, Statuses, in_order
 from tools.quill.setup_tracker import APP_LOGIN, FILING, PLAN, TASK, unmarked
@@ -127,6 +128,41 @@ class FakeBoard:
             self.status[number] = name
 
 
+#: The node id of quill's App as the fake's suggestions hold it.
+QUILL_ACTOR = "BOT_shekel-quill"
+
+
+class FakeSuggestions:
+    """The cards' suggested Priorities in memory (:class:`_suggestion.Suggestions`): the one
+    pending suggestion quill holds on each card, by number; its writes go to the tracker's log.
+    As GitHub's API does (measured 2026-11-10 on plan#3178), a Priority set on a card leaves its
+    suggestion pending (:meth:`FakeTracker.set_field` never touches it): only a take-back
+    removes it."""
+
+    def __init__(self, writes):
+        """No suggestion held, logging into ``writes``."""
+        self.held: dict[int, Pending] = {}
+        self.writes = writes
+
+    def pending(self, card):
+        """quill's pending suggestion on ``card``, or None."""
+        return self.held.get(card.number)
+
+    def put(self, card, suggestion):
+        """Suggest ``suggestion`` for ``card``; one already held is a write the tool must
+        never send, since quill takes its own back first, so it fails loudly."""
+        assert card.number not in self.held, f"plan#{card.number} holds a suggestion already"
+        self.writes.append(("suggest", card.number, suggestion.priority, suggestion.why))
+        self.held[card.number] = Pending(suggestion, QUILL_ACTOR)
+
+    def withdraw(self, card, pending):
+        """Take back ``pending`` from ``card``; one the card does not hold is a write the tool
+        must never send."""
+        assert self.held.get(card.number) == pending, f"plan#{card.number} holds no {pending}"
+        self.writes.append(("withdraw", card.number))
+        del self.held[card.number]
+
+
 class FakeTracker:  # pylint: disable=too-many-public-methods,too-many-instance-attributes
     """The tracker in memory: cards, bodies, comments, its board, and every write.
 
@@ -135,10 +171,10 @@ class FakeTracker:  # pylint: disable=too-many-public-methods,too-many-instance-
     reads and writes but ``connect`` (its own disable says why there are so many),
     ``blocking``, which that class takes from :class:`_tracker.CardReader`, and ``add``
     and ``add_task``, which put a card or a task in.
-    ``too-many-instance-attributes`` (8/7) -- **one per kind
-    of fact it keeps**: seven a command reads back (cards, bodies, saved
-    versions, comments, the board, the milestones that exist, and each card's
-    milestone) and the log of writes the tests read.  The claims and the merged
+    ``too-many-instance-attributes`` (9/7, measured at plan#2798, whose suggestions it keeps)
+    -- **one per kind of fact it keeps**: eight a command reads back (cards, bodies, saved
+    versions, comments, the board, the cards' suggested Priorities, the milestones that exist,
+    and each card's milestone) and the log of writes the tests read.  The claims and the merged
     pull requests it kept left it at X-cx's M1, when a claim became a branch of
     the code repository (R-BAL359); the deleted numbers and how GitHub renders a
     text, which only X-cx's migration read, left with it at X-cx's S3b.
@@ -157,6 +193,7 @@ class FakeTracker:  # pylint: disable=too-many-public-methods,too-many-instance-
         self.milestone_of: dict[int, int] = {}
         self.writes: list[tuple] = []
         self.board = FakeBoard(self.writes, self.cards_by_number)
+        self.suggestions = FakeSuggestions(self.writes)
 
     def add(self, number, kind="step", body="", on_board=True, **fields):
         """Put a card in the tracker (open, unclaimed, and by default on the board's bottom when
@@ -591,6 +628,28 @@ def two_tasks():
     tracker.add_task(2, 1, title="piece a")
     tracker.add_task(3, 1, title="piece b")
     return tracker
+
+
+#: The Priority the tests' filing of a step at the top level or a question suggests, and its
+#: reason (``--suggest``, ``--why``; rulings plan#3224, plan#3236), as each command line names it.
+SUGGESTED = ("--suggest", "Low", "--why", "A test card's reason: nothing waits on it.")
+
+
+def suggested(number):
+    """The write in the tracker's log of :data:`SUGGESTED` on card ``number``
+    (:meth:`FakeSuggestions.put`)."""
+    return ("suggest", number, SUGGESTED[1], SUGGESTED[3])
+
+
+def split_in_two(tracker):
+    """Put in ``tracker`` plan#1, split into plan#2 and plan#3 and off the board, holding a
+    Priority, which ranks its leaves (ruling plan#3229), and plan#4 below its leaves: the board
+    the tests of a leaf filed after them, or of one cut short, file on."""
+    tracker.add(1, children=(Child(2, "step", True), Child(3, "step", True)), on_board=False,
+                priority="Medium")
+    tracker.add(2, parent=1)
+    tracker.add(3, parent=1)
+    tracker.add(4)
 
 
 def leaf_filing(tmp_path, title, parent="plan#1"):

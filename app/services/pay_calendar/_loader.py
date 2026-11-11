@@ -262,7 +262,11 @@ def calendar_at_schedule(
     followed it.  Passing the pair rather than two arguments is what stops a
     caller supplying one owner's cadence beside another's history bound.
 
-    **One caller today and it is not a convenience** (finding **P70**):
+    **Its first caller was not a convenience** (finding **P70**), and every
+    caller since is one that read the schedule row SOFTLY before deriving a
+    calendar from it -- ``routes/settings``, ``routes/pay_periods`` and the
+    new-profile form (``routes/salary/profiles.new_profile``, task
+    plan#3170), each answering an owner with no row rather than refusing one.
     ``pay_period_rolling._future_period_count`` counts the owner's remaining
     paychecks on the rolling top-up, which ``/grid`` and ``/dashboard`` run
     BEFORE they open their read pass -- deliberately, so that pass sees the
@@ -336,9 +340,10 @@ def cadence_for(user_id: int) -> PayCadence:
     ``.rhythm.cadence``, and ``resolve_schedule`` is the one read.  What changed
     is that the refusal for a row-less owner is written once, here and for
     :func:`calendar_for`, instead of once per door with two messages to keep in
-    step.  ``resolve_cadence`` survives for the callers that want the SOFT
-    answer -- ``routes/salary/profiles._paychecks_per_year`` renders a pointer
-    where this raises, because a form must not 500 on the state it repairs.
+    step.  The SOFT answer is ``pay_schedule_service.resolve_schedule``'s --
+    ``routes/salary/profiles.new_profile`` renders a pointer where this raises,
+    because a form must not 500 on the state it points the owner to the fix
+    for (task plan#3170, which moved it off ``resolve_cadence``).
 
     **Resolve it once per PRODUCER and thread it.**  The recurrence plan said
     "once per request" (archived in

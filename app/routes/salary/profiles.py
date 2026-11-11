@@ -31,13 +31,14 @@ from app.services import (
     pay_list_service,
     recurrence_engine,
     salary_pay_period,
+    salary_paydays,
     salary_profile_service,
     template_amount_service,
 )
 from app.services import pay_schedule_service, pay_stub_service
 from app.services.balance_at import BalanceContext
 from app.services.obligations_aggregator import todays_price
-from app.services.pay_calendar import PayCadence
+from app.services.pay_calendar import cadence_on, calendar_at_schedule
 from app.services.payroll_basis import PayrollBasis
 from app.services.recurrence import RecurrenceSpec, author_rule
 from app.services.generation_schedule import GenerationSchedule
@@ -63,63 +64,6 @@ from app.routes.salary._helpers import (
 logger = logging.getLogger(__name__)
 
 
-def _paychecks_per_year() -> "int | None":
-    """Return how many paychecks the owner receives a year, or ``None``.
-
-    **The form's read-only replacement for the ``pay_periods_per_year``
-    dropdown** (plan step R-F16).  It is the count of the owner's LATEST
-    rhythm (``resolve_cadence``).  A yearly figure is a pay times the count
-    in force on ITS payday (ruling **R-SAL59**; since plan step salary:X-av-2
-    each payday's own, **R-SAL66**), which is this number for an owner with
-    one rhythm and not, before the change, for an owner with a later one
-    recorded; the pay list states each entry's own count beside it.  It is
-    not the owner's to choose HERE: it derives from
-    the owner's pay era's cadence (``budget.pay_eras`` since plan step
-    ``pay_calendar:C17-a``; ``budget.pay_schedule.cadence_days`` until then),
-    which the pay-period settings own, and offering a second control was the
-    finding.
-
-    ``None`` for an owner with no resolvable cadence, which the template
-    renders as a pointer to generate a schedule.  Answered rather than raised:
-    a form page must not 500 on the state the form itself is the fix for, and
-    such an owner cannot create a profile either way (``_paycheck_template``
-    needs a payday to seat the recurrence on).
-
-    **Through ``resolve_cadence`` rather than ``cadence_for`` or a whole
-    calendar**, and the two doors beside it are why each is wrong here.
-    :func:`~app.services.pay_calendar.cadence_for` REFUSES the unresolvable
-    owner, which is right for a producer of money and wrong for a form.
-    **Since plan step ``pay_calendar:C4-d`` (ruling R-PC45) so does**
-    :func:`~app.services.pay_calendar.calendar_for` -- this paragraph said it
-    "answers without refusing", which was true of the empty cadence-less
-    calendar that step deleted and is now false of both calendar doors.  It
-    remains the wrong door here for its OTHER stated reason, which the step did
-    not touch: it derives the owner's whole payday set to answer, 61 rows on
-    production, on two pages that load a calendar for nothing else.
-    ``resolve_cadence`` is the SOFT door and is what this form wants -- the one
-    fact both of those read, asked directly, and answered rather than raised.
-    *Since plan step salary:R15-b the same page DOES derive the owner's
-    calendar whenever a deduction line carries a cadence rule
-    (``_helpers._line_cadence_phrases``: a rule is described against
-    it, and a rule is authored against one, so that derivation cannot meet
-    the refusal).*  **And since plan step salary:X-av-3a the EDIT page
-    derives it on every render**, for the pay list and the rhythm notice
-    (``edit_profile``), so for that page this soft read no longer spares the
-    owner with no schedule: the calendar door refuses one first.  No such
-    owner reaches it -- the create door derives the same calendar and no
-    door deletes a schedule -- and the NEW-profile page, which derives the
-    calendar only after this read finds a cadence, is where it still
-    answers rather than raises.
-
-    Returns:
-        The paycheck count as an ``int``, or ``None``.
-    """
-    cadence = pay_schedule_service.resolve_cadence(current_user.id)
-    if cadence is None:
-        return None
-    return int(PayCadence(cadence).periods_per_year)
-
-
 @salary_bp.route("/salary/new")
 @require_owner
 def new_profile():
@@ -127,18 +71,51 @@ def new_profile():
 
     The first pay entry's payday defaults to the CURRENT payday (plan step
     salary:X-av-3a): the pay the owner types is what they are paid now, so a
-    raise they already received is in it and is not added on top.  Only an
-    owner with a pay schedule has one; the form points the rest at the
-    schedule (:func:`_paychecks_per_year`).  The day is the pass's pinned day,
-    the one read (ledger row **SAL-572**).
+    raise they already received is in it and is not added on top
+    (:func:`~app.services.salary_paydays.first_entry_payday` states the rule,
+    the first payday included for an owner not yet paid).  The day is the
+    owner's civil day, read once (ledger row **SAL-572**): the day the create
+    door's payday rule reads (``create_profile`` hands ``display_today()`` to
+    the pay list, ruling **R-SAL90**), so the payday offered is one the door
+    takes.  It was the read pass's ``as_of`` until task plan#3170, the
+    process's day, which only the deployed ``TZ`` made the owner's.
+
+    **Beside it the form states the paychecks a year in force on that payday**
+    (ruling **R-SAL97**, "Today's rhythm"), read through
+    :func:`~app.services.pay_calendar.cadence_on`, the one producer of a
+    payday's rhythm, which the pay list's count for an entry on that payday
+    also reaches (``pay_list_service.pay_rows`` through
+    ``PayrollBasis.base_pay_on``).  It was the LATEST rhythm's count
+    (``pay_schedule_service.resolve_cadence``), which for an owner with a
+    later rhythm recorded is not the count the typed pay is multiplied by
+    (rulings **R-SAL59** and **R-SAL66**).  The count is read-only (plan step
+    R-F16): the pay-period settings own the rhythm, and a second control for
+    it was the finding.
+
+    **No payday to default to, no count**, and the template renders a pointer
+    to the pay-period settings in its place: an owner with no schedule, or
+    one whose schedule holds no payday.  Neither holds a payday the create
+    door would take for the first entry.
+
+    **The schedule row is read once, and softly** (``resolve_schedule``),
+    with the calendar derived from it (``calendar_at_schedule``, the shape
+    ``routes/settings`` uses for the same reason): a form must not 500 on the
+    state it points the owner to the fix for, and
+    :func:`~app.services.pay_calendar.calendar_for` REFUSES an owner with no
+    schedule row (ruling **R-PC45**).
     """
     filing_statuses = db.session.query(FilingStatus).all()
-    paychecks_per_year = _paychecks_per_year()
-    ctx = BalanceContext.build(current_user.id)
-    current_payday = None
-    if paychecks_per_year is not None:
-        current = ctx.calendar().period_containing(ctx.as_of)
-        current_payday = current.start_date if current is not None else None
+    current_payday = paychecks_per_year = None
+    facts = pay_schedule_service.resolve_schedule(current_user.id)
+    if facts is not None:
+        calendar = calendar_at_schedule(current_user.id, facts)
+        current_payday = salary_paydays.first_entry_payday(
+            calendar, display_today(),
+        )
+        if current_payday is not None:
+            paychecks_per_year = int(
+                cadence_on(calendar, current_payday).periods_per_year,
+            )
     return render_template(
         "salary/form.html",
         profile=None,
@@ -435,7 +412,8 @@ def edit_profile(profile_id):
         calc_methods=calc_methods,
         investment_accounts=investment_accounts,
         inactive_profiles=inactive_profiles,
-        paychecks_per_year=_paychecks_per_year(),
+        # No paychecks-a-year count: each pay-list row states its own
+        # (ruling R-SAL97).
         pay_rows=pay_list_service.pay_rows(basis),
         rhythm_changes=basis.rhythm_changes_without_pay(),
         stub_summaries=pay_stub_service.stub_summaries(profile),

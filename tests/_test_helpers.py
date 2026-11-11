@@ -8026,12 +8026,12 @@ def validated_cadence(
     unit=None, interval_n=1, placement=None, starts_on=None, nominal_day=None,
     states_a_start=True, max_per_month=None,
 ):
-    """Return one cadence as a SCHEMA hands it to a route helper.
+    """Return one cadence as a SCHEMA's fields deserialize it.
 
-    The post-``load()`` shape: enum members, a real ``int`` and a real
-    ``date``, which is what
-    :func:`app.routes._recurrence_form_helpers.recurrence_spec_from_form`
-    and its siblings read.
+    The deserialized shape: enum members, a real ``int`` and a real ``date``,
+    which the schema's ``@post_load`` consumes into the submission a route
+    helper reads, as :func:`~tests.test_routes._recurrence_submission.submission_from`
+    does (the route helpers read this dict's keys directly until plan step R7e).
 
     **``starts_on`` rides WITH the cadence since plan step R7c-b**, and it is
     not optional garnish: the rule's first occurrence is authored (ruling

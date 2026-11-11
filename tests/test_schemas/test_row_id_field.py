@@ -391,7 +391,7 @@ _NON_INTEGER_FIELD_FACTORIES = frozenset({
 #: fields.Nested(RaiseProbeSchema))`` -- the values are a schema this sweep
 #: reads on its own account, and the keys are raise ids the sweep cannot see
 #: inside the container call, so their strictness is asserted DIRECTLY by
-#: ``tests/test_schemas/test_validation.py::TestReadinessQueryGathersTheRaiseProbes
+#: ``test_validation/test_salary_schemas.py::TestReadinessQueryGathersTheRaiseProbes
 #: ::test_a_raise_id_is_read_as_every_row_id_is`` (``007``, ``""``, ``-5`` and
 #: ``1.9`` refused) rather than granted by this listing.
 #: **``ShownIds`` is here on ``PurchaseDestination``'s terms** (plan step

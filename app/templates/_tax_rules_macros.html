@@ -1,0 +1,46 @@
+{# Which year's tax rules priced a figure: the ONE spelling of the words
+   (ruling salary:R-SAL75, "so the label is not built twice"; plan step
+   salary:X-at-6).
+
+   Usage:
+     {% from "_tax_rules_macros.html" import rules_year_phrase, rules_note %}
+
+   Both read a TaxLawBasis (app/services/tax_config_service.py), the
+   resolver's own answer carried on whatever was priced, so no screen works
+   the year out itself: the Taxes tab hands them its liability's basis, and
+   the salary pages a paycheck's tax lines' ``rules``.
+
+   ``rules_year_phrase`` is the year alone when every part was priced on its
+   own year's rules ("2026"); "<year> on <year>'s tax rules" when every part
+   was priced on one other year, the app lacking the year asked for (ruling
+   R-SAL76); and each part's own year when they differ.  They differ for a
+   year that shipped before its state's rules (ruling R-SAL86), and for every
+   year after it while the newest year still lacks the state: with 2026
+   listing the state and 2027 not, 2028 is federal and FICA 2027's, the state
+   2026's.  That case names the state, so the caller hands it the profile's
+   ``state_code`` and the words never spell a literal one.
+
+   ``rules_note`` is the sentence saying the app lacks the year's rules.  Its
+   words are modelled on the tax-law notice's ("Shekel doesn't have the 2027
+   tax rules yet", ruling R-SAL87) rather than copied: it says "2027's tax
+   rules" where the notice says "the 2027 tax rules", and it drops "yet",
+   which is false for a year before the law's first.  It says "all of" only
+   when some part was priced on the year's own rules (has_some_own_rules):
+   2027 above, never 2028, whose rules the app holds none of.  It renders
+   nothing for a basis that substituted nothing, so no caller can print the
+   claim about a year whose rules the app has. #}
+
+{%- macro rules_year_phrase(basis, state_code) -%}
+{{- basis.tax_year -}}
+{%- if basis.substituted -%}
+{%- if basis.rules_year is not none %} on {{ basis.rules_year }}'s tax rules
+{%- else %}: federal tax on {{ basis.federal_year }}'s rules, Social Security and Medicare on {{ basis.fica_year }}'s, {{ state_code }} tax on {{ basis.state_year }}'s
+{%- endif -%}
+{%- endif -%}
+{%- endmacro -%}
+
+{%- macro rules_note(basis) -%}
+{%- if basis.substituted -%}
+Shekel doesn't have {{ "all of " if basis.has_some_own_rules }}{{ basis.tax_year }}'s tax rules.
+{%- endif -%}
+{%- endmacro -%}

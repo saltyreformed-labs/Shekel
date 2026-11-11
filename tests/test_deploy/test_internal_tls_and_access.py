@@ -63,6 +63,8 @@ POSTGRES_DIR = DEPLOY_DIR / "postgres"
 POSTGRES_README = POSTGRES_DIR / "README.md"
 GITIGNORE = REPO_ROOT / ".gitignore"
 RUNBOOK = REPO_ROOT / "docs" / "runbook.md"
+#: Every file under ``docs/runbook/``: with :data:`RUNBOOK`, its front page, the one runbook.
+RUNBOOK_PARTS = tuple(sorted((REPO_ROOT / "docs" / "runbook").glob("*.md")))
 
 DOCKER_SUBPROCESS_TIMEOUT_S = 60
 
@@ -894,7 +896,7 @@ class TestMergedComposeCarriesTLS:
 
 
 class TestRunbookDocumentsC37Procedures:
-    """docs/runbook.md carries the operator-facing procedures for the
+    """The runbook carries the operator-facing procedures for the
     C-37 changes (cert generation, Access policy attachment, metrics
     binding verification, troubleshooting).  Discoverability matters:
     operators reading the runbook must find the workflow without
@@ -904,8 +906,9 @@ class TestRunbookDocumentsC37Procedures:
     @pytest.fixture(scope="class")
     @classmethod
     def text(cls) -> str:
-        """Return the full runbook source as a string."""
-        return RUNBOOK.read_text(encoding="utf-8")
+        """Return the full runbook source, its front page and every part, as a string."""
+        return "\n".join(part.read_text(encoding="utf-8")
+                         for part in (RUNBOOK, *RUNBOOK_PARTS))
 
     @pytest.mark.parametrize(
         "marker",
@@ -928,7 +931,7 @@ class TestRunbookDocumentsC37Procedures:
         table or §6 lags.
         """
         assert marker in text, (
-            f"docs/runbook.md does not mention {marker!r}; the "
+            f"the runbook does not mention {marker!r}; the "
             f"operator workflow documentation is incomplete"
         )
 
@@ -941,7 +944,7 @@ class TestRunbookDocumentsC37Procedures:
             text,
             re.MULTILINE,
         ), (
-            "docs/runbook.md does not have a Postgres TLS section "
+            "the runbook does not have a Postgres TLS section "
             "heading; the operator has no documented cert workflow"
         )
 
@@ -953,7 +956,7 @@ class TestRunbookDocumentsC37Procedures:
             text,
             re.MULTILINE | re.IGNORECASE,
         ), (
-            "docs/runbook.md does not have an Access Policy section "
+            "the runbook does not have an Access Policy section "
             "heading; the operator has no documented placeholder-"
             "substitution workflow"
         )

@@ -70,11 +70,10 @@
 #
 # Since plan step balance:X-cv, entrypoint step 3 is ONE transaction: the
 # migrations, the reference seed and the audit-trigger check in
-# `scripts/init_database.py` commit together or not at all (three ledger
-# hooks ran inside it too until plan task plan#3077).  So a failure INSIDE
-# step 3 -- a migration that errors, a seed that fails, a missing audit
-# trigger -- leaves the stamp where it was, and this
-# script re-pins the previous image even for a migration-bearing release.
+# `scripts/init_database.py` commit together or not at all (the ledger hooks
+# did too, until plan task plan#3077).  So a failure INSIDE step 3 -- a failed
+# migration or seed, a missing audit trigger -- leaves the stamp unmoved, and
+# this script re-pins the previous image even for a migration-bearing release.
 # Only a failure AFTER step 3 has committed (a later entrypoint step, or the
 # health check) leaves the new stamp, and that is the case the refusal still
 # meets.  A re-pin is not a recovery when the fault is in something both

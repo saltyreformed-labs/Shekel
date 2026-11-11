@@ -797,10 +797,9 @@ def filed_acts(seed_user, how_many, *, by_rule):
     **Each act gets an envelope of its own, and that was a MEASUREMENT rather
     than a style choice.**  ``posting_service.sync_transaction_postings``
     reconciled a transaction's whole purchase FAMILY on every entry change
-    (ruling **R-FM**) until plan task plan#3097 took it out of the entry
-    doors, so filing the *k*-th purchase into an envelope that
-    already held *k-1* of them called
-    ``_posting_purchases.emit_purchase_deltas`` *k* times --
+    (ruling **R-FM**) until plan task plan#3097 took it out of the entry doors,
+    so filing the *k*-th purchase into an envelope that already held *k-1* of
+    them called ``_posting_purchases.emit_purchase_deltas`` *k* times --
     quadratic in the number of acts.  Measured 2026-08-31 on this box, 51
     acts: **1,326 emit calls (51x52/2) and 4.50 s into one envelope, against
     51 calls and 1.13 s spread across 51**.  CI then pinned ``-n 12`` on a
@@ -1295,10 +1294,10 @@ def an_account_whose_books_hide_a_line(db, seed_user, seed_periods):
         ``(account, day)`` -- the account and the day both its books and the
         line fall on.
     """
-    # pylint: disable=import-outside-toplevel  -- ``account_service`` reaches
-    # back into this package's subject at import time; the three modules that
-    # used to hold their own copy of this fixture deferred it for the same
-    # reason.
+    # Pylint: ``import-outside-toplevel`` -- ``account_service`` reaches back
+    # into this package's subject at import time; the three modules that used
+    # to hold their own copy of this fixture deferred it for the same reason.
+    # pylint: disable=import-outside-toplevel
     from app.services import account_service as _accounts
 
     day = seed_periods[0].start_date

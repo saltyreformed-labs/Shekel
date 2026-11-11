@@ -16,8 +16,7 @@ wrote a row.  This module is about what changed and what must not have.
    handed a row or an envelope an EARLIER item in the same pass has claimed.
    That is what :func:`~app.services.statement_match.matched_subjects` being
    re-read per act buys, and it is the arm a snapshot would silently break.
-3. **Failing loud.**  A broken ledger invariant (a ``RuntimeError``) is not
-   one item's refusal, so it takes the whole request down.
+3. **Failing loud.**  A broken invariant (a ``RuntimeError``) fails the request, not one item.
 
 **What the collision cases here fix in place is a REAL case**: on the
 developer's own statement some envelopes are both named by a proposal and
@@ -956,13 +955,7 @@ class TestWhatIsNOTCaughtPerItem:
     def test_a_broken_invariant_fails_the_whole_pass(
         self, app, seed_user, monkeypatch,
     ):
-        """A broken invariant is a fact about the account, not about an item.
-
-        Raised as the ``RuntimeError`` the walks raise on one (``cash_ledger``'s
-        readers, for instance).  It was a ``PostingError`` until plan task
-        plan#3132, the stored ledger's error, which no door can raise once its
-        writers are not called.
-        """
+        """A broken invariant is a fact about the account, not about an item."""
         with app.app_context():
             statement = an_import(seed_user)
             day = seed_user["bootstrap_period"].start_date
@@ -973,6 +966,8 @@ class TestWhatIsNOTCaughtPerItem:
                 seed_user, name="Electricity", amount="180.00",
             )
 
+            # A walk raises a RuntimeError on one (cash_ledger's readers).  Until plan#3132
+            # it was the stored ledger's PostingError, which no door raises without its writers.
             def _boom(*_args, **_kwargs):
                 raise RuntimeError("the ledger does not balance")
 

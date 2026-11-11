@@ -596,12 +596,9 @@ class TestItMovesNoMoney:
         to move could still hide a line that did.
         """
         before = self._ledger(db, seed_user)
-        # The fixture's $125.00 Groceries row, settled 2026-03-03, books
-        # 0 - 125.00 = -125.00 on Checking's own line that day (money out of
-        # an asset, debit-positive), so the snapshot is not an empty one.
-        assert before[(linked_key(seed_user["account"]), date(2026, 3, 3))] == (
-            Decimal("-125.00")
-        )
+        # Not empty: the $125.00 Groceries row settled 2026-03-03 books 0 - 125.00 =
+        # -125.00 on Checking's own line (money out of an asset, debit-positive).
+        assert before[(linked_key(seed_user["account"]), date(2026, 3, 3))] == Decimal("-125.00")
 
         _record(seed_user, _file())
 

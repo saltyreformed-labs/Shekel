@@ -1591,9 +1591,8 @@ class TestApplyAnchorTrueUpReraisesUnknownIntegrityError:
         with no reachable input: the decision that used to end in a unique
         violation is made before anything is staged.  Patching the call where
         a deferred constraint would raise keeps the contract testable without
-        asserting on a specific constraint.  *It was engineered at the posting
-        re-sync, the door's other call into the database, until plan task
-        plan#3076 deleted it.*
+        asserting on a specific constraint.  It was engineered at the posting
+        re-sync, the door's other call into the database, until plan#3076 deleted it.
         """
         with app.app_context():
             account = db.session.get(Account, seed_user["account"].id)
@@ -2133,7 +2132,7 @@ class TestRecordLoanTrackingStart:
     def test_refuses_on_or_after_the_day_a_payment_moved_money_and_writes_nothing(
         self, app, db, seed_user, seed_periods_today,
     ):
-        """Rulings R-R114 and R-BAL155: a tracking start on or after a payment's money day is refused.
+        """Rulings R-R114, R-BAL155: a tracking start on or after a payment's money day is refused.
 
         A $400.00 payment settled on period 1's first day moved money that
         day.  A tracking start that day or ten days later raises
@@ -2544,25 +2543,20 @@ class TestApplyLoanAnchorTrueUpReraisesUnknownIntegrityError:
 
     The loan twin of the checking class above.  Its ``except IntegrityError``
     lived in ``loan_posting_service.sync_all_scenarios_or_duplicate``, which the
-    loan anchor path stopped calling at plan step X-f1c4b (the ARM rate change
-    kept that translation, whose table is EDITABLE and whose unique key is a
-    real business rule, and holds it itself since plan task plan#3076).  The
-    contract it protected is graded here directly.
+    loan anchor path stopped calling at plan step X-f1c4b (the ARM rate change kept that
+    translation, its EDITABLE table's unique key being a real business rule, and holds it
+    itself since plan task plan#3076).  The contract it protected is graded here directly.
     """
 
     def test_integrity_error_from_the_commit_is_not_swallowed(
         self, app, db, seed_user, seed_periods_today,
     ):
-        """An ``IntegrityError`` raised by the door's commit reaches the caller.
-
-        Engineered at the commit, as the checking class above is and for its
-        reason; it was engineered at the loan re-sync until plan task plan#3076
-        deleted it.
-        """
+        """An ``IntegrityError`` raised by the door's commit reaches the caller."""
         with app.app_context():
             account = _make_loan_account(seed_user)
             today = date.today()
 
+            # At the commit, as the checking twin is (it patched the loan re-sync until plan#3076).
             with patch.object(
                 db.session, "commit",
                 side_effect=IntegrityError("stmt", {}, Exception("boom")),

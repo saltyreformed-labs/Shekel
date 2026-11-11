@@ -512,24 +512,18 @@ _DOWNGRADE = {
     "new_migrations": "0001_a.py\n",
     "stamped": "0003",
 }
-#: A migration-bearing release whose entrypoint step 3 ROLLED BACK (plan step
-#: balance:X-cv): the target adds revisions, but its migrations, seed and
-#: audit-trigger check are one transaction, so a refusal there leaves the
-#: stamp unmoved.
+#: A migration-bearing release whose entrypoint step 3 ROLLED BACK (plan step balance:X-cv):
+#: its migrations, seed and audit-trigger check are one transaction, so the stamp is unmoved.
 _STEP_3_ROLLED_BACK = {
     "old_migrations": "0001_a.py\n",
     "new_migrations": "0001_a.py\n0002_b.py\n",
     "stamped": "0001",
     "stamped_after": "0001",
 }
-#: What ``init_database.py`` prints when step 3 refuses: the operator's pointer
-#: to the repair, which only the failed container's log carries.  The
-#: audit-trigger check's refusal (``app.audit_infrastructure``); it was a
-#: ledger hook's until plan task plan#3077 deleted the hooks.
-_REFUSAL_LINE = (
-    "RuntimeError: Audit trigger check failed: 63 audit trigger(s), at least "
-    "64 expected"
-)
+#: Part of what ``init_database.py`` prints when step 3 refuses: the operator's pointer to
+#: the repair, which only the failed container's log carries.  The audit-trigger check's
+#: (``app.audit_infrastructure``); a ledger hook's until plan task plan#3077.
+_REFUSAL_LINE = "Missing: budget.transactions (writes to them leave no audit row)."
 
 
 class TestTheHarnessInheritsNoTarget:

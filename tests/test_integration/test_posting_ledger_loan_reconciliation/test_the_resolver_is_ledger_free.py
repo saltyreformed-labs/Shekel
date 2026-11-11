@@ -7,10 +7,20 @@ from __future__ import annotations
 import ast
 import inspect
 import os
+from decimal import Decimal
 
 import app.services
+from app.extensions import db as _db
+from app.services.ledger_lines import _loan_payments, linked_key
 
-from ._helpers import _resolver_balance
+from ._helpers import (
+    _AS_OF,
+    _P1,
+    _ledger_balance,
+    _make_loan,
+    _resolver_balance,
+    _settle,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -24,8 +34,12 @@ from ._helpers import _resolver_balance
 # the ledger would silently collapse the parallel run to a tautology and nothing
 # would fail.  These guards make it mechanical.
 #
-# **INDEPENDENCE WAS GRADED AS A VALUE from plan step balance:X-au-g-2c-1 until
-# plan#2914**: ``test_perturbing_the_posted_ledger_does_not_move_the_reference``
+# **INDEPENDENCE IS GRADED AS A VALUE again since plan task plan#3394**, on
+# the read the parallel run compares against:
+# ``TestTheResolverIgnoresTheReadByValue`` skews the worked-out read's loan
+# split and re-reads the resolver.  **It was graded on the STORE from plan
+# step balance:X-au-g-2c-1 until plan#2914**:
+# ``test_perturbing_the_posted_ledger_does_not_move_the_reference``
 # moved the STORED ledger and asserted ``_resolver_balance`` did not, which is
 # sound against every route a static check cannot see: raw SQL, an ORM backref
 # traversed off a model, ``importlib``, ``getattr``, or a ledger model module
@@ -457,3 +471,55 @@ class TestResolverIsLedgerFree:
             f"the closure holds {len(closure)} of {len(sources)} modules -- it "
             f"has collapsed through a re-export hub and grades nothing"
         )
+
+
+class TestTheResolverIgnoresTheReadByValue:
+    """Moving the worked-out read's loan figure moves the read and not the resolver.
+
+    The value control the static checks above cannot replace (plan task
+    plan#3394, from the card's review plan#3059): a closure sees imports, and
+    a resolver that came to read the walk through a memo on the read pass, a
+    passed callable or ``importlib`` would import nothing new.  This skews
+    the read's own loan-payment target, the one place the worked-out ledger
+    turns a payment's split into the loan's line, and re-reads both.
+    """
+
+    def test_skewing_the_reads_loan_split_does_not_move_the_resolver(
+        self, app, db, seed_user, seed_periods, monkeypatch,
+    ):
+        """A $7.00 skew on the loan's line: the read owes $7.00 more, the resolver the same.
+
+        The skew books the payment's principal $7.00 short on the loan's own
+        line, so the loan's net there falls by 7.00 and the read's balance,
+        ``-(that net)``, rises by 7.00.  The resolver replays the schedule
+        from the anchor and reads no ledger, so it moves by 0.00.
+        """
+        with app.app_context():
+            scenario_id = seed_user["scenario"].id
+            loan = _make_loan(seed_user)
+            _settle(seed_user, loan, seed_periods[_P1])
+            _db.session.commit()
+            read_before = _ledger_balance(loan.id, scenario_id)
+            resolver_before = _resolver_balance(loan.id, scenario_id, _AS_OF)
+
+            real_target = _loan_payments._loan_payment_target
+            skew = Decimal("7.00")
+
+            def _skewed_target(outcome, loan_account):
+                """Book the loan's own line $7.00 more negative than the split says."""
+                legs = dict(real_target(outcome, loan_account))
+                key = linked_key(loan_account)
+                amount, kind = legs[key]
+                legs[key] = (amount - skew, kind)
+                return legs
+
+            monkeypatch.setattr(
+                _loan_payments, "_loan_payment_target", _skewed_target,
+            )
+
+            assert _ledger_balance(loan.id, scenario_id) == read_before + skew, (
+                "CONTROL: the skew must reach the read, or this grades nothing"
+            )
+            assert _resolver_balance(
+                loan.id, scenario_id, _AS_OF,
+            ) == resolver_before

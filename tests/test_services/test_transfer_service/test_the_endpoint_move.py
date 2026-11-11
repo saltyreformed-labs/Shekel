@@ -16,6 +16,8 @@ from app.services import (
     account_service,
     transfer_service,
 )
+from app.services.ledger_lines import linked_key
+from app.services.loan_ledger import walk_loan_ledgers
 from app.exceptions import NotFoundError, ValidationError
 from tests._ledger_reads import account_net
 from tests._test_helpers import create_loan_account
@@ -531,13 +533,16 @@ class TestMovingATransferBetweenAccounts:
     def test_a_move_and_a_settle_in_ONE_call_settle_against_the_new_loan(
         self, app, db, transfer_data
     ):
-        """A move and a settle in ONE call land on the destination it LEAVES.
+        """A move and a settle in ONE call land on the destination it MOVES TO.
 
         The two acts compose: the call re-points the transfer at the loan and
-        settles it, and its cash lines post.  That the loan's STORED split was
-        written during the call was graded by an idempotence oracle on the
-        stored journal until plan step plan#2914 took the store's grading off
-        the suite.
+        settles it, so its $250.00 leaves Checking and arrives on the LOAN's
+        line, not the Savings it left, and the loan's walk splits it.  That
+        the loan's STORED split was written during the call was graded by an
+        idempotence oracle on the stored journal until plan step plan#2914
+        took the store's grading off the suite; the walk's payment is its
+        place on the read (plan task plan#3394).  The split's own arithmetic
+        is ``test_ledger_lines/test_a_loans_lines``'s, graded by hand there.
 
         **It does not pin the ORDER of the endpoint apply against the settle
         dispatch, and that is said because it was checked**: moving the apply
@@ -571,10 +576,24 @@ class TestMovingATransferBetweenAccounts:
             db.session.flush()
 
             assert xfer.to_account_id == loan.id
-            # The cash legs posted, and against the LOAN's ledger.
-            after = _ledger_nets_for_transfer(xfer.id)
-            assert len(after) == 2
-            assert sum(after.values()) == Decimal("0")
+            # The cash lines post, and against the LOAN's line: 250.00 out of
+            # Checking, 250.00 into the loan, none on the Savings it left.
+            assert _ledger_nets_for_transfer(xfer.id) == {
+                linked_key(td["account"]): Decimal("-250.00"),
+                linked_key(loan): Decimal("250.00"),
+            }
+            # The loan's walk holds the payment, split into parts that sum
+            # back to its cash (interest + escrow + principal + excess).
+            (split,) = [
+                outcome for outcome in walk_loan_ledgers(
+                    [loan.id], td["scenario"].id,
+                )[loan.id].payment_splits
+                if outcome.source.transfer.id == xfer.id
+            ]
+            assert split.cash == Decimal("250.00")
+            assert (
+                split.interest + split.escrow + split.principal + split.excess
+            ) == Decimal("250.00")
 
     def test_a_settled_transfer_s_cash_legs_follow_the_move(
         self, app, db, transfer_data

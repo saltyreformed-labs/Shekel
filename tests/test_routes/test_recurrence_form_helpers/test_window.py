@@ -25,11 +25,11 @@ from tests._test_helpers import (
     insert_trueup_event,
     loan_params_for,
     make_loan_payment_template,
-    submission_from,
     validated_cadence,
 )
 from app.services import balance_at, loan_recurrence_sync
 from tests.oracles.recurrence_baseline import MONTHLY
+from tests.test_routes._recurrence_submission import submission_from
 
 from ._helpers import _Definition
 
@@ -83,7 +83,8 @@ class TestAnUpdateMayNotInvertTheWindow:
 
         Args:
             data: The post-``load()`` payload, its recurrence keys consumed
-                into the submission (:func:`~tests._test_helpers.submission_from`).
+                into the submission
+                (:func:`~tests.test_routes._recurrence_submission.submission_from`).
             end_bound: The submitted closing bound, or ``None``.
 
         Returns:

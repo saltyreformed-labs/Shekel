@@ -8,7 +8,8 @@ from app.enums import RecurrenceUnitEnum
 from app.extensions import db
 from app.services.recurrence import RecurrenceSpec
 from app.routes._recurrence_form_render import create_form_default_starts_on
-from tests._test_helpers import derived_span, submission_from, validated_cadence
+from tests._test_helpers import derived_span, validated_cadence
+from tests.test_routes._recurrence_submission import submission_from
 
 from ._helpers import _phase_of_spec
 
@@ -18,8 +19,8 @@ class TestBuildRecurrenceRuleFromForm:
 
     :meth:`~app.services.recurrence.RecurrenceSubmission.authored` since plan
     step R7e, reached through the schema's own consumer
-    (:func:`~tests._test_helpers.submission_from`); the route helper
-    ``recurrence_spec_from_form`` until then.
+    (:func:`~tests.test_routes._recurrence_submission.submission_from`); the
+    route helper ``recurrence_spec_from_form`` until then.
     """
 
     def test_no_pattern_returns_none_and_pops_all_keys(

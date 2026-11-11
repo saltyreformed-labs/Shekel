@@ -17,8 +17,9 @@ from app.services.recurrence import (
     recurrence_spec,
     resolve,
 )
-from tests._test_helpers import submission_from, transient_cadence_rule, validated_cadence
+from tests._test_helpers import transient_cadence_rule, validated_cadence
 from tests.oracles.recurrence_baseline import EVERY_N_PERIODS, MONTHLY, QUARTERLY
+from tests.test_routes._recurrence_submission import submission_from
 
 
 class TestTheColumnSaysWhatTheCadenceSays:

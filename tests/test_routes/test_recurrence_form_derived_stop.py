@@ -66,10 +66,10 @@ from tests._test_helpers import (
     loan_params_for,
     make_loan_payment_template,
     make_transfer_template,
-    submission_from,
     validated_cadence,
 )
 from tests.oracles.recurrence_baseline import MONTHLY
+from tests.test_routes._recurrence_submission import submission_from
 
 #: The day every pass in this module is measured at, frozen so the loan fold
 #: and the derived payoff are deterministic.  The same day and loan shape the
@@ -187,8 +187,9 @@ def _form_ctx(data, end_bound):
     """Return a form context carrying *data*'s submission and a real redirect target.
 
     *data* is a post-``load()`` payload whose recurrence keys are consumed into
-    the submission (:func:`~tests._test_helpers.submission_from`), beside the
-    closing bound *end_bound* (``None`` for one the form did not mention).
+    the submission
+    (:func:`~tests.test_routes._recurrence_submission.submission_from`), beside
+    the closing bound *end_bound* (``None`` for one the form did not mention).
     """
     return RecurrenceFormContext(
         submission=submission_from(data, end_bound),

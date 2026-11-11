@@ -10,8 +10,9 @@ from app.routes._redirect_target import RedirectTarget
 from app.services.balance_at import BalanceContext
 from app.services.pay_calendar import calendar_for
 from app.services.recurrence import build_transient_rule, reauthor_rule
-from tests._test_helpers import submission_from, transient_cadence_rule, validated_cadence
+from tests._test_helpers import transient_cadence_rule, validated_cadence
 from tests.oracles.recurrence_baseline import EVERY_N_PERIODS
+from tests.test_routes._recurrence_submission import submission_from
 
 from ._helpers import _Definition, _phase_of
 

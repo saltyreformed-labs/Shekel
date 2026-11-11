@@ -16,12 +16,14 @@ import pytest
 
 from tools.quill import quill
 from tools.quill._fake import (
+    SUGGESTED,
     FailOnce,
     FakeTracker,
     finding_filing,
     leaf_filing,
     ruling_filing,
     run,
+    suggested,
 )
 from tools.quill._fields import EFFORT, EFFORT_FIELD, PRIORITY_FIELD
 from tools.quill._tracker import TrackerError
@@ -34,8 +36,8 @@ def _step(tmp_path, *effort):
     file, ``effort`` (``--effort`` and its value, or nothing) after it."""
     spec = tmp_path / "new.md"
     spec.write_text("New work.")
-    return ("file", "step", "--arc", "balance", "--title", "New", "--body-file", str(spec),
-            *effort)
+    return ("file", "step", *SUGGESTED, "--arc", "balance", "--title", "New", "--body-file",
+            str(spec), *effort)
 
 
 def _filings(tmp_path):
@@ -48,8 +50,8 @@ def _filings(tmp_path):
         "finding": ("file", "finding", "--arc", "balance", "--title", "Twice", "--owner",
                     "plan#1", "--text", "The report counts a refund twice."),
         "ruling": ruling_filing(tmp_path, "plan#1"),
-        "question": ("file", "question", "--arc", "balance", "--title", "Day", "--body-file",
-                     str(body)),
+        "question": ("file", "question", *SUGGESTED, "--arc", "balance", "--title", "Day",
+                     "--body-file", str(body)),
         TASK: ("file", TASK, "--parent", "plan#1", "--title", "Piece", "--body-file", str(body)),
     }
 
@@ -129,8 +131,8 @@ def test_a_filing_run_again_writes_the_effort_its_card_does_not_hold(code, tmp_p
     tracker.add(1, body="New work.", title="New", labels=("balance", FILING), effort=held,
                 on_board=False)
     assert run(tracker, code, *_step(tmp_path, "--effort", "3")) == 0
-    assert tracker.writes == [("set_field", 1, EFFORT_FIELD, "3"), ("board_add", 1),
-                              ("unmark", 1)]
+    assert tracker.writes == [("set_field", 1, EFFORT_FIELD, "3"), suggested(1),
+                              ("board_add", 1), ("unmark", 1)]
     assert tracker.cards_by_number[1].effort == "3"
     assert said in capsys.readouterr().out
 
@@ -141,7 +143,7 @@ def test_a_filing_run_again_over_a_card_holding_its_effort_writes_none(code, tmp
     tracker.add(1, body="New work.", title="New", labels=("balance", FILING), effort="3",
                 on_board=False)
     assert run(tracker, code, *_step(tmp_path, "--effort", "3")) == 0
-    assert tracker.writes == [("board_add", 1), ("unmark", 1)]
+    assert tracker.writes == [suggested(1), ("board_add", 1), ("unmark", 1)]
 
 
 def test_a_create_whose_effort_github_dropped_is_finished_holding_it(code, tmp_path, capsys,
@@ -186,7 +188,7 @@ def test_the_first_leaf_clears_its_split_step_s_effort_before_its_mark_comes_off
     #1's 4 is cleared once the leaf is linked and placed, before the leaf's mark is removed,
     last (R-BAL202)."""
     tracker = FakeTracker()
-    tracker.add(1, effort="4")
+    tracker.add(1, priority="Medium", effort="4")
     assert run(tracker, code, *leaf_filing(tmp_path, "half")) == 0
     assert (tracker.cards_by_number[1].effort, tracker.cards_by_number[2].effort) == (None, "2")
     assert tracker.writes == [("create", 2, "step", "half", ("balance", FILING), "balance"),
@@ -203,7 +205,7 @@ def test_a_split_step_in_a_milestone_gives_up_its_milestone_and_its_effort(code,
     tracker = FakeTracker()
     tracker.milestones.add(1)
     tracker.milestone_of[1] = 1
-    tracker.add(1, effort="4")
+    tracker.add(1, priority="Medium", effort="4")
     assert run(tracker, code, *leaf_filing(tmp_path, "half")) == 0
     assert tracker.milestone_of == {2: 1}
     assert tracker.cards_by_number[1].effort is None
@@ -215,7 +217,7 @@ def test_a_leaf_of_a_split_step_holding_no_effort_writes_none(code, tmp_path):
     """The first leaf cleared #1's Effort, so the second finds it holding none: no write, as a
     clear of a value the card does not hold is GitHub's 404 (``_tracker.Tracker.set_field``)."""
     tracker = FakeTracker()
-    tracker.add(1, effort="4")
+    tracker.add(1, priority="Medium", effort="4")
     assert run(tracker, code, *leaf_filing(tmp_path, "first half")) == 0
     assert run(tracker, code, *leaf_filing(tmp_path, "second half")) == 0
     assert _set_fields(tracker) == [("set_field", 1, EFFORT_FIELD, None)]
@@ -226,7 +228,7 @@ def test_a_leaf_filing_cut_short_at_the_clear_is_finished_by_the_same_command(co
     """R-BAL186: the clear fails, the run exits 2 with #1 still holding its Effort and the leaf
     still marked; run again, it clears it once and removes the mark, no second card filed."""
     tracker = FakeTracker()
-    tracker.add(1, effort="4")
+    tracker.add(1, priority="Medium", effort="4")
     FailOnce(tracker, "set_field")
     assert run(tracker, code, *leaf_filing(tmp_path, "half")) == 2
     assert tracker.cards_by_number[1].effort == "4"
@@ -247,7 +249,7 @@ def test_a_leaf_dropped_before_its_filing_finished_leaves_its_step_as_its_filing
     holds none, and ``quill effort`` sets one.  Cut at its link, before the clear, #1 keeps the
     Effort it held."""
     tracker = FakeTracker()
-    tracker.add(1, effort="4")
+    tracker.add(1, priority="Medium", effort="4")
     FailOnce(tracker, cut)
     assert run(tracker, code, *leaf_filing(tmp_path, "half")) == 2
     assert tracker.cards_by_number[1].effort == kept

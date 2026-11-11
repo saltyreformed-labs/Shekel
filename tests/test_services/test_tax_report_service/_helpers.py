@@ -14,7 +14,7 @@ from app.models.ref import CalcMethod, FilingStatus
 from app.models.salary_profile import SalaryProfile
 from app.services import paycheck_calculator
 from app.services.pay_calendar import calendar_for
-from app.services.tax_config_service import load_tax_configs_for_year
+from tests._tax_configs import tax_configs_for
 from tests._test_helpers import payroll_basis, start_test_pay_list
 
 
@@ -149,7 +149,7 @@ def _project_sum(profile, year, periods):
     same year-to-date context and what stays independent is the period
     SUBSET each is asked to sum.
     """
-    configs = load_tax_configs_for_year(profile, year)
+    configs = tax_configs_for(profile, year)
     breakdowns = paycheck_calculator.project_salary(
         payroll_basis(profile, periods), periods, configs,
     )

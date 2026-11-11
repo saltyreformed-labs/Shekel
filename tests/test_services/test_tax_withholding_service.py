@@ -58,7 +58,7 @@ from app.models.ref import FilingStatus
 from app.models.salary_profile import SalaryProfile
 from app.models.ytd_tax_checkpoint import YtdTaxCheckpoint
 from app.services import paycheck_calculator
-from app.services.tax_config_service import load_tax_configs_for_year
+from tests._tax_configs import tax_configs_for
 from app.services.balance_at import BalanceContext
 from app.services.pay_calendar import calendar_for
 from app.services.payroll_basis import PayrollBasis
@@ -205,7 +205,7 @@ def _expected_projected(basis, year, periods):
     pinned with absolute hand-computed dollars in ``TestFullYearCapContext``,
     which is where the context is graded.
     """
-    configs = load_tax_configs_for_year(basis.profile, year)
+    configs = tax_configs_for(basis.profile, year)
     breakdowns = paycheck_calculator.project_salary(basis, periods, configs)
     return {
         "gross": sum((b.earnings.gross_biweekly for b in breakdowns), ZERO),

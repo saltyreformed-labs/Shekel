@@ -280,8 +280,10 @@ class TestStepOnePairsByTheKey:
         an_id(recorded[1], secu, "TRN-882")
         incoming = [_line("TRN-882", description="OUR WORD")]
 
+        # Pylint: ``protected-access`` -- the case grades the door's pairing step.
         pairing = _plan._pair_group(  # pylint: disable=protected-access
             incoming, _group(db, seed_user), secu,
+            # Pylint: ``protected-access`` -- its input is the door's own id read.
             _plan._held_ids(  # pylint: disable=protected-access
                 seed_user["account"].id, secu, incoming,
             ),
@@ -309,8 +311,10 @@ class TestStepOnePairsByTheKey:
             _line("TRN-881", description="OUR WORD"),
         ]
 
+        # Pylint: ``protected-access`` -- the case grades the door's pairing step.
         pairing = _plan._pair_group(  # pylint: disable=protected-access
             incoming, _group(db, seed_user), secu,
+            # Pylint: ``protected-access`` -- its input is the door's own id read.
             _plan._held_ids(  # pylint: disable=protected-access
                 seed_user["account"].id, secu, incoming,
             ),

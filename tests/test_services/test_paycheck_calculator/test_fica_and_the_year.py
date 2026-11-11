@@ -11,6 +11,7 @@ from app.services.tax_calculator import calculate_fica
 from app.services.paycheck_calculator import project_salary, PaycheckBreakdown
 from app.services.paycheck_calculator._calendar_questions import _get_cumulative_wages
 from app.utils.money import ZERO
+from tests._tax_configs import hand_built_law
 from tests._test_helpers import payroll_basis
 
 from ._helpers import (
@@ -165,16 +166,18 @@ class TestProjectSalary:
         two nets equal.
         """
         configs_by_year = {
-            2026: {
-                "bracket_set": simple_bracket_set,
-                "state_config": FakeStateTaxRules(flat_rate="0.045"),
-                "fica_config": standard_fica,
-            },
-            2027: {
-                "bracket_set": simple_bracket_set,
-                "state_config": FakeStateTaxRules(flat_rate="0.090"),
-                "fica_config": standard_fica,
-            },
+            2026: hand_built_law(
+                2026,
+                bracket_set=simple_bracket_set,
+                state_config=FakeStateTaxRules(flat_rate="0.045"),
+                fica_config=standard_fica,
+            ),
+            2027: hand_built_law(
+                2027,
+                bracket_set=simple_bracket_set,
+                state_config=FakeStateTaxRules(flat_rate="0.090"),
+                fica_config=standard_fica,
+            ),
         }
         periods = [
             _period(start_date=date(2026, 6, 5), period_id=1),

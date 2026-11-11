@@ -56,7 +56,7 @@ from datetime import date
 from decimal import Decimal
 
 from app.services import escrow_calculator
-from app.services.installment_calendar import installment_dates
+from app.services.installment_calendar import accrual_window, installment_dates
 from app.services.rate_period_engine import RatePeriod, period_for_date
 
 
@@ -118,11 +118,20 @@ class AccrualCharge:
         escrow: The monthly escrow in force for this period
             (:func:`~app.services.escrow_calculator.escrow_monthly_as_of` on
             ``on_date``), ``0.00`` when the loan escrows nothing.
+        opens_on: The first day of the window whose interest this
+            installment charges, ``[opens_on, on_date)``
+            (:func:`~app.services.installment_calendar.accrual_window`, plan
+            step recurrence:R16-d): the previous month's due day, read from
+            the loan's meant day.  Like the escrow it is a function of the
+            date alone, so the charge carries it; what the window COSTS
+            depends on the balance standing when the charge falls, which only
+            the walk knows.
     """
 
     on_date: date
     period: RatePeriod
     escrow: Decimal
+    opens_on: date
 
 
 @dataclass(frozen=True)
@@ -191,6 +200,7 @@ def contract_charges(calendar: LoanCalendar, through: date) -> list[AccrualCharg
             escrow=escrow_calculator.escrow_monthly_as_of(
                 calendar.escrow_lines, on_date,
             ),
+            opens_on=accrual_window(on_date, calendar.payment_day)[0],
         )
         for on_date in installment_dates(
             calendar.origination_date, calendar.payment_day, through,

@@ -32,12 +32,16 @@ from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
 
-from app.services.installment_calendar import due_in_following_month
+from app.enums import InterestAccrualConventionEnum
+from app.services.installment_calendar import (
+    accrual_window,
+    due_in_following_month,
+)
 from app.utils.dates import clamped_day, month_ordinal, months_between
 from app.utils.money import (
     MONTHS_PER_YEAR,
-    accrue_monthly_interest,
     apply_payment_cash,
+    installment_interest,
     round_money,
 )
 
@@ -409,11 +413,18 @@ class PeriodTerms:
         monthly_pi: Level P&I (principal + interest, no escrow) held
             constant for the span.  Must be >= 0 (zero only for the
             degenerate already-paid-off span).
+        convention: How the loan's interest accrues
+            (:class:`~app.enums.InterestAccrualConventionEnum`), mapped from
+            the period's :attr:`~app.services.rate_period_engine.RatePeriod.convention`
+            -- or, for the refinance calculator's hypothetical loan, the
+            convention of the loan it refinances.  No default (plan step
+            recurrence:R16-d).
     """
 
     start_date: date
     annual_rate: Decimal
     monthly_pi: Decimal
+    convention: InterestAccrualConventionEnum
 
     def __post_init__(self):
         """Validate terms fields at construction time.
@@ -422,8 +433,10 @@ class PeriodTerms:
         results deep in the projection loop.
 
         Raises:
-            TypeError: If ``start_date`` is not a date or either money
-                field is not a Decimal.
+            TypeError: If ``start_date`` is not a date, either money
+                field is not a Decimal, or ``convention`` is not an
+                :class:`~app.enums.InterestAccrualConventionEnum` member
+                (the stored id or ``None`` handed over by mistake).
             ValueError: If ``annual_rate`` or ``monthly_pi`` is negative.
         """
         if not isinstance(self.start_date, date):
@@ -448,6 +461,11 @@ class PeriodTerms:
         if self.monthly_pi < 0:
             raise ValueError(
                 f"monthly_pi must be >= 0, got {self.monthly_pi}"
+            )
+        if not isinstance(self.convention, InterestAccrualConventionEnum):
+            raise TypeError(
+                f"convention must be an InterestAccrualConventionEnum member, "
+                f"got {self.convention!r}"
             )
 
 
@@ -699,7 +717,15 @@ def project_forward(
         # rate-period engine's figures, never re-derived from the
         # projection's own balance (DH-#1 / E-02).
         terms = _governing_terms(terms_schedule, pay_date)
-        interest = accrue_monthly_interest(balance, terms.annual_rate)
+        # The installment's own window, never one opened on the starting
+        # day: row 1 falls in ``starting_date``'s month, and a window inside
+        # one month charges nothing under ``MONTHLY_1_12`` (plan step
+        # recurrence:R16-d).
+        window_start, window_end = accrual_window(pay_date, inputs.payment_day)
+        interest = installment_interest(
+            balance, terms.annual_rate, window_start, window_end,
+            terms.convention,
+        )
         # Contractual + extra.  The final scheduled month absorbs the residue
         # regardless of extra.
         principal_portion, actual_payment, extra, balance = (

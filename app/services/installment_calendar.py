@@ -75,6 +75,45 @@ def due_in_following_month(reference: date, payment_day: int) -> date:
     return clamped_day(month_ordinal(reference) + 1, payment_day)
 
 
+def accrual_window(due: date, payment_day: int) -> tuple[date, date]:
+    """Return the window whose interest the installment due on *due* charges.
+
+    ``[the loan's due day in the month before due's, due)``: a loan charges
+    interest in ARREARS, so the installment that falls on *due* charges for the
+    month that ends there.  It is the window every installment walk hands
+    :func:`app.utils.money.installment_interest` (plan step recurrence:R16-d),
+    so no walk spells its own.
+
+    **It spans exactly one calendar month, for every due day and every
+    month**, and that is what keeps ``MONTHLY_1_12`` charging what it charged
+    before the window was an input: that convention counts the months a window
+    spans, so a window opened inside *due*'s own month -- a projection's first
+    row from its own starting day, say -- would charge ``$0.00``.  Consecutive
+    installments' windows abut: each opens on the installment before.
+
+    **The start is read from the MEANT day, not from *due*'s.**  A loan due the
+    31st is due Feb 28 in February, and the window that installment closes
+    opens on Jan 31, not Jan 28; the one after it is ``[Feb 28, Mar 31)``.
+    *payment_day* is what carries the meant day, through the one clamp
+    (:func:`app.utils.dates.clamped_day`).
+
+    **The first installment's window opens on the origination month's due day,
+    not on the origination date.**  Under ``MONTHLY_1_12`` the two are the
+    same one month, because the first installment always falls in the month
+    after origination (:func:`first_installment_date`).  A convention that
+    counts DAYS (plan#3355's daily accrual) has to decide whether the first
+    window opens here or on the funding date; the two differ by days.
+
+    Args:
+        due: The installment's due date.
+        payment_day: The loan's contractual day-of-month due day, 1-31.
+
+    Returns:
+        ``(start, end)``, the window's first day and its EXCLUSIVE end, *due*.
+    """
+    return clamped_day(month_ordinal(due) - 1, payment_day), due
+
+
 def first_installment_date(origination_date: date, payment_day: int) -> date:
     """Return the date of a loan's FIRST contractual installment.
 

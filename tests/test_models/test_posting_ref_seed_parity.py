@@ -56,7 +56,7 @@ Two design points make the scan precise:
 
 The dual seed has three legs, each guarded by a distinct layer:
 
-  1. the enum (``app/enums.py``) is the source of truth for valid values;
+  1. the enum (``app/enums/``) is the source of truth for valid values;
   2. the migration inline-seed (the bare-``flask db upgrade`` path) -- the
      ``TestRefInlineSeedParity`` scan below asserts every enum member
      is INSERTed by some migration;
@@ -104,6 +104,7 @@ from app.enums import (
     MovementFigureSourceEnum,
     StatementBalanceEvidenceEnum,
     BusinessDayShiftEnum,
+    InterestAccrualConventionEnum,
     LedgerAccountClassEnum,
     LedgerAccountKindEnum,
     PeriodPlacementEnum,
@@ -141,6 +142,7 @@ _INLINE_SEEDED_REF_ENUMS: tuple[tuple[type[Enum], str], ...] = (
     (StatementBalanceEvidenceEnum, "ref.statement_balance_evidence"),
     (AccountOpeningSourceEnum, "ref.account_opening_sources"),
     (WithholdingKindEnum, "ref.withholding_kinds"),
+    (InterestAccrualConventionEnum, "ref.interest_accrual_conventions"),
 )
 
 
@@ -163,6 +165,7 @@ _SEED_LIST_REF_ENUMS: tuple[tuple[type[Enum], str], ...] = (
     (StatementBalanceEvidenceEnum, "StatementBalanceEvidence"),
     (AccountOpeningSourceEnum, "AccountOpeningSource"),
     (WithholdingKindEnum, "WithholdingKind"),
+    (InterestAccrualConventionEnum, "InterestAccrualConvention"),
 )
 
 

@@ -23,7 +23,7 @@ from app.services.tax_config_service import (
     profile_tax_series,
 )
 from app.tax_law import TaxLaw
-from tests._tax_configs import tax_configs_for
+from tests._tax_configs import hand_built_law, tax_configs_for
 from tests._test_helpers import (
     add_test_pay_stub,
     made_up_federal,
@@ -409,14 +409,15 @@ class TestTheStubSideTakesTheRhythmOnItsOwnPayday:
         )]
         state = FakeStateTaxRules(flat_rate="0.045")
         state.standard_deduction = Decimal("12000.00")
-        configs = {
-            "bracket_set": FakeFederalRules(
+        configs = hand_built_law(
+            2026,
+            bracket_set=FakeFederalRules(
                 standard_deduction=Decimal("0"),
                 brackets=[FakeBracket(Decimal("0"), None, Decimal("0"), 0)],
             ),
-            "state_config": state,
-            "fica_config": FakeFicaRules(),
-        }
+            state_config=state,
+            fica_config=FakeFicaRules(),
+        )
         period = next(p for p in calendar.periods if p.start_date == date(2026, 7, 2))
 
         paycheck = paycheck_calculator.calculate_paycheck(

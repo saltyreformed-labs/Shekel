@@ -10,6 +10,8 @@ from decimal import Decimal
 from sqlalchemy import event
 from sqlalchemy.engine import Engine
 
+from app import ref_cache
+from app.enums import InterestAccrualConventionEnum
 from app.models.loan_params import LoanParams
 from app.models.transfer import Transfer
 from tests._test_helpers import loan_params_for
@@ -43,6 +45,9 @@ class TestComputeContractualPi:
             params = LoanParams(
                 account_id=1,
                 original_principal=Decimal("240000.00"),
+                interest_accrual_convention_id=ref_cache.interest_accrual_convention_id(
+                    InterestAccrualConventionEnum.MONTHLY_1_12,
+                ),
                 term_months=360,
                 origination_date=date(2025, 1, 1),
                 payment_day=1,
@@ -88,6 +93,9 @@ class TestComputeContractualPi:
             params = LoanParams(
                 account_id=1,
                 original_principal=Decimal("250000.00"),
+                interest_accrual_convention_id=ref_cache.interest_accrual_convention_id(
+                    InterestAccrualConventionEnum.MONTHLY_1_12,
+                ),
                 term_months=360,
                 origination_date=date(2024, 1, 1),
                 payment_day=1,
@@ -151,6 +159,9 @@ class TestComputeContractualPiArmAware:
         params = LoanParams(
             account_id=1,
             original_principal=Decimal("202000.00"),
+            interest_accrual_convention_id=ref_cache.interest_accrual_convention_id(
+                InterestAccrualConventionEnum.MONTHLY_1_12,
+            ),
             term_months=360,
             origination_date=date(2018, 12, 1),
             payment_day=1,
@@ -195,6 +206,9 @@ class TestComputeContractualPiArmAware:
         params = LoanParams(
             account_id=1,
             original_principal=Decimal("240000.00"),
+            interest_accrual_convention_id=ref_cache.interest_accrual_convention_id(
+                InterestAccrualConventionEnum.MONTHLY_1_12,
+            ),
             term_months=360,
             origination_date=date(2025, 1, 1),
             payment_day=1,
@@ -229,6 +243,9 @@ class TestComputeContractualPiArmAware:
         params = LoanParams(
             account_id=1,
             original_principal=Decimal("240000.00"),
+            interest_accrual_convention_id=ref_cache.interest_accrual_convention_id(
+                InterestAccrualConventionEnum.MONTHLY_1_12,
+            ),
             term_months=360,
             origination_date=date(2025, 1, 1),
             payment_day=1,

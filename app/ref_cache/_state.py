@@ -43,6 +43,7 @@ from app.enums import (
     CalcMethodEnum,
     CompoundingFrequencyEnum,
     FilingStatusEnum,
+    InterestAccrualConventionEnum,
     PaycheckLineKindEnum,
     EmployerContributionTypeEnum,
     GoalModeEnum,
@@ -242,6 +243,9 @@ def _build_ref_specs(ref_models) -> list[_RefSpec]:
             EmployerContributionTypeEnum, ref_models.EmployerContributionType
         ),
         _RefSpec(CompoundingFrequencyEnum, ref_models.CompoundingFrequency),
+        _RefSpec(
+            InterestAccrualConventionEnum, ref_models.InterestAccrualConvention,
+        ),
         _RefSpec(LedgerAccountClassEnum, ref_models.LedgerAccountClass),
         _RefSpec(PostingKindEnum, ref_models.PostingKind),
         _RefSpec(PostingSourceEnum, ref_models.PostingSource),

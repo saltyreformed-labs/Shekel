@@ -124,6 +124,11 @@ def projection(profile_id):
             projection_data, today,
         ),
         "yearly_nets": salary_cockpit_service.yearly_net_totals(projection_data),
+        # Which years' paychecks were priced on another year's tax rules
+        # (plan step salary:X-at-6), off the same breakdowns.
+        "substituted_rules": salary_cockpit_service.substituted_tax_rules(
+            projection_data,
+        ),
     }
 
     return render_template(

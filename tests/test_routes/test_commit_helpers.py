@@ -13,13 +13,14 @@ as a unit failure rather than as drift in a route suite.
 
 The stale-conflict half of the module
 (:func:`handle_stale_conflict` and the two stale wrappers) already has
-direct coverage in ``test_recurrence_form_helpers.py`` (C2-6) and is
+direct coverage in
+``test_recurrence_form_helpers/test_stale_conflict.py`` (C2-6) and is
 exercised again here only through ``regenerate_commit_or_report``'s
 stale arm.
 
 Tests use real blueprint endpoints for the redirect target (the
 session-scoped ``app`` fixture is frozen once a request has been
-handled; see ``test_recurrence_form_helpers.py``), and forge
+handled; see ``test_recurrence_form_helpers/__init__.py``), and forge
 ``IntegrityError`` objects with the ``orig.diag.constraint_name``
 shape psycopg produces (the ``test_c19_credit_payback_unique.py``
 idiom) so :func:`app.utils.db_errors.is_unique_violation` discriminates

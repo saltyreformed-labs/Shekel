@@ -16,6 +16,7 @@ from decimal import Decimal, ROUND_CEILING
 from flask import render_template, request
 from flask_login import current_user
 
+from app.enums import InterestAccrualConventionEnum
 from app.routes.loan._bp import loan_bp
 from app.routes.loan._helpers import (
     _load_loan_account,
@@ -343,7 +344,13 @@ def payoff_calculate(account_id):
     )
 
 
-def _project_refinance(refi_principal, refi_rate, refi_term, payment_day):
+def _project_refinance(
+    refi_principal: Decimal,
+    refi_rate: Decimal,
+    refi_term: int,
+    payment_day: int,
+    convention: InterestAccrualConventionEnum,
+) -> tuple[Decimal, Decimal, date]:
     """Project a hypothetical refinance schedule and summarize it.
 
     Commit 7 of the amortization-engine split: a pure forward projection
@@ -352,11 +359,19 @@ def _project_refinance(refi_principal, refi_rate, refi_term, payment_day):
     :func:`amortization_engine.project_forward` -- no replay, no extra;
     the contractual P&I drives every row.
 
+    The hypothetical loan accrues under the convention of the loan it
+    refinances (plan step recurrence:R16-d): the form asks for a new rate
+    and term, not a new note's accrual rule, so the comparison holds that
+    rule fixed rather than assuming one.
+
     Args:
         refi_principal: Decimal starting balance for the refinance.
         refi_rate: Decimal annual rate (storage-domain fraction).
         refi_term: New term in months.
         payment_day: Day-of-month the payment falls on.
+        convention: The refinanced loan's
+            :class:`~app.enums.InterestAccrualConventionEnum` member
+            (:func:`app.services.loan_resolver.accrual_convention`).
 
     Returns:
         Tuple of (refi_monthly P&I, refi_total_interest, refi_payoff
@@ -381,6 +396,7 @@ def _project_refinance(refi_principal, refi_rate, refi_term, payment_day):
                 start_date=starting_date,
                 annual_rate=refi_rate,
                 monthly_pi=refi_monthly,
+                convention=convention,
             )],
         ),
         extra_monthly=Decimal("0.00"),
@@ -456,7 +472,8 @@ def _build_refinance_comparison(current_owed, ctx, scenarios, data, params):
             ``original_forward`` slice is the contractual current-side baseline.
         data: Validated :class:`RefinanceSchema` form data.  ``new_rate``
             is already the storage-domain fraction (schema ``@pre_load``).
-        params: ORM :class:`LoanParams` instance (payment_day source).
+        params: ORM :class:`LoanParams` instance (payment_day and accrual
+            convention source).
 
     Returns:
         dict of comparison fields consumed by
@@ -471,6 +488,7 @@ def _build_refinance_comparison(current_owed, ctx, scenarios, data, params):
 
     refi_monthly, refi_total_interest, refi_payoff = _project_refinance(
         refi_principal, data["new_rate"], refi_term, params.payment_day,
+        loan_resolver.accrual_convention(params),
     )
 
     # Forward-only CONTRACTUAL baseline: what is still ahead on the current loan

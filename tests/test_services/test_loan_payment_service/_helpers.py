@@ -6,7 +6,7 @@ from datetime import date
 from decimal import Decimal
 
 from app import ref_cache
-from app.enums import StatusEnum
+from app.enums import InterestAccrualConventionEnum, StatusEnum
 from app.extensions import db
 from app.models.loan_params import LoanParams
 from app.models.ref import AccountType
@@ -89,6 +89,9 @@ def _create_loan_account(seed_user):
     params = LoanParams(
         account_id=account.id,
         original_principal=Decimal("250000.00"),
+        interest_accrual_convention_id=ref_cache.interest_accrual_convention_id(
+            InterestAccrualConventionEnum.MONTHLY_1_12,
+        ),
         term_months=360,
         origination_date=_ORIGINATION,
         payment_day=1,

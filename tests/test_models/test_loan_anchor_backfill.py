@@ -40,7 +40,7 @@ from decimal import Decimal
 import pytest
 
 from app import ref_cache
-from app.enums import LoanAnchorSourceEnum
+from app.enums import InterestAccrualConventionEnum, LoanAnchorSourceEnum
 from app.extensions import db as _db
 from app.models.loan_anchor_event import LoanAnchorEvent
 from app.models.loan_params import LoanParams
@@ -126,6 +126,9 @@ def _create_loan_account(seed_user, db_session, *,
     params = LoanParams(
         account_id=account.id,
         original_principal=original_principal,
+        interest_accrual_convention_id=ref_cache.interest_accrual_convention_id(
+            InterestAccrualConventionEnum.MONTHLY_1_12,
+        ),
         term_months=term_months,
         origination_date=origination_date,
         payment_day=payment_day,

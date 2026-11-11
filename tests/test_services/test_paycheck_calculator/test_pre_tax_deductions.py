@@ -4,6 +4,7 @@ from datetime import date
 from decimal import Decimal, ROUND_HALF_UP
 
 from app.services.paycheck_calculator import calculate_paycheck
+from tests._tax_configs import hand_built_law
 from tests._test_helpers import payroll_basis
 
 from ._helpers import (
@@ -616,11 +617,12 @@ class TestPreTaxDeductionTaxImpact:
         state_with_std_ded = FakeStateTaxRules(flat_rate="0.045")
         state_with_std_ded.standard_deduction = Decimal("12750")
 
-        configs = {
-            "bracket_set": simple_bracket_set,
-            "state_config": state_with_std_ded,
-            "fica_config": standard_fica,
-        }
+        configs = hand_built_law(
+            2026,
+            bracket_set=simple_bracket_set,
+            state_config=state_with_std_ded,
+            fica_config=standard_fica,
+        )
 
         no_ded_profile = FakeProfile(
             pay=Decimal("2307.69"), pay_from=date(2026, 1, 16),  # $60,000.00 a year / 26

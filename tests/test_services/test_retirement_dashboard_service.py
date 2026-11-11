@@ -46,6 +46,7 @@ from app.services import (
 from app.services.pay_rhythm import FixedDays
 from app.services.retirement_plan import load_retirement_inputs, picture_at
 from app.services.salary_raises import terms_of
+from tests._tax_configs import own_year_rules
 from tests._test_helpers import (
     add_test_pay_stub,
     figure_source_columns,
@@ -325,6 +326,7 @@ def _current_paycheck(
             gross_biweekly=gross_biweekly,
             net_pay=net_pay,
         ),
+        taxes=paycheck_calculator.TaxLines(rules=own_year_rules(2026)),
     )
 
 

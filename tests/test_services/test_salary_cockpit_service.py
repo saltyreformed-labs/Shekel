@@ -37,6 +37,7 @@ from app.services.paycheck_calculator import (
     PeriodInfo,
     TaxLines,
 )
+from tests._tax_configs import own_year_rules
 
 TODAY = date(2026, 6, 5)
 
@@ -82,7 +83,7 @@ def _pair(
     taxable="0", is_third=False, raise_event="",
     federal="0", state="0", ss="0", medicare="0",
     pre=(), post=(), taxable_lines=(), after_tax=(), cadence=_BIWEEKLY,
-    stub_payday=None,
+    stub_payday=None, rules=None,
 ):
     """Build a ``(period, breakdown)`` pair from plain values.
 
@@ -95,7 +96,9 @@ def _pair(
     paycheck was priced at (ruling R-SAL70); biweekly unless a case crosses
     an era change.  ``stub_payday`` is the payday of the pay stub the
     engine priced the four taxes from, ``None`` for the tax formulas (plan
-    step salary:S11-c-2c).
+    step salary:S11-c-2c).  ``rules`` is which year's tax rules priced them
+    (plan step salary:X-at-6): *start*'s own year's, every part, unless a
+    case says otherwise.
     """
     period = _fake_period(pid, start, end)
     breakdown = PaycheckBreakdown(
@@ -119,6 +122,7 @@ def _pair(
             federal=Decimal(federal), state=Decimal(state),
             social_security=Decimal(ss), medicare=Decimal(medicare),
             stub_payday=stub_payday,
+            rules=own_year_rules(start.year) if rules is None else rules,
         ),
         deductions=DeductionBreakdown(
             pre_tax=_priced(pre, PaycheckLineKindEnum.PRE_TAX_DEDUCTION),

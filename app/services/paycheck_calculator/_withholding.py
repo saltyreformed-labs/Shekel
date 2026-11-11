@@ -92,11 +92,18 @@ def _bracket_tax_lines(basis, wages, total_pre_tax, tax_configs):
             period's wages by).
         total_pre_tax: Per-period pre-tax deduction total (annualised for
             the bracket federal calculation).
-        tax_configs: dict with bracket_set, state_config, fica_config.
+        tax_configs: dict with bracket_set, state_config, fica_config, and
+            ``basis``: the
+            :class:`~app.services.tax_config_service.TaxLawBasis` the
+            resolver hands back with the other three (ruling **R-SAL75**).
+            The rules may be ``None`` (a filing status the law does not
+            model); the basis may not, since every config set the resolver
+            returns carries one.
 
     Returns:
         TaxLines with the federal, state, social_security, and medicare
-        withholding amounts.
+        withholding amounts, and ``rules``, the basis of the law they were
+        priced on (plan step salary:X-at-6).
     """
     pay_periods_per_year = wages.periods_per_year
     bracket_set = tax_configs.get("bracket_set")
@@ -119,6 +126,7 @@ def _bracket_tax_lines(basis, wages, total_pre_tax, tax_configs):
         state=state,
         social_security=fica["ss"],
         medicare=fica["medicare"],
+        rules=tax_configs["basis"],
     )
 
 

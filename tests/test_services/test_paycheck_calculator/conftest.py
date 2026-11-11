@@ -8,6 +8,8 @@ from decimal import Decimal
 
 import pytest
 
+from tests._tax_configs import hand_built_law
+
 from ._helpers import (
     _period,
     FakeBracket,
@@ -47,12 +49,13 @@ def standard_fica():
 
 @pytest.fixture
 def simple_tax_configs(simple_bracket_set, nc_state_config, standard_fica):
-    """Combined tax config dict."""
-    return {
-        "bracket_set": simple_bracket_set,
-        "state_config": nc_state_config,
-        "fica_config": standard_fica,
-    }
+    """Combined tax config dict, for 2026: the year every period here is in."""
+    return hand_built_law(
+        2026,
+        bracket_set=simple_bracket_set,
+        state_config=nc_state_config,
+        fica_config=standard_fica,
+    )
 
 
 @pytest.fixture

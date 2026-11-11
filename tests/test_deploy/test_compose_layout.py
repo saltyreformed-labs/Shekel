@@ -48,7 +48,8 @@ CREDENTIALS: dict[str, tuple[frozenset[str], frozenset[str]]] = {
     _URL: (frozenset({"DATABASE_URL", "DATABASE_URL_APP", "DB_USER", "DB_PASSWORD",
                       "PGPASSWORD"}), frozenset()),
 }
-#: Which services hold each credential, in every way the files run.
+#: Which services hold each credential, in every way the files run but for the seed's, which
+#: :data:`SEED_HOLDERS` gives by stack.
 HOLDERS: dict[str, frozenset[str]] = {
     _SUPERUSER: frozenset({"db"}),
     _OWNER: frozenset({"db", "migrate"}),
@@ -59,6 +60,10 @@ HOLDERS: dict[str, frozenset[str]] = {
     _SEED: frozenset({"migrate"}),
     _URL: frozenset(),
 }
+#: Who holds the seed's variables, by stack: the deploy, where it may seed, and no service in
+#: the dev stack, which seeds no user (ruling plan#3509).
+SEED_HOLDERS = {"bundled": frozenset({"migrate"}), "production": frozenset({"migrate"}),
+                "dev": frozenset()}
 
 #: Where the image holds the checkout (the Dockerfile's WORKDIR and ``COPY . .``).
 _IMAGE_APP_DIR = "/home/shekel/app"
@@ -146,10 +151,11 @@ class TestEachServiceHoldsItsOwnCredentials:
     ) -> None:
         """Each credential is held by exactly the services that use it: the superuser's by
         the db alone, the owner's by the db (which sets it) and migrate (which logs in with
-        it), the web login's by the db and the app, the seed's by migrate, and a database URL
-        by none.  Exact, so a credential missing where it is needed fails too."""
-        _kind, document = stack
-        assert _holders(document) == HOLDERS
+        it), the web login's by the db and the app, the seed's by migrate where the stack
+        seeds and by nothing in the dev stack, and a database URL by none.  Exact, so a
+        credential missing where it is needed fails too."""
+        kind, document = stack
+        assert _holders(document) == {**HOLDERS, _SEED: SEED_HOLDERS[kind]}
 
     @pytest.mark.docker
     def test_production_reads_the_deploy_s_passwords_from_files(self) -> None:

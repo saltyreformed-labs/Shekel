@@ -1424,9 +1424,9 @@ sudo docker run --rm \
 
 **2. Verify the `shekel-prod-app-state` volume is shekel-owned.**
 
-The app service runs as the `shekel` user (Dockerfile USER directive) and writes the seed-complete
-sentinel under `/home/shekel/app/state`. The volume was created under Commit C-34 and inherits the
-in-image directory ownership, so this is mostly defensive. Verify once:
+The migrate service runs as the `shekel` user (Dockerfile USER directive) and writes the
+seed-complete sentinel under `/home/shekel/app/state`. The volume was created under Commit C-34 and
+inherits the in-image directory ownership, so this is mostly defensive. Verify once:
 
 ```bash
 sudo docker run --rm \

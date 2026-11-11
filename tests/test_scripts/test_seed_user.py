@@ -252,8 +252,9 @@ class TestSeedUserProductionGuard:
         """Every name but a host run's and the suite's refuses the default.
 
         Ruling plan#3448.  ``deploy`` is the case that matters: the deploy seeds
-        under it on every stack, production's and the dev stack's alike, so a
-        guard that refused only ``production`` would never fire there again.
+        under it on every stack that seeds (the dev stack's seeds no user,
+        ruling plan#3509), production's included, so a guard that refused only
+        ``production`` would never fire there again.
         ``development-container`` and a name nobody has made are the
         fail-closed half: the guard names what it ALLOWS, so anything else
         refuses.

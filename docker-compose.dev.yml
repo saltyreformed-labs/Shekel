@@ -310,8 +310,7 @@ services:
     # needs PYTHONDONTWRITEBYTECODE=1 because its app dir is immutable
     # image content; dev deliberately omits it).  No static volume is
     # mounted here, so the entrypoint skips its static copy, and the
-    # seed sentinel is the migrate service's, so the read-only rootfs
-    # does not break startup.  no-new-privileges also comes
+    # read-only rootfs does not break startup.  no-new-privileges also comes
     # from the daemon default on this host; declared here so the
     # committed file carries the posture on any host.
     security_opt:
@@ -324,10 +323,16 @@ services:
 
   # ── The deploy (one-shot, before the app) ────────────────────────
   # Production's migrate service (docker-compose.yml says what it runs and
-  # why), run on this checkout: the schemas, the grants, the migrations,
-  # the reference rows and the seed, as the database owner, before the dev
-  # server starts.  ``up`` runs it again on every up, so a new migration in
-  # the checkout is applied when the stack next comes up.
+  # why), run on this checkout: the schemas, the grants, the migrations and
+  # the reference rows, as the database owner, before the dev server
+  # starts.  ``up`` runs it again on every up, so a new migration in the
+  # checkout is applied when the stack next comes up.
+  #
+  # It seeds no user (ruling plan#3509): it is given no SEED_USER_*
+  # variable, so the deploy skips the seed, and no checkout needs a seed
+  # sentinel.  The dev database is a copy of production, which an invented
+  # user would only add to; an empty one gets its first user from
+  # /register, which the dev configuration enables.
   migrate:
     # Built from this checkout as the app is: both builds run in one pass
     # from the same layers, and both run the checkout's code through the
@@ -347,17 +352,8 @@ services:
       # The owner's password (the db service's anchor), the one credential
       # this service holds, as production's holds.
       OWNER_ROLE_PASSWORD: *owner-role-password
-      SEED_USER_EMAIL: admin@shekel.local
-      # A brand-new dev stack's first login.  Not the seed's published
-      # default ChangeMe!2026: the deploy seeds under FLASK_ENV=deploy on
-      # every stack, and the seed refuses that default everywhere but a
-      # host run and the suite (ruling plan#3448).  A non-secret
-      # development value, like the role passwords above.
-      SEED_USER_PASSWORD: dev-only-shekel-seed-password
-      SEED_USER_DISPLAY_NAME: Budget Admin
     volumes:
-      # The checkout: the deploy runs its migrations and scripts, and
-      # writes the seed sentinel under its state/.
+      # The checkout: the deploy runs its migrations and scripts.
       - .:/home/shekel/app
     # The image's HEALTHCHECK asks gunicorn's /health, which a deploy never
     # serves (docker-compose.yml's migrate service).

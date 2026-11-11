@@ -13,9 +13,10 @@ logging, and the credential scrub.
 
 **The published default password is refused everywhere but a host run
 and the suite** (ruling plan#3448).  The deploy runs this script under
-``FLASK_ENV=deploy`` on every stack, the dev stack included (ruling
-plan#3451), so the configuration's name cannot say which stack is
-production: the guard refuses unless the name is one of the two that
+``FLASK_ENV=deploy`` on any stack it seeds (ruling plan#3451; the dev
+stack's seeds no user, ruling plan#3509), so the configuration's name
+cannot say which stack is production: the guard refuses unless the name
+is one of the two that
 never deploy (:data:`_DEFAULT_PASSWORD_ALLOWED_UNDER`), and a stack it
 does not know refuses too.  (Historically it hand-copied the
 provisioning sequence and had already drifted from the service --

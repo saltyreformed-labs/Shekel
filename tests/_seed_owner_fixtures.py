@@ -403,11 +403,11 @@ def _reset_seed_calendar(owner, first_payday, num_periods, cadence_days):
     **The re-statement of the account's opening is deliberately NOT carried
     over, and that is measured rather than argued.**  The deleted helper moved
     the books to ``min(governing.opened_on, new_anchor.start_date - 1 day)`` --
-    backward only.  Every owner this file builds opens its books the day before
-    :data:`SEED_USER_BOOTSTRAP_START`, and every calendar this function is
-    asked for starts later than that, so the ``min`` always chose the day
-    already stored: the call could not move a day in any world this file
-    builds.  ``TestTheResetDoesNotMoveTheBooks`` in
+    backward only.  Every owner the root conftest's fixtures build opens its
+    books the day before :data:`SEED_USER_BOOTSTRAP_START`, and every calendar
+    this function is asked for starts later than that, so the ``min`` always
+    chose the day already stored: the call could not move a day in any world
+    those fixtures build.  ``TestTheResetDoesNotMoveTheBooks`` in
     ``tests/test_arch/test_the_seeded_calendar_comes_from_the_writer.py`` holds
     that as a property rather than leaving it as this paragraph's claim.
 
@@ -475,8 +475,8 @@ def build_periods_today(db, seed_user):
 
     **It reads ``display_today()``, so a caller that freezes it freezes this.**
     A world built from this is therefore built once per SESSION and dropped at
-    its end -- see the seeded-start-state block comment above; one kept across
-    midnight would place today in a period this no longer builds.
+    its end -- see the block comment in ``tests/_seeded_start_states.py``; one
+    kept across midnight would place today in a period this no longer builds.
 
     Args:
         db: The Flask-SQLAlchemy extension.  **Unread since plan step

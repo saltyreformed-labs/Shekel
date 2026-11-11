@@ -11,8 +11,7 @@ two-factor: a companion just created, which is what a test of the hold, or of
 her setup, starts from.
 
 The one spelling of her credentials is here, and ``seed_companion`` writes
-them.  It cannot sit beside :mod:`tests._sign_in`, which imports
-``tests.conftest`` and so cannot be imported by it.
+them.
 
 **Replay prevention refuses a second code for one secret inside a 30-second
 step** (``mfa_service.verify_totp_code``), so a test signed in this way types

@@ -285,7 +285,7 @@ def seed_full_second_user_data(app, db, seed_second_user, seed_second_periods):
     }
 
 
-# --- Entry and Companion Fixtures -----------------------------------------
+# --- Entry Fixtures -------------------------------------------------------
 
 
 @pytest.fixture()

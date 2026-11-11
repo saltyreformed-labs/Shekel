@@ -64,13 +64,15 @@ def second_user(app, db):
             account_type_id=checking_type.id,
             name="Other Checking",
             anchor_balance=Decimal("500.00"),
-            # Day one of its own period -- see ``seed_user`` above for why
-            # the origination must not share a civil day with the settles.
+            # Day one of its own period -- see ``build_seed_user`` in
+            # ``tests/_seed_owner_fixtures.py`` for why the origination must
+            # not share a civil day with the settles.
             observed_on=bootstrap_period.start_date,
         ),
     )
-    # The BOOKS open the day before that assertion -- see ``seed_user`` above
-    # for the argument (plan step X-f3c-2b, ruling **R-HG**).
+    # The BOOKS open the day before that assertion -- see ``build_seed_user``
+    # in ``tests/_seed_owner_fixtures.py`` for the argument (plan step
+    # X-f3c-2b, ruling **R-HG**).
     open_books_before_the_first_assertion(db.session, account)
 
     scenario = Scenario(
@@ -159,13 +161,15 @@ def seed_second_user(app, db):
             account_type_id=checking_type.id,
             name="Checking",
             anchor_balance=Decimal("2000.00"),
-            # Day one of its own period -- see ``seed_user`` above for why
-            # the origination must not share a civil day with the settles.
+            # Day one of its own period -- see ``build_seed_user`` in
+            # ``tests/_seed_owner_fixtures.py`` for why the origination must
+            # not share a civil day with the settles.
             observed_on=bootstrap_period.start_date,
         ),
     )
-    # The BOOKS open the day before that assertion -- see ``seed_user`` above
-    # for the argument (plan step X-f3c-2b, ruling **R-HG**).
+    # The BOOKS open the day before that assertion -- see ``build_seed_user``
+    # in ``tests/_seed_owner_fixtures.py`` for the argument (plan step
+    # X-f3c-2b, ruling **R-HG**).
     open_books_before_the_first_assertion(db.session, account)
 
     categories = []

@@ -118,7 +118,7 @@ def _neutralize_seed_checking(db, seed_user, anchor_period):
             current / anchor period of the per-kind fixture).
     """
     # Pylint: ``import-outside-toplevel`` -- Account is intentionally not
-    # imported at conftest top (every fixture builds accounts via the
+    # imported at this module's top (every fixture builds accounts via the
     # canonical factory); load it lazily, as seed_cross_page_account does.
     # pylint: disable=import-outside-toplevel
     from app.models.account import Account
@@ -320,7 +320,7 @@ def cross_page_loan_ctx(db, seed_user):
     where the balance map must equal C and not P).
     """
     # Pylint: ``import-outside-toplevel`` -- LoanParams is loaded lazily,
-    # the Account-class convention this conftest follows (no model packages
+    # the Account-class convention this module follows (no model packages
     # imported at module top).
     # pylint: disable=import-outside-toplevel
     from app.models.loan_params import LoanParams
@@ -440,7 +440,7 @@ def _unseeded_replay_balance(loan_id, scenario_id, as_of):
     here because the cross-page fixtures below read like prose with it.
     """
     # Pylint: ``import-outside-toplevel`` -- the app services are loaded lazily,
-    # the convention every helper in this conftest follows.
+    # the convention every helper in this module follows.
     # pylint: disable=import-outside-toplevel
     from tests._test_helpers import unseeded_replay_balance
 
@@ -470,7 +470,7 @@ def cross_page_loan_off_schedule_ctx(db, seed_user):
     ``test_all_surfaces_read_the_ledger_off_schedule``).
     """
     # Pylint: ``import-outside-toplevel`` -- the app services / test helpers are
-    # loaded lazily, the convention every fixture in this conftest follows.
+    # loaded lazily, the convention every fixture in this module follows.
     # pylint: disable=import-outside-toplevel
     from tests._test_helpers import (
         create_loan_with_trueup,
@@ -699,7 +699,7 @@ def cross_page_secured_ctx(db, seed_user):
     PV, MC, and both account handles plus the standard period keys.
     """
     # Pylint: ``import-outside-toplevel`` -- Account / LoanParams are loaded
-    # lazily, the Account-class convention this conftest follows (no model
+    # lazily, the Account-class convention this module follows (no model
     # packages imported at module top).
     # pylint: disable=import-outside-toplevel
     from app.models.account import Account

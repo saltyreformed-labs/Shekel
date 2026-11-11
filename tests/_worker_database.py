@@ -73,7 +73,8 @@ def _like_escape(value):
 def _bootstrap_worker_database():
     """Create a per-pytest-worker database cloned from the test template.
 
-    Called once at conftest module-load time, BEFORE any ``app``
+    Called once when this module is imported, which
+    ``tests/conftest.py`` does at its own load, BEFORE any ``app``
     import.  Each pytest invocation (and each pytest-xdist worker
     within an invocation) gets its own database; concurrent
     invocations cannot deadlock on the per-test ``TRUNCATE CASCADE``
@@ -287,7 +288,8 @@ def _bootstrap_worker_database():
         verify_conn.close()
 
     # Point the app's TestConfig at the per-session DB.  Must
-    # precede the first ``from app import ...`` below.
+    # precede the first ``from app import ...``, which
+    # ``tests/conftest.py`` makes only after importing this module.
     os.environ["TEST_DATABASE_URL"] = per_session_url
 
     return (db_name, admin_url)

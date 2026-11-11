@@ -80,7 +80,7 @@ coverage.xml
 # ``SHEKEL_TEST_FIXTURE_PROFILE=1`` is set; one CSV per pytest-xdist
 # worker plus a "main.csv" for single-process runs.  Files are
 # truncated on every pytest invocation (see
-# ``tests/conftest.py::_profile_session_init``), so the only purpose
+# ``tests/_fixture_profile.py::_profile_session_init``), so the only purpose
 # of ignoring them is to keep harness runs out of accidental commits.
 tests/.fixture-profile/
 

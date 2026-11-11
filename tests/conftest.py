@@ -1,9 +1,18 @@
 """
 Shekel Budget App -- Test Fixtures
 
-Provides reusable pytest fixtures for the test suite: a configured
-test app, a freshly-cloned per-test database, an authenticated
-client, and factory helpers for creating test data.
+Registers the suite's fixtures: a configured test app, a
+freshly-cloned per-test database, an authenticated client, and the
+data fixtures built on them.  Each is defined in a module beside this
+one and registered here by importing it by name (plan#3565): the app
+and the per-test database in ``tests/_app_fixtures.py``, the seeded
+owner and its calendars in ``tests/_seed_owner_fixtures.py``, the
+other users in ``tests/_other_user_fixtures.py``, the rich datasets in
+``tests/_dataset_fixtures.py``, and the cross-page lock's in
+``tests/_cross_page_fixtures.py``.  Under them sit the per-worker
+database (``tests/_worker_database.py``), the seeded start states
+(``tests/_seeded_start_states.py``) and the profile harness
+(``tests/_fixture_profile.py``).  The suite's three hooks stay here.
 
 Strategy: each test gets a brand-new database cloned from
 ``shekel_test_template`` via ``CREATE DATABASE ... TEMPLATE ...``
@@ -21,8 +30,8 @@ The clone uses ``STRATEGY WAL_LOG``.  Phase 3b's original
 box's btrfs PGDATA and is 20x SLOWER on any cluster that has not
 switched durability off -- which CI's postgres service container had
 not, until 2026-08-18 (since ``bank_import:X-gy`` CI runs the
-wrapper's non-durable cluster).  ``_clone_worker_database`` below
-carries the measurements
+wrapper's non-durable cluster).  ``_clone_worker_database``
+(``tests/_worker_database.py``) carries the measurements
 and the failures that decision produced; do not restore
 ``FILE_COPY`` without re-measuring against a durable cluster.
 """
@@ -34,13 +43,17 @@ and the failures that decision produced; do not restore
 # Two class-body reads at first-app-import time depend on this:
 #
 # * ``app.config.TestConfig.SQLALCHEMY_DATABASE_URI`` reads
-#   ``TEST_DATABASE_URL`` -- ``_bootstrap_worker_database`` below
-#   sets it to the per-session DSN.
+#   ``TEST_DATABASE_URL`` -- ``_bootstrap_worker_database``, which
+#   runs when ``tests._worker_database`` is imported below, sets it to
+#   the per-session DSN.
 # * Production / ``_reject_sentinel`` defends read ``SECRET_KEY``
 #   with no fallback (audit finding F-016).
 #
 # Setting either env var after the first ``from app import ...``
-# would leave the app pointed at a stale value.
+# would leave the app pointed at a stale value.  So the two modules
+# imported first, ``tests._fixture_profile`` and
+# ``tests._worker_database``, import nothing from ``app``, and every
+# fixture module after them may.
 
 import os
 

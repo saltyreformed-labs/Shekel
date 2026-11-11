@@ -5,11 +5,13 @@ the conftest's directory as its base, and its name, scope and autouse.
 """
 
 import os
-# ``datetime.time`` is aliased, NOT imported under its own name: the bare name
-# ``time`` above is the stdlib MODULE, and the profile harness below calls
-# ``time.perf_counter()``.  An unaliased ``from datetime import time`` shadows
-# it two lines after it is imported, which is exactly what happened between
-# 2026-07-26 (commit d3489728) and this line: every test errored with
+# ``datetime.time`` is aliased, NOT imported under its own name, so the bare
+# name ``time`` can only ever be the stdlib MODULE.  ``tests/conftest.py`` held
+# this import beside ``import time`` until plan#3565 split it, and its profile
+# harness (now ``tests/_fixture_profile.py``) calls ``time.perf_counter()``: an
+# unaliased ``from datetime import time`` shadowed it two lines after it was
+# imported, which is exactly what happened between 2026-07-26 (commit d3489728)
+# and this line: every test errored with
 # ``AttributeError: type object 'datetime.time' has no attribute
 # 'perf_counter'`` the moment ``SHEKEL_TEST_FIXTURE_PROFILE=1`` was set, so the
 # one instrument this project has for diagnosing test performance was dead for
@@ -205,7 +207,7 @@ def setup_database(app):
     page that references one).
 
     Database teardown happens in :func:`pytest_sessionfinish` at the
-    bottom of this module: ``DROP DATABASE ... WITH FORCE`` removes
+    bottom of ``tests/conftest.py``: ``DROP DATABASE ... WITH FORCE`` removes
     the whole per-session DB rather than table-by-table -- faster
     and less brittle than the previous ``drop_all`` + per-schema
     cascade.
@@ -319,8 +321,8 @@ def db(app, setup_database, request, set_totp_key, disable_hibp_check):  # pylin
     The ``_profile_step`` wrappers below are no-ops when
     ``SHEKEL_TEST_FIXTURE_PROFILE`` is unset; when set they capture
     per-step elapsed time for the Phase 0 harness (see the block
-    comment near ``_FIXTURE_PROFILE_ENABLED`` at the top of this
-    module).
+    comment near ``_FIXTURE_PROFILE_ENABLED`` at the top of
+    ``tests/_fixture_profile.py``).
     """
     if _WORKER_DB_NAME is None or _WORKER_ADMIN_URL is None:
         raise RuntimeError(

@@ -30,12 +30,13 @@ from contextlib import contextmanager
 # ``docs/audits/test_improvements/test-performance-research.md``
 # section 3.1.
 #
-# Why this lives here and not in a sibling module: the timer
-# wrappers must be physically interleaved with the fixture body, and
-# the aggregator must run from ``pytest_sessionfinish``, which is a
-# conftest-level hook.  Splitting helpers into a sibling module would
-# add an indirection without buying isolation -- the wrappers would
-# still need direct access to ``_db`` and the fixture's local state.
+# What lives here and what does not: the ``with _profile_step(...)``
+# wrappers must be physically interleaved with the ``db`` fixture's
+# body, so they stay in it (``tests/_app_fixtures.py``), and the
+# summary must be printed from ``pytest_sessionfinish``, a
+# conftest-level hook, so that call stays in ``tests/conftest.py``.
+# The helpers they call need neither ``_db`` nor the fixture's local
+# state, so they live here.
 #
 # Why the flag is checked once at module load (not per-test): we want
 # zero per-test cost when disabled.  A single module-level boolean
@@ -118,8 +119,9 @@ def _profile_session_init():
        spawn.  Without this, a previous run with ``-n 16`` would
        leave ``gw13``..``gw15.csv`` on disk and the next ``-n 12``
        run's aggregator would mistakenly include their stale rows.
-       Worker subprocesses load this conftest AFTER the master, so
-       the wipe is finished by the time they create their own CSVs.
+       Worker subprocesses load the conftest, and so this module,
+       AFTER the master, so the wipe is finished by the time they
+       create their own CSVs.
     2. Every process whose conftest load happens before xdist sets
        ``PYTEST_XDIST_TESTRUNUID`` creates the dir and writes a
        header row to its worker CSV.  Empirically (pytest-xdist

@@ -193,7 +193,8 @@ _SOCKET_DIR_BYTES = _SUN_PATH_BYTES - len(f"/{_SOCKET_FILE}".encode())
 # be inert rather than wrong.  So would the tenth, ``file_copy_method=clone``, which is not
 # carried either: it chooses how ``CREATE DATABASE ... STRATEGY FILE_COPY`` copies a
 # template's files (the deleted service paired it with a btrfs PGDATA for reflinks), and
-# every clone the suite makes is ``STRATEGY WAL_LOG`` (tests/conftest.py).
+# every clone the suite makes is ``STRATEGY WAL_LOG`` (tests/_worker_database.py,
+# tests/_seeded_start_states.py).
 #
 # THE NON-DURABLE KNOBS ARE WHAT MAKE A CLUSTER PER RUN AFFORDABLE.  Measured: the full
 # suite took 753 s in a per-run container against 356 s on the shared cluster -- 2.1x --

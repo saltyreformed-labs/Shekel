@@ -200,7 +200,7 @@ audit-trigger and DDL-state isolation requirements (see
 Phase 3b fixed.
 
 **The clone strategy is `WAL_LOG`, not `FILE_COPY`** -- see
-`tests/conftest.py::_clone_worker_database` for the measurements that forced the change. `FILE_COPY`
+`tests/_worker_database.py::_clone_worker_database` for the measurements that forced it. `FILE_COPY`
 forces three cluster-wide checkpoints per drop+create cycle against one for `WAL_LOG`, which costs
 nothing on a cluster with `fsync=off` and 20x on any cluster with durability on, including CI until
 2026-08-18. The private cluster is started with `fsync=off`, `synchronous_commit=off` and
@@ -240,8 +240,8 @@ required check is `tests/test_integration/test_audit_trigger_work.py`, in the or
 ## Building the test template
 
 `shekel_test_template` is the PostgreSQL template database that
-`tests/conftest.py::_bootstrap_worker_database` clones into a uniquely-named per-session DB at the
-start of every pytest invocation (and every pytest-xdist worker within a session). Cloning a
+`tests/_worker_database.py::_bootstrap_worker_database` clones into a uniquely-named per-session DB
+at the start of every pytest invocation (and every pytest-xdist worker within a session). Cloning a
 populated template is roughly two orders of magnitude faster than running migrations + audit
 infrastructure + reference seed per session, which is what unlocks the parallel and concurrent-safe
 test runs documented above.
@@ -271,8 +271,8 @@ row count). It reads `TEST_ADMIN_DATABASE_URL` for the admin DSN (default `postg
 the value is purely scaffolding for app construction.
 **The template's NAME is a constant, not a knob**: it was resolved from `TEST_TEMPLATE_DATABASE` so
 two checkouts on one postmaster could name their templates apart, and `balance:X-br-4` deleted that
-override with the shared postmaster. `tests/conftest.py` and this script now spell the same literal
-and MUST agree.
+override with the shared postmaster. `tests/_worker_database.py` and this script now spell the same
+literal and MUST agree.
 
 **If the bootstrap raises `RuntimeError`** complaining the template is missing or has the wrong
 row/trigger count, the error message names the offending count and the likely root cause. Under the

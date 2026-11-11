@@ -86,9 +86,10 @@ from tests._worker_database import (
 #
 # **A world is built inside the ``db`` fixture, so it CANNOT see an autouse
 # fixture defined in a SUBDIRECTORY conftest, and that is a real limit rather
-# than an oversight.**  ``db`` names the two autouse fixtures in THIS file that
-# a builder needs, which orders them ahead of it; it cannot name a fixture
-# defined below it in the tree, and those sort after ``db`` unconditionally.
+# than an oversight.**  ``db`` names the two autouse fixtures beside it in
+# ``tests/_app_fixtures.py`` that a builder needs, which orders them ahead of
+# it; it cannot name a fixture defined below it in the tree, and those sort
+# after ``db`` unconditionally.
 # The live example: ``tests/test_services/conftest.py`` freezes
 # ``pay_period_service.date.today()`` to a fixed day for every test under it.
 # A world declared there would be BUILT on the real clock and then READ by
@@ -253,7 +254,7 @@ def _refuse_a_build_the_environment_is_not_ready_for(name):
     **It is a diagnostic, not a guarantee**: it can only name the two the
     ``db`` fixture already enumerates, and it cannot see an autouse fixture in
     a SUBDIRECTORY conftest -- those sort after ``db`` and no dependency in
-    this file can reach them.  See the block comment above.
+    the root conftest's fixtures can reach them.  See the block comment above.
 
     Args:
         name: The world's registered name, for the message.

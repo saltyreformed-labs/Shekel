@@ -1,5 +1,5 @@
 """Registers the ``tests`` package for pytest's assertion rewriting, and nothing else: the
-suite's fixtures and hooks live in ``tests/conftest.py``.
+suite's hooks live in ``tests/conftest.py``, which registers its fixtures.
 
 pytest rewrites the asserts of a test module (``python_files``), of a ``conftest.py``, of a
 module named on the command line and of a module registered for rewriting (pytest registers

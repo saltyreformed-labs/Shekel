@@ -262,8 +262,8 @@ tracker's and git's, and a sentence about it here would be a second answer besid
   `ref.pay_cadence_kinds` from a nested `app.app_context()` and waited out `lock_timeout` -- a
   `LockNotAvailable` on a table no test was touching. The holder was `conftest`'s `ref_cache.init`,
   whose reads had never been committed or rolled back. End a fixture's read transaction when its
-  reads are done (`tests/conftest.py`, the rollback after `ref_cache.init`); a test that reads a
-  fixture object's attribute after a commit re-opens that transaction too.
+  reads are done (`tests/_seeded_start_states.py`, the rollback after `ref_cache.init`); a test that
+  reads a fixture object's attribute after a commit re-opens that transaction too.
 - **The literal arithmetic of a specification can name a PHANTOM PAYCHECK.**
   `pay_calendar:C17-b-2`'s spec said the record continues at "the first grid payday after the last
   recorded one"; on the catalogue's own thirteen-day shape (01-02, 01-15 at cadence 14) that rule

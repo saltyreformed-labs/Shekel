@@ -22,11 +22,12 @@ worked-out ledger (:mod:`app.services.ledger_lines`), which reads the records.
 Left in place, production's rows would be a stale copy the suite never holds,
 because a test database's store is empty once nothing writes it, so a key on
 them could refuse a door in production alone.  One such key is
-``fk_ledger_accounts_loan_account_id`` (RESTRICT): each loan's chart rows
-(5 rows, 2 loans, measured read-only on production 2026-11-09 10:28 UTC)
-refuse that loan's permanent delete once the door stops clearing them first.
-A copy of production taken 2026-11-09 20:14 UTC held 1,464 journal entries,
-2,942 legs and 48 chart rows, for 10 accounts.
+``fk_ledger_accounts_loan_account_id`` (RESTRICT): each loan's chart rows,
+which production holds (measured read-only on production 2026-11-09), refuse
+that loan's permanent delete once the door stops clearing them first.  The
+measurements below were taken on a copy of production made 2026-11-09; their
+figures stay with the measurement, outside this repository (ruling
+**R-BAL132**).
 
 **DELETE, not TRUNCATE.**  Each table's audit trigger
 (``app.audit_infrastructure``, ``AFTER INSERT OR UPDATE OR DELETE ... FOR EACH
@@ -52,7 +53,7 @@ copy, with production's grants given ``shekel_app``, its first DELETE failed
 the owner's connection; the app runs as ``shekel_app`` only from the gunicorn
 handoff on.  That deploy step, run on the copy, emptied the three tables in
 its one transaction, and ``system.audit_log`` gained one DELETE row for each
-row it deleted, 2,942, 1,464 and 48.
+row it deleted.
 
 **The downgrade restores one chart row per account, an account's own.**  A
 downgrade comes before an earlier release's image boots, and that release's
@@ -68,15 +69,15 @@ earlier release's first boot, every deploy's clock pinned at one instant:
 * on the tables emptied as this upgrade empties them, with nothing restored,
   that step was refused, ``PostingError: No ledger account is linked to
   account 1``, which rolls its whole first boot back;
-* after this downgrade (10 chart rows, one per account, no entry), the same
-  step ran and rebuilt 564 entries, 1,136 legs and 46 chart rows, and every
-  leg's net by chart row, scenario, paycheck, day, source kind and posting
-  kind, 719 of 719, equals what that step leaves on the copy as it was (its
-  noise gate: that step run twice on two clones of the copy, identical).  The
-  chart rows are compared by natural key, since the ids differ, and the two
-  the rebuild does not mint are an equity and an interest counter whose legs
-  net to $0.00 (4 and 7 legs, booked and reversed), which no record books on
-  any longer, so they carry no figure.
+* after this downgrade (one chart row per account, no entry), the same step
+  ran and rebuilt the entries, legs and chart rows from the records, and
+  every leg's net by chart row, scenario, paycheck, day, source kind and
+  posting kind equals what that step leaves on the copy as it was (its noise
+  gate: that step run twice on two clones of the copy, identical).  The chart
+  rows are compared by natural key, since the ids differ, and the two the
+  rebuild does not mint are an equity and an interest counter whose legs net
+  to $0.00 (booked and reversed), which no record books on any longer, so
+  they carry no figure.
 
 So the downgrade restores exactly that one kind, and the earlier release
 rebuilds the rest from the records.

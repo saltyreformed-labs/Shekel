@@ -32,6 +32,7 @@ from app.services.paycheck_calculator import (
     TaxLines,
 )
 from app.services.pay_calendar import PayCadence
+from tests._tax_configs import own_year_rules
 from app.services.pay_rhythm import FixedDays
 from app.services import account_service
 from app.utils.dates import add_months
@@ -511,6 +512,7 @@ class TestPaycheckBreakdownTotals:
                 base_biweekly=Decimal("2884.62"),
                 gross_biweekly=Decimal("2884.62"),
             ),
+            taxes=TaxLines(rules=own_year_rules(2026)),
             deductions=DeductionBreakdown(
                 pre_tax=[
                     PricedLine(
@@ -537,6 +539,7 @@ class TestPaycheckBreakdownTotals:
                 base_biweekly=Decimal("2884.62"),
                 gross_biweekly=Decimal("2884.62"),
             ),
+            taxes=TaxLines(rules=own_year_rules(2026)),
             deductions=DeductionBreakdown(
                 post_tax=[
                     PricedLine(
@@ -568,6 +571,7 @@ class TestPaycheckBreakdownTotals:
                 state=Decimal("130.00"),
                 social_security=Decimal("178.85"),
                 medicare=Decimal("41.83"),
+                rules=own_year_rules(2026),
             ),
         )
         assert breakdown.taxes.total == Decimal("650.68")
@@ -583,6 +587,7 @@ class TestPaycheckBreakdownTotals:
                 base_biweekly=Decimal("2884.62"),
                 gross_biweekly=Decimal("2884.62"),
             ),
+            taxes=TaxLines(rules=own_year_rules(2026)),
         )
         assert breakdown.deductions.total_pre_tax == Decimal("0")
         assert breakdown.deductions.total_post_tax == Decimal("0")
@@ -610,6 +615,7 @@ class TestPaycheckBreakdownTotals:
                 state=Decimal("100.00"),
                 social_security=Decimal("75.00"),
                 medicare=Decimal("25.00"),
+                rules=own_year_rules(2026),
             ),
             deductions=DeductionBreakdown(
                 pre_tax=[
@@ -655,6 +661,7 @@ class TestPaycheckBreakdownTotals:
                 gross_biweekly=Decimal("2000.00"),
                 net_pay=Decimal("2000.00"),
             ),
+            taxes=TaxLines(rules=own_year_rules(2026)),
         )
         assert breakdown.earnings.net_pay == Decimal("2000.00")
         assert breakdown.deductions.total_pre_tax == Decimal("0")
@@ -684,6 +691,7 @@ class TestPaycheckBreakdownTotals:
                 state=Decimal("200.00"),
                 social_security=Decimal("0"),
                 medicare=Decimal("0"),
+                rules=own_year_rules(2026),
             ),
             deductions=DeductionBreakdown(
                 pre_tax=[

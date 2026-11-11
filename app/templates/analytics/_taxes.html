@@ -1,4 +1,5 @@
 {% from "_money_macros.html" import money %}
+{% from "_tax_rules_macros.html" import rules_year_phrase, rules_note %}
 {# Taxes tab -- HTMX partial (T-P4), per the locked anatomy in
    docs/design/analytics_audit.md: hero band (refund hero + chips + YTD
    checkpoint card + assumptions card) over the derivation ledger, the
@@ -134,32 +135,15 @@
           {# Which year's tax rules priced this tab (ruling R-SAL75, plan
              step salary:X-at-5): the resolver's basis, carried on the
              liability, so the tab never works the year out itself.  The
-             bare year when every part was priced on its own year's rules;
-             "on <year>'s tax rules" when every part was priced on one other
-             year, the app lacking the year asked for (ruling R-SAL76); and
-             each part's own year when they differ.  They differ for a year
-             that shipped before its state's rules (ruling R-SAL86), and for
-             every year after it while the newest year still lacks the state:
-             with 2026 listing the state and 2027 not, 2028 is federal and
-             FICA 2027's, the state 2026's.
-
-             The note's words are this tab's own, modelled on the tax-law
-             notice's ("Shekel doesn't have the 2027 tax rules yet", ruling
-             R-SAL87) rather than copied: it says "2027's tax rules" where the
-             notice says "the 2027 tax rules", and it drops "yet", which is
-             false for a year before the law's first.  It says "all of" only
-             when some part was priced on the year's own rules
-             (has_some_own_rules): 2027 above, never 2028, whose rules the
-             app holds none of. #}
+             words are the salary pages' too, so they are spelled once, in
+             _tax_rules_macros.html, which says what each case prints and
+             why (plan step salary:X-at-6). #}
           {% set rules_basis = report.liability.basis %}
           <dt class="col-6 fw-normal">Tax year</dt>
           <dd class="col-6 text-end mb-1">
-            {{- rules_basis.tax_year }}
+            {{- rules_year_phrase(rules_basis, state_code) }}
             {%- if rules_basis.substituted %}
-            {%- if rules_basis.rules_year is not none %} on {{ rules_basis.rules_year }}'s tax rules
-            {%- else %}: federal tax on {{ rules_basis.federal_year }}'s rules, Social Security and Medicare on {{ rules_basis.fica_year }}'s, {{ state_code }} tax on {{ rules_basis.state_year }}'s
-            {%- endif %}
-            <div class="text-muted">Shekel doesn't have {{ "all of " if rules_basis.has_some_own_rules }}{{ rules_basis.tax_year }}'s tax rules.</div>
+            <div class="text-muted">{{ rules_note(rules_basis) }}</div>
             {%- endif -%}
           </dd>
           <dt class="col-6 fw-normal">Filing status</dt>

@@ -12,7 +12,7 @@ from datetime import datetime, timedelta, timezone
 
 from flask import Flask, request, session as flask_session
 
-from app.config import CONFIG_MAP
+from app.config import CONFIG_MAP, DeployConfig, configuration_name
 from app.context_processors import register_context_processors
 from app.db_transaction import register_transaction_boundary
 from app.error_handlers import register_error_handlers
@@ -72,7 +72,7 @@ def create_app(config_name=None, *, init_ref_cache=True):
 
     # --- Configuration ---------------------------------------------------
     if config_name is None:
-        config_name = os.getenv("FLASK_ENV", "development")
+        config_name = configuration_name()
     config_class = CONFIG_MAP.get(config_name)
     if config_class is None:
         raise ValueError(f"Unknown config_name: {config_name!r}")
@@ -90,7 +90,9 @@ def create_app(config_name=None, *, init_ref_cache=True):
     # --- Logging ---------------------------------------------------------
     setup_logging(app)
 
-    if not app.config.get("TOTP_ENCRYPTION_KEY"):
+    # Not under the deploy's configuration: it serves no sign-in, so MFA is
+    # not unavailable there, and it holds no web secret (ruling plan#3413).
+    if config_class is not DeployConfig and not app.config.get("TOTP_ENCRYPTION_KEY"):
         app.logger.warning(
             "TOTP_ENCRYPTION_KEY is not set. MFA/TOTP will be unavailable "
             "until this key is configured. See .env.example for details."

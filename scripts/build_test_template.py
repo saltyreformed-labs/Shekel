@@ -66,7 +66,7 @@ Environment variables (read at module load before app import):
 * ``DATABASE_URL_APP``: Overridden to the empty string (= unset, per
   the config resolver's documented contract) -- the script needs DDL
   privileges (the owner role, ``DATABASE_URL``), not the
-  least-privilege app role.  Matches ``scripts/init_database.py``.
+  least-privilege app role.  Matches ``scripts/audit_cleanup.py``.
 
 Usage::
 
@@ -153,7 +153,7 @@ os.environ.setdefault("SECRET_KEY", _DEFAULT_SECRET_KEY)
 # into an absent key, defeating the override; an existing-but-empty
 # key survives dotenv and the config resolver documents
 # empty-as-unset (falls through to DATABASE_URL).  See the matching
-# block in scripts/init_database.py.  The assignment is
+# block in scripts/audit_cleanup.py.  The assignment is
 # process-local; the parent shell's env is untouched.
 os.environ["DATABASE_URL_APP"] = ""
 

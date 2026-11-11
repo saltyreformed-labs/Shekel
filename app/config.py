@@ -2,7 +2,8 @@
 Shekel Budget App -- Configuration Classes
 
 Provides the Dev (host ``flask run``), DevContainer (the containerized dev
-app), Test, and Prod configuration classes, which the application factory
+app), Test, Prod and Deploy (the migrations, the seeds and the owner-login
+maintenance scripts) configuration classes, which the application factory
 builds based on the FLASK_ENV environment variable.
 """
 
@@ -451,14 +452,14 @@ def _runtime_database_uri(default: str | None = None) -> str | None:
       ``DATABASE_URL_APP``.
 
     The runtime app prefers ``DATABASE_URL_APP`` whenever it is set,
-    falling back to ``DATABASE_URL`` otherwise.  Deployment scripts
-    (``scripts/init_database.py``, ``scripts/build_test_template.py``)
+    falling back to ``DATABASE_URL`` otherwise.  The deploy does not
+    come here: :class:`DeployConfig` reads ``DATABASE_URL`` alone.  The
+    scripts that still run as the owner under another configuration
+    (``scripts/audit_cleanup.py``, ``scripts/build_test_template.py``)
     override ``DATABASE_URL_APP`` to the empty string at startup --
-    empty-as-unset per the resolver below -- so they always run as
-    the owner role even when a ``.env`` line would re-populate a
-    popped key via this module's ``load_dotenv()``.  See the
-    file-level docstring of ``scripts/init_database.py`` for the
-    rationale.
+    empty-as-unset per the resolver below -- so they run as the owner
+    role even when a ``.env`` line would re-populate a popped key via
+    this module's ``load_dotenv()``.
 
     Args:
         default: Fallback URI used when neither ``DATABASE_URL_APP``
@@ -599,11 +600,9 @@ class ProdConfig(_ValkeyStore, BaseConfig):
     DEBUG = False
     # Prefers DATABASE_URL_APP (least-privilege ``shekel_app`` role)
     # when set, falling back to DATABASE_URL (owner ``shekel_user``).
-    # ``__init__`` below rejects a missing URI; deployment scripts
-    # blank DATABASE_URL_APP before ``create_app`` (empty-as-unset,
-    # dotenv-proof) to force themselves
-    # onto the owner role.  See ``_runtime_database_uri`` and
-    # ``scripts/init_database.py`` for the full policy.
+    # ``__init__`` below rejects a missing URI.  The deploy builds
+    # DeployConfig instead, which reads the owner's URL alone.  See
+    # ``_runtime_database_uri`` for the full policy.
     SQLALCHEMY_DATABASE_URI = _runtime_database_uri()
 
     # Connection pool settings for production.  Made explicit rather than
@@ -705,10 +704,74 @@ class ProdConfig(_ValkeyStore, BaseConfig):
         super().__init__()
 
 
+class DeployConfig(BaseConfig):
+    """The deploy's configuration: the migrations, the reference rows, the ledger hooks, the
+    first user's seed, and the maintenance scripts that run as the database owner.
+
+    The container chooses it (ruling plan#3451): the deploy's start sets ``FLASK_ENV=deploy``,
+    so every script run there builds this, and a script that needs a web secret refuses there
+    because it belongs in the web container.
+
+    **It connects with the owner's URL and nothing else.**  ``DATABASE_URL`` is the one setting
+    it reads for a database; ``DATABASE_URL_APP`` it never reads, so that variable, set in the
+    environment or by a ``.env`` line, cannot move the deploy onto the web login, and no script
+    it builds needs to blank it first.
+
+    **It asks for no web secret** (rulings plan#3413, plan#3450): no ``SECRET_KEY``, no TOTP key,
+    and no rate-limit store, since the deploy serves no request and the limiter is off.  So the
+    deploy container holds one password, the owner's.  One read of a web secret is still on the
+    deploy's path, and it is a migration's, not this configuration's: ``3748145b83e3`` names
+    each sign-in count's record by a digest keyed with ``SECRET_KEY``, and needs it only on a
+    database older than that migration that holds a count or a lock.  Production is past it
+    (its stamp, read 2026-11-10); such a deploy stops naming the key and rolls back, and is run
+    once with the key supplied by hand (ruling plan#3450).
+    """
+
+    RATELIMIT_ENABLED = False
+
+    def __init__(self):
+        """Read the owner's URL, refusing to build the configuration without one.
+
+        Read when the configuration is built (``create_app``), as the rate-limit store's
+        password is (:class:`_ValkeyStore`), not when this module is imported: an import never
+        needs it, and a process that builds another configuration never reads it.
+
+        Raises:
+            ValueError: When ``DATABASE_URL`` is unset or empty, naming it; or when it still
+                embeds the ``.env.example`` sentinel password (:func:`_reject_sentinel`).
+        """
+        super().__init__()
+        uri = _reject_sentinel(os.getenv("DATABASE_URL"), var_name="DATABASE_URL")
+        if not uri:
+            raise ValueError(
+                "DATABASE_URL is not set, so the deploy has no database to connect to.  It "
+                "connects as the database owner, by DATABASE_URL alone, and never by "
+                "DATABASE_URL_APP, the web login's URL."
+            )
+        # Pylint: ``invalid-name`` -- Flask's ``from_object`` copies only upper-case names
+        # into ``app.config``, so a setting read when the configuration is built is an
+        # upper-case instance attribute, as ``_ValkeyStore``'s is.
+        self.SQLALCHEMY_DATABASE_URI = uri  # pylint: disable=invalid-name
+
+
+def configuration_name() -> str:
+    """Return the configuration the environment names: ``FLASK_ENV``, else ``development``.
+
+    The one reading of it: ``create_app`` builds the configuration this names when given none,
+    and ``scripts/seed_user.py``'s password guard judges the same name before the app is built.
+
+    Returns:
+        A key of :data:`CONFIG_MAP`, or whatever unknown name ``FLASK_ENV`` holds, which
+        ``create_app`` refuses.
+    """
+    return os.getenv("FLASK_ENV", "development")
+
+
 # Map environment names to config classes for the factory.
 CONFIG_MAP = {
     "development": DevConfig,
     "development-container": DevContainerConfig,
     "testing": TestConfig,
     "production": ProdConfig,
+    "deploy": DeployConfig,
 }

@@ -1,16 +1,15 @@
-"""Tests for the seed user script's production safety checks and
+"""Tests for the seed user script's password guard and
 credential hygiene scrubbing.
 
-Uses subprocess to test _check_production_password() in isolation.
-The subprocess environment is carefully controlled:
+_check_seed_password() is graded in-process; one subprocess case grades
+that the script asks it before create_app().  That subprocess's
+environment is carefully controlled:
   - Inherits PATH and Python-related vars (so imports work)
   - Sets FLASK_ENV and SEED_USER_PASSWORD explicitly
   - Does NOT inherit DATABASE_URL (prevents connecting to real DBs)
 
-For the production cases, the script exits at the password check
-before reaching create_app().  For the development case, the script
-proceeds past the check and fails at create_app() (no DATABASE_URL),
-but the test only verifies the password error is absent.
+The refusing case exits at the password check before reaching
+create_app().
 
 The TestSeedUserCredentialScrub class covers Commit C-34 / audit
 finding F-022: after running, ``scripts/seed_user.py`` must remove
@@ -29,7 +28,7 @@ from pathlib import Path
 
 import pytest
 
-from app.config import BaseConfig
+from app.config import CONFIG_MAP, BaseConfig
 from app.models.account import Account
 from app.models.category import Category
 from app.models.pay_period import PayPeriod
@@ -42,7 +41,10 @@ from app.services.registration_service import DEFAULT_CATEGORIES
 from app.utils.dates import display_today
 # Aliased so the module-level name cannot shadow the ``seed_user``
 # pytest fixture from conftest.py.
-from scripts.seed_user import _check_production_password
+from scripts.seed_user import (
+    _DEFAULT_PASSWORD_ALLOWED_UNDER,
+    _check_seed_password,
+)
 from scripts.seed_user import seed_user as run_seed_user
 from tests._test_helpers import (
     derived_span,
@@ -71,7 +73,7 @@ def _safe_env(**overrides):
 
 
 class TestSeedUserProductionGuard:
-    """Verify ``_check_production_password`` decides, and that the script asks it.
+    """Verify ``_check_seed_password`` decides, and that the script asks it.
 
     **Two different questions, and they were one SUBPROCESS test each until
     2026-08-18.**  The guard's LOGIC is a pure function of two environment
@@ -145,7 +147,7 @@ class TestSeedUserProductionGuard:
         assert "ChangeMe!2026" in result.stderr, (
             "the script reached create_app() before asking the guard, so the "
             "check no longer works without a database -- which is the "
-            "property _check_production_password's own docstring rests on"
+            "property _check_seed_password's own docstring rests on"
         )
 
     def test_default_password_rejected_in_production(self, monkeypatch, capsys):
@@ -154,7 +156,7 @@ class TestSeedUserProductionGuard:
         monkeypatch.setenv("SEED_USER_PASSWORD", "ChangeMe!2026")
 
         with pytest.raises(SystemExit) as exc:
-            _check_production_password()
+            _check_seed_password()
 
         assert exc.value.code == 1
         assert "ChangeMe!2026" in capsys.readouterr().err
@@ -174,7 +176,7 @@ class TestSeedUserProductionGuard:
         monkeypatch.delenv("SEED_USER_PASSWORD", raising=False)
 
         with pytest.raises(SystemExit) as exc:
-            _check_production_password()
+            _check_seed_password()
 
         assert exc.value.code == 1
         assert "ChangeMe!2026" in capsys.readouterr().err
@@ -185,7 +187,7 @@ class TestSeedUserProductionGuard:
         monkeypatch.setenv("SEED_USER_PASSWORD", "")
 
         with pytest.raises(SystemExit) as exc:
-            _check_production_password()
+            _check_seed_password()
 
         assert exc.value.code == 1
         assert "empty" in capsys.readouterr().err.lower()
@@ -202,7 +204,7 @@ class TestSeedUserProductionGuard:
         monkeypatch.setenv("SEED_USER_PASSWORD", "   ")
 
         with pytest.raises(SystemExit) as exc:
-            _check_production_password()
+            _check_seed_password()
 
         assert exc.value.code == 1
         assert "empty" in capsys.readouterr().err.lower()
@@ -212,14 +214,84 @@ class TestSeedUserProductionGuard:
 
         The positive form of what a subprocess could only assert by absence:
         the guard RETURNS, and says nothing.  ``FLASK_ENV`` is the only thing
-        it branches on before that, so a guard that started rejecting outside
-        production would raise here rather than merely print differently.
+        it branches on before that, so a guard that started rejecting under a
+        host run would raise here rather than merely print differently.
         """
         monkeypatch.setenv("FLASK_ENV", "development")
         monkeypatch.setenv("SEED_USER_PASSWORD", "ChangeMe!2026")
 
-        assert _check_production_password() is None
+        assert _check_seed_password() is None
         assert capsys.readouterr().err == ""
+
+    @pytest.mark.parametrize("flask_env", ["testing", None])
+    def test_default_password_allowed_in_the_suite_and_unset(
+        self, monkeypatch, capsys, flask_env,
+    ):
+        """The suite, and no ``FLASK_ENV`` at all, may seed the default too.
+
+        Unset is a host run: ``create_app`` builds ``development`` then, and the
+        guard reads the name through the same function
+        (``app.config.configuration_name``), so the two cannot disagree.
+        """
+        if flask_env is None:
+            monkeypatch.delenv("FLASK_ENV", raising=False)
+        else:
+            monkeypatch.setenv("FLASK_ENV", flask_env)
+        monkeypatch.setenv("SEED_USER_PASSWORD", "ChangeMe!2026")
+
+        assert _check_seed_password() is None
+        assert capsys.readouterr().err == ""
+
+    @pytest.mark.parametrize(
+        "flask_env",
+        ["deploy", "development-container", "a-stack-nobody-named"],
+    )
+    def test_default_password_rejected_everywhere_else(
+        self, monkeypatch, capsys, flask_env,
+    ):
+        """Every name but a host run's and the suite's refuses the default.
+
+        Ruling plan#3448.  ``deploy`` is the case that matters: the deploy seeds
+        under it on every stack, production's and the dev stack's alike, so a
+        guard that refused only ``production`` would never fire there again.
+        ``development-container`` and a name nobody has made are the
+        fail-closed half: the guard names what it ALLOWS, so anything else
+        refuses.
+        """
+        monkeypatch.setenv("FLASK_ENV", flask_env)
+        monkeypatch.setenv("SEED_USER_PASSWORD", "ChangeMe!2026")
+
+        with pytest.raises(SystemExit) as exc:
+            _check_seed_password()
+
+        assert exc.value.code == 1
+        assert "ChangeMe!2026" in capsys.readouterr().err
+
+    def test_the_allowed_names_are_configurations(self):
+        """Each name the guard allows is a configuration ``create_app`` builds.
+
+        A renamed configuration would otherwise leave the guard allowing a name
+        nothing runs under, and refusing the host run it was meant to allow.
+        """
+        assert _DEFAULT_PASSWORD_ALLOWED_UNDER == {"development", "testing"}
+        assert _DEFAULT_PASSWORD_ALLOWED_UNDER <= CONFIG_MAP.keys()
+
+    def test_the_seed_itself_asks_the_guard(self, monkeypatch, capsys):
+        """``seed_user()`` refuses the default under ``deploy`` before any read.
+
+        The guard has one statement and two callers: ``__main__`` (graded by
+        the subprocess case above) and ``seed_user()``, so a caller that skips
+        ``__main__`` is guarded too.  It exits before the function touches the
+        database, so no fixture is needed.
+        """
+        monkeypatch.setenv("FLASK_ENV", "deploy")
+        monkeypatch.setenv("SEED_USER_PASSWORD", "ChangeMe!2026")
+
+        with pytest.raises(SystemExit) as exc:
+            run_seed_user()
+
+        assert exc.value.code == 1
+        assert "ChangeMe!2026" in capsys.readouterr().err
 
     def test_a_short_production_password_WARNS_and_does_not_exit(
         self, monkeypatch, capsys,
@@ -235,7 +307,7 @@ class TestSeedUserProductionGuard:
         monkeypatch.setenv("FLASK_ENV", "production")
         monkeypatch.setenv("SEED_USER_PASSWORD", "short1!")
 
-        assert _check_production_password() is None
+        assert _check_seed_password() is None
 
         err = capsys.readouterr().err
         assert "Warning" in err

@@ -138,9 +138,10 @@ unset _postgres_password_loaded_from_file
 
 # ── 0a. Validate SECRET_KEY shape ─────────────────────────────────
 # Flask's ProdConfig.__init__ also validates SECRET_KEY, but it fires
-# only once a script builds the app (init_database.py, step 3) -- after
-# steps 2 and 2b have run psql.  We catch misconfiguration here so the
-# database is never touched under a placeholder key.  The placeholder list below
+# only once the server builds the app, after every deploy step has run
+# (the deploy builds DeployConfig, which reads no SECRET_KEY).  We catch
+# misconfiguration here so the database is never touched under a
+# placeholder key.  The placeholder list below
 # must stay in sync with _KNOWN_DEFAULT_SECRETS in app/config.py.
 # 32 is the minimum length matching _MIN_SECRET_KEY_LENGTH.
 if [ -z "${SECRET_KEY:-}" ]; then
@@ -255,11 +256,12 @@ PSQL
 echo "Role ready."
 
 # ── 3. Initialize database (fresh) or run migrations (existing) ─
-# init_database.py blanks DATABASE_URL_APP in its own process env at
-# startup (empty-as-unset per the config resolver; robust against
-# load_dotenv re-population) so it always runs as the owner role
-# (DATABASE_URL).  Migrations need DDL privileges; the app role has
-# DML only.
+# Steps 3 and 5 are the deploy, so they build the deploy's configuration
+# (FLASK_ENV=deploy, app/config.py's DeployConfig; ruling plan#3451),
+# set on each command so the server exec'd below keeps the stack's own.
+# It connects by DATABASE_URL, the owner, alone, never by
+# DATABASE_URL_APP, and asks for no web secret.  Migrations need DDL
+# privileges; the app role has DML only.
 #
 # ONE transaction, committed once (plan step balance:X-cv): the fresh
 # build or the migrations, the reference-data seed, the three deploy
@@ -273,7 +275,7 @@ echo "Role ready."
 # deploy/shekel-deploy.sh can re-pin the previous image; a failure in a
 # LATER step lands after this commit.
 echo "Initializing database..."
-python scripts/init_database.py
+FLASK_ENV=deploy python scripts/init_database.py
 
 # ── 5. Seed initial user (optional, first run only) ────────────
 # Only runs if SEED_USER_EMAIL is set and non-empty AND the seed
@@ -313,7 +315,7 @@ if [ -n "${SEED_USER_EMAIL:-}" ]; then
         echo "Seed sentinel present at ${SEED_SENTINEL}; skipping user seed step."
     else
         echo "Seeding initial user..."
-        python scripts/seed_user.py
+        FLASK_ENV=deploy python scripts/seed_user.py
         echo "User seeding complete."
         # Materialise the sentinel only after the seed script
         # returned cleanly -- ``set -e`` above would have aborted the

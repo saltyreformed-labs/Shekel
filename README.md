@@ -321,7 +321,8 @@ If you expose Shekel outside your local network, take these additional steps:
    `TOTP_ENCRYPTION_KEY` to be set (see [MFA Setup](#mfa-setup) below).
 3. **Verify HTTPS.** Cloudflare Tunnel and Tailscale handle TLS automatically. If using a different
    method, ensure your reverse proxy terminates HTTPS.
-4. **Change the default seed password immediately** if you used the default `ChangeMe!2026`.
+4. **Set your own seed password before the first boot.** The deploy refuses to seed `.env.example`'s
+   published `ChangeMe!2026`, so the first boot stops until `SEED_USER_PASSWORD` holds another.
 5. **Scrub seed credentials from `.env` after the first successful boot.** Remove the
    `SEED_USER_EMAIL` and `SEED_USER_PASSWORD` lines from `.env`, then run
    `docker compose up -d --force-recreate app` so Docker's stored `Container.Config.Env` no longer

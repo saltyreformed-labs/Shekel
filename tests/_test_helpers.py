@@ -6,7 +6,6 @@ test file.  Import functions from here in test modules that need them.
 """
 
 import importlib.util
-import os
 import pathlib
 import re
 import sys
@@ -2394,13 +2393,12 @@ def load_init_database_module():
     ``scripts`` has no ``__init__``, so the deploy host is loaded by absolute
     path -- the same importlib idiom :func:`load_migration_module` uses -- so a
     test can run its one-transaction deploy (``initialise_database``) or one of
-    its pieces directly.  The script
-    mutates ``DATABASE_URL_APP`` to ``""`` at import time (its deploy-host
-    owner-role override, which must run BEFORE the ``app`` import), a
-    process-global side effect this restores around the load so it never leaks
-    into the test session.  Shared by the loan and account backfill suites so
-    the importlib + env-restore boilerplate lives in one place (a duplicate-code
-    finding otherwise).
+    its pieces directly.  Loading it changes nothing in the environment: the
+    owner-role override it once made at import went with the deploy's own
+    configuration (:class:`app.config.DeployConfig`, which never reads
+    ``DATABASE_URL_APP``).  Shared by the loan and account backfill suites so
+    the importlib boilerplate lives in one place (a duplicate-code finding
+    otherwise).
 
     Returns:
         The loaded ``init_database`` module object, exposing
@@ -2410,18 +2408,11 @@ def load_init_database_module():
     script_path = (
         pathlib.Path(__file__).resolve().parents[1] / "scripts" / "init_database.py"
     )
-    saved = os.environ.get("DATABASE_URL_APP")
     spec = importlib.util.spec_from_file_location(
         script_path.stem, str(script_path),
     )
     module = importlib.util.module_from_spec(spec)
-    try:
-        spec.loader.exec_module(module)
-    finally:
-        if saved is None:
-            os.environ.pop("DATABASE_URL_APP", None)
-        else:
-            os.environ["DATABASE_URL_APP"] = saved
+    spec.loader.exec_module(module)
     return module
 
 

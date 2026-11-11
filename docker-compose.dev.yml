@@ -209,7 +209,12 @@ services:
       # check.  See audit finding F-081 / Commit C-13.
       APP_ROLE_PASSWORD: dev-only-shekel-app-role-password-change-in-prod
       SEED_USER_EMAIL: admin@shekel.local
-      SEED_USER_PASSWORD: ChangeMe!2026
+      # A brand-new dev stack's first login.  Not the seed's published
+      # default ChangeMe!2026: the deploy seeds under FLASK_ENV=deploy on
+      # every stack, and the seed refuses that default everywhere but a
+      # host run and the suite (ruling plan#3448).  A non-secret
+      # development value, like APP_ROLE_PASSWORD above.
+      SEED_USER_PASSWORD: dev-only-shekel-seed-password
       SEED_USER_DISPLAY_NAME: Budget Admin
       TOTP_ENCRYPTION_KEY: ${TOTP_ENCRYPTION_KEY:-}
       # Idle-session ceiling for the containerized dev app.  BaseConfig

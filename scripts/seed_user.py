@@ -7,9 +7,17 @@ Creates the single Phase 1 user by delegating to
 self-registered one: user, settings, the pay-period schedule, checking
 account (with origination anchor history), baseline scenario, default
 categories, and default tax configuration.  This script owns only the
-operator-facing policy around that call: env parsing, production
-password guards, the idempotent already-exists skip, redacted
-logging, and the credential scrub.  (Historically it hand-copied the
+operator-facing policy around that call: env parsing, the seed
+password guard, the idempotent already-exists skip, redacted
+logging, and the credential scrub.
+
+**The published default password is refused everywhere but a host run
+and the suite** (ruling plan#3448).  The deploy runs this script under
+``FLASK_ENV=deploy`` on every stack, the dev stack included (ruling
+plan#3451), so the configuration's name cannot say which stack is
+production: the guard refuses unless the name is one of the two that
+never deploy (:data:`_DEFAULT_PASSWORD_ALLOWED_UNDER`), and a stack it
+does not know refuses too.  (Historically it hand-copied the
 provisioning sequence and had already drifted from the service --
 e.g. it never seeded tax data.)
 
@@ -25,7 +33,7 @@ it (finding **N-123**); defaulting the seeded operator's payday to "today"
 here would put that same fabrication back on the one path that provisions the
 production account.  There is no honest default for the day somebody was last
 paid, so the script refuses rather than guesses -- the same shape as its
-refusal of the documented default password in production.  The cadence and the
+refusal of the documented default password in every deploy.  The cadence and the
 horizon DO default, to the app-wide constants, because those are stated
 premises rather than facts about one person.
 
@@ -41,11 +49,12 @@ exposure called out in audit finding F-022.  See audit finding F-022
 and remediation Commit C-34.
 
 Usage:
-    python scripts/seed_user.py
+    FLASK_ENV=deploy python scripts/seed_user.py
 
 Environment variables (or .env file):
     SEED_USER_EMAIL         -- default: admin@shekel.local
-    SEED_USER_PASSWORD      -- default: ChangeMe!2026
+    SEED_USER_PASSWORD      -- default: ChangeMe!2026, refused outside a
+                               host run and the suite
     SEED_USER_DISPLAY_NAME  -- default: Budget Admin
     SEED_USER_LAST_PAYDAY   -- REQUIRED, ISO ``YYYY-MM-DD``: the day the
                                operator was last paid.  Must fall within one
@@ -70,6 +79,19 @@ _SEED_SECRET_ENV_VARS: tuple[str, ...] = (
     "SEED_USER_EMAIL",
 )
 
+#: The password the seed falls back to when ``SEED_USER_PASSWORD`` is unset,
+#: published in this file, ``.env.example`` and the README, so known to anyone.
+_DEFAULT_PASSWORD = "ChangeMe!2026"
+
+#: The configurations (``app.config.CONFIG_MAP`` keys) under which the seed may
+#: use :data:`_DEFAULT_PASSWORD` (ruling plan#3448): a host run and the suite,
+#: the two that never deploy.  Named by what is ALLOWED, so every other name,
+#: ``deploy`` and ``production`` among them and any added later, refuses.
+_DEFAULT_PASSWORD_ALLOWED_UNDER: frozenset[str] = frozenset({
+    "development",
+    "testing",
+})
+
 # Add project root to path.
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -79,7 +101,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 # root, in that mode).
 # pylint: disable=wrong-import-position
 from app import create_app
-from app.config import BaseConfig
+from app.config import BaseConfig, configuration_name
 from app.enums import BusinessDayShiftEnum
 from app.exceptions import ConflictError, ValidationError
 from app.extensions import db
@@ -153,47 +175,24 @@ def _read_last_payday() -> date:
 def seed_user():
     """Create the seeded user via ``registration_service.register_user``.
 
-    Applies the script-side guards (production password policy, the
-    12-character minimum with operator guidance, and the required
-    last-payday input), then delegates the provisioning itself to the
-    registration service so the seeded user's shape is identical to a
-    /register user's.  Idempotent: an existing user takes the
-    already-exists skip and is returned unchanged.  Exits with code 1
-    on a password or input problem.
+    Applies the script-side guards (the seed password guard,
+    :func:`_check_seed_password`, the 12-character minimum with operator
+    guidance, and the required last-payday input), then delegates the
+    provisioning itself to the registration service so the seeded user's
+    shape is identical to a /register user's.  Idempotent: an existing
+    user takes the already-exists skip and is returned unchanged.  Exits
+    with code 1 on a password or input problem.
 
     Returns:
         The created (or pre-existing) User.
     """
     email = os.getenv("SEED_USER_EMAIL", "admin@shekel.local")
-    password = os.getenv("SEED_USER_PASSWORD", "ChangeMe!2026")
+    password = os.getenv("SEED_USER_PASSWORD", _DEFAULT_PASSWORD)
     display_name = os.getenv("SEED_USER_DISPLAY_NAME", "Budget Admin")
 
-    # Production safety: reject the publicly documented default password
-    # and empty/whitespace-only passwords.  This guard lives inside
-    # seed_user() (not just __main__) so it protects all callers.
-    flask_env = os.getenv("FLASK_ENV", "development")
-    if flask_env == "production":
-        if not password or not password.strip():
-            print(
-                "Error: SEED_USER_PASSWORD is empty or whitespace-only. "
-                "Set a strong password in .env or environment.",
-                file=sys.stderr,
-            )
-            sys.exit(1)
-        if password == "ChangeMe!2026":
-            print(
-                "Error: SEED_USER_PASSWORD is still the default "
-                "'ChangeMe!2026'. Set a unique password for production "
-                "in .env or environment.",
-                file=sys.stderr,
-            )
-            sys.exit(1)
-        if len(password) < 12:
-            print(
-                f"Warning: SEED_USER_PASSWORD is only {len(password)} "
-                f"characters. The application requires at least 12.",
-                file=sys.stderr,
-            )
+    # The guard runs here as well as in ``__main__`` (where it runs before
+    # ``create_app``), so it protects every caller of this function.
+    _check_seed_password()
 
     # Enforce the same 12-character minimum as the app's change_password()
     # and register_user() functions.  Prevents deploying with a weak
@@ -317,17 +316,21 @@ def seed_user():
     return user
 
 
-def _check_production_password():
-    """Reject unsafe passwords before starting the app.
+def _check_seed_password():
+    """Reject an unsafe seed password unless this is a host run or the suite.
 
-    Runs before create_app() so the check works even when
-    DATABASE_URL is not set (e.g., direct script invocation
-    outside Docker).
+    The one statement of the guard (ruling plan#3448): :func:`seed_user`
+    and ``__main__`` both call it, ``__main__`` before ``create_app()`` so
+    the check works even when DATABASE_URL is not set (e.g., direct script
+    invocation outside Docker).  Under a configuration named in
+    :data:`_DEFAULT_PASSWORD_ALLOWED_UNDER` it returns at once; under any
+    other, the deploy's on every stack among them, it refuses an empty or
+    whitespace-only password and the published default, and warns of one
+    shorter than the application's minimum.
     """
-    password = os.getenv("SEED_USER_PASSWORD", "ChangeMe!2026")
-    flask_env = os.getenv("FLASK_ENV", "development")
-    if flask_env != "production":
+    if configuration_name() in _DEFAULT_PASSWORD_ALLOWED_UNDER:
         return
+    password = os.getenv("SEED_USER_PASSWORD", _DEFAULT_PASSWORD)
     if not password or not password.strip():
         print(
             "Error: SEED_USER_PASSWORD is empty or whitespace-only. "
@@ -335,11 +338,11 @@ def _check_production_password():
             file=sys.stderr,
         )
         sys.exit(1)
-    if password == "ChangeMe!2026":
+    if password == _DEFAULT_PASSWORD:
         print(
-            "Error: SEED_USER_PASSWORD is still the default "
-            "'ChangeMe!2026'. Set a unique password for production "
-            "in .env or environment.",
+            f"Error: SEED_USER_PASSWORD is still the published default "
+            f"'{_DEFAULT_PASSWORD}', which only a host run or the test suite "
+            "may seed.  Set a unique password in .env or environment.",
             file=sys.stderr,
         )
         sys.exit(1)
@@ -400,7 +403,7 @@ def _scrub_seed_env_vars() -> None:
 
 
 if __name__ == "__main__":
-    _check_production_password()
+    _check_seed_password()
     app = create_app()
     try:
         with app.app_context():

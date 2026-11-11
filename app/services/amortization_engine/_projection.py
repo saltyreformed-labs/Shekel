@@ -297,9 +297,10 @@ def schedule_dates(due_dates: list[date], payment_day: int) -> list[date]:
     *That key is the calendar MONTH, and it is no longer the installment
     identity the walks use*: plan step recurrence:R16-c-2 deleted
     ``loan_ledger.installment_slot`` and keys an installment by its contract
-    interval (ruling **R-R89**, finding **D55**).  This slotting feeds the
-    schedule replay (walk 3), whose re-key is ``recurrence:R16-e`` /
-    ``R16-f``'s.
+    interval (ruling **R-R89**, finding **D55**).  This slotting fed the
+    schedule replay (walk 3) until plan step recurrence:R16-e deleted it;
+    what is left of its reach is the prepared payment list that step deletes
+    after it.
 
     Args:
         due_dates: Each payment's own due date, in the order the caller
@@ -606,9 +607,13 @@ def project_forward(
 
     The forward half of the amortization-engine split (architectural
     plan: ``docs/plans/2026-05-21-amortization-engine-split-replay-projection.md``);
-    pairs with a replay of the recorded past
-    (``rate_period_engine.replay_schedule``, which superseded this
-    module's original ``replay_confirmed_history`` primitive).
+    pairs with the loan's confirmed view of the recorded past
+    (:func:`app.services.balance_at.confirmed_view`, the fold of its one
+    walk), which starts it at the first installment after the record's last
+    event (:func:`app.services.loan_resolver.compute_payoff_scenarios`).  It
+    paired with ``rate_period_engine.replay_schedule`` -- which superseded
+    this module's original ``replay_confirmed_history`` primitive -- until
+    plan step recurrence:R16-e deleted that replay.
     ``project_forward`` has no concept of history and cannot rewrite
     it -- its inputs describe a state at ``starting_date`` and a set of
     forward-only parameters (the rate/P&I terms schedule, a what-if

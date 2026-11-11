@@ -11,8 +11,9 @@ basis carried two names for one fact and every hand-off between the three cost a
 projection.  ``CLAUDE.md`` rule 14: two spellings that agree today are still two
 spellings.
 
-**What that duplication cost, concretely.**  The schedule replay reads these
-three dates and NO amount, but its only feed was the priced ``PaymentRecord``,
+**What that duplication cost, concretely.**  The schedule replay read these
+three dates and NO amount (it is deleted since plan step recurrence:R16-e),
+but its only feed was the priced ``PaymentRecord``,
 so the reconciliation oracle's reference loaded the whole amount model -- **101
 modules where its own arithmetic needs 45** (measured 2026-09-09 on ``dev``
 ``2625963a``; the metric is stated in
@@ -126,13 +127,13 @@ class PaymentDates:
         SETTLED half.  So the resolver and the ledger cannot classify a payment
         differently even on a row a bypass has broken.
 
-        **The schedule replay does NOT read this, and that is deliberate.**
-        :func:`app.services.rate_period_engine.replay_schedule` decides what it
-        replays through :func:`~app.services.rate_period_engine
-        .is_confirmed_payment_eligible`, whose ``has_settled_by`` term is
-        ``False`` for a missing day by that predicate's own contract -- so an
-        unsettled payment is excluded STRUCTURALLY rather than by a filter its
-        caller has to remember.  Plan step **balance:X-bl-2b** deleted that
+        **The schedule replay did NOT read this, and that was deliberate.**
+        ``rate_period_engine.replay_schedule`` decided what it replayed
+        through ``is_confirmed_payment_eligible``, whose ``has_settled_by``
+        term is ``False`` for a missing day by that predicate's own contract
+        -- so an unsettled payment was excluded STRUCTURALLY rather than by a
+        filter its caller had to remember.  Plan step recurrence:R16-e
+        deleted both.  Plan step **balance:X-bl-2b** deleted that
         caller-side filter (and the ``ConfirmedPayment`` type that existed to
         assert what it had removed) once it measured the two to be the same
         predicate.  This property is the answer for the readers that ask the

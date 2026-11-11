@@ -5,10 +5,10 @@ Pure-function package for loan amortization calculations.
 Generates amortization schedules, summary metrics, and payoff analysis.
 No database access -- operates only on values passed in.
 
-Supports payment-aware projections: when a list of PaymentRecord
-instances is provided, the schedule replays actual/committed payments
-month-by-month instead of assuming the contractual amount.  Two
-projections come from the same engine:
+It projects the CONTRACT forward from a known starting state; what a loan
+actually paid is its walk's (``loan_ledger.replay_loan_events``), and no
+function here takes a payment list.  Two projections come from the same
+engine:
 
   1. Original schedule -- the contract, extra_monthly=0
   2. What-if schedule -- the contract plus extra_monthly=user input, the

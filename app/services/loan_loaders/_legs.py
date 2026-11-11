@@ -230,9 +230,9 @@ def settled_income_legs(
     balance:X-bi-6-5's third leaf: the status-band rule refuses that state
     at commit.
 
-    Two bounds the resolver's
-    :func:`app.services.rate_period_engine.is_confirmed_payment_eligible` filter
-    applies are deliberately ABSENT:
+    Two bounds the resolver's replay applied through
+    ``rate_period_engine.is_confirmed_payment_eligible`` -- both deleted at plan
+    step recurrence:R16-e -- are deliberately ABSENT here:
 
     * **No post-anchor LOWER bound.**  The fold walks EVERY settled payment from
       origination, because an anchor is a running-balance RESET
@@ -249,7 +249,8 @@ def settled_income_legs(
 
       **That bound is the payment's SETTLED day, not its pay period, on every
       reader** -- the fold's since step C2 (:func:`app.services.loan_ledger.payment_visible_on`),
-      the resolver's replay since plan step **X-an**.  This paragraph used to say
+      and the resolver's replay's from plan step **X-an** until plan step
+      recurrence:R16-e deleted that replay.  This paragraph used to say
       the readers' PERIOD bound kept an early-settled payment out of every
       displayed balance until its period began, and finding **N-187** is that
       sentence being false in both directions at once: an early-settled payment

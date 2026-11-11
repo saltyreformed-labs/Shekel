@@ -38,7 +38,6 @@ import pytest
 from app.services.amortization_engine._projection import (
     _apply_contractual_payment,
 )
-from app.services.rate_period_engine import RatePeriod, _replay_payment_row
 from app.utils.money import (
     accrue_monthly_interest,
     apply_payment_cash,
@@ -112,25 +111,6 @@ class TestEveryWalkAllocatesThroughTheOneRule:
         assert seen == {
             "negative_amortization", "overrun", "exact_payoff", "ordinary",
         }, f"sweep missed branches: {seen}"
-
-    def test_the_replay_row_allocates_through_the_one_rule(self):
-        """``rate_period_engine._replay_payment_row`` restates nothing.
-
-        Its cash is the period's contractual P&I and it charges no escrow (a
-        contractual schedule is escrow-free by definition), so the shared rule
-        with ``charged_escrow=0.00`` must reproduce its row exactly.
-        """
-        for balance, rate, interest, cash, _extra in _sweep():
-            period = RatePeriod(
-                index=0, start_date=ORIGINATION, annual_rate=rate,
-                period_pi=cash, start_month_index=0, term_months_at_start=360,
-            )
-            row = _replay_payment_row(balance, period, PAY_DATE, ORIGINATION)
-            parts = apply_payment_cash(cash, balance, interest, ZERO)
-            assert row.interest == interest
-            assert row.principal == round_money(parts.principal)
-            assert row.payment == round_money(parts.principal + interest)
-            assert row.remaining_balance == parts.balance_after
 
     def test_the_contractual_path_allocates_through_the_one_rule(self):
         """``amortization_engine._apply_contractual_payment`` restates nothing.
@@ -250,12 +230,16 @@ class TestTheAllocationSitsBelowEveryWalk:
 
     @pytest.mark.parametrize("walk", [
         "app.services.amortization_engine",
-        "app.services.rate_period_engine",
         "app.services.loan_ledger",
         "app.services.balance_at",
     ])
     def test_every_walk_can_reach_the_rule(self, walk):
-        """Each of the four loan walks imports the leaf the rule lives in."""
+        """Each loan walk imports the leaf the rule lives in.
+
+        Three since plan step recurrence:R16-e deleted the fourth, the rate
+        engine's ``replay_schedule``; its row step and its entry here went with
+        it (ruling plan#3382).
+        """
         assert "app.utils.money" in self._closure(walk), (
             f"{walk} cannot reach app.utils.money, so it cannot call the one "
             "allocation and will have to restate it"

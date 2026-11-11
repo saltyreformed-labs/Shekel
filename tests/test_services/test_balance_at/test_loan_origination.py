@@ -227,7 +227,7 @@ class TestLoanNotYetOriginated:
 
         The SCHEDULE must survive: it is what the projection walks once
         the loan closes, and filtering the anchor out of the old anchor replay
-        (``_replay_from_anchor``, which walk 3's deletion takes; rather than the
+        (``_replay_from_anchor``, deleted with walk 3 at plan step recurrence:R16-e; rather than the
         balance following the events) would have collapsed it to nothing.
         """
         with app.app_context():

@@ -185,9 +185,7 @@ def _resolver_state(account, loan_params, as_of):
     )
     anchor_events = loan_loaders.load_loan_anchor_facts(loan_params)
     return loan_resolver.resolve_loan(
-        loan_resolver.LoanInputs(
-            loan_params, anchor_events, ctx.payments, ctx.rate_changes,
-        ),
+        loan_resolver.LoanInputs(loan_params, anchor_events, ctx.rate_changes),
         as_of,
     )
 

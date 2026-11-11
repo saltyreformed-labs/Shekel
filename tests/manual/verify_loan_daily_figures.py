@@ -115,10 +115,8 @@ def _figures(account: Account, day: date) -> dict:
         loan_inputs=loan_resolver.LoanInputs(
             params,
             loan_loaders.load_loan_anchor_facts(params),
-            context.payments,
             context.rate_changes,
         ),
-        as_of=day,
         confirmed_view=balance_at.confirmed_view(account, ctx),
     )
     # The loan's PLAN is the seam's forward fold since plan step R7d-g-3

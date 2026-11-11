@@ -497,10 +497,11 @@ def _is_paid_off(
     not an achievement -- from being badged "paid off" on the /savings tile.
 
     This replaced a ``resolve_loan(inputs, date.max)`` probe that could not have
-    consulted the ledger even in principle -- the confirmed view returns
-    ``None`` for any ``as_of`` after today -- and so answered from the
-    pre-read-switch anchor replay, which is BLIND TO MONEY: it advances one
-    SCHEDULED step per confirmed payment and discards the cash.  A loan retired
+    consulted the ledger even in principle -- the confirmed view returned
+    ``None`` for any ``as_of`` after today until plan step recurrence:R16-e --
+    and so answered from the pre-read-switch anchor replay, which was BLIND TO
+    MONEY: it advanced one SCHEDULED step per confirmed payment and discarded
+    the cash (that step deleted it).  A loan retired
     by one lump-sum payment read as still-owing (no badge, still active debt on
     the Horizon), and a loan paid SHORT could read as retired and VANISH from the
     debt card's total.  Both are regression-tested

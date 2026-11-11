@@ -32,6 +32,8 @@ from app.services.loan_ledger import (
 )
 from app.services.loan_ledger._charges import contract_charges
 from app.services.installment_calendar import (
+    first_installment_date,
+    installment_after,
     installment_dates,
     installment_of,
     installment_paid_by,
@@ -463,6 +465,75 @@ class TestInstallmentPaidBy:
                 assert named <= day, (payment_day, day)
                 assert previous is None or named >= previous, (payment_day, day)
                 day, previous = day + timedelta(days=1), named
+
+
+class TestInstallmentAfter:
+    """The first installment STRICTLY after a day: where the contract line starts (plan#3382).
+
+    The payoff composer hands it the date of the loan record's last event,
+    a payment's own due date or an assertion's date, and starts the
+    contract's remaining installments there.
+    """
+
+    def test_a_day_on_an_installment_steps_to_the_next(self):
+        """Due Mar 22 on a loan due the 22nd: that installment is charged, Apr 22 is next.
+
+        Strict, because an installment due on an assertion's date is
+        inside the asserted balance (``due_after_anchor``).
+        """
+        assert installment_after(
+            date(2026, 1, 22), 22, date(2026, 3, 22),
+        ) == date(2026, 4, 22)
+
+    def test_a_day_inside_an_interval_steps_to_the_installment_closing_it(self):
+        """Mar 10 and Mar 21 fall in the Feb 22 interval, which Mar 22 closes.
+
+        The off-day case the ruling moves a month earlier than the deleted
+        replay, which stepped the calendar month after the due date (Apr 22).
+        """
+        for day in (date(2026, 3, 10), date(2026, 3, 21)):
+            assert installment_after(date(2026, 1, 22), 22, day) == date(2026, 3, 22)
+
+    def test_a_day_before_the_first_installment_answers_the_first(self):
+        """The origination, a later day of its month, and a day before Feb 22.
+
+        The origination itself is the from-origination contract's start,
+        :func:`first_installment_date`; a balance asserted between the
+        origination and the first due day starts the line there too.
+        """
+        for day in (date(2026, 1, 22), date(2026, 1, 25), date(2026, 2, 10)):
+            assert installment_after(date(2026, 1, 22), 22, day) == date(2026, 2, 22)
+        assert installment_after(
+            date(2026, 1, 22), 22, date(2026, 1, 22),
+        ) == first_installment_date(date(2026, 1, 22), 22)
+
+    def test_a_clamped_installment_steps_back_to_the_meant_day(self):
+        """Due the 31st: past Feb 28 the next installment is Mar 31, not Mar 28."""
+        assert installment_after(
+            date(2026, 12, 31), 31, date(2027, 2, 28),
+        ) == date(2027, 3, 31)
+        assert installment_after(
+            date(2026, 12, 31), 31, date(2027, 3, 5),
+        ) == date(2027, 3, 31)
+
+    def test_it_agrees_with_the_list_on_every_day(self):
+        """For every day, the earliest listed installment after it.
+
+        Every due day 1-31, every day from before the origination (a
+        December 31st before a leap February) to three years on, against
+        the enumeration (:func:`installment_dates`), which the stepped rule
+        must never contradict.
+        """
+        origination = date(2027, 12, 31)
+        for payment_day in range(1, 32):
+            listed = installment_dates(origination, payment_day, date(2031, 3, 31))
+            day = date(2027, 11, 1)
+            while day <= date(2030, 12, 31):
+                expected = next(due for due in listed if due > day)
+                assert installment_after(origination, payment_day, day) == expected, (
+                    payment_day, day,
+                )
+                day += timedelta(days=1)
 
 
 def _escrow_line(*versions: tuple[date, str]) -> SimpleNamespace:

@@ -349,7 +349,6 @@ def test_arm_monthly_payment_card_equals_resolver_constant(  # C15-2
             loan_resolver.LoanInputs(
                 loan_params,
                 loan_loaders.load_loan_anchor_facts(loan_params),
-                ctx.payments,
                 ctx.rate_changes,
             ),
             date.today(),

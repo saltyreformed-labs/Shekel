@@ -556,9 +556,14 @@ _FENCED_MODULE_RULINGS = {
             #     and what comes back is still keyed by contract time.
             #   * ``projection_boundary`` returns a ``date`` -- the day after the
             #     loan's latest recorded fact -- and cannot yield a figure.
+            #   * ``latest_recorded_on`` (recurrence:R16-e, ruling plan#3382)
+            #     returns that fact's own ``date``, the one statement
+            #     ``projection_boundary`` steps a day past; it cannot yield a
+            #     figure either.
             #   * ``with_contract_charges`` (recurrence:R16-c-2, ruling R-R100)
             #     returns a stream with its charges attached -- the stream
             #     ruling above plus ``contract_charges``' -- before any replay.
+            "latest_recorded_on",
             "projection_boundary",
             "replay_loan_stream",
             "with_contract_charges",

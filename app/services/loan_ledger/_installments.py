@@ -40,9 +40,9 @@ the monthly schedule row it consumes is not, because biweekly pay periods
 sometimes put two payments in one due month and a monthly engine that summed
 them would double-count that month.  That assignment is
 :func:`app.services.amortization_engine.schedule_dates`, which INVENTS a date for
-the loser of a collision -- which is why the replay keys its RATE on the
-pay-period start instead
-(:func:`app.services.rate_period_engine.replay_schedule`, finding **N-36**).  It
+the loser of a collision -- which is why the replay keyed its RATE on the
+pay-period start instead (``rate_period_engine.replay_schedule``, finding
+**N-36**, until plan step recurrence:R16-e deleted the replay).  It
 lives in the pure engine and not here so BOTH feeds reach it without a loader in
 scope: hosting it HERE put ``loan_payment_service._engine_prep`` -- pure
 arithmetic -- on a **46-module** import closure against the **15** it had at
@@ -138,14 +138,12 @@ def payment_installments(
     The project's single "which installment does each of this loan's payments
     satisfy, and has its cash moved?" derivation, and the amount-free half of
     :func:`app.services.loan_payment_service.get_payment_history`, which is built
-    on it.  A consumer that needs only the chronology -- the schedule replay's
-    feed is the whole of it -- takes this and never loads the amount model.
-    A caller feeding the replay applies
-    :func:`app.services.amortization_engine.slotted_dates` to
-    ``[installment.dates for installment in ...]`` first, which is the same
-    collision assignment the priced feed's
+    on it.  A consumer that needs only the chronology takes this and never
+    loads the amount model.  *The schedule replay's feed was the whole of it,
+    slotted by* :func:`app.services.amortization_engine.slotted_dates` *--
+    the same collision assignment the priced feed's*
     :func:`~app.services.loan_payment_service.prepare_payments_for_engine`
-    applies.
+    *applies -- until plan step recurrence:R16-e deleted the replay.*
 
     **Settled-ness is read off the PARTITION, not derived here.**
     :func:`app.services.loan_loaders.income_legs` is the app's one answer to
@@ -194,7 +192,8 @@ def payment_installments(
         options: The loader options for every relationship the CALLER will
             traverse on the SETTLED legs' parents, rooted at
             :class:`~app.models.transfer.Transfer`.  ``()`` for a caller that
-            reads only the dates -- the schedule replay's reference -- and,
+            reads only the dates -- the schedule replay's reference, until
+            plan step recurrence:R16-e deleted it -- and,
             since a settled leg is worth the figure its TRANSFER stores, a
             column of the parent the producer loads, ``()`` for
             ``get_payment_history`` too: nothing on that valuation's path

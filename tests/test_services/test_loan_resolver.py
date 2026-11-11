@@ -25,22 +25,14 @@ from decimal import Decimal
 import pytest
 
 from app.services import loan_resolver
-from app.services.amortization_engine import (
-    PaymentDates,
-    PaymentRecord,
-    RateChangeRecord,
-)
+from app.services.amortization_engine import RateChangeRecord
 from app.services.loan_resolver import (
     ConfirmedLedgerView,
     LoanInputs,
     compute_payoff_scenarios,
     current_rate_baseline,
     resolve_loan,
-    resolve_periods,
 )
-from app.services.loan_resolver._periods import _replay_from_anchor
-from app.utils.dates import has_settled_by
-from app.services.installment_calendar import monthly_due_date
 from app.utils.dates import add_months
 from app.utils.money import round_money
 
@@ -169,29 +161,6 @@ def _rate_feed(
     return feed
 
 
-def _replay_balance(inputs: LoanInputs, as_of: date) -> Decimal:
-    """Return the anchor + confirmed-payment replay balance for *inputs*.
-
-    The window the deleted ``LoanState.current_balance`` carried (plan step
-    D2a): the same production derivation one level down
-    (:func:`app.services.loan_resolver._periods._replay_from_anchor`, which
-    still seeds the schedule composer's starting state on the unseeded path),
-    so every hand-computed pin below keeps its value while the resolver's
-    public bundle carries no balance.  Rounded to the cent exactly as the
-    deleted field was.
-    """
-    periods = resolve_periods(inputs.loan_params, inputs.rate_changes)
-    return round_money(
-        _replay_from_anchor(
-            anchor_events=inputs.anchor_events,
-            periods=periods,
-            payments=[payment.dates for payment in inputs.payments or []],
-            payment_day=inputs.loan_params.payment_day,
-            as_of=as_of,
-        ).balance_as_of
-    )
-
-
 # -- C13-1 -- ARM payment constant across the fixed-rate window -------------
 
 
@@ -221,7 +190,7 @@ def test_arm_payment_constant_in_fixed_window():
     for month_offset in range(60):
         as_of = add_months(params.origination_date, month_offset)
         state = resolve_loan(
-            LoanInputs(params, [anchor], None, _rate_feed(params)), as_of,
+            LoanInputs(params, [anchor], _rate_feed(params)), as_of,
         )
         payments_observed.add(state.monthly_payment)
 
@@ -246,11 +215,11 @@ def test_arm_no_creep_month_24_vs_25():
     anchor = _origination_anchor(params)
 
     state_24 = resolve_loan(
-        LoanInputs(params, [anchor], None, _rate_feed(params)),
+        LoanInputs(params, [anchor], _rate_feed(params)),
         add_months(params.origination_date, 24),
     )
     state_25 = resolve_loan(
-        LoanInputs(params, [anchor], None, _rate_feed(params)),
+        LoanInputs(params, [anchor], _rate_feed(params)),
         add_months(params.origination_date, 25),
     )
 
@@ -292,12 +261,12 @@ def test_current_rate_is_rate_at_today_not_a_stored_scalar():
     feed = _rate_feed(params, [reset])
 
     in_window = resolve_loan(
-        LoanInputs(params, [anchor], None, feed), date(2027, 1, 1),
+        LoanInputs(params, [anchor], feed), date(2027, 1, 1),
     )
     assert in_window.current_rate == Decimal("0.06")
 
     after_reset = resolve_loan(
-        LoanInputs(params, [anchor], None, feed), date(2031, 6, 1),
+        LoanInputs(params, [anchor], feed), date(2031, 6, 1),
     )
     assert after_reset.current_rate == Decimal("0.07")
 
@@ -328,311 +297,10 @@ def test_current_rate_baseline_equals_the_resolved_current_rate():
     ]:
         baseline = current_rate_baseline(params, feed, as_of)
         resolved = resolve_loan(
-            LoanInputs(params, [anchor], None, feed), as_of,
+            LoanInputs(params, [anchor], feed), as_of,
         ).current_rate
         assert baseline == expected
         assert baseline == resolved
-
-
-# -- C13-3 -- confirmed payment reduces balance -----------------------------
-
-
-def test_confirmed_payment_reduces_balance():
-    """C13-3 (re-pinned): a confirmed payment reduces the balance by the
-    SCHEDULED principal, independent of the cash amount paid.
-
-    Re-pinned under the decided contractual-schedule model (CLAUDE rule
-    5 exception; the developer chose "each confirmed payment reduces
-    principal by period P&I - interest; deliberate extra principal is an
-    explicit event").  The prior assertion ($299,611.64) reduced the
-    balance by the cash amount ($1,888.36 - interest), so escrow or an
-    overpayment bundled into the transfer leaked into principal.  Now
-    only the payment's occurrence (date) matters; its amount does not.
-
-    Setup: $300k fixed-rate, 6%, 360mo, origination 2026-01-01.  One
-    confirmed payment on 2026-02-15 (cash $1,888.36, deliberately above
-    the contractual P&I to show the excess is ignored):
-
-        period P&I = amortize(300000, 0.06, 360) = 1,798.65
-        interest   = 300000 * 0.005 = 1,500.00
-        principal  = 1,798.65 - 1,500.00 = 298.65
-        balance    = 300,000.00 - 298.65 = 299,701.35
-
-    The $89.71 paid above the contractual P&I is NOT auto-applied to
-    principal (that requires an explicit prepayment event); the balance
-    follows the contractual schedule.
-    """
-    params = FakeLoanParams(
-        origination_date=date(2026, 1, 1),
-        term_months=360,
-        original_principal=Decimal("300000.00"),
-        interest_rate=Decimal("0.06"),
-        payment_day=1,
-        is_arm=False,
-    )
-    anchor = _origination_anchor(params)
-    payment = PaymentRecord(
-        PaymentDates(
-            period_start=date(2026, 2, 15),
-            due_date=monthly_due_date(date(2026, 2, 15), 1),
-            settled_on=date(2026, 2, 15),
-        ),
-        amount=Decimal("1888.36"),
-    )
-
-    inputs = LoanInputs(params, [anchor], [payment], _rate_feed(params))
-
-    assert _replay_balance(inputs, date(2026, 3, 1)) == Decimal("299701.35")
-
-
-# -- C13-4 -- projected payment is not replayed -----------------------------
-
-
-def test_projected_payment_not_replayed():
-    """C13-4: An unconfirmed (projected) payment leaves the balance unchanged.
-
-    Future commitments are not historical fact and must not reduce
-    the resolved principal.  Symptom #3 is closed precisely because
-    only confirmed payments count.
-    """
-    params = FakeLoanParams(
-        origination_date=date(2026, 1, 1),
-        term_months=360,
-        original_principal=Decimal("300000.00"),
-        interest_rate=Decimal("0.06"),
-        payment_day=1,
-    )
-    anchor = _origination_anchor(params)
-    projected = PaymentRecord(
-        PaymentDates(
-            period_start=date(2026, 2, 15),
-            due_date=monthly_due_date(date(2026, 2, 15), 1),
-            settled_on=None,
-        ),
-        amount=Decimal("1888.36"),
-    )
-
-    inputs = LoanInputs(params, [anchor], [projected], _rate_feed(params))
-
-    # No confirmed payments; the replay balance equals the anchor balance
-    # (= original_principal for the Commit-12 origination anchor).
-    assert _replay_balance(inputs, date(2026, 3, 1)) == Decimal("300000.00")
-
-
-def test_a_projected_payment_does_not_ride_the_resolver_schedule():
-    """R7d-g-3: the resolver's schedule is the CONTRACT's; the plan is the seam's.
-
-    Until plan step R7d-g-3 this pinned step 8 the other way round: a
-    projected recurring payment above contractual rode forward through
-    ``monthly_override`` and appeared in ``LoanState.schedule`` as the
-    committed trajectory.  Ruling **R-R88** made the balance seam's plan fold
-    the one walk of what a loan is projected to PAY, and this schedule the
-    contract's: every reader of it takes a DATE (the net-worth trend's
-    first-payment gate, the equity chart's tracking start), never a balance.
-    So a $2,500 projected March payment leaves the resolver's March row at the
-    contractual $1,798.65, identical to the no-payment resolve, and the
-    replayed balance still stays at the origination anchor (the C13-4
-    invariant: a projected payment is not replayed).
-    """
-    params = FakeLoanParams(
-        origination_date=date(2026, 1, 1),
-        term_months=360,
-        original_principal=Decimal("300000.00"),
-        interest_rate=Decimal("0.06"),
-        payment_day=1,
-    )
-    anchor = _origination_anchor(params)
-    projected_overpay = PaymentRecord(
-        PaymentDates(
-            period_start=date(2026, 3, 1),
-            due_date=monthly_due_date(date(2026, 3, 1), 1),
-            settled_on=None,
-        ),
-        amount=Decimal("2500.00"),
-    )
-
-    planned_inputs = LoanInputs(
-        params, [anchor], [projected_overpay], _rate_feed(params),
-    )
-    planned = resolve_loan(planned_inputs, date(2026, 1, 15))
-    contractual = resolve_loan(
-        LoanInputs(params, [anchor], [], _rate_feed(params)),
-        date(2026, 1, 15),
-    )
-
-    def _march(state):
-        return next(
-            row for row in state.schedule
-            if row.payment_date == date(2026, 3, 1)
-        )
-
-    assert _march(planned).payment == Decimal("1798.65")
-    assert _march(planned) == _march(contractual)
-    assert planned.schedule == contractual.schedule
-    # The projected payment is not replayed: the balance is the anchor's.
-    assert _replay_balance(planned_inputs, date(2026, 1, 15)) == Decimal("300000.00")
-
-
-
-# -- C13-5 -- fixed-rate, three confirmed payments --------------------------
-
-
-def test_fixed_rate_replays_from_origination_anchor():
-    """C13-5: Three confirmed contractual payments cumulatively reduce balance.
-
-    Setup: $300k / 6% / 360mo; contractual payment = $1,798.65
-    (amortize($300k, 0.06, 360)).  Three confirmed payments at the
-    contractual amount in months 2, 3, 4.  Hand-computed cumulative
-    reduction:
-
-        m1: i = 300000.00 * 0.005   = 1500.00; p = 298.65;
-            bal = 299701.35
-        m2: i = 299701.35 * 0.005   = 1498.51 (HALF_UP); p = 300.14;
-            bal = 299401.21
-        m3: i = 299401.21 * 0.005   = 1497.01 (HALF_UP); p = 301.64;
-            bal = 299099.57
-    """
-    params = FakeLoanParams(
-        origination_date=date(2026, 1, 1),
-        term_months=360,
-        original_principal=Decimal("300000.00"),
-        interest_rate=Decimal("0.06"),
-        payment_day=1,
-    )
-    anchor = _origination_anchor(params)
-    payments = [
-        PaymentRecord(PaymentDates(date(2026, 2, 1), monthly_due_date(date(2026, 2, 1), 1), date(2026, 2, 1)), Decimal("1798.65")),
-        PaymentRecord(PaymentDates(date(2026, 3, 1), monthly_due_date(date(2026, 3, 1), 1), date(2026, 3, 1)), Decimal("1798.65")),
-        PaymentRecord(PaymentDates(date(2026, 4, 1), monthly_due_date(date(2026, 4, 1), 1), date(2026, 4, 1)), Decimal("1798.65")),
-    ]
-
-    inputs = LoanInputs(params, [anchor], payments, _rate_feed(params))
-
-    assert _replay_balance(inputs, date(2026, 5, 1)) == Decimal("299099.57")
-
-
-# -- C13-6 -- trueup anchor resets the replay -------------------------------
-
-
-def test_anchor_trueup_resets_replay():
-    """C13-6: A later user_trueup anchor makes pre-trueup payments irrelevant.
-
-    Setup: $300k / 6% / 360mo.  Two confirmed payments BEFORE a
-    user_trueup, one confirmed payment AFTER the trueup.  The
-    trueup balance ($250,000) is intentionally far from the
-    engine's from-origination projection (~$299,700) so the test
-    proves the resolver starts the post-trueup replay from the
-    trueup balance, not from the engine's projection.
-
-    Hand-computed post-trueup arithmetic:
-
-        anchor_balance = 250,000.00 (trueup)
-        i = 250000.00 * 0.005   = 1250.00
-        p = 1798.65 - 1250.00   = 548.65
-        balance = 250000.00 - 548.65 = 249,451.35
-
-    Pre-trueup payments (2026-02 and 2026-03) are filtered out by
-    replay_schedule's due-date boundary -- their monthly due dates
-    (payment_day=1, so 2026-02-01 and 2026-03-01) fall on or before the
-    2026-04-01 trueup anchor -- and never enter the replay.
-    """
-    params = FakeLoanParams(
-        origination_date=date(2026, 1, 1),
-        term_months=360,
-        original_principal=Decimal("300000.00"),
-        interest_rate=Decimal("0.06"),
-        payment_day=1,
-    )
-    origination_anchor = FakeAnchorEvent(
-        anchor_date=date(2026, 1, 1),
-        anchor_balance=Decimal("300000.00"),
-        created_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
-    )
-    trueup_anchor = FakeAnchorEvent(
-        anchor_date=date(2026, 4, 1),
-        anchor_balance=Decimal("250000.00"),
-        created_at=datetime(2026, 4, 1, tzinfo=timezone.utc),
-    )
-    payments = [
-        # Pre-trueup -- filtered out by the resolver.
-        PaymentRecord(PaymentDates(date(2026, 2, 1), monthly_due_date(date(2026, 2, 1), 1), date(2026, 2, 1)), Decimal("1798.65")),
-        PaymentRecord(PaymentDates(date(2026, 3, 1), monthly_due_date(date(2026, 3, 1), 1), date(2026, 3, 1)), Decimal("1798.65")),
-        # Post-trueup -- replayed.
-        PaymentRecord(PaymentDates(date(2026, 5, 1), monthly_due_date(date(2026, 5, 1), 1), date(2026, 5, 1)), Decimal("1798.65")),
-    ]
-
-    inputs = LoanInputs(
-        params,
-        [origination_anchor, trueup_anchor],
-        payments,
-        _rate_feed(params),
-    )
-
-    assert _replay_balance(inputs, date(2026, 6, 1)) == Decimal("249451.35")
-
-
-def test_payment_due_after_trueup_replays_though_pay_period_started_before():
-    """Regression: a payment keyed to a pay-period start before a mid-period
-    true-up still replays, because the boundary uses its real due date.
-
-    The production bug (mortgage account 3): a balance true-up entered
-    2026-05-22 ($177,829.83, the pre-payment statement balance) lands one
-    day after the biweekly pay period that begins 2026-05-21 and carries
-    the 2026-06-01 mortgage payment.  The PaymentRecord is keyed to the
-    pay-period START (05-21), so the old "payment_date > anchor_date"
-    boundary stranded it (05-21 is not after 05-22) -- the loan card froze
-    at the anchor and marking the payment paid never moved it.  Keyed to
-    its true monthly DUE date (payment_day=1 -> 06-01), it is correctly
-    after the anchor and replays.
-
-    Setup: $300k / 6% / 360mo, contractual P&I $1,798.65.  Two earlier
-    confirmed payments (keyed 03-26 -> due 04-01 and 04-23 -> due 05-01)
-    are already baked into the trued-up balance and stay excluded; only
-    the 06-01 payment replays:
-
-        anchor    = 177,829.83 (trueup, 2026-05-22)
-        i         = 177829.83 * 0.06/12 = 889.15 (889.14915 -> HALF_UP)
-        p         = 1798.65 - 889.15    = 909.50
-        balance   = 177829.83 - 909.50  = 176,920.33
-    """
-    params = FakeLoanParams(
-        origination_date=date(2020, 1, 1),
-        term_months=360,
-        original_principal=Decimal("300000.00"),
-        interest_rate=Decimal("0.06"),
-        payment_day=1,
-    )
-    origination_anchor = FakeAnchorEvent(
-        anchor_date=date(2020, 1, 1),
-        anchor_balance=Decimal("300000.00"),
-        created_at=datetime(2020, 1, 1, tzinfo=timezone.utc),
-    )
-    trueup_anchor = FakeAnchorEvent(
-        anchor_date=date(2026, 5, 22),
-        anchor_balance=Decimal("177829.83"),
-        created_at=datetime(2026, 5, 22, tzinfo=timezone.utc),
-    )
-    payments = [
-        # Already reflected in the trueup balance (due 04-01, 05-01).
-        PaymentRecord(PaymentDates(date(2026, 3, 26), monthly_due_date(date(2026, 3, 26), 1), date(2026, 3, 26)), Decimal("1798.65")),
-        PaymentRecord(PaymentDates(date(2026, 4, 23), monthly_due_date(date(2026, 4, 23), 1), date(2026, 4, 23)), Decimal("1798.65")),
-        # Keyed to its pay-period start 05-21; due 06-01, after the
-        # 05-22 trueup -- must replay.
-        PaymentRecord(PaymentDates(date(2026, 5, 21), monthly_due_date(date(2026, 5, 21), 1), date(2026, 5, 21)), Decimal("1798.65")),
-    ]
-
-    inputs = LoanInputs(
-        params,
-        [origination_anchor, trueup_anchor],
-        payments,
-        _rate_feed(params),
-    )
-
-    # The 06-01 payment reduced the balance; the card is NOT frozen at the
-    # anchor (the bug) and the two pre-trueup payments did not double-count.
-    replayed = _replay_balance(inputs, date(2026, 6, 2))
-    assert replayed == Decimal("176920.33")
-    assert replayed != trueup_anchor.anchor_balance
 
 
 # -- C13-7 -- rate change after window applied ------------------------------
@@ -669,10 +337,10 @@ def test_rate_change_after_window_applied():
 
     feed = _rate_feed(params, rate_changes)
     state_feb = resolve_loan(
-        LoanInputs(params, [anchor], None, feed), date(2031, 2, 1),
+        LoanInputs(params, [anchor], feed), date(2031, 2, 1),
     )
     state_later = resolve_loan(
-        LoanInputs(params, [anchor], None, feed), date(2033, 6, 1),
+        LoanInputs(params, [anchor], feed), date(2033, 6, 1),
     )
 
     # Period recast of the reduced month-60 balance at 7% (NOT the old
@@ -777,12 +445,16 @@ def test_zero_rate_loan_payment_is_principal_over_n():
     )
     anchor = _origination_anchor(params)
 
-    inputs = LoanInputs(params, [anchor], None, _rate_feed(params))
+    inputs = LoanInputs(params, [anchor], _rate_feed(params))
     state = resolve_loan(inputs, date(2026, 2, 1))
 
     assert state.monthly_payment == Decimal("1000.00")
-    # Balance unchanged with no confirmed payments.
-    assert _replay_balance(inputs, date(2026, 2, 1)) == Decimal("12000.00")
+    # The contract line's first row, Feb 1: no interest at 0%, so the whole
+    # 1,000.00 is principal, leaving 12,000.00 - 1,000.00 = 11,000.00.
+    first = state.schedule[0]
+    assert (first.interest, first.principal, first.remaining_balance) == (
+        Decimal("0.00"), Decimal("1000.00"), Decimal("11000.00"),
+    )
 
 
 # -- C13-11 -- payoff date and total_interest -------------------------------
@@ -849,7 +521,7 @@ def test_payoff_date_and_total_interest():
     anchor = _origination_anchor(params)
 
     state = resolve_loan(
-        LoanInputs(params, [anchor], None, _rate_feed(params)),
+        LoanInputs(params, [anchor], _rate_feed(params)),
         date(2026, 2, 1),
     )
 
@@ -880,7 +552,7 @@ def test_empty_anchor_events_raises_value_error():
     params = _arm_400k_params()
     with pytest.raises(ValueError, match="at least one anchor fact"):
         resolve_loan(
-            LoanInputs(params, [], None, _rate_feed(params)),
+            LoanInputs(params, [], _rate_feed(params)),
             date(2026, 6, 1),
         )
 
@@ -912,11 +584,16 @@ def test_latest_anchor_breaks_tie_by_created_at():
                    + timedelta(seconds=5),
     )
 
-    inputs = LoanInputs(params, [earlier, later], None, _rate_feed(params))
+    inputs = LoanInputs(params, [earlier, later], _rate_feed(params))
 
-    # Latest anchor's balance is returned (no confirmed payments
-    # to replay forward from it).
-    assert _replay_balance(inputs, date(2026, 7, 1)) == Decimal("275000.00")
+    # The later-created anchor governs, and the contract line (no view)
+    # seeds from its balance: Jul 1's interest is round(275000.00 x 0.005)
+    # = 1,375.00, where the earlier one's would be 1,400.00.
+    assert loan_resolver.select_latest_anchor(inputs.anchor_events) is later
+    first = compute_payoff_scenarios(loan_inputs=inputs).original_forward[0]
+    assert (first.payment_date, first.interest) == (
+        date(2026, 7, 1), Decimal("1375.00"),
+    )
 
 
 def test_loan_state_is_frozen():
@@ -930,7 +607,7 @@ def test_loan_state_is_frozen():
     params = _arm_400k_params()
     anchor = _origination_anchor(params)
     state = resolve_loan(
-        LoanInputs(params, [anchor], None, _rate_feed(params)),
+        LoanInputs(params, [anchor], _rate_feed(params)),
         date(2026, 6, 1),
     )
 
@@ -966,8 +643,7 @@ def test_arm_trueup_does_not_change_payment():
 
     # Resolve at two as_of dates past the trueup.
     inputs = LoanInputs(
-        params, [origination_anchor, trueup_anchor], None,
-        _rate_feed(params),
+        params, [origination_anchor, trueup_anchor], _rate_feed(params),
     )
     state_a = resolve_loan(inputs, date(2028, 6, 1))
     state_b = resolve_loan(inputs, date(2030, 6, 1))
@@ -975,8 +651,12 @@ def test_arm_trueup_does_not_change_payment():
     # Payment unchanged by the true-up: the origination-period level P&I.
     assert state_a.monthly_payment == Decimal("2398.20")
     assert state_a.monthly_payment == state_b.monthly_payment
-    # The true-up DID move the balance (no confirmed payments after it).
-    assert _replay_balance(inputs, date(2028, 6, 1)) == Decimal("380000.00")
+    # The true-up DID move the balance: the contract line (no view) seeds
+    # from it, so Feb 1 2028's interest is round(380000.00 x 0.005) = 1,900.00.
+    first = state_a.schedule[0]
+    assert (first.payment_date, first.interest) == (
+        date(2028, 2, 1), Decimal("1900.00"),
+    )
 
 
 def test_arm_second_period_uses_recorded_recast_held_constant():
@@ -1018,10 +698,10 @@ def test_arm_second_period_uses_recorded_recast_held_constant():
     # Two as_of dates inside the second period -> the recorded recast,
     # held constant (no month-to-month re-amortization).
     state_early = resolve_loan(
-        LoanInputs(params, [anchor], None, feed), date(2032, 6, 1),
+        LoanInputs(params, [anchor], feed), date(2032, 6, 1),
     )
     state_late = resolve_loan(
-        LoanInputs(params, [anchor], None, feed), date(2035, 6, 1),
+        LoanInputs(params, [anchor], feed), date(2035, 6, 1),
     )
     assert state_early.monthly_payment == Decimal("2500.00")
     assert state_early.monthly_payment == state_late.monthly_payment
@@ -1058,7 +738,7 @@ def test_arm_second_period_uses_recorded_recast_held_constant():
 
     # The origination period is unaffected: still the contractual P&I.
     state_p0 = resolve_loan(
-        LoanInputs(params, [anchor], None, feed), date(2028, 1, 1),
+        LoanInputs(params, [anchor], feed), date(2028, 1, 1),
     )
     assert state_p0.monthly_payment == Decimal("2398.20")
 
@@ -1093,7 +773,7 @@ def test_future_recorded_recast_notice_honored_in_schedule():
         ),
     ])
     state = resolve_loan(
-        LoanInputs(params, [anchor], None, feed), date(2030, 11, 15),
+        LoanInputs(params, [anchor], feed), date(2030, 11, 15),
     )
 
     # Card today: still the origination period's contractual P&I.
@@ -1146,7 +826,7 @@ def test_stale_anchor_derived_recast_schedule_matches_card():
         ),
     ])
     state = resolve_loan(
-        LoanInputs(params, [anchor], None, feed), date(2032, 6, 1),
+        LoanInputs(params, [anchor], feed), date(2032, 6, 1),
     )
 
     # Hand arithmetic: the derived second-period P&I amortizes the
@@ -1202,96 +882,6 @@ def test_no_generate_schedule_in_resolver():
     )
 
 
-# -- C6-9 / C6-10 -- is_confirmed flags on history vs forward rows ----------
-
-
-def test_history_rows_marked_confirmed():
-    """C6-9: schedule rows backing confirmed payments are is_confirmed=True.
-
-    Setup: $300k / 6% / 360 mo, three confirmed contractual payments
-    Feb-Apr 2026, ``as_of=2026-05-01``.  The composer's replay
-    consumes the three confirmed payments and emits three history
-    rows; the resolver's ``LoanState.schedule`` starts with those
-    three rows.  Every history row carries ``is_confirmed=True``
-    so a downstream caller can distinguish recorded history from
-    projection without re-tracing the row through the payment list.
-
-    This invariant is load-bearing for any future surface that
-    needs to render history differently from projection (e.g. a
-    "shade past months" treatment in the amortization tab) without
-    re-querying the payment store.
-    """
-    params = FakeLoanParams(
-        origination_date=date(2026, 1, 1),
-        term_months=360,
-        original_principal=Decimal("300000.00"),
-        interest_rate=Decimal("0.06"),
-        payment_day=1,
-    )
-    anchor = _origination_anchor(params)
-    payments = [
-        PaymentRecord(PaymentDates(date(2026, 2, 1), monthly_due_date(date(2026, 2, 1), 1), date(2026, 2, 1)), Decimal("1798.65")),
-        PaymentRecord(PaymentDates(date(2026, 3, 1), monthly_due_date(date(2026, 3, 1), 1), date(2026, 3, 1)), Decimal("1798.65")),
-        PaymentRecord(PaymentDates(date(2026, 4, 1), monthly_due_date(date(2026, 4, 1), 1), date(2026, 4, 1)), Decimal("1798.65")),
-    ]
-
-    state = resolve_loan(
-        LoanInputs(params, [anchor], payments, _rate_feed(params)),
-        date(2026, 5, 1),
-    )
-
-    # First three rows are the replayed confirmed payments.
-    assert len(state.schedule) >= 3
-    for idx, row in enumerate(state.schedule[:3]):
-        assert row.is_confirmed is True, (
-            f"history row {idx} ({row.payment_date}) is not "
-            f"flagged is_confirmed=True"
-        )
-
-
-def test_forward_rows_marked_unconfirmed():
-    """C6-10: schedule rows past as_of are is_confirmed=False.
-
-    Same setup as :func:`test_history_rows_marked_confirmed`.  The
-    fourth row onward comes from :func:`project_forward` (via the
-    composer's ``original_forward`` slice) and is unconfirmed by
-    construction -- projection rows are not facts about the
-    recorded past.
-
-    Together with C6-9 this pins the contract that
-    ``LoanState.schedule`` carries an authoritative confirmation
-    flag per row: callers can rely on ``is_confirmed`` to
-    distinguish historical fact from projection without re-deriving
-    the boundary from ``as_of``.
-    """
-    params = FakeLoanParams(
-        origination_date=date(2026, 1, 1),
-        term_months=360,
-        original_principal=Decimal("300000.00"),
-        interest_rate=Decimal("0.06"),
-        payment_day=1,
-    )
-    anchor = _origination_anchor(params)
-    payments = [
-        PaymentRecord(PaymentDates(date(2026, 2, 1), monthly_due_date(date(2026, 2, 1), 1), date(2026, 2, 1)), Decimal("1798.65")),
-        PaymentRecord(PaymentDates(date(2026, 3, 1), monthly_due_date(date(2026, 3, 1), 1), date(2026, 3, 1)), Decimal("1798.65")),
-        PaymentRecord(PaymentDates(date(2026, 4, 1), monthly_due_date(date(2026, 4, 1), 1), date(2026, 4, 1)), Decimal("1798.65")),
-    ]
-
-    state = resolve_loan(
-        LoanInputs(params, [anchor], payments, _rate_feed(params)),
-        date(2026, 5, 1),
-    )
-
-    # All rows past the three history rows are forward projections.
-    assert len(state.schedule) > 3
-    for idx, row in enumerate(state.schedule[3:], start=3):
-        assert row.is_confirmed is False, (
-            f"forward row {idx} ({row.payment_date}) is flagged "
-            f"is_confirmed=True; only history rows should be"
-        )
-
-
 # -- TestComputePayoffScenarios (Commit 3, C3-1..C3-15) ---------------------
 #
 # The composer is the load-bearing fix for the architectural defect
@@ -1331,194 +921,18 @@ def _fixed_rate_300k_params() -> FakeLoanParams:
     )
 
 
-def _four_contractual_payments_jan_to_apr_2026() -> list[PaymentRecord]:
-    """Four confirmed contractual payments on the first of Jan-Apr 2026.
-
-    Amount $1798.65 is the contractual P&I for
-    amortize($300k, 0.06, 360) -- hand-computed at C13-5 (existing
-    fixed-rate replay test) and used by the architectural plan's
-    regression scenario.
-    """
-    return [
-        PaymentRecord(PaymentDates(date(2026, 1, 1), monthly_due_date(date(2026, 1, 1), 1), date(2026, 1, 1)), Decimal("1798.65")),
-        PaymentRecord(PaymentDates(date(2026, 2, 1), monthly_due_date(date(2026, 2, 1), 1), date(2026, 2, 1)), Decimal("1798.65")),
-        PaymentRecord(PaymentDates(date(2026, 3, 1), monthly_due_date(date(2026, 3, 1), 1), date(2026, 3, 1)), Decimal("1798.65")),
-        PaymentRecord(PaymentDates(date(2026, 4, 1), monthly_due_date(date(2026, 4, 1), 1), date(2026, 4, 1)), Decimal("1798.65")),
-    ]
-
-
 class TestComputePayoffScenarios:
     """C3-1..C3-15: scenario composer in loan_resolver.
 
-    Pins the composer's invariants (history shared, forward slices
-    derive from one starting state, override months never carry
-    extra) plus the originally-reported-bug regression lock (C3-10)
-    and the temporal-gap property (C3-11) that generalizes it.
+    Pins the composer's two standing invariants: it takes no extra, no plan
+    and no evaluation date, and it is pure.  *Its history, starting-balance,
+    first-row-date, row-dating, temporal-gap and ARM-anchor tests (C3-1, C3-2,
+    C3-3, C3-5, C3-11, C3-14 and the due-date regression) graded the deleted
+    replay's rows and start, and went with it at plan step recurrence:R16-e
+    (ruling plan#3382): the view supplies the rows now (``test_confirmed_view``),
+    and the start is ``test_the_contract_line_start``'s.*
     """
 
-    AS_OF = date(2026, 5, 21)
-
-    def test_history_shared(self):
-        """C3-1: history_rows has one entry per confirmed payment <= as_of.
-
-        Four confirmed contractual payments Jan-Apr 2026 produce
-        exactly four history rows.  Replay does NOT fabricate
-        contractual rows for the 23 unrecorded months between
-        2024-02 and 2025-12 (this is the load-bearing distinction
-        between replay and projection); the row count equals the
-        confirmed-payment count, not the months-since-origination
-        count.
-        """
-        params = _fixed_rate_300k_params()
-        anchor = _origination_anchor(params)
-        scenarios = compute_payoff_scenarios(
-            loan_inputs=LoanInputs(
-                loan_params=params,
-                anchor_events=[anchor],
-                payments=_four_contractual_payments_jan_to_apr_2026(),
-                rate_changes=_rate_feed(params),
-            ),
-            as_of=self.AS_OF,
-        )
-        assert len(scenarios.history_rows) == 4
-        for row in scenarios.history_rows:
-            assert row.payment_date <= self.AS_OF
-            assert row.is_confirmed is True
-
-    def test_forward_starts_from_the_replay_balance(self):
-        """C3-2: the contractual forward's row 0 splits the replay's balance.
-
-        replay.balance_as_of after four $1798.65 payments is
-        $298,796.42 (verified at C13-5).  Hand arithmetic for row 0:
-            interest    = 298796.42 * 0.005 = 1493.98 (HALF_UP)
-            principal   = 1798.65 - 1493.98 = 304.67
-            balance     = 298796.42 - 304.67 = 298491.75
-        Until plan step R7d-g-3 this pinned the committed and accelerated
-        slices against the same row; those slices are the balance seam's fold
-        now (ruling R-R88).
-        """
-        params = _fixed_rate_300k_params()
-        anchor = _origination_anchor(params)
-        scenarios = compute_payoff_scenarios(
-            loan_inputs=LoanInputs(
-                loan_params=params,
-                anchor_events=[anchor],
-                payments=_four_contractual_payments_jan_to_apr_2026(),
-                rate_changes=_rate_feed(params),
-            ),
-            as_of=self.AS_OF,
-        )
-        original_row0 = scenarios.original_forward[0]
-        assert original_row0.interest == Decimal("1493.98")
-        assert original_row0.principal == Decimal("304.67")
-        assert original_row0.remaining_balance == Decimal("298491.75")
-        assert original_row0.extra_payment == Decimal("0.00")
-
-    def test_forward_first_row_date_matches_next_pay_date(self):
-        """C3-3: the contractual forward starts at replay.next_pay_date.
-
-        Last replayed payment is 2026-04-01, so projection picks up
-        at 2026-05-01.
-        """
-        params = _fixed_rate_300k_params()
-        anchor = _origination_anchor(params)
-        scenarios = compute_payoff_scenarios(
-            loan_inputs=LoanInputs(
-                loan_params=params,
-                anchor_events=[anchor],
-                payments=_four_contractual_payments_jan_to_apr_2026(),
-                rate_changes=_rate_feed(params),
-            ),
-            as_of=self.AS_OF,
-        )
-        assert scenarios.original_forward[0].payment_date == date(2026, 5, 1)
-
-    def test_schedule_rows_dated_by_monthly_due_date(self):
-        """Schedule rows show the true monthly due date, not the pay-period start.
-
-        Regression for the user-reported display bug (mortgage account 3):
-        a confirmed payment keyed to its biweekly pay-period START
-        (2026-05-21) was printed on the schedule as "May 21" and the
-        projection then began one month early (the next Projected row read
-        "Jun 1" when the borrower's next payment is Jul 1).  The schedule
-        now dates each row by the true monthly DUE date: the confirmed
-        payment shows Jun 1 (its real statement date) and the first
-        projected row shows Jul 1 (the following month).
-
-        A user_trueup anchor on 2026-05-22 makes only the 2026-05-21 pay
-        period (due 2026-06-01) post-anchor; the 2026-06-18 pay period
-        (due 2026-07-01) is a Projected forward payment.  Both pay-period
-        starts precede their monthly due dates, so the old pay-period-start
-        dating mislabeled both rows.
-        """
-        params = _fixed_rate_300k_params()
-        anchors = [
-            _origination_anchor(params),
-            FakeAnchorEvent(
-                anchor_date=date(2026, 5, 22),
-                anchor_balance=Decimal("200000.00"),
-                created_at=datetime(2026, 5, 22, tzinfo=timezone.utc),
-            ),
-        ]
-        payments = [
-            # Confirmed, keyed to its pay-period start 2026-05-21; due 06-01.
-            PaymentRecord(PaymentDates(date(2026, 5, 21), monthly_due_date(date(2026, 5, 21), 1), date(2026, 5, 21)), Decimal("1798.65")),
-            # Projected, keyed to pay-period start 2026-06-18; due 07-01.
-            PaymentRecord(PaymentDates(date(2026, 6, 18), monthly_due_date(date(2026, 6, 18), 1), None), Decimal("1798.65")),
-        ]
-        scenarios = compute_payoff_scenarios(
-            loan_inputs=LoanInputs(
-                loan_params=params,
-                anchor_events=anchors,
-                payments=payments,
-                rate_changes=_rate_feed(params),
-            ),
-            as_of=date(2026, 6, 2),
-        )
-        # Confirmed history row carries the true due date (06-01), not the
-        # pay-period start (05-21) it was keyed to.
-        assert len(scenarios.history_rows) == 1
-        assert scenarios.history_rows[0].is_confirmed is True
-        assert scenarios.history_rows[0].payment_date == date(2026, 6, 1)
-        # The projection picks up the FOLLOWING month (07-01), not 06-01.
-        assert scenarios.original_forward[0].is_confirmed is False
-        assert scenarios.original_forward[0].payment_date == date(2026, 7, 1)
-
-    def test_original_ignores_projections(self):
-        """C3-5: original_forward uses contractual every row, no extras.
-
-        One projected $2000 payment in June 2026 in the feed: every
-        original_forward row uses the contractual $1798.65 P&I and
-        ``extra_payment == 0``.  The original line is "what the
-        lender would amortize" with NO planning data and NO
-        acceleration.  The final row absorbs any sub-penny residue
-        and may report a slightly different payment amount (engine's
-        ``is_final`` branch); that row is excluded from the pointwise
-        contractual assertion below.
-        """
-        params = _fixed_rate_300k_params()
-        anchor = _origination_anchor(params)
-        payments = _four_contractual_payments_jan_to_apr_2026() + [
-            PaymentRecord(PaymentDates(date(2026, 6, 1), monthly_due_date(date(2026, 6, 1), 1), None), Decimal("2000.00")),
-        ]
-        scenarios = compute_payoff_scenarios(
-            loan_inputs=LoanInputs(
-                loan_params=params,
-                anchor_events=[anchor],
-                payments=payments,
-                rate_changes=_rate_feed(params),
-            ),
-            as_of=self.AS_OF,
-        )
-        # All but the final row use the exact contractual payment;
-        # the engine's final-row branch absorbs the balance residue
-        # and may have a sub-cent difference.
-        for row in scenarios.original_forward[:-1]:
-            assert row.payment == Decimal("1798.65")
-            assert row.extra_payment == Decimal("0.00")
-        # The final row also carries no extra (extra is forward-only
-        # and original has no extras by construction).
-        assert scenarios.original_forward[-1].extra_payment == Decimal("0.00")
 
     def test_the_composer_takes_no_extra_and_no_plan(self):
         """R7d-g-3: the composer walks the contract; the fold walks the plan.
@@ -1529,31 +943,25 @@ class TestComputePayoffScenarios:
         composer adding one again paid it twice on every row-covered month)
         and the lever's ``extra_monthly`` beside a ``monthly_override`` of the
         projected rows (ruling **R-R88** deleted both: the balance seam's plan
-        fold is the one walk of what a loan is projected to pay).  Three
-        pins: neither keyword exists, so a re-threading cannot land silently;
-        and the forward it does compose is the CONTRACT -- extra-free rows,
-        every one at the contractual P&I, whatever the feed's projected rows
-        say.
+        fold is the one walk of what a loan is projected to pay).  Four
+        pins: none of the three keywords exists -- ``as_of`` went with the
+        replay it bounded at plan step recurrence:R16-e -- so a re-threading
+        cannot land silently; and the forward it does compose is the CONTRACT,
+        extra-free rows, every one at the contractual P&I.
         """
         params = _fixed_rate_300k_params()
         anchor = _origination_anchor(params)
         inputs = LoanInputs(
             loan_params=params,
             anchor_events=[anchor],
-            payments=_four_contractual_payments_jan_to_apr_2026() + [
-                PaymentRecord(PaymentDates(date(2026, 6, 1), monthly_due_date(date(2026, 6, 1), 1), None), Decimal("2000.00")),
-            ],
             rate_changes=_rate_feed(params),
         )
-        for gone in ("extra_principal", "extra_monthly"):
+        for gone in ("extra_principal", "extra_monthly", "as_of"):
             with pytest.raises(TypeError, match=gone):
                 compute_payoff_scenarios(
-                    loan_inputs=inputs, as_of=self.AS_OF,
-                    **{gone: Decimal("500.00")},
+                    loan_inputs=inputs, **{gone: Decimal("500.00")},
                 )
-        scenarios = compute_payoff_scenarios(
-            loan_inputs=inputs, as_of=self.AS_OF,
-        )
+        scenarios = compute_payoff_scenarios(loan_inputs=inputs)
         june = next(
             row for row in scenarios.original_forward
             if row.payment_date == date(2026, 6, 1)
@@ -1561,57 +969,6 @@ class TestComputePayoffScenarios:
         assert june.payment == Decimal("1798.65")
         for row in scenarios.original_forward:
             assert row.extra_payment == Decimal("0.00")
-
-    def test_temporal_gap_property(self):
-        """C3-11: history row count tracks confirmed-payment count, not gap.
-
-        Parameterized origination dates create gaps of 12, 24, and
-        36 months before the first confirmed payment.  The same four
-        confirmed payments always produce four history rows
-        regardless of gap -- replay does not fabricate.  This
-        generalizes C3-10's load-bearing assertion to arbitrary
-        origination-to-first-confirmed gaps.
-
-        The architectural plan calls this property out at lines
-        467-469 (architectural plan path):
-        "any scenario that does not include a multi-month gap
-        between origination and the first confirmed payment cannot
-        distinguish the buggy and fixed implementations."  This test
-        is the gap-class regression lock.
-        """
-        for gap_months in (12, 24, 36):
-            # First confirmed payment fixed at 2026-01-01; vary
-            # origination to create the requested gap.
-            origination = add_months(
-                date(2026, 1, 1), -gap_months,
-            )
-            params = FakeLoanParams(
-                origination_date=origination,
-                term_months=360,
-                original_principal=Decimal("300000.00"),
-                interest_rate=Decimal("0.06"),
-                payment_day=1,
-            )
-            anchor = _origination_anchor(params)
-            payments = _four_contractual_payments_jan_to_apr_2026()
-            scenarios = compute_payoff_scenarios(
-                loan_inputs=LoanInputs(
-                    loan_params=params,
-                    anchor_events=[anchor],
-                    payments=payments,
-                    rate_changes=_rate_feed(params),
-                ),
-                as_of=self.AS_OF,
-            )
-            assert len(scenarios.history_rows) == 4, (
-                f"gap_months={gap_months}: expected 4 history rows "
-                f"(one per confirmed payment), got "
-                f"{len(scenarios.history_rows)}"
-            )
-            # All history rows must fall in the confirmed window;
-            # none in the 2024-2025 gap.
-            for row in scenarios.history_rows:
-                assert row.payment_date >= date(2026, 1, 1)
 
     def test_composer_is_pure(self):
         """C3-12: compute_payoff_scenarios source has no Flask / db references.
@@ -1643,90 +1000,18 @@ class TestComputePayoffScenarios:
                 f"executable code; the composer must remain pure."
             )
 
-    def test_arm_anchor_preserved(self):
-        """C3-14: ARM anchor snaps replay's balance to the verified value.
-
-        ARM 5/5 originated 2024-01-01, $400k/6%/360mo.  Trueup
-        anchor at 2025-12-15 with anchor_balance=$250,000 -- well
-        inside the 60-month fixed window
-        ``[2024-01-01, 2029-01-01)``.  Two confirmed payments after
-        the trueup (2026-01-01, 2026-02-01) at the in-window
-        contractual P&I of $2398.20 (Symptom #4 worked example).
-
-        Replay's first post-snap row reflects the verified balance
-        rather than the from-origination projection.  Hand
-        arithmetic for the first replayed row (Jan 2026, post-snap):
-
-            balance(at trueup snap) = 250000.00
-            interest                = 250000.00 * 0.005 = 1250.00
-            principal               = 2398.20 - 1250.00 = 1148.20
-            balance(end of Jan)     = 250000 - 1148.20 = 248851.80
-        """
-        params = FakeLoanParams(
-            origination_date=date(2024, 1, 1),
-            term_months=360,
-            original_principal=Decimal("400000.00"),
-            interest_rate=Decimal("0.06"),
-            payment_day=1,
-            is_arm=True,
-            arm_first_adjustment_months=60,
-        )
-        anchor_origin = FakeAnchorEvent(
-            anchor_date=date(2024, 1, 1),
-            anchor_balance=Decimal("400000.00"),
-            created_at=datetime(2024, 1, 1, tzinfo=timezone.utc),
-        )
-        anchor_trueup = FakeAnchorEvent(
-            anchor_date=date(2025, 12, 15),
-            anchor_balance=Decimal("250000.00"),
-            created_at=datetime(2025, 12, 15, tzinfo=timezone.utc),
-        )
-        payments = [
-            PaymentRecord(PaymentDates(date(2026, 1, 1), monthly_due_date(date(2026, 1, 1), 1), date(2026, 1, 1)), Decimal("2398.20")),
-            PaymentRecord(PaymentDates(date(2026, 2, 1), monthly_due_date(date(2026, 2, 1), 1), date(2026, 2, 1)), Decimal("2398.20")),
-        ]
-        scenarios = compute_payoff_scenarios(
-            loan_inputs=LoanInputs(
-                loan_params=params,
-                anchor_events=[anchor_origin, anchor_trueup],
-                payments=payments,
-                rate_changes=_rate_feed(params),
-            ),
-            as_of=date(2026, 3, 1),
-        )
-        # Two post-trueup history rows; the first reflects the snap
-        # to $250,000.
-        assert len(scenarios.history_rows) == 2
-        assert (
-            scenarios.history_rows[0].payment_date == date(2026, 1, 1)
-        )
-        assert (
-            scenarios.history_rows[0].remaining_balance
-            == Decimal("248851.80")
-        )
-        # Second post-trueup row continues from the snap:
-        #     interest    = 248851.80 * 0.005 = 1244.26 (HALF_UP)
-        #     principal   = 2398.20 - 1244.26 = 1153.94
-        #     balance     = 248851.80 - 1153.94 = 247697.86
-        assert (
-            scenarios.history_rows[1].payment_date == date(2026, 2, 1)
-        )
-        assert (
-            scenarios.history_rows[1].remaining_balance
-            == Decimal("247697.86")
-        )
-
 class TestConfirmedLedgerView:
     """The read-switch seam: ``confirmed_view`` (the ConfirmedLedgerView bundle).
 
     The one bundle the loan read switch threads into the resolver so a loan's
     displayed balance, its confirmed schedule rows, and every figure projected
-    from them come from the genesis ledger, not the schedule replay.
-    Supplying it overrides the headline ``current_balance``, the forward
-    projection's starting balance, AND the schedule's confirmed slice (one
-    bundle, threaded once), so the card, the table, and the chart cannot
-    desync off-schedule; omitting it (``None``) leaves the resolver on its
-    anchor replay, unchanged.  These pin the seam directly at
+    from them come from the genesis ledger.  Supplying it overrides the
+    forward projection's starting balance and start, AND the schedule's
+    confirmed slice (one bundle, threaded once), so the card, the table, and
+    the chart cannot desync off-schedule; omitting it (``None``) seeds the
+    resolver from the loan's latest assertion with no history (the anchor
+    replay it fell back to went at plan step recurrence:R16-e).  These pin the
+    seam directly at
     ``resolve_loan``, ``compute_payoff_scenarios``, and
     ``target_date_outlook`` -- the three entry points the loaders and the
     loan-detail chart / payoff calculators wire.  The fixtures carry no
@@ -1738,8 +1023,14 @@ class TestConfirmedLedgerView:
     SEED = Decimal("290000.00")
 
     def _view(self):
-        """The payment-less ledger view: the seed balance, no history rows."""
-        return ConfirmedLedgerView(balance=self.SEED, history_rows=[])
+        """The payment-less ledger view: the seed balance, no history rows.
+
+        Its last event is the loan's opening on ``AS_OF``, the origination,
+        so the line starts at the first installment, Feb 1 2026.
+        """
+        return ConfirmedLedgerView(
+            balance=self.SEED, history_rows=[], last_recorded_on=self.AS_OF,
+        )
 
     def _fixed_300k(self):
         """$300k / 6% / 360mo from 2026-01-01, origination anchor, no payments."""
@@ -1755,7 +1046,7 @@ class TestConfirmedLedgerView:
     def test_resolve_loan_seed_overrides_the_projection_not_the_payment(self):
         """A seed overrides the forward projection's start, not the payment.
 
-        The origination anchor puts the un-seeded replay at the full $300,000.
+        The origination anchor puts the un-seeded line at the full $300,000.
         Seeding $290,000 (a $10,000 lower confirmed balance, as an off-schedule
         paydown would leave) makes the forward projection amortize the seed: at
         $1,798.65 contractual P&I and 0.5% monthly interest the first projected
@@ -1769,7 +1060,7 @@ class TestConfirmedLedgerView:
         the loan's recorded events.)
         """
         params, anchor = self._fixed_300k()
-        loan_inputs = LoanInputs(params, [anchor], None, _rate_feed(params))
+        loan_inputs = LoanInputs(params, [anchor], _rate_feed(params))
 
         seeded = resolve_loan(
             loan_inputs, self.AS_OF, confirmed_view=self._view(),
@@ -1791,7 +1082,7 @@ class TestConfirmedLedgerView:
         )
 
     def test_compute_payoff_scenarios_seeds_the_forward_slice(self):
-        """The composer's contractual forward starts from the seed, not the replay.
+        """The composer's contractual forward starts from the seed, not the anchor.
 
         The direct-call path the loan-detail chart's x-axis and the lever's
         contract reference wire (they bypass ``resolve_loan``).  With the
@@ -1800,13 +1091,11 @@ class TestConfirmedLedgerView:
         less.
         """
         params, anchor = self._fixed_300k()
-        loan_inputs = LoanInputs(params, [anchor], None, _rate_feed(params))
+        loan_inputs = LoanInputs(params, [anchor], _rate_feed(params))
         seeded = compute_payoff_scenarios(
-            loan_inputs=loan_inputs, as_of=self.AS_OF, confirmed_view=self._view(),
+            loan_inputs=loan_inputs, confirmed_view=self._view(),
         )
-        unseeded = compute_payoff_scenarios(
-            loan_inputs=loan_inputs, as_of=self.AS_OF,
-        )
+        unseeded = compute_payoff_scenarios(loan_inputs=loan_inputs)
         assert seeded.original_forward[0].remaining_balance == Decimal(
             "289651.35"
         )
@@ -1834,54 +1123,27 @@ class TestConfirmedLedgerView:
 class TestTheReplayProjectionCutIsTheSettledDay:
     """Plan step **X-an** / finding **N-187**: one cut, on the day cash moved.
 
-    The resolver's replay takes what has happened on ONE predicate --
-    ``_replay_from_anchor`` reads ``has_settled_by`` -- and what has not is the
-    balance seam's plan's (since plan step R7d-g-3, ruling **R-R88**; until
-    then the composer's own ``_build_monthly_override`` planned it, and both
-    halves of this class were the composer's).  (A settled payment CAN be in
-    neither the replay nor the plan;
-    ``test_a_payment_an_anchor_subsumes_is_in_neither_half`` below is the
-    counter-example, and "exact complements" is what this deliberately is
-    not.)  Until X-an both sides asked whether the payment's PAY PERIOD had
-    begun, while the posted ledger that seeds the projection counted the same
-    payment from the day its cash moved (``loan_ledger.payment_visible_on``).
-    The two dates differ in both directions, and both failures move a figure the
-    developer reads:
+    Until X-an the resolver asked whether a payment's PAY PERIOD had begun,
+    while the posted ledger that seeds the projection counted the same payment
+    from the day its cash moved (``loan_ledger.payment_visible_on``).  A
+    payment settled EARLY -- before the paycheck period funding it opens --
+    was already in the ledger's balance and was planned again, so the forward
+    chart paid it twice: measured on a $300,000 / 6% / 360-month loan whose
+    2026-08-01 installment is funded by the pay period opening 2026-07-31 and
+    whose cash left 2026-07-30, read on 2026-07-30 the projected balance was
+    $310.81 low the following month, growing to $1,789.69 at the tail.
 
-    * settled EARLY (before the paycheck period funding it opens): the ledger
-      had already paid the installment down and the resolver planned it again,
-      so the forward chart paid it twice;
-    * settled AFTER an evaluation date its period already covers (an ordinary
-      state for a read of a PAST date): history to the resolver, not to the
-      ledger, so it fell out of both the balance and the plan.
-
-    Measured on a $300,000 / 6% / 360-month loan whose 2026-08-01 installment is
-    funded by the pay period opening 2026-07-31 and whose cash left 2026-07-30:
-    read on 2026-07-30 the projected balance was $310.81 low the following
-    month, growing to $1,789.69 at the tail of the schedule.
-
-    **The end-to-end test does not grade the cut on its own, and the
-    partition test is not redundant with it.**  A replay a day off the
-    predicate still opens its forward slice in September on this fixture, so
-    the end-to-end test stays green;
-    ``test_the_replay_takes_exactly_the_settled_by_set`` is what fails there,
-    and it does so by reading the predicate directly.
+    **Since plan step recurrence:R16-e the cut has ONE home** (ruling
+    plan#3382): the walk the confirmed view folds holds the payments visible
+    by the pass's date, and the view carries the record's last event, here the
+    August installment's own due date; the contract line starts at the
+    installment after it.  The replay's own half of the cut, and the partition
+    tests that graded it against ``has_settled_by``, went with the replay.
+    These two pin what the reader sees: the line opens in September, from the
+    balance seven installments leave.
     """
 
     PI = Decimal("1798.65")
-    PAY_PERIOD_STARTS = {
-        2: date(2026, 1, 23), 3: date(2026, 2, 20), 4: date(2026, 3, 20),
-        5: date(2026, 4, 17), 6: date(2026, 5, 15), 7: date(2026, 6, 26),
-        8: date(2026, 7, 31),
-    }
-    #: The August installment's cash left on 07-30, the day BEFORE the pay
-    #: period funding it opens.  Every other one settled on its own due date.
-    SETTLED_ON = {
-        2: date(2026, 2, 1), 3: date(2026, 3, 1), 4: date(2026, 4, 1),
-        5: date(2026, 5, 1), 6: date(2026, 6, 1), 7: date(2026, 7, 1),
-        8: date(2026, 7, 30),
-    }
-    AS_OF = date(2026, 7, 30)
 
     def _params(self):
         """$300k / 6% / 360mo from 2026-01-01, due on the 1st."""
@@ -1893,51 +1155,40 @@ class TestTheReplayProjectionCutIsTheSettledDay:
             payment_day=1,
         )
 
-    def _payments(self, through_month: int = 8):
-        """The Feb..*through_month* installments, all settled."""
-        return [
-            PaymentRecord(
-                PaymentDates(
-                    period_start=self.PAY_PERIOD_STARTS[month],
-                    due_date=date(2026, month, 1),
-                    settled_on=self.SETTLED_ON[month],
-                ),
-                amount=self.PI,
-            )
-            for month in range(2, through_month + 1)
-        ]
-
     def _ledger_view(self, payments_counted: int):
-        """The balance a sum-of-postings ledger reports after N payments.
+        """The view a walk reports after the Feb.. installments, N of them.
 
         Walked by hand at the loan's single rate period: each installment
         accrues ``balance * 0.06 / 12`` and pays ``1798.65 - interest`` of
         principal.  This is what the fold answers on 2026-07-30, where all
-        SEVEN payments have settled -- the August one that very day.
+        SEVEN payments have settled -- the August one that very day -- and
+        the last of them is due on the first of month ``1 + N``.
         """
         balance = Decimal("300000.00")
         for _ in range(payments_counted):
             interest = round_money(balance * Decimal("0.06") / Decimal("12"))
             balance = round_money(balance - (self.PI - interest))
-        return ConfirmedLedgerView(balance=balance, history_rows=[])
+        return ConfirmedLedgerView(
+            balance=balance, history_rows=[],
+            last_recorded_on=date(2026, 1 + payments_counted, 1),
+        )
 
     def test_an_early_settled_payment_is_not_planned_again(self):
         """The August installment is history, so the plan starts in September.
 
         Its cash moved 2026-07-30 and the read is as of that day, so the ledger
-        seed already contains it.  The forward slice must therefore open at the
-        SEPTEMBER installment.  Reading the pay period instead (07-31, still
-        ahead of the read) left it in ``monthly_override``, so the committed
-        slice opened at 2026-08-01 and paid the installment a second time on a
-        balance that already reflected it.
+        seed already contains it, and the view's last event is its Aug 1 due
+        date.  The forward slice must therefore open at the SEPTEMBER
+        installment.  Reading the pay period instead (07-31, still ahead of the
+        read) left it in ``monthly_override``, so the committed slice opened at
+        2026-08-01 and paid the installment a second time on a balance that
+        already reflected it.
         """
         params = self._params()
         scenarios = compute_payoff_scenarios(
             loan_inputs=LoanInputs(
-                params, [_origination_anchor(params)],
-                self._payments(), _rate_feed(params),
+                params, [_origination_anchor(params)], _rate_feed(params),
             ),
-            as_of=self.AS_OF,
             confirmed_view=self._ledger_view(7),
         )
         assert scenarios.original_forward[0].payment_date == date(2026, 9, 1)
@@ -1959,10 +1210,8 @@ class TestTheReplayProjectionCutIsTheSettledDay:
 
         scenarios = compute_payoff_scenarios(
             loan_inputs=LoanInputs(
-                params, [_origination_anchor(params)],
-                self._payments(), _rate_feed(params),
+                params, [_origination_anchor(params)], _rate_feed(params),
             ),
-            as_of=self.AS_OF,
             confirmed_view=view,
         )
         by_month = {
@@ -1973,95 +1222,3 @@ class TestTheReplayProjectionCutIsTheSettledDay:
         assert (2026, 8) not in by_month
         assert by_month[(2026, 9)] == Decimal("297568.58")
         assert by_month[(2026, 10)] == Decimal("297257.77")
-
-    def _partition(self, as_of: date, anchors: list | None = None):
-        """Return ``(replayed_months, settled_by_months)``.
-
-        The replay's half of the cut, read off the call site, and the
-        predicate's own answer, so the assertions below compare what the code
-        does against what the rule says rather than against a second
-        hand-maintained expectation.  Until plan step R7d-g-3 this returned
-        the composer's PLANNED half too (``_build_monthly_override``, the
-        complement); that half is the balance seam's plan now (ruling
-        **R-R88**), and its clamp is graded where it lives
-        (``test_loan_plan_assembly``).
-        """
-        params = self._params()
-        payments = self._payments()
-        periods = resolve_periods(params, _rate_feed(params))
-        anchor_events = (
-            [_origination_anchor(params)] if anchors is None else anchors
-        )
-        replayed = _replay_from_anchor(
-            anchor_events=anchor_events,
-            periods=periods,
-            payments=[payment.dates for payment in payments],
-            payment_day=params.payment_day,
-            as_of=as_of,
-        ).rows
-        replayed_months = {
-            (row.payment_date.year, row.payment_date.month)
-            for row in replayed
-        }
-        settled_by_months = {
-            (p.dates.due_date.year, p.dates.due_date.month)
-            for p in payments
-            if has_settled_by(p.dates.settled_on, as_of)
-        }
-        assert len(replayed_months) == len(replayed), (
-            "the replay produced two rows in one month, which the "
-            "biweekly redistribution exists to prevent"
-        )
-        return replayed_months, settled_by_months
-
-    @pytest.mark.parametrize("as_of_day", list(range(25, 32)))
-    def test_the_replay_takes_exactly_the_settled_by_set(self, as_of_day):
-        """The replay's half IS the predicate's answer, on every day.
-
-        ``has_settled_by`` is the WHOLE split: what it answers ``True`` for
-        is a replay candidate, and what it answers ``False`` for is the
-        balance seam's plan's (ruling R-R88).  Graded against the predicate
-        directly, so the call site cannot drift from the rule without this
-        failing.  Swept across 2026-07-25..07-31, which brackets both the
-        August installment's settle day (07-30) and the pay period that used
-        to decide it (07-31), so the sweep crosses the seam whichever rule is
-        in force.  On this fixture (one origination anchor, no payoff) every
-        candidate does replay;
-        :meth:`test_a_payment_an_anchor_subsumes_is_in_neither_half` is the
-        case where it does NOT.
-        """
-        replayed, settled_by = self._partition(date(2026, 7, as_of_day))
-        assert replayed == settled_by
-
-    def test_a_payment_an_anchor_subsumes_is_in_neither_half(self):
-        """The case the single-anchor fixture cannot ask about, stated as a rule.
-
-        A true-up asserts the balance owed on its own date, so every installment
-        due at or before it is ALREADY inside that figure.  The replay drops
-        those (``anchor_date < due_date``), and the plan must NOT take them back
-        -- planning an installment the anchor already contains would pay it
-        twice, the same defect from the other side.
-
-        So "exact complements" is false as an unqualified claim, and this is the
-        counter-example: with a true-up dated 2026-06-15, the February..June
-        installments are in neither the replay nor the plan.  What IS invariant
-        is what the test above grades -- the replay is the settled-by set minus
-        what the anchor (or a payoff) already accounts for.
-        """
-        params = self._params()
-        trueup = FakeAnchorEvent(
-            anchor_date=date(2026, 6, 15),
-            anchor_balance=Decimal("297900.00"),
-            created_at=datetime(2026, 6, 15, tzinfo=timezone.utc),
-        )
-        replayed, settled_by = self._partition(
-            self.AS_OF, anchors=[_origination_anchor(params), trueup],
-        )
-        subsumed = {(2026, month) for month in range(2, 7)}
-
-        assert subsumed & settled_by == subsumed, (
-            "pre-condition: all five installments HAD settled by the read"
-        )
-        assert subsumed.isdisjoint(replayed)
-        # Only the July and August installments survive the anchor bound.
-        assert replayed == {(2026, 7), (2026, 8)}

@@ -323,7 +323,9 @@ def resolve_loan_bundle(
       a cold posting cache no longer drops a loan back to the money-blind anchor
       replay (finding B-12).  When the view cannot answer (``None`` -- no
       baseline scenario, or a loan that has not originated by ``ctx.as_of``) the
-      composer falls back to that replay, the pre-switch behaviour.  The loan's
+      composer seeds the contract from the loan's latest assertion, with no
+      history rows (the replay it fell back to went at plan step
+      recurrence:R16-e).  The loan's
       displayed BALANCE is not derived here at all (plan step D2a): the seam folds
       it from the same recorded events.
     * **The loan's DEFINITIONS**, loaded ONCE here: every active recurring
@@ -390,9 +392,7 @@ def resolve_loan_bundle(
         account.id, account.user_id,
     )
     state = loan_resolver.resolve_loan(
-        loan_resolver.LoanInputs(
-            params, anchor_facts, context.payments, context.rate_changes,
-        ),
+        loan_resolver.LoanInputs(params, anchor_facts, context.rate_changes),
         ctx.as_of,
         confirmed_view=confirmed_view(account, ctx),
     )
@@ -539,14 +539,15 @@ def contractual_schedule_from_origination(
 
     Forks NO amortization math: it seeds
     :func:`loan_resolver.compute_payoff_scenarios` with a synthesized ORIGINATION
-    anchor (:func:`loan_loaders.synthesize_origination_anchor`) and an empty
-    payment feed, evaluated as of ``origination_date``, and returns its
-    ``original_forward`` -- the pure contractual reference (no override, no
-    extra).  Seeding through the composer inherits the resolver's EXACT
-    first-payment-date and remaining-term convention (``next_pay_date`` one month
-    after origination on ``payment_day``, the full ``term_months`` remaining), so
-    the back-projection lands on the same monthly grid as the resolved schedule
-    and the two cannot drift at the seam.
+    anchor (:func:`loan_loaders.synthesize_origination_anchor`) and no confirmed
+    view, and returns its ``original_forward`` -- the pure contractual reference
+    (no override, no extra).  Seeding through the composer inherits the
+    resolver's EXACT first-payment-date and remaining-term convention (the first
+    installment after the anchor, which for the origination is
+    :func:`~app.services.installment_calendar.first_installment_date`, with the
+    full ``term_months`` remaining), so the back-projection lands on the same
+    monthly grid as the resolved schedule and the two cannot drift at the
+    seam.
 
     Pure: takes loaded data (the caller supplies ``rate_changes`` via
     :func:`loan_loaders.load_rate_changes`); performs no I/O.
@@ -570,10 +571,8 @@ def contractual_schedule_from_origination(
         loan_inputs=loan_resolver.LoanInputs(
             loan_params,
             [synthesize_origination_anchor(loan_params)],
-            None,
             rate_changes,
         ),
-        as_of=loan_params.origination_date,
         confirmed_view=None,
     )
     return list(scenarios.original_forward)

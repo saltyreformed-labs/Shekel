@@ -531,12 +531,38 @@ class LoanReplay:
     resets: list[ResetOutcome]
 
 
+def latest_recorded_on(stream: LoanEventStream) -> date | None:
+    """Return the date of *stream*'s latest RECORDED fact, or ``None`` when it records none.
+
+    The loan record's LAST EVENT: its last settled payment or its last
+    assertion, in contract time -- a payment's own due date
+    (:attr:`LoanCashEvent.on_date`), an assertion's own date.  Charges and
+    projections are not records of anything having happened, so neither moves
+    it.  Two readers ask it, and this is its one statement: the day after it
+    is where projections may walk (:func:`projection_boundary`), and the
+    installment after it is where the contract's remaining installments begin
+    (the confirmed view's ``last_recorded_on``,
+    :func:`app.services.balance_at.confirmed_view`; ruling plan#3382).
+
+    Args:
+        stream: The loan's :class:`LoanEventStream`.
+
+    Returns:
+        The latest recorded ``on_date``, or ``None`` for a stream with no
+        recorded fact.
+    """
+    return max(
+        (event.on_date for event in (*stream.payments, *stream.resets)),
+        default=None,
+    )
+
+
 def projection_boundary(stream: LoanEventStream) -> date | None:
     """Return the first day on which *stream*'s projections may be walked.
 
-    The day after the loan's latest RECORDED fact -- its last settled payment
-    or its last assertion, in contract time -- or ``None`` when the stream
-    records nothing.  A projection whose own date is earlier is keyed here
+    The day after the loan's latest RECORDED fact
+    (:func:`latest_recorded_on`), or ``None`` when the stream records
+    nothing.  A projection whose own date is earlier is keyed here
     instead (:func:`_ordered`), so no projection is ever replayed ahead of a
     fact, and the ``extra_per_period`` what-if accrues only at charges on or
     after it (:func:`replay_loan_events`).  Charges do not move it: a charge is
@@ -551,10 +577,7 @@ def projection_boundary(stream: LoanEventStream) -> date | None:
     Returns:
         The boundary ``date``, or ``None`` for a stream with no recorded fact.
     """
-    latest = max(
-        (event.on_date for event in (*stream.payments, *stream.resets)),
-        default=None,
-    )
+    latest = latest_recorded_on(stream)
     return None if latest is None else latest + _ONE_DAY
 
 

@@ -217,13 +217,14 @@ def accrue_monthly_interest(balance: Decimal, annual_rate: Decimal) -> Decimal:
 
     The single monthly-accrual primitive every amortization surface shares:
     ``round_money(balance * (annual_rate / 12))`` with a zero-rate guard.  The
-    historical replay (``rate_period_engine._replay_payment_row``), the forward
-    projection (``amortization_engine`` schedule), the contractual balance walk
+    forward projection (``amortization_engine`` schedule), the contractual balance walk
     (``rate_period_engine._amortize_forward``), and the posting-ledger loan-payment
     split (``loan_posting_service``) ALL call this one function, so the interest
     they accrue is byte-identical by construction -- a drifting copy of the
     formula can no longer desynchronise a displayed loan balance from a posted
-    one (the whole premise of the parallel-run posting ledger).  ``ROUND_HALF_UP``
+    one (the whole premise of the parallel-run posting ledger).  *The historical
+    replay (``rate_period_engine._replay_payment_row``) called it too, until
+    plan step recurrence:R16-e deleted that replay.*  ``ROUND_HALF_UP``
     via :func:`round_money` is the project's only rounding boundary; the
     intermediate ``balance * (annual_rate / 12)`` stays at full Decimal precision
     and rounds exactly once.

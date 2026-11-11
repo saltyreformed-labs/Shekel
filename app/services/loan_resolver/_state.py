@@ -9,8 +9,9 @@ There is deliberately no BALANCE here (plan step D2a).  ``LoanState`` carried a
 ``current_balance`` -- a balance-at-``as_of`` -- which made every holder of the
 bundle one attribute read away from a loan balance that never passed the
 ``balance_at`` seam, and for a loan whose posting ledger cannot answer it fell
-back to the anchor replay, which is BLIND TO MONEY (it advances one scheduled
-step per confirmed payment and discards the cash).  The seam's readers fold the
+back to the anchor replay, which was BLIND TO MONEY (it advanced one scheduled
+step per confirmed payment and discarded the cash; plan step recurrence:R16-e
+deleted it).  The seam's readers fold the
 loan's recorded events instead (``balance_at._fold``), so the balance a page
 shows and the seed its projections start from are ONE derivation.
 
@@ -213,72 +214,63 @@ def resolve_loan(
 
     Algorithm (see the package docstring for the full rationale):
 
-    1. Pick the governing anchor -- the greatest under
-       :func:`app.utils.dates.anchor_chronology_key`, i.e. ``(anchor_date,
-       created_at, event_id)`` DESC (:func:`._periods.select_latest_anchor`).
-    2. Generate the schedule via :func:`._payoff.compute_payoff_scenarios`
-       with the FULL payment list: the composer replays the payments SETTLED
-       by ``as_of`` and projects the CONTRACT forward from the resulting
-       state.  It routed the projected rows through ``monthly_override`` and
-       a loan-level ``extra_principal`` too until plan step R7d-g-3 -- a
-       second forward walk beside the seam's plan fold, which paid a
-       standing extra twice on every row-covered month.  ARM vs. fixed-rate
-       anchor handling lives inside the composer (Phase 6 of the
-       amortization-engine split); the resolver no longer reaches the engine
-       directly.
-    3. ``LoanState.schedule = history_rows + original_forward`` -- the
+    1. Generate the schedule via :func:`._payoff.compute_payoff_scenarios`:
+       the confirmed view's rows, then the CONTRACT's remaining installments
+       from the first one after the record's last event (ruling plan#3382),
+       or from the loan's latest assertion when no view is supplied.  It
+       replayed the payments settled by ``as_of`` to find that start until
+       plan step recurrence:R16-e, and routed the projected rows through
+       ``monthly_override`` and a loan-level ``extra_principal`` too until
+       plan step R7d-g-3 -- a second forward walk beside the seam's plan
+       fold, which paid a standing extra twice on every row-covered month.
+       The resolver no longer reaches the engine directly.
+    2. ``LoanState.schedule = history_rows + original_forward`` -- the
        confirmed past and the contract's forward.
-    4. Compute the monthly payment per ARM-in-window vs.
+    3. Compute the monthly payment per ARM-in-window vs.
        ARM-out-of-window vs. fixed-rate rules.
-    5. Return the LoanState; consumers read its fields without
+    4. Return the LoanState; consumers read its fields without
        recomputing.
 
     Args:
         loan_inputs: The loan's loaded :class:`LoanInputs` bundle
-            (``loan_params``, ``anchor_events``, ``payments``,
-            ``rate_changes``).  ``anchor_events`` must be non-empty
-            (the Commit-12 invariant); an empty list raises a
-            ValueError.  Only payments settled by ``as_of`` are replayed into
-            the balance; the rest are the balance seam's plan to price.
-        as_of: The evaluation date.  Drives the current-balance walk
-            and the out-of-window monthly-payment computation.
+            (``loan_params``, ``anchor_events``, ``rate_changes``).
+            ``anchor_events`` must be non-empty where no view is supplied
+            (the Commit-12 invariant); an empty list then raises a
+            ValueError.
+        as_of: The evaluation date.  Selects the governing rate period, and
+            so the monthly payment and the current rate.
         confirmed_view: The loan's genesis-ledger confirmed view (the read
-            switch), or ``None`` to keep the anchor replay.  When supplied,
-            its ``balance`` becomes the forward projection's starting balance
-            and its ``history_rows`` become the schedule's confirmed slice
-            (threaded once to :func:`._payoff.compute_payoff_scenarios`) --
-            one bundle, so the schedule's history and the projection cannot
-            desync off-schedule.  ``None`` leaves the composer on the
-            anchor replay unchanged (an unconfigured loan, or a caller that
-            deliberately reads the schedule balance -- e.g. the "ever paid
-            off" ``date.max`` probe).
+            switch), or ``None``.  When supplied, its ``balance`` becomes the
+            forward projection's starting balance, its ``last_recorded_on``
+            the event the projection starts after, and its ``history_rows``
+            the schedule's confirmed slice (threaded once to
+            :func:`._payoff.compute_payoff_scenarios`) -- one bundle, so the
+            schedule's history and the projection cannot desync
+            off-schedule.  ``None`` seeds the projection from the loan's
+            latest assertion with no history rows (no baseline scenario, or
+            a read before the loan originated).
 
     Returns:
         A :class:`LoanState` with the four resolver fields.
 
     Raises:
-        ValueError: When ``loan_inputs.anchor_events`` is empty (the
-            Commit-12 invariant is violated and the caller's data is bad).
+        ValueError: When no view is supplied and
+            ``loan_inputs.anchor_events`` is empty (the Commit-12 invariant
+            is violated and the caller's data is bad).
     """
     periods = resolve_periods(
         loan_inputs.loan_params, loan_inputs.rate_changes,
     )
 
-    # Schedule generation routes through the scenario composer
-    # (Phase 6 of the amortization-engine split -- architectural plan:
-    # ``docs/plans/2026-05-21-amortization-engine-split-replay-projection.md``).
-    # ``compute_payoff_scenarios`` calls ``replay_schedule`` once (confirmed
-    # history, balance, remaining term) and ``project_forward`` once for the
-    # CONTRACT's forward.  ``LoanState.schedule`` is the confirmed-history
-    # rows plus that contractual slice; what the loan is projected to PAY is
-    # the balance seam's plan fold (plan step R7d-g-3, ruling R-R88), and no
-    # reader of this schedule takes a balance off it.  ARM vs. fixed-rate
-    # anchor handling is owned by the composer.
-    # Fixed-rate trueups remain a follow-up: see F-8 in
-    # ``docs/audits/financial_calculations/remediation_follow_up.md``.
+    # Schedule generation routes through the scenario composer, which reads
+    # where the loan's record stands (the confirmed view, or the latest
+    # assertion) and calls ``project_forward`` once for the CONTRACT's
+    # forward.  ``LoanState.schedule`` is the confirmed-history rows plus
+    # that contractual slice; what the loan is projected to PAY is the
+    # balance seam's plan fold (plan step R7d-g-3, ruling R-R88), and no
+    # reader of this schedule takes a balance off it.
     scenarios = compute_payoff_scenarios(
         loan_inputs=loan_inputs,
-        as_of=as_of,
         confirmed_view=confirmed_view,
     )
     schedule = list(scenarios.history_rows) + list(

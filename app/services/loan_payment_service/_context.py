@@ -10,8 +10,9 @@ and shared by every consumer of an amortization schedule
 **N-432**).  The rows, their chronology and their three dates are
 :func:`app.services.loan_ledger.payment_installments` now; what is left here is
 the amount, which is the only part of a payment record this tier is qualified to
-answer.  That is what lets the schedule replay -- three dates, no amount -- reach
-the feed without the amount model behind it.
+answer.  That is what let the schedule replay -- three dates, no amount -- reach
+the feed without the amount model behind it, until plan step recurrence:R16-e
+deleted the replay.
 
 Sits above :mod:`._engine_prep`, whose two corrections it applies to the feed
 before returning it, and BELOW the amount model: since plan step X-au-g-2c both
@@ -278,9 +279,9 @@ def get_payment_history(
     are :func:`app.services.loan_ledger.payment_installments`; the figures are
     :func:`~app.services.row_valuation.settled_contribution` and
     :func:`~app.services.cash_ledger.resolve_amount`, one per half.
-    What is left here is the pairing.  Splitting it that way is what lets a
+    What is left here is the pairing.  Splitting it that way is what let a
     consumer that needs only the chronology -- the schedule replay, which
-    reads three dates and no amount
+    read three dates and no amount until plan step recurrence:R16-e deleted it
     -- take the installments alone: this function's import closure is the amount
     model's -- **102 modules here, against the 46 the replay's own tier needs**
     (2026-09-09; the metric and its history are stated in

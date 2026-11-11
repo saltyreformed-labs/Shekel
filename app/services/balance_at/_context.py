@@ -19,9 +19,10 @@ card, and an "ever paid off" probe each resolving independently
 That was filed as waste.  It was not only waste.  Because there was no single
 resolution to compare against, nothing revealed that one of those eleven -- the
 ``date.max`` "ever paid off" probe -- resolved through a producer that
-*structurally cannot read the genesis ledger* (the confirmed view returns
-``None`` for any ``as_of`` after today), and so answered from the pre-read-switch
-anchor replay, which is blind to how much cash a payment actually moved.  The
+*structurally cannot read the genesis ledger* (the confirmed view returned
+``None`` for any ``as_of`` after today until plan step recurrence:R16-e), and so
+answered from the pre-read-switch anchor replay, which was blind to how much cash
+a payment actually moved.  The
 ten that agreed made the eleventh invisible.  **Redundant derivation is not a
 performance smell; it is where a divergence hides.**
 
@@ -517,7 +518,8 @@ class BalanceContext(RecurrenceMemosMixin):  # pylint: disable=too-many-instance
           nullability is the same nullability.
         * :func:`._confirmed_view.confirmed_view` -- the confirmed ledger view
           is scenario-scoped by construction, so with no baseline there is no
-          view and the resolver falls back to its anchor replay.
+          view and the resolver seeds the contract's remaining installments
+          from the loan's latest assertion.
 
         The third is OUTSIDE the seam and takes the nullable for a different
         reason, which is why it is listed apart rather than folded into the

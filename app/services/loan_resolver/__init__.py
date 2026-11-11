@@ -18,13 +18,13 @@ sub-modules; the public surface is re-exported here so
 ``loan_resolver.compute_payoff_scenarios`` keep working unchanged:
 
 * :mod:`._periods` -- the shared foundation: rate-period construction,
-  anchor selection, confirmed-payment replay, and the :class:`LoanInputs`
-  bundle every entry point takes.
+  anchor selection, the :class:`ConfirmedLedgerView` seed, and the
+  :class:`LoanInputs` bundle every entry point takes.
 * :mod:`._state` -- :func:`resolve_loan` (the SSOT current-state producer)
   and :func:`compute_monthly_payment_baseline` (the cheap level-payment
   lookup), plus :class:`LoanState`.
-* :mod:`._payoff` -- :func:`compute_payoff_scenarios` (the three-scenario
-  "what-if" composer) and :class:`PayoffScenarios`.
+* :mod:`._payoff` -- :func:`compute_payoff_scenarios` (the confirmed
+  history and the contract's forward) and :class:`PayoffScenarios`.
 
 ## What this fixes
 
@@ -52,18 +52,13 @@ The resolver collapses both onto a single derivation:
    synthesizes the origination fact from the immutable LoanParams and
    loads the stored user true-ups, so every configured loan has at
    least one).
-2. Replay only the payments that have ALREADY HAPPENED at ``as_of`` --
-   whose stored settle day is on or before it
-   (``app.utils.dates.has_settled_by``, the same day the fold counts a
-   payment's principal from, plan step X-an) -- and among those only the
-   ones whose true monthly due date (``loan_loaders.loan_payment_due_date``,
-   the shadow's own stored ``due_date``) is strictly after the anchor date.
-   Comparing the DUE date rather than the settle day against the anchor
-   keeps a payment whose cash moved on or before a mid-period balance
-   true-up but whose monthly installment is not due until after it.  A
-   payment whose cash has not moved does not reduce the balance -- it is a
-   future commitment, not historical fact, and the forward projection owns
-   it.
+2. Read where the loan's record stands: the balance seam's confirmed view
+   (``balance_at.confirmed_view``, the fold of the loan's recorded events
+   as of ``as_of``) when one is supplied, else the latest anchor.  The
+   contract's remaining installments start at the first one after its last
+   event (ruling plan#3382).  *This step REPLAYED the payments settled by
+   ``as_of`` from the anchor, one contractual step per payment record,
+   until plan step recurrence:R16-e deleted that walk.*
 3. For an ARM whose anchor and as_of both fall inside
    ``[origination_date, origination_date + arm_first_adjustment_months)``
    (the fixed-rate window), compute the monthly payment ONCE from
@@ -79,16 +74,14 @@ The resolver collapses both onto a single derivation:
 
 ## What the resolver is NOT
 
-* Not a query layer.  Callers load the anchor facts,
-  ``PaymentRecord`` instances, and ``RateChangeRecord`` instances
-  themselves (typically via ``loan_payment_service.load_loan_context``
-  for the payment + rate-change feeds, and
-  ``loan_loaders.load_loan_anchor_facts`` for the anchors).
-* Not a payment preparation step.  ``payments`` is expected to be
-  the already-prepared list from
-  ``loan_payment_service.prepare_payments_for_engine`` (escrow
-  subtracted, biweekly redistributed).  Passing raw, unprepared
-  payments will misalign principal/interest splits.
+* Not a query layer.  Callers load the anchor facts and
+  ``RateChangeRecord`` instances themselves (typically via
+  ``loan_payment_service.load_loan_context`` for the rate-change feed,
+  and ``loan_loaders.load_loan_anchor_facts`` for the anchors), and the
+  balance seam folds the confirmed view it is seeded with.
+* Not a payment reader.  It took the loan's prepared payment feed
+  (``loan_payment_service.prepare_payments_for_engine``) until plan step
+  recurrence:R16-e; the confirmed view states what was paid.
 * Not a writer.  The resolver never inserts or updates anything;
   Commit 16 owns the trueup write path via ``anchor_service``.
 """

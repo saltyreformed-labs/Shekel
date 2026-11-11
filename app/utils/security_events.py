@@ -82,8 +82,8 @@ class SecurityEventKind(str, enum.Enum):
     == SecurityEventKind.PASSWORD_CHANGED.value`` without importing
     the enum.
 
-    The backing database CHECK constraint enumerates these same four
-    values; see the migration that adds the column.  Adding a kind
+    The backing database CHECK constraint enumerates these same six
+    values; see the migration that last rebuilt it.  Adding a kind
     requires:
 
       1. Adding the member here.
@@ -96,6 +96,8 @@ class SecurityEventKind(str, enum.Enum):
     MFA_ENABLED = "mfa_enabled"
     MFA_DISABLED = "mfa_disabled"
     BACKUP_CODES_REGENERATED = "backup_codes_regenerated"
+    PASSKEY_ADDED = "passkey_added"
+    PASSKEY_REMOVED = "passkey_removed"
 
 
 # Per-kind display copy rendered by ``_security_event_banner.html``.
@@ -141,6 +143,24 @@ KIND_DISPLAY: dict[str, dict[str, str]] = {
         "detail": (
             "Any previously printed codes no longer work.  If this was "
             "not you, change your password and disable MFA."
+        ),
+    },
+    # A passkey signs in on its own (ruling plan#3465), so one added by
+    # someone else is a way into the account: the copy says to remove it.
+    SecurityEventKind.PASSKEY_ADDED.value: {
+        "title": "A passkey was added to your account.",
+        "detail": (
+            "If this was not you, remove it on your Security page and "
+            "review your active sessions."
+        ),
+    },
+    # Removing an account's last passkey opens its password sign-in again
+    # (ruling plan#3467), so the copy points at the password.
+    SecurityEventKind.PASSKEY_REMOVED.value: {
+        "title": "A passkey was removed from your account.",
+        "detail": (
+            "If this was not you, change your password and review your "
+            "active sessions."
         ),
     },
 }

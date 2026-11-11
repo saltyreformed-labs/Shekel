@@ -33,7 +33,7 @@ class User(UserMixin, TimestampMixin, db.Model):
         # ``last_security_event_kind`` is a free-text VARCHAR at the
         # SQL level so the column type stays interchangeable with any
         # future kind without an Alembic ``ALTER TYPE`` dance, but
-        # the application only ever writes one of four enum values
+        # the application only ever writes one of six enum values
         # (see ``app.utils.security_events.SecurityEventKind``).  The
         # CHECK pins the column to that whitelist at the database
         # tier so a future caller that bypasses the helper -- a
@@ -52,7 +52,8 @@ class User(UserMixin, TimestampMixin, db.Model):
             "last_security_event_kind IS NULL OR "
             "last_security_event_kind IN ("
             "'password_changed', 'mfa_enabled', "
-            "'mfa_disabled', 'backup_codes_regenerated')",
+            "'mfa_disabled', 'backup_codes_regenerated', "
+            "'passkey_added', 'passkey_removed')",
             name="ck_users_security_event_kind",
         ),
         # Pair invariant: ``kind`` and ``at`` are stamped together by

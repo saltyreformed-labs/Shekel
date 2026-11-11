@@ -85,8 +85,8 @@ FROM python:3.14-slim@sha256:a2b82f3c48559aa0a8446d9af49826b6e2b2016f4cd2afabfe6
 # runtime image carries libssl3t64 (pulled in transitively by
 # postgresql-client below); without this upgrade the CVE-fixed
 # package would live only in the builder stage.  Runtime-only deps:
-# libpq5 (the libpq psycopg-c links) and postgresql-client (psql in
-# entrypoint.sh).
+# libpq5 (the libpq psycopg-c links) and postgresql-client (pg_isready
+# in both entrypoints' wait, psql in scripts/deploy.sh).
 RUN apt-get update \
     && apt-get upgrade -y --no-install-recommends \
         openssl libssl3t64 openssl-provider-legacy \
@@ -165,7 +165,7 @@ COPY --chown=shekel:shekel . .
 # seed sentinel lives under.  Pre-creating the directory in the image
 # guarantees it is shekel-owned when Docker first creates the volume
 # (the volume inherits the contents and ownership of the underlying
-# image path on first creation) so entrypoint.sh's ``touch`` runs as
+# image path on first creation) so scripts/deploy.sh's sentinel write runs as
 # the unprivileged shekel user without an in-line chown step.  See
 # audit finding F-022 and remediation Commit C-34.
 RUN mkdir -p /var/www/static /home/shekel/app/state \
@@ -178,9 +178,10 @@ EXPOSE 8000
 
 # Health check: verify the app is responding and database is reachable.
 # Uses Python's built-in urllib (curl/wget are not in the slim image).
-# --start-period gives entrypoint.sh time to run migrations and seeding
-# (schema creation + Alembic + ref data + user + tax brackets can take
-# well over 30 seconds on a fresh database).  Exec (JSON) form, hadolint
+# --start-period covers the web server's start: entrypoint.sh's wait for
+# PostgreSQL (up to a minute) and gunicorn's boot.  The deploy (schema
+# creation + Alembic + ref data + user) is not in it: it runs in the
+# migrate service, before this container starts.  Exec (JSON) form, hadolint
 # DL3025: no shell is spawned, and a non-zero exit -- urlopen raising on
 # a refused connection or a non-2xx status -- is what marks the container
 # unhealthy, so the shell form's trailing ``|| exit 1`` added nothing.

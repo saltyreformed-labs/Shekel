@@ -42,11 +42,12 @@ SEED_USER_PASSWORD and SEED_USER_EMAIL values are scrubbed from
 ``os.environ`` and the C-level environment.  This is defense-in-depth
 against a future caller (or a child process spawned during seeding)
 reading the credential back out of the process environment after it
-has served its one-shot purpose.  The matching scrub in
-``entrypoint.sh`` removes the same variables from the parent shell
-before exec'ing Gunicorn -- closing the ``cat /proc/<gunicorn>/environ``
-exposure called out in audit finding F-022.  See audit finding F-022
-and remediation Commit C-34.
+has served its one-shot purpose.  Gunicorn never holds them at all,
+which closes the ``cat /proc/<gunicorn>/environ`` exposure called out
+in audit finding F-022: this script runs in the migrate service
+(``scripts/deploy.sh``), and the web server's container is not given
+the seed's variables (card plan#2166).  See audit finding F-022 and
+remediation Commit C-34.
 
 Usage:
     FLASK_ENV=deploy python scripts/seed_user.py
@@ -212,9 +213,10 @@ def seed_user():
     # ``_read_last_payday()`` first, and that ``sys.exit(1)`` raises
     # ``SystemExit``, a ``BaseException`` no ``except`` clause here catches.
     # A production stack whose ``state`` volume was recreated (an operator
-    # path ``entrypoint.sh`` documents as supported) would then abort under
-    # ``set -e`` and never exec Gunicorn -- the app failing to boot for want
-    # of a payday that a skipped creation was never going to use.
+    # path ``scripts/deploy.sh`` documents as supported) would then fail its
+    # deploy under ``set -e``, so the web server never starts -- the app
+    # failing to boot for want of a payday that a skipped creation was never
+    # going to use.
     #
     # ``register_user``'s own uniqueness check REMAINS the authority: it still
     # raises ``ConflictError`` below, which is now the racing-loser path
@@ -365,7 +367,7 @@ def _scrub_seed_env_vars() -> None:
     a child process inherited via ``subprocess.run(env=os.environ)`` --
     could surface them.
 
-    Removal is performed at three layers for defense-in-depth:
+    Removal is performed at two layers for defense-in-depth:
 
     1. ``os.environ.pop`` -- removes the key from Python's environment
        mapping.  In CPython 3.9+ this also calls ``os.unsetenv`` under
@@ -373,12 +375,11 @@ def _scrub_seed_env_vars() -> None:
     2. An explicit ``os.unsetenv`` -- documents intent and protects
        against any future change to ``os.environ.pop``'s implementation
        that decouples it from the C-level environ.
-    3. The parent ``entrypoint.sh`` runs ``unset SEED_USER_PASSWORD ...``
-       after this script returns, scrubbing the same keys from the
-       shell that exec's Gunicorn.  Without that companion change,
-       Gunicorn would still inherit the credential in
-       ``/proc/<pid>/environ`` -- this Python-side scrub only helps
-       within this script's process tree.
+
+    This scrub helps only within this script's process tree.  Gunicorn's
+    ``/proc/<pid>/environ`` is kept clear another way: this script runs in
+    the migrate service (``scripts/deploy.sh``), and the web server's
+    container is not given the seed's variables (card plan#2166).
 
     DISPLAY_NAME is intentionally retained.  It is not a secret and
     has operational value (e.g. an operator confirming they seeded

@@ -13,6 +13,10 @@ login at 127.0.0.1 with a wrong password measured accepted, 2026-11-10), and ask
 every other address.  The superuser's work runs over the socket, which is how an operator's run
 reaches it with no password.
 
+The last class runs what the deploy then runs as the owner, ``scripts/init_db.sql`` and
+``scripts/init_db_role.sql`` (``scripts/deploy.sh``'s first two steps), logged in as the owner at
+the bridge address, so a grant that needs a superuser's right fails here.
+
 ``docker``-marked: ``scripts/test.sh`` deselects them unless asked
 (``PYTEST_MARKER_EXPR=docker``), CI runs them, and this package's conftest refuses the system
 daemon outside CI.  A cluster that does not start FAILS the test rather than skipping it.
@@ -37,6 +41,9 @@ pytestmark = pytest.mark.docker
 _DB = service("db")
 #: The script under test, as committed.
 _SCRIPT = REPO_ROOT / "deploy" / "postgres" / "provision_roles.sh"
+#: The deploy's two SQL files, as committed, in the order ``scripts/deploy.sh`` runs them.
+_SCHEMAS_SQL = REPO_ROOT / "scripts" / "init_db.sql"
+_GRANTS_SQL = REPO_ROOT / "scripts" / "init_db_role.sql"
 #: Where the image runs a first-boot hook from, and where an operator runs the script.
 _HOOK = "/docker-entrypoint-initdb.d/10-provision-roles.sh"
 #: The superuser and database the service's environment names.
@@ -129,6 +136,15 @@ class _Cluster:
         return _docker("exec", "-e", f"PGPASSWORD={password}", self.container, "psql",
                        "-h", self.address, "-U", role, "-d", _DATABASE, "-v", "ON_ERROR_STOP=1",
                        "--no-psqlrc", "-tAqc", sql)
+
+    def run_file(self, role: str, password: str, sql_file: Path
+                 ) -> subprocess.CompletedProcess[str]:
+        """Log in as ``role`` with ``password`` at the bridge address and run ``sql_file`` as
+        ``scripts/deploy.sh`` runs it, stopping at its first error."""
+        return _docker("exec", "-i", "-e", f"PGPASSWORD={password}", self.container, "psql",
+                       "-h", self.address, "-U", role, "-d", _DATABASE, "-v", "ON_ERROR_STOP=1",
+                       "--no-psqlrc", "-q", "-f", "-",
+                       stdin=sql_file.read_text(encoding="utf-8"))
 
     def provision(self, *env: str) -> subprocess.CompletedProcess[str]:
         """Run the script as an operator does, in the running container, with ``env``'s
@@ -397,3 +413,73 @@ class TestOperatorRun:
             assert cluster.superuser(
                 "SELECT pg_get_userbyid(relowner) FROM pg_class "
                 "WHERE oid = 'budget.accounts'::regclass") == _SUPERUSER
+
+
+@pytest.mark.timeout(120)
+class TestTheDeploysSqlRunsAsTheOwner:
+    """The deploy's schemas and the web login's grants, run as the owner, need no superuser."""
+
+    def _deploy_sql(self, cluster: _Cluster, owner: str) -> None:
+        """Run the deploy's two SQL files as the owner, in the deploy's order.
+
+        Raises:
+            AssertionError: when either stops, with psql's error.
+        """
+        for sql_file in (_SCHEMAS_SQL, _GRANTS_SQL):
+            ran = cluster.run_file(_OWNER, owner, sql_file)
+            assert ran.returncode == 0, f"{sql_file.name} as the owner: {ran.stderr}"
+
+    def test_on_a_fresh_cluster_the_owner_owns_the_schemas_and_the_app_reaches_new_tables(
+        self, tmp_path: Path,
+    ) -> None:
+        """On the first boot's empty database the owner makes every schema, so owns it, and a
+        table it makes afterwards, as a migration does, takes the web login's grants from the
+        default privileges the owner set: the app login reads and writes it and cannot drop
+        it."""
+        owner, app = _password(), _password()
+        with _started(tmp_path, OWNER_ROLE_PASSWORD=owner, APP_ROLE_PASSWORD=app) as cluster:
+            self._deploy_sql(cluster, owner)
+
+            assert int(cluster.superuser(_NOT_THE_OWNERS)) == 0
+            migration = cluster.login(_OWNER, owner, (
+                "CREATE TABLE budget.goals (id serial PRIMARY KEY, name text NOT NULL)"))
+            assert migration.returncode == 0, migration.stderr
+            written = cluster.login(_APP, app, (
+                "INSERT INTO budget.goals (name) VALUES ('Rent') RETURNING name"))
+            assert written.returncode == 0, written.stderr
+            assert written.stdout.strip() == "Rent"
+            dropped = cluster.login(_APP, app, "DROP TABLE budget.goals")
+            assert dropped.returncode != 0
+            assert "must be owner of table goals" in dropped.stderr
+
+    def test_on_a_database_the_superuser_built_after_its_hand_over(
+        self, tmp_path: Path,
+    ) -> None:
+        """A database every deploy before plan#2166 built as the superuser, once handed to the
+        owner, takes the deploy's SQL as the owner, and the web login can write its tables."""
+        owner, app = _password(), _password()
+        with _started(tmp_path, OWNER_ROLE_PASSWORD=owner, APP_ROLE_PASSWORD=app) as cluster:
+            cluster.superuser(_APP_SHAPED_SCHEMA)
+            assert cluster.provision().returncode == 0
+
+            self._deploy_sql(cluster, owner)
+
+            written = cluster.login(_APP, app, (
+                "INSERT INTO budget.accounts (name) VALUES ('Savings') RETURNING name"))
+            assert written.returncode == 0, written.stderr
+            assert written.stdout.strip() == "Savings"
+
+    def test_a_database_without_the_web_login_stops_at_its_first_grant(
+        self, tmp_path: Path,
+    ) -> None:
+        """The grants make no login: with ``shekel_app`` gone, the file stops at its first
+        statement naming the missing role, as ``scripts/init_db_role.sql`` says."""
+        owner, app = _password(), _password()
+        with _started(tmp_path, OWNER_ROLE_PASSWORD=owner, APP_ROLE_PASSWORD=app) as cluster:
+            cluster.superuser(f"DROP ROLE {_APP}")
+            assert cluster.run_file(_OWNER, owner, _SCHEMAS_SQL).returncode == 0
+
+            ran = cluster.run_file(_OWNER, owner, _GRANTS_SQL)
+
+            assert ran.returncode != 0
+            assert f'role "{_APP}" does not exist' in ran.stderr

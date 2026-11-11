@@ -32,7 +32,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 DOCKER_COMPOSE = REPO_ROOT / "docker-compose.yml"
 DOCKER_COMPOSE_PROD = REPO_ROOT / "deploy" / "docker-compose.prod.yml"
 DOCKER_COMPOSE_DEV = REPO_ROOT / "docker-compose.dev.yml"
-ENTRYPOINT_SCRIPT = REPO_ROOT / "entrypoint.sh"
+DEPLOY_SCRIPT = REPO_ROOT / "scripts" / "deploy.sh"
 SEED_USER_SCRIPT = REPO_ROOT / "scripts" / "seed_user.py"
 ENV_EXAMPLE = REPO_ROOT / ".env.example"
 DOCKERIGNORE = REPO_ROOT / ".dockerignore"
@@ -45,116 +45,68 @@ APP_CONFIG = REPO_ROOT / "app" / "config.py"
 # ──────────────────────────────────────────────────────────────────
 
 
-class TestSeedCredentialEntrypointScrub:
-    """entrypoint.sh must unset SEED_USER_* before exec'ing Gunicorn.
+class TestDeploySeedSentinel:
+    """scripts/deploy.sh gates the seed on its sentinel and writes it only after success.
 
-    The unset is the load-bearing fix for F-022: the credentials
-    leave the entrypoint shell's environment BEFORE the ``exec "$@"``
-    that replaces the shell with Gunicorn, so Gunicorn never inherits
-    them in /proc/<pid>/environ.  The ordering matters -- assertions
-    check both that the unset exists and that it appears BEFORE the
-    final exec.
+    The seed's credentials are read by the deploy alone (card plan#2166): the web
+    server's entrypoint names none of them (``test_entrypoints.py``), so gunicorn
+    cannot inherit them in /proc/<pid>/environ, which is what audit finding F-022's
+    scrub before the ``exec`` was for.  The runs of the deploy that grade the sentinel
+    by behaviour are in ``test_entrypoints.py`` too; these pin its source shape.
     """
 
     @pytest.fixture(scope="class")
     @classmethod
-    def entrypoint_text(cls) -> str:
-        """Return the full entrypoint.sh source as a string."""
-        return ENTRYPOINT_SCRIPT.read_text(encoding="utf-8")
+    def deploy_text(cls) -> str:
+        """Return the full scripts/deploy.sh source as a string."""
+        return DEPLOY_SCRIPT.read_text(encoding="utf-8")
 
-    def test_entrypoint_unsets_seed_password(self, entrypoint_text: str) -> None:
-        """entrypoint.sh contains an ``unset SEED_USER_PASSWORD`` line."""
-        # We accept either a single multi-arg unset or three separate
-        # unsets so a future refactor that splits the line for
-        # readability does not break the assertion.  The bash ``unset``
-        # builtin accepts multiple arguments.
-        assert re.search(
-            r"\bunset\b[^\n]*\bSEED_USER_PASSWORD\b",
-            entrypoint_text,
-        ), (
-            "entrypoint.sh does not unset SEED_USER_PASSWORD; the seed "
-            "credential will be inherited by Gunicorn in /proc/<pid>/environ "
-            "(audit finding F-022)"
-        )
-
-    def test_entrypoint_unsets_seed_email(self, entrypoint_text: str) -> None:
-        """entrypoint.sh also unsets SEED_USER_EMAIL."""
-        assert re.search(
-            r"\bunset\b[^\n]*\bSEED_USER_EMAIL\b",
-            entrypoint_text,
-        ), "entrypoint.sh does not unset SEED_USER_EMAIL"
-
-    def test_entrypoint_unset_runs_before_exec(self, entrypoint_text: str) -> None:
-        """The unset MUST appear in source order BEFORE ``exec "$@"``.
-
-        If the unset ran AFTER exec, it would never run -- exec
-        replaces the shell process with the named binary and any
-        following lines are unreachable.
-        """
-        # Find the byte offsets of (a) the SEED_USER_PASSWORD unset
-        # and (b) the final ``exec "$@"`` that hands off to gunicorn.
-        unset_match = re.search(
-            r"\bunset\b[^\n]*\bSEED_USER_PASSWORD\b",
-            entrypoint_text,
-        )
-        exec_match = re.search(r'^exec\s+"\$@"', entrypoint_text, re.MULTILINE)
-        assert unset_match is not None, "no SEED_USER_PASSWORD unset found"
-        assert exec_match is not None, (
-            "no ``exec \"$@\"`` line in entrypoint.sh; the script "
-            "should hand off to the Dockerfile CMD via exec"
-        )
-        assert unset_match.start() < exec_match.start(), (
-            "SEED_USER_PASSWORD unset appears AFTER ``exec \"$@\"`` in "
-            "entrypoint.sh; lines after exec never run, so the unset "
-            "is dead code (audit finding F-022 regression)"
-        )
-
-    def test_entrypoint_uses_seed_sentinel(self, entrypoint_text: str) -> None:
-        """entrypoint.sh checks for the seed-complete sentinel."""
+    def test_deploy_uses_seed_sentinel(self, deploy_text: str) -> None:
+        """scripts/deploy.sh checks for the seed-complete sentinel."""
         # The exact filename is documented in the script's comment
         # block and exposed as a SEED_SENTINEL shell variable.
-        assert "SEED_SENTINEL=" in entrypoint_text, (
-            "entrypoint.sh does not declare the SEED_SENTINEL variable; "
+        assert "SEED_SENTINEL=" in deploy_text, (
+            "scripts/deploy.sh does not declare the SEED_SENTINEL variable; "
             "the noise-reduction sentinel from Commit C-34 is missing"
         )
-        assert "/home/shekel/app/state" in entrypoint_text, (
-            "entrypoint.sh does not reference the /home/shekel/app/state "
+        assert "/home/shekel/app/state" in deploy_text, (
+            "scripts/deploy.sh does not reference the /home/shekel/app/state "
             "writable mount that the seed sentinel lives under"
         )
         assert re.search(
             r"\bif\s*\[\s*-f\s+\"\$\{SEED_SENTINEL\}\"\s*\]",
-            entrypoint_text,
+            deploy_text,
         ), (
-            "entrypoint.sh does not gate the seed step on the sentinel "
+            "scripts/deploy.sh does not gate the seed step on the sentinel "
             "file's existence; subsequent restarts will re-run the "
             "(idempotent but noisy) seed_user.py invocation"
         )
 
-    def test_entrypoint_sentinel_written_after_seed_success(
-        self, entrypoint_text: str,
+    def test_deploy_sentinel_written_after_seed_success(
+        self, deploy_text: str,
     ) -> None:
         """The sentinel is materialised AFTER the seed script returns.
 
         The ordering invariant: ``: > "${SEED_SENTINEL}"`` (or
         ``touch``) must appear in the same conditional branch as the
         seed_user.py invocation, AFTER it.  ``set -e`` at the top of
-        entrypoint.sh aborts the script on a non-zero return from
+        scripts/deploy.sh aborts the script on a non-zero return from
         seed_user.py, so the sentinel never gets written on failure.
         """
         # Locate the seed_user.py invocation and the sentinel write
         # in source order.
         seed_match = re.search(
-            r"python\s+scripts/seed_user\.py", entrypoint_text,
+            r"python\s+\"\$\{_scripts\}/seed_user\.py\"", deploy_text,
         )
         sentinel_write_match = re.search(
             r"(touch\s+\"\$\{SEED_SENTINEL\}\"|:\s*>\s*\"\$\{SEED_SENTINEL\}\")",
-            entrypoint_text,
+            deploy_text,
         )
         assert seed_match is not None, (
-            "entrypoint.sh no longer invokes scripts/seed_user.py"
+            "scripts/deploy.sh no longer invokes scripts/seed_user.py"
         )
         assert sentinel_write_match is not None, (
-            "entrypoint.sh does not write the seed sentinel file; "
+            "scripts/deploy.sh does not write the seed sentinel file; "
             "subsequent restarts cannot skip the seed step"
         )
         assert seed_match.start() < sentinel_write_match.start(), (
@@ -292,15 +244,15 @@ class TestComposeAppStateVolume:
         Pre-creation matters because Docker's volume-mount semantics
         copy the underlying image path's contents (and ownership) to
         the volume on first creation.  Without the pre-create + chown,
-        the volume would be empty and root-owned -- entrypoint.sh's
-        ``touch`` would fail under ``set -e`` because it runs as the
+        the volume would be empty and root-owned -- scripts/deploy.sh's
+        sentinel write would fail under ``set -e`` because it runs as the
         unprivileged shekel user.
         """
         text = DOCKERFILE.read_text(encoding="utf-8")
         assert "/home/shekel/app/state" in text, (
             "Dockerfile does not pre-create /home/shekel/app/state; the "
-            "volume mount will be root-owned and entrypoint.sh's "
-            "sentinel touch will fail"
+            "volume mount will be root-owned and scripts/deploy.sh's "
+            "sentinel write will fail"
         )
         # The state dir is chowned to shekel directly (one line, shared
         # with /var/www/static). Polyglot CI/DF-03 narrowed the prior
@@ -309,8 +261,8 @@ class TestComposeAppStateVolume:
         # two dirs that need it; state still ends up shekel-owned.
         assert "chown shekel:shekel /home/shekel/app/state" in text, (
             "Dockerfile no longer chowns /home/shekel/app/state to shekel; "
-            "the state subdirectory will be root-owned and entrypoint.sh's "
-            "sentinel touch will fail under set -e"
+            "the state subdirectory will be root-owned and scripts/deploy.sh's "
+            "sentinel write will fail under set -e"
         )
 
 
@@ -516,6 +468,11 @@ class TestDockerignoreCoverage:
         "scripts/_script_lib.py",
         "alembic.ini",
         "entrypoint.sh",
+        # The migrate service's entrypoint and command, and the
+        # library both entrypoints and the deploy source.
+        "scripts/owner_entrypoint.sh",
+        "scripts/deploy.sh",
+        "scripts/_entrypoint_lib.sh",
         "gunicorn.conf.py",
         "run.py",
         # The lock the Dockerfile's builder stage copies from the
@@ -531,7 +488,7 @@ class TestDockerignoreCoverage:
 
         Catches a future maintainer broadly excluding ``scripts/`` or
         similar without realising several of those files are needed
-        at container start.  See entrypoint.sh and docs/runbook.md
+        at container start.  See scripts/deploy.sh and docs/runbook.md
         for the complete list of in-container script invocations.
         """
         # The path is excluded if (a) it appears verbatim in the
@@ -542,7 +499,8 @@ class TestDockerignoreCoverage:
         # neither of which prefixes any runtime-essential path.
         assert pattern not in dockerignore_lines, (
             f"{pattern} is excluded by .dockerignore but is required "
-            "at runtime (entrypoint.sh or docker exec invocations)"
+            "at runtime (the entrypoints, the deploy or docker exec "
+            "invocations)"
         )
 
     def test_dockerignore_documents_intent(
@@ -569,22 +527,22 @@ class TestDockerignoreCoverage:
 
 
 # ──────────────────────────────────────────────────────────────────
-# Integration: docker-compose.yml + entrypoint.sh agree on paths
+# Integration: docker-compose.yml + scripts/deploy.sh agree on paths
 # ──────────────────────────────────────────────────────────────────
 
 
 class TestComposeEntrypointAgreement:
-    """The state-volume mount path matches the entrypoint sentinel path.
+    """The state-volume mount path matches the deploy's sentinel path.
 
-    A drift here would silently break the sentinel (entrypoint.sh
+    A drift here would silently break the sentinel (scripts/deploy.sh
     would write to the rootfs path while the volume sits empty at a
     different mount point).
     """
 
     def test_state_mount_path_matches_sentinel_path(self) -> None:
-        """docker-compose.yml mounts the volume at the path entrypoint.sh writes to."""
+        """docker-compose.yml mounts the volume at the path scripts/deploy.sh writes to."""
         compose_text = DOCKER_COMPOSE.read_text(encoding="utf-8")
-        entrypoint_text = ENTRYPOINT_SCRIPT.read_text(encoding="utf-8")
+        deploy_text = DEPLOY_SCRIPT.read_text(encoding="utf-8")
 
         # Extract the mount target from docker-compose.yml.
         mount_match = re.search(
@@ -595,19 +553,19 @@ class TestComposeEntrypointAgreement:
         )
         mount_target = mount_match.group(1)
 
-        # Extract the sentinel directory from entrypoint.sh.
+        # Extract the sentinel directory from scripts/deploy.sh.
         sentinel_dir_match = re.search(
-            r'SEED_STATE_DIR="([^"]+)"', entrypoint_text,
+            r'SEED_STATE_DIR="([^"]+)"', deploy_text,
         )
         assert sentinel_dir_match is not None, (
-            "entrypoint.sh does not declare SEED_STATE_DIR"
+            "scripts/deploy.sh does not declare SEED_STATE_DIR"
         )
         sentinel_dir = sentinel_dir_match.group(1)
 
         assert mount_target == sentinel_dir, textwrap.dedent(f"""
-            Mount path drift between docker-compose.yml and entrypoint.sh:
+            Mount path drift between docker-compose.yml and scripts/deploy.sh:
               docker-compose.yml mounts at:  {mount_target}
-              entrypoint.sh writes to:        {sentinel_dir}
+              scripts/deploy.sh writes to:    {sentinel_dir}
             The sentinel will land on the read-only rootfs (or be lost
             on every restart) instead of the persistent volume.
         """).strip()

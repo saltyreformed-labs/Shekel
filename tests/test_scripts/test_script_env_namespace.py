@@ -27,7 +27,7 @@ The comparison set is DISCOVERED, not listed
     An earlier draft of this module hand-listed "every script that writes to
     or destroys production data".  It was not that set; it was the residue of
     one ``DB_CONTAINER`` grep, and it silently omitted ``entrypoint.sh``
-    (which runs ``alembic upgrade`` against production), ``backup_retention.sh``
+    (which then ran ``alembic upgrade`` against production), ``backup_retention.sh``
     (which deletes backup archives) and two more.  A hand list cannot see a
     script written after it, which is the one case a guard is for.
 
@@ -241,7 +241,7 @@ class TestScriptEnvNamespace:
             Path("scripts/restore.sh"),  # scripts/: DROPs the prod database
             Path("scripts/backup_retention.sh"),  # scripts/: deletes archives
             Path("deploy/shekel-deploy.sh"),  # deploy/: deploys and migrates
-            Path("entrypoint.sh"),  # repo root: alembic upgrade against prod
+            Path("entrypoint.sh"),  # repo root: the web server's entrypoint
         ):
             assert required in discovered, (
                 f"{required} is not in the discovered set; the guard would "

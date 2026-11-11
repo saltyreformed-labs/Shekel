@@ -1,77 +1,22 @@
--- Shekel Budget App -- Least-Privilege Role Provisioning
+-- Shekel Budget App -- the web login's privileges
 --
--- Two-role policy (audit finding F-081 / remediation Commit C-13):
---   * shekel_user (owner)            -- runs DDL, migrations, and the
---     deployment scripts.  Connection URL exposed as DATABASE_URL.
+-- Two-role policy (audit finding F-081 / remediation Commit C-13; the
+-- owner split from the superuser by plan#2166):
+--   * shekel_owner (owner)           -- owns the database, its schemas
+--     and every object in them, and runs the deploy: DDL, migrations,
+--     the deployment scripts.  Not a superuser.  Its URL is
+--     DATABASE_URL, in the migrate service alone.
 --   * shekel_app  (least-privilege)  -- DML-only role used by the
 --     runtime Flask app.  Cannot DROP TABLE, ALTER TABLE, or DROP
 --     ROLE.  An attacker with RCE in the Gunicorn process cannot
 --     remove the audit triggers that the rebuild migration adds.
---     Connection URL exposed as DATABASE_URL_APP.
+--     Its URL is DATABASE_URL_APP.
 --
--- Run by entrypoint.sh after init_db.sql, with the password
--- supplied via psql's -v flag:
---
---     psql -v "APP_ROLE_PASSWORD_LITERAL=${APP_ROLE_PASSWORD}" \
---          -v "ON_ERROR_STOP=1" \
---          -f scripts/init_db_role.sql
---
--- Why the indirection through SET / current_setting():
---
---     psql variable substitution (``:'name'``) only happens outside
---     dollar-quoted blocks.  The role-provisioning DO block below
---     therefore cannot read ``:'APP_ROLE_PASSWORD_LITERAL'`` directly
---     -- the colon-name token would reach PostgreSQL unsubstituted
---     and fail with a syntax error.  The fix is to write the password
---     to a custom GUC (``shekel.app_role_password``) at the SQL
---     boundary -- where psql substitution does run -- and read it
---     from inside the DO block via ``current_setting()``.  The GUC
---     is session-local and ``WITH LOCAL`` could be used in a
---     transaction but is unnecessary here because the entire psql
---     invocation runs in one session that ends with the file.
---
--- Idempotent: existing role gets ALTER ROLE; missing role gets
--- CREATE ROLE.  Both branches use ``format(... %L, ...)`` to quote
--- the password into the dynamically-built SQL safely.
-
--- Smuggle the password into a session-local GUC so the DO block
--- can read it via current_setting() (psql substitution does not
--- run inside dollar-quoted blocks; see file header for rationale).
---
--- If APP_ROLE_PASSWORD_LITERAL was not supplied via psql -v, the
--- substitution below leaves the literal token ``:'APP_ROLE_PASSWORD_LITERAL'``
--- in the SQL stream, which PostgreSQL rejects with a syntax error.
--- Combined with ``-v ON_ERROR_STOP=1`` (set by entrypoint.sh) that
--- gives a non-zero exit code, which the entrypoint shell captures
--- via ``set -eEo pipefail``.  Defending against the empty-string
--- case (``-v APP_ROLE_PASSWORD_LITERAL=``) happens in the DO block
--- below via ``current_setting`` + ``RAISE EXCEPTION``.
-SET shekel.app_role_password TO :'APP_ROLE_PASSWORD_LITERAL';
-
-DO $$
-BEGIN
-    IF current_setting('shekel.app_role_password') = '' THEN
-        RAISE EXCEPTION
-            'APP_ROLE_PASSWORD_LITERAL must be supplied via psql -v';
-    END IF;
-
-    IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'shekel_app') THEN
-        EXECUTE format(
-            'CREATE ROLE shekel_app WITH LOGIN PASSWORD %L',
-            current_setting('shekel.app_role_password')
-        );
-    ELSE
-        EXECUTE format(
-            'ALTER ROLE shekel_app WITH LOGIN PASSWORD %L',
-            current_setting('shekel.app_role_password')
-        );
-    END IF;
-END$$;
-
--- Clear the GUC immediately after use so the password does not
--- linger in pg_stat_activity for the rest of this session.  Other
--- sessions never saw it.
-RESET shekel.app_role_password;
+-- Both logins, and their passwords, are made in the database container
+-- (deploy/postgres/provision_roles.sh; rulings plan#3412, plan#3413).
+-- This file only grants: scripts/deploy.sh runs it as shekel_owner after
+-- init_db.sql, on every deploy, before the migrations.  A database without
+-- shekel_app stops here, at the first GRANT, naming the role.
 
 -- ── Connection + schema usage ─────────────────────────────────────
 -- Note: the database name "shekel" is the production default; if a
@@ -110,12 +55,12 @@ GRANT USAGE
 -- trigger has no DELETE arm by design).
 --
 -- This block MUST follow the blanket GRANT above and MUST live in this
--- file (not only in migration e3c23fadb21d): entrypoint.sh re-runs this
--- file on every container start, so the blanket GRANT re-opens
--- UPDATE/DELETE on the ledger tables at each boot and this REVOKE
+-- file (not only in migration e3c23fadb21d): scripts/deploy.sh re-runs
+-- this file on every deploy, so the blanket GRANT re-opens
+-- UPDATE/DELETE on the ledger tables at each deploy and this REVOKE
 -- re-closes it in the same run.  Guarded on table existence because on
 -- a FRESH database this file runs before the tables are created --
--- that first boot's posture is closed later in the same start by
+-- that first deploy's posture is closed later in the same deploy by
 -- scripts/init_database.py (apply_ledger_append_only_privileges, the
 -- shared SQL in app/posting_infrastructure.py; keep both in sync).
 DO $$
@@ -131,13 +76,16 @@ $$;
 
 -- ── Default privileges for future objects ─────────────────────────
 -- ALTER DEFAULT PRIVILEGES is scoped to the role that runs it (the
--- "FOR ROLE" clause defaults to current_user, which is shekel_user
--- when this file runs from entrypoint.sh).  The clause grants the
+-- "FOR ROLE" clause defaults to current_user, which is shekel_owner
+-- when this file runs from scripts/deploy.sh).  The clause grants the
 -- listed privileges automatically on every new object that
--- shekel_user creates in the named schema -- so when Alembic
+-- shekel_owner creates in the named schema -- so when Alembic
 -- creates a new table in budget/salary/auth, the runtime app role
 -- immediately has DML on it without a manual GRANT after every
--- migration.
+-- migration.  (A database deployed before plan#2166 also holds the
+-- same defaults for shekel_user, the superuser that ran its deploys;
+-- they cover only what that role creates, which is no longer the
+-- migrations.)
 ALTER DEFAULT PRIVILEGES IN SCHEMA auth, budget, salary
     GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO shekel_app;
 ALTER DEFAULT PRIVILEGES IN SCHEMA ref
@@ -168,7 +116,7 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA system
 -- migration's own conditional GRANT never re-runs and every write 500s
 -- inside system.audit_trigger_func() with "permission denied for table
 -- audit_log" (hit 2026-06-11).  This block makes any clone self-heal at
--- the next app start; it is an idempotent no-op when the migration's
+-- the next deploy; it is an idempotent no-op when the migration's
 -- grant is already in place, and a no-op on a fresh database where the
 -- table does not exist yet (the migration grants it on creation).
 DO $$

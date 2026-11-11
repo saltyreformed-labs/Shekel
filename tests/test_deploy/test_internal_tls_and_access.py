@@ -14,8 +14,10 @@ The artifacts under audit are:
                                           volumes for cert/key + app
                                           DATABASE_URL ?sslmode=require +
                                           DB_SSLMODE + PGSSLMODE.
-    entrypoint.sh                         Honours DB_SSLMODE in the
-                                          DATABASE_URL_APP construction.
+    scripts/_entrypoint_lib.sh            Honours DB_SSLMODE in the
+                                          database URL each entrypoint
+                                          builds (its behaviour is
+                                          tested in test_entrypoints.py).
     scripts/generate_pg_cert.sh           Generates the self-signed
                                           cert/key with proper modes
                                           and ownership.
@@ -53,7 +55,6 @@ DEPLOY_DIR = REPO_ROOT / "deploy"
 CLOUDFLARED_CONFIG = REPO_ROOT / "cloudflared" / "config.yml"
 PROD_COMPOSE_OVERRIDE = DEPLOY_DIR / "docker-compose.prod.yml"
 BASE_COMPOSE = REPO_ROOT / "docker-compose.yml"
-ENTRYPOINT = REPO_ROOT / "entrypoint.sh"
 GENERATE_CERT_SCRIPT = REPO_ROOT / "scripts" / "generate_pg_cert.sh"
 POSTGRES_DIR = DEPLOY_DIR / "postgres"
 POSTGRES_README = POSTGRES_DIR / "README.md"
@@ -544,80 +545,6 @@ class TestProdComposeOverrideAppDatabaseUrl:
             f"deploy/docker-compose.prod.yml services.app.environment"
             f".PGSSLMODE is not 'require' (audit F-154): "
             f"{env.get('PGSSLMODE')!r}"
-        )
-
-
-class TestEntrypointHonoursDbSslmode:
-    """entrypoint.sh constructs DATABASE_URL_APP from individual
-    DB_* env vars just before exec'ing Gunicorn.  C-37 adds
-    DB_SSLMODE consumption to that construction so the runtime app
-    inherits the same TLS posture as the owner role.
-    """
-
-    @pytest.fixture(scope="class")
-    @classmethod
-    def text(cls) -> str:
-        """Return the entrypoint.sh source as a string."""
-        return ENTRYPOINT.read_text(encoding="utf-8")
-
-    def test_script_parses_cleanly(self) -> None:
-        """``bash -n`` accepts the script (no syntax errors)."""
-        result = subprocess.run(
-            ["bash", "-n", str(ENTRYPOINT)],
-            capture_output=True,
-            text=True,
-            timeout=10,
-            check=False,
-        )
-        assert result.returncode == 0, (
-            f"bash -n failed for {ENTRYPOINT}:\n"
-            f"  stdout: {result.stdout}\n  stderr: {result.stderr}"
-        )
-
-    def test_constructs_database_url_app_with_sslmode(
-        self, text: str
-    ) -> None:
-        """The DATABASE_URL_APP construction must reference
-        DB_SSLMODE.  We grep for the variable name and the
-        construction line.
-        """
-        assert "DB_SSLMODE" in text, (
-            "entrypoint.sh does not reference DB_SSLMODE -- the "
-            "DATABASE_URL_APP construction would emit a plaintext "
-            "URL even when the prod override sets DB_SSLMODE=require "
-            "(audit F-154)"
-        )
-        # The DATABASE_URL_APP export line must concatenate the
-        # ssl-mode query suffix.  The literal pattern allows for
-        # whitespace flexibility in the variable name expansion.
-        pattern = re.compile(
-            r"export\s+DATABASE_URL_APP=.*\$\{DB_SSLMODE_QUERY\}",
-        )
-        assert pattern.search(text) is not None, (
-            "entrypoint.sh's DATABASE_URL_APP export does not "
-            "concatenate DB_SSLMODE_QUERY -- the runtime URL would "
-            "lack the ?sslmode= suffix"
-        )
-
-    def test_db_sslmode_query_built_only_when_set(
-        self, text: str
-    ) -> None:
-        """The construction must guard against an unset DB_SSLMODE
-        so bundled-mode (without DB_SSLMODE) keeps emitting a
-        plaintext URL.  Mandatory ssl-mode in bundled mode would
-        break the README Quick Start, where postgres has no cert.
-        """
-        # A simple shape check: the script must use the ``${VAR:-}``
-        # idiom (or an explicit empty default) to test DB_SSLMODE
-        # before appending the query suffix.
-        pattern = re.compile(
-            r'if\s+\[\s+-n\s+"\$\{DB_SSLMODE:?-?\}"\s+\]',
-        )
-        assert pattern.search(text) is not None, (
-            "entrypoint.sh does not guard the DB_SSLMODE_QUERY "
-            "construction with a DB_SSLMODE non-empty check; "
-            "bundled-mode deployments without TLS would emit a "
-            "broken URL"
         )
 
 

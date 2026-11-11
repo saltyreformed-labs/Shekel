@@ -7,12 +7,12 @@
 # What MUST live inside the image:
 #   - app/                      Flask application package
 #   - migrations/               Alembic migration history (used by
-#                               flask db upgrade in entrypoint.sh and
+#                               the deploy, scripts/deploy.sh, and
 #                               docker exec ops)
-#   - scripts/init_db.sql       Schema bootstrap (entrypoint.sh)
-#   - scripts/init_db_role.sql  Role provisioning (entrypoint.sh)
-#   - scripts/init_database.py  Step 3, one transaction (entrypoint.sh)
-#   - scripts/seed_user.py      Seed initial owner (entrypoint.sh +
+#   - scripts/init_db.sql       Schema bootstrap (scripts/deploy.sh)
+#   - scripts/init_db_role.sql  The web login's grants (scripts/deploy.sh)
+#   - scripts/init_database.py  Step 3, one transaction (scripts/deploy.sh)
+#   - scripts/seed_user.py      Seed initial owner (scripts/deploy.sh +
 #                               docker exec ops)
 #   - scripts/seed_ref_tables.py    Seed lookup tables (docker exec repair)
 #   - scripts/seed_companion.py     Seed companion user (docker exec)
@@ -25,7 +25,10 @@
 #   - scripts/_script_lib.py    Shared CLI helpers the runtime scripts
 #                               above import (run_in_app_context etc.)
 #   - alembic.ini               Alembic config
-#   - entrypoint.sh             ENTRYPOINT
+#   - entrypoint.sh             ENTRYPOINT, the web server's
+#   - scripts/owner_entrypoint.sh   The migrate service's entrypoint
+#   - scripts/deploy.sh         The migrate service's command, the deploy
+#   - scripts/_entrypoint_lib.sh    What the three above source
 #   - gunicorn.conf.py          gunicorn config
 #   - pyproject.toml, uv.lock, .python-version
 #                               The lock the builder stage installs
@@ -118,7 +121,7 @@ tools/
 # logs/ is a host-side directory used by deploy/backup scripts.  The
 # app inside the container writes to stdout (captured by Docker's
 # json-file driver per Commit C-15), never to /home/shekel/app/logs.
-# state/ is created by entrypoint.sh when running under the dev
+# state/ is created by scripts/deploy.sh when running under the dev
 # compose's host-bind mount; the production image ships a fresh
 # (empty) /home/shekel/app/state directory pre-created by the
 # Dockerfile to anchor the named-volume mount.
@@ -189,8 +192,8 @@ amortization-fix.patch
 .worktrees/
 
 # ── Dev-only scripts ───────────────────────────────────────────────
-# scripts/ is mostly runtime-essential; entrypoint.sh runs four of
-# the .py / .sql files at container start and the runbook documents
+# scripts/ is mostly runtime-essential; scripts/deploy.sh runs four of
+# the .py / .sql files on every deploy and the runbook documents
 # many ``docker exec ... python scripts/...`` invocations.  Only the
 # strictly host-only or build-time scripts are excluded here.
 #

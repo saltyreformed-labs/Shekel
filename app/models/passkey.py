@@ -26,7 +26,7 @@ user's id by one function.
 without the private key, which never leaves the person's device.  The table
 is audited, so ``system.audit_log`` records each passkey added and removed.
 
-Related service: app/services/passkey_service.py
+Related service: app/services/passkey_service/
 """
 
 from app.extensions import db

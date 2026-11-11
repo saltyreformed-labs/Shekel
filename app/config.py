@@ -377,6 +377,18 @@ class BaseConfig:
         os.getenv("HIBP_TIMEOUT_SECONDS", "3")
     )
 
+    # ---- Passkeys (plan#2538) -------------------------------------------
+    #
+    # The site's origin, as a browser writes it (``https://`` and the host,
+    # no path): every passkey ceremony is bound to it, and the relying party
+    # id is its host, derived by ``passkey_service.relying_party_id`` and
+    # never read from a request's ``Host`` header.  A passkey made on one
+    # origin works on no other, so the test site's passkeys are its own.
+    # ``None`` where the environment names none; DevConfig and TestConfig
+    # each state one, and ProdConfig's refusal to build without one is
+    # plan#3488's, which delivers the value.
+    PASSKEY_ORIGIN = os.getenv("PASSKEY_ORIGIN")
+
 
 #: Where the rate limiter's store is for the configurations that run in a container beside it
 #: (ruling plan#2633): Valkey's socket file, which ``deploy/valkey/start.sh`` makes (its
@@ -528,6 +540,10 @@ class DevConfig(BaseConfig):
     """
 
     DEBUG = True
+    # The address host ``flask run`` serves, unless the environment names
+    # another: a browser lets ``http://localhost`` use a passkey, the one
+    # insecure origin it does.
+    PASSKEY_ORIGIN = os.getenv("PASSKEY_ORIGIN", "http://localhost:5000")
     # Falls back to peer-auth local connection if neither
     # DATABASE_URL_APP nor DATABASE_URL is set in .env.  Matches the
     # Quick Start instructions in README.md.
@@ -577,6 +593,11 @@ class TestConfig(BaseConfig):
     # state, which made test_stale_activity_rejected (13h-stale session vs
     # the 12h default) fail suite-wide whenever the suite inherited it.
     IDLE_TIMEOUT_MINUTES = 720
+
+    # Pinned, whatever the environment names, so the suite is hermetic: the
+    # software authenticator in ``tests/_passkeys.py`` signs for this origin.
+    # ``.test`` is reserved (RFC 2606), so it names no real site.
+    PASSKEY_ORIGIN = "https://shekel.test"
 
     # Lower bcrypt cost for faster test execution. Default is 12;
     # 4 is the minimum and makes auth/MFA tests ~100x faster.

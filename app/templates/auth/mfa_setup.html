@@ -6,6 +6,15 @@
 <div class="row justify-content-center mt-4">
   <div class="col-md-6">
     {% call form_card("Set Up Two-Factor Authentication", "bi-shield-plus") %}
+    {# Why the user is here (ruling plan#3434): a user who must have
+       two-factor is held at this page until it is set up, every other page
+       sending them back to it. #}
+    {% if current_user.must_have_two_factor %}
+    <p>
+      Your account requires two-factor authentication. Set it up here to
+      continue to Shekel.
+    </p>
+    {% endif %}
     <p class="text-muted">
       Scan the QR code below with your authenticator app (e.g. Google Authenticator,
       Authy, or 1Password), then enter the 6-digit code to verify.

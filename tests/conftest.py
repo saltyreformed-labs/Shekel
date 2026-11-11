@@ -759,6 +759,9 @@ from tests._test_helpers import (
     step_down_through_the_transfer_column_drop,
 )
 from tests._per_request_globals import PerRequestGlobalsClient
+from tests._two_factor_sign_in import (
+    SEED_COMPANION_EMAIL, SEED_COMPANION_PASSWORD, sign_in_seed_companion,
+)
 from tests._shard import SHARD_ENV, apply_shard, parse_shard
 
 
@@ -3457,8 +3460,8 @@ def seed_companion(app, db, seed_user):
     from app.enums import RoleEnum  # pylint: disable=import-outside-toplevel
 
     companion = User(
-        email="companion@shekel.local",
-        password_hash=hash_password("companionpass"),
+        email=SEED_COMPANION_EMAIL,
+        password_hash=hash_password(SEED_COMPANION_PASSWORD),
         display_name="Companion User",
         role_id=ref_cache.role_id(RoleEnum.COMPANION),
         linked_owner_id=seed_user["user"].id,
@@ -3478,20 +3481,13 @@ def seed_companion(app, db, seed_user):
 
 @pytest.fixture()
 def companion_client(app, db, seed_companion):
-    """Provide an authenticated test client for the companion user.
+    """A browser signed in as the companion with her password and her code.
 
-    Creates a new test client instance and logs in as the companion
-    user, following the same pattern as second_auth_client.
+    Ruling plan#3434: a companion without two-factor is held at its setup, so
+    she gets it first (:func:`tests._two_factor_sign_in.sign_in_seed_companion`);
+    ``seed_companion`` alone stays without it.
     """
-    comp_client = app.test_client()
-    resp = comp_client.post("/login", data={
-        "email": "companion@shekel.local",
-        "password": "companionpass",
-    })
-    assert resp.status_code == 302, (
-        f"companion_client login failed with status {resp.status_code}"
-    )
-    return comp_client
+    return sign_in_seed_companion(app)
 
 
 # --- Helpers --------------------------------------------------------------

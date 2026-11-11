@@ -109,14 +109,9 @@ def security():
     Returns:
         The rendered page.
     """
-    mfa_config = (
-        db.session.query(MfaConfig)
-        .filter_by(user_id=current_user.id)
-        .first()
-    )
     return render_template(
         "auth/security.html",
-        mfa_enabled=mfa_config.is_enabled if mfa_config else False,
+        mfa_enabled=current_user.has_two_factor,
         # How long a trusted device stays trusted, which the page states in
         # its sentences: the one value, never a second spelling of it.
         trust_days=TRUST_LIFETIME.days,

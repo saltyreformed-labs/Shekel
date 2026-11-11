@@ -15,6 +15,7 @@ backup-code consumer, and the setup TTL constant come from
 
 import logging
 from datetime import datetime, timezone
+from functools import wraps
 
 from flask import (
     current_app,
@@ -615,12 +616,45 @@ def regenerate_backup_codes():
     return render_template("auth/mfa_backup_codes.html", backup_codes=codes)
 
 
+def _refused_where_required(view):
+    """Refuse a view that turns off two-factor to a user who must have it.
+
+    Ruling plan#3434: every companion must use two-factor, and there is no
+    switch, so ``/mfa/disable`` refuses her on GET and POST alike, before the
+    view reads or counts any password or code.  The Security page hides the
+    button and says it is required; this answers the URL typed or a stale
+    link.  ``scripts/reset_mfa.py`` still clears it, and she meets setup at
+    her next sign-in.
+
+    Args:
+        view: The view function to guard.
+
+    Returns:
+        The guarded view, which redirects such a user to the Security page,
+        saying why, and runs *view* for anyone else.
+    """
+    @wraps(view)
+    def guarded(*args, **kwargs):
+        """Redirect a user who must have two-factor; else run the view."""
+        if current_user.must_have_two_factor:
+            flash(
+                "Two-factor authentication is required for your account and "
+                "cannot be turned off.",
+                "warning",
+            )
+            return redirect(url_for("auth.security"))
+        return view(*args, **kwargs)
+    return guarded
+
+
 @auth_bp.route("/mfa/disable", methods=["GET"])
+@_refused_where_required
 def mfa_disable():
     """Display the MFA disable confirmation page.
 
     Requires MFA to be currently enabled. Redirects to security
-    settings if MFA is not enabled.
+    settings if MFA is not enabled.  A user who must have two-factor never
+    reaches it (:func:`_refused_where_required`).
     """
     mfa_config = (
         db.session.query(MfaConfig)
@@ -635,6 +669,7 @@ def mfa_disable():
 
 
 @auth_bp.route("/mfa/disable", methods=["POST"])
+@_refused_where_required
 def mfa_disable_confirm():
     """Process MFA disable after verifying password and TOTP code.
 
@@ -655,6 +690,10 @@ def mfa_disable_confirm():
     its own record and passes the account's lock, a stranger counts on the
     account and meets it.  Success does not clear the count: that is a
     finished sign-in's or re-confirm's (ruling plan#3007).
+
+    A user who must have two-factor never reaches it
+    (:func:`_refused_where_required`), so a wrong password or code there
+    counts nothing and a right pair turns nothing off.
     """
     # Schema validates shape before bcrypt is invoked.  current_password
     # accepts any historical length (legacy short passwords still work

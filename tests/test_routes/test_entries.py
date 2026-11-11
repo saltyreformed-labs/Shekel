@@ -35,6 +35,7 @@ from tests._test_helpers import (
     rhythm_of,
     settle_instant_on,
 )
+from tests._two_factor_sign_in import sign_in_seed_companion
 from app.services.settle_day import (
     record_settle_day,
     recorded_settle_day,
@@ -118,29 +119,6 @@ def _create_visible_tracked_txn(seed_user, seed_periods):
     db.session.commit()
 
     return {"template": template, "transaction": txn, "category": category}
-
-
-def _login_companion(app):
-    """Create a test client and log in as the companion user.
-
-    Must be called within an app context, after seed_companion has
-    created the companion user.
-
-    Args:
-        app: The Flask application.
-
-    Returns:
-        An authenticated FlaskClient for the companion user.
-    """
-    comp = app.test_client()
-    resp = comp.post("/login", data={
-        "email": "companion@shekel.local",
-        "password": "companionpass",
-    })
-    assert resp.status_code == 302, (
-        f"Companion login failed with status {resp.status_code}"
-    )
-    return comp
 
 
 def _create_other_user_txn():
@@ -1812,7 +1790,7 @@ class TestEntryMutationSurfaces:
             txn.notes = "owner-private-note"
             db.session.commit()
 
-            comp = _login_companion(app)
+            comp = sign_in_seed_companion(app)
             resp = comp.post(
                 f"/transactions/{txn.id}/entries",
                 data={
@@ -1915,7 +1893,7 @@ class TestEntryTransactionMismatch:
             entry = _add_entry(txn_hidden, seed_user, "50.00", "Secret Store")
 
             # Companion logs in and uses visible txn URL with hidden entry ID.
-            comp = _login_companion(app)
+            comp = sign_in_seed_companion(app)
             resp = comp.patch(
                 f"/transactions/{txn_visible.id}/entries/{entry.id}",
                 data={"amount": "75.00", "direction": "charge"},
@@ -1938,7 +1916,7 @@ class TestCompanionAccess:
             txn = data["transaction"]
             _add_entry(txn, seed_user, "50.00", "Kroger")
 
-            comp = _login_companion(app)
+            comp = sign_in_seed_companion(app)
             resp = comp.get(f"/transactions/{txn.id}/entries")
             assert resp.status_code == 200
             assert b"Kroger" in resp.data
@@ -1952,7 +1930,7 @@ class TestCompanionAccess:
             data = _create_visible_tracked_txn(seed_user, seed_periods)
             txn = data["transaction"]
 
-            comp = _login_companion(app)
+            comp = sign_in_seed_companion(app)
             resp = comp.post(
                 f"/transactions/{txn.id}/entries",
                 data={
@@ -1978,7 +1956,7 @@ class TestCompanionAccess:
             txn = data["transaction"]
             entry = _add_entry(txn, seed_user, "50.00", "Kroger")
 
-            comp = _login_companion(app)
+            comp = sign_in_seed_companion(app)
             resp = comp.patch(
                 f"/transactions/{txn.id}/entries/{entry.id}",
                 data={"amount": "60.00", "direction": "charge"},
@@ -2000,7 +1978,7 @@ class TestCompanionAccess:
             entry = _add_entry(txn, seed_user, "50.00", "Kroger")
             entry_id = entry.id
 
-            comp = _login_companion(app)
+            comp = sign_in_seed_companion(app)
             resp = comp.delete(
                 f"/transactions/{txn.id}/entries/{entry_id}",
             )
@@ -2017,7 +1995,7 @@ class TestCompanionAccess:
         with app.app_context():
             # companion_visible defaults to False.
             txn = seed_entry_template["transaction"]
-            comp = _login_companion(app)
+            comp = sign_in_seed_companion(app)
             resp = comp.get(f"/transactions/{txn.id}/entries")
             assert resp.status_code == 404
 
@@ -2028,7 +2006,7 @@ class TestCompanionAccess:
         """Companion gets 404 for transactions belonging to a different owner."""
         with app.app_context():
             other = _create_other_user_txn()
-            comp = _login_companion(app)
+            comp = sign_in_seed_companion(app)
             resp = comp.get(
                 f"/transactions/{other['transaction'].id}/entries",
             )
@@ -2045,7 +2023,7 @@ class TestCompanionAccess:
             # Owner creates an entry.
             _add_entry(txn, seed_user, "50.00", "Kroger")
             # Companion creates an entry via route.
-            comp = _login_companion(app)
+            comp = sign_in_seed_companion(app)
             comp.post(
                 f"/transactions/{txn.id}/entries",
                 data={

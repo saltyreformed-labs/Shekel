@@ -20,6 +20,7 @@ from tests._test_helpers import (
     one_off_row_of,
     payback_row_of,
 )
+from tests._two_factor_sign_in import sign_in_seed_companion
 
 
 # ── Companion blocked from all guarded routes ────────────────────────
@@ -316,29 +317,6 @@ def _create_companion_test_transaction(
     return txn
 
 
-def _login_companion(app):
-    """Create an authenticated companion test client.
-
-    Must be called within an app context, after seed_companion
-    has created the companion user.
-
-    Args:
-        app: The Flask application.
-
-    Returns:
-        An authenticated FlaskClient for the companion user.
-    """
-    comp = app.test_client()
-    resp = comp.post("/login", data={
-        "email": "companion@shekel.local",
-        "password": "companionpass",
-    })
-    assert resp.status_code == 302, (
-        f"Companion login failed with status {resp.status_code}"
-    )
-    return comp
-
-
 class TestMarkDoneCompanionAccess:
     """Test companion access to the mark_done route."""
 
@@ -357,7 +335,7 @@ class TestMarkDoneCompanionAccess:
             template_name="Groceries",
         )
 
-        comp = _login_companion(app)
+        comp = sign_in_seed_companion(app)
         resp = comp.post(f"/transactions/{txn.id}/mark-done")
         assert resp.status_code == 200
 
@@ -379,7 +357,7 @@ class TestMarkDoneCompanionAccess:
             template_name="Mortgage",
         )
 
-        comp = _login_companion(app)
+        comp = sign_in_seed_companion(app)
         resp = comp.post(f"/transactions/{txn.id}/mark-done")
         assert resp.status_code == 404
 
@@ -403,7 +381,7 @@ class TestMarkDoneCompanionAccess:
         db.session.commit()
 
         # Companion (linked to seed_user) tries to mark the second owner's txn.
-        comp = _login_companion(app)
+        comp = sign_in_seed_companion(app)
         resp = comp.post(f"/transactions/{txn.id}/mark-done")
         assert resp.status_code == 404
 
@@ -448,7 +426,7 @@ class TestMarkDoneCompanionAccess:
         )
         db.session.commit()
 
-        comp = _login_companion(app)
+        comp = sign_in_seed_companion(app)
         resp = comp.post(f"/transactions/{txn.id}/mark-done")
         assert resp.status_code == (200 if shown else 404)
 
@@ -483,7 +461,7 @@ class TestMarkDoneCompanionAccess:
         assert envelope.visible_to_companion is True
         assert payback.visible_to_companion is False
 
-        comp = _login_companion(app)
+        comp = sign_in_seed_companion(app)
         assert comp.post(f"/transactions/{envelope.id}/mark-done").status_code == 200
         resp = comp.post(f"/transactions/{payback.id}/mark-done")
         assert resp.status_code == 404
@@ -506,7 +484,7 @@ class TestCompanionBlockedTransactionRoutes:
             db, seed_user, seed_periods_today,
             companion_visible=True,
         )
-        comp = _login_companion(app)
+        comp = sign_in_seed_companion(app)
         resp = comp.patch(
             f"/transactions/{txn.id}",
             data={"estimated_amount": "999.00"},
@@ -521,7 +499,7 @@ class TestCompanionBlockedTransactionRoutes:
             db, seed_user, seed_periods_today,
             companion_visible=True,
         )
-        comp = _login_companion(app)
+        comp = sign_in_seed_companion(app)
         resp = comp.post(f"/transactions/{txn.id}/cancel")
         assert resp.status_code == 404
 
@@ -533,7 +511,7 @@ class TestCompanionBlockedTransactionRoutes:
             db, seed_user, seed_periods_today,
             companion_visible=True,
         )
-        comp = _login_companion(app)
+        comp = sign_in_seed_companion(app)
         resp = comp.post(f"/transactions/{txn.id}/mark-credit")
         assert resp.status_code == 404
 
@@ -545,7 +523,7 @@ class TestCompanionBlockedTransactionRoutes:
             db, seed_user, seed_periods_today,
             companion_visible=True,
         )
-        comp = _login_companion(app)
+        comp = sign_in_seed_companion(app)
         resp = comp.delete(f"/transactions/{txn.id}")
         assert resp.status_code == 404
 
@@ -557,7 +535,7 @@ class TestCompanionBlockedTransactionRoutes:
             db, seed_user, seed_periods_today,
             companion_visible=True,
         )
-        comp = _login_companion(app)
+        comp = sign_in_seed_companion(app)
         resp = comp.get(f"/transactions/{txn.id}/cell")
         assert resp.status_code == 404
 
@@ -569,7 +547,7 @@ class TestCompanionBlockedTransactionRoutes:
             db, seed_user, seed_periods_today,
             companion_visible=True,
         )
-        comp = _login_companion(app)
+        comp = sign_in_seed_companion(app)
         resp = comp.get(f"/transactions/{txn.id}/quick-edit")
         assert resp.status_code == 404
 
@@ -581,7 +559,7 @@ class TestCompanionBlockedTransactionRoutes:
             db, seed_user, seed_periods_today,
             companion_visible=True,
         )
-        comp = _login_companion(app)
+        comp = sign_in_seed_companion(app)
         resp = comp.get(f"/transactions/{txn.id}/full-edit")
         assert resp.status_code == 404
 
@@ -589,7 +567,7 @@ class TestCompanionBlockedTransactionRoutes:
         self, app, db, seed_companion,
     ):
         """Companion gets 404 on POST /transactions/inline."""
-        comp = _login_companion(app)
+        comp = sign_in_seed_companion(app)
         resp = comp.post("/transactions/inline", data={})
         assert resp.status_code == 404
 
@@ -597,7 +575,7 @@ class TestCompanionBlockedTransactionRoutes:
         self, app, db, seed_companion,
     ):
         """Companion gets 404 on POST /transactions."""
-        comp = _login_companion(app)
+        comp = sign_in_seed_companion(app)
         resp = comp.post("/transactions", data={})
         assert resp.status_code == 404
 
@@ -605,7 +583,7 @@ class TestCompanionBlockedTransactionRoutes:
         self, app, db, seed_user, seed_periods_today, seed_companion,
     ):
         """Companion gets 404 on POST /pay-periods/<id>/carry-forward."""
-        comp = _login_companion(app)
+        comp = sign_in_seed_companion(app)
         resp = comp.post(f"/pay-periods/{seed_periods_today[0].id}/carry-forward")
         assert resp.status_code == 404
 

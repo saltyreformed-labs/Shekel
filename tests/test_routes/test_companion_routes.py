@@ -30,6 +30,7 @@ from tests._test_helpers import (
     open_owner_calendar,
     settlement_if_settling,
 )
+from tests._two_factor_sign_in import sign_in_seed_companion
 
 
 # ── Helpers ──────────────────────────────────────────────────────────
@@ -61,26 +62,6 @@ def _make_template(
     )
 
 
-def _login_companion(app):
-    """Create an authenticated companion test client.
-
-    Args:
-        app: The Flask application.
-
-    Returns:
-        An authenticated FlaskClient for the companion user.
-    """
-    comp = app.test_client()
-    resp = comp.post("/login", data={
-        "email": "companion@shekel.local",
-        "password": "companionpass",
-    })
-    assert resp.status_code == 302, (
-        f"Companion login failed with status {resp.status_code}"
-    )
-    return comp
-
-
 # ── Route Access ─────────────────────────────────────────────────────
 
 
@@ -103,7 +84,7 @@ class TestRouteAccess:
         generate_row_of(t_hid, seed_periods_today[0])
         db.session.commit()
 
-        comp = _login_companion(app)
+        comp = sign_in_seed_companion(app)
         resp = comp.get(f"/companion/period/{seed_periods_today[0].id}")
         assert resp.status_code == 200
         html = resp.data.decode()
@@ -133,7 +114,7 @@ class TestRouteAccess:
         gracefully render the empty state.
         Note: seed_periods_today is not included, so the owner has no periods.
         """
-        comp = _login_companion(app)
+        comp = sign_in_seed_companion(app)
         resp = comp.get("/companion/")
         assert resp.status_code == 200
         html = resp.data.decode()
@@ -157,7 +138,7 @@ class TestPeriodNavigation:
         generate_row_of(template, seed_periods_today[1])
         db.session.commit()
 
-        comp = _login_companion(app)
+        comp = sign_in_seed_companion(app)
         resp = comp.get(f"/companion/period/{seed_periods_today[1].id}")
         assert resp.status_code == 200
         html = resp.data.decode()
@@ -181,7 +162,7 @@ class TestPeriodNavigation:
         other_period = open_owner_calendar(second_user.id, date(2026, 1, 2))[0]
         db.session.commit()
 
-        comp = _login_companion(app)
+        comp = sign_in_seed_companion(app)
         resp = comp.get(f"/companion/period/{other_period.id}")
         assert resp.status_code == 404
 
@@ -189,7 +170,7 @@ class TestPeriodNavigation:
         self, app, db, seed_user, seed_periods_today, seed_companion,
     ):
         """Companion accessing a non-existent period gets 404."""
-        comp = _login_companion(app)
+        comp = sign_in_seed_companion(app)
         resp = comp.get("/companion/period/999999")
         assert resp.status_code == 404
 
@@ -204,7 +185,7 @@ class TestPeriodNavigation:
         generate_row_of(template, seed_periods_today[1])
         db.session.commit()
 
-        comp = _login_companion(app)
+        comp = sign_in_seed_companion(app)
         resp = comp.get(f"/companion/period/{seed_periods_today[1].id}")
         assert resp.status_code == 200
         html = resp.data.decode()
@@ -224,7 +205,7 @@ class TestPeriodNavigation:
         generate_row_of(template, seed_periods_today[0])
         db.session.commit()
 
-        comp = _login_companion(app)
+        comp = sign_in_seed_companion(app)
         resp = comp.get(f"/companion/period/{seed_periods_today[0].id}")
         assert resp.status_code == 200
         html = resp.data.decode()
@@ -248,7 +229,7 @@ class TestPeriodNavigation:
         generate_row_of(template, last_period)
         db.session.commit()
 
-        comp = _login_companion(app)
+        comp = sign_in_seed_companion(app)
         resp = comp.get(f"/companion/period/{last_period.id}")
         assert resp.status_code == 200
         html = resp.data.decode()
@@ -284,7 +265,7 @@ class TestEntryIntegration:
         txn = generate_row_of(template, seed_periods_today[0])
         db.session.commit()
 
-        comp = _login_companion(app)
+        comp = sign_in_seed_companion(app)
         resp = comp.post(f"/transactions/{txn.id}/entries", data={
             "amount": "42.50",
             "description": "Kroger",
@@ -315,7 +296,7 @@ class TestEntryIntegration:
         db.session.commit()
 
         companion = seed_companion["user"]
-        comp = _login_companion(app)
+        comp = sign_in_seed_companion(app)
         resp = comp.post(f"/transactions/{txn.id}/entries", data={
             "amount": "25.00",
             "description": "Target",
@@ -338,7 +319,7 @@ class TestEntryIntegration:
         txn = generate_row_of(template, seed_periods_today[0])
         db.session.commit()
 
-        comp = _login_companion(app)
+        comp = sign_in_seed_companion(app)
         resp = comp.post(f"/transactions/{txn.id}/entries", data={
             "amount": "10.00",
             "description": "Test",
@@ -393,7 +374,7 @@ class TestEntryIntegration:
         assert row.template.companion_visible is False
         assert row.visible_to_companion is False
 
-        comp = _login_companion(app)
+        comp = sign_in_seed_companion(app)
         resp = comp.get(f"/companion/period/{seed_periods_today[0].id}")
         assert resp.status_code == 200
         assert b"Shown" in resp.data
@@ -405,7 +386,7 @@ class TestEntryIntegration:
         self, app, db, seed_user, seed_periods_today, seed_companion,
     ):
         """Plan 10.8: Random/non-existent txn_id returns 404."""
-        comp = _login_companion(app)
+        comp = sign_in_seed_companion(app)
         resp = comp.post("/transactions/999999/entries", data={
             "amount": "10.00",
             "description": "Test",
@@ -432,7 +413,7 @@ class TestEntryIntegration:
         db.session.add(entry)
         db.session.commit()
 
-        comp = _login_companion(app)
+        comp = sign_in_seed_companion(app)
         resp = comp.delete(
             f"/transactions/{txn.id}/entries/{entry.id}",
         )
@@ -460,7 +441,7 @@ class TestEntryIntegration:
         db.session.add(entry)
         db.session.commit()
 
-        comp = _login_companion(app)
+        comp = sign_in_seed_companion(app)
         resp = comp.patch(
             f"/transactions/{txn.id}/entries/{entry.id}",
             data={
@@ -498,7 +479,7 @@ class TestMarkDoneIntegration:
         txn = generate_row_of(template, seed_periods_today[0])
         db.session.commit()
 
-        comp = _login_companion(app)
+        comp = sign_in_seed_companion(app)
         resp = comp.post(f"/transactions/{txn.id}/mark-done")
         assert resp.status_code == 200
 
@@ -516,7 +497,7 @@ class TestMarkDoneIntegration:
         txn = generate_row_of(template, seed_periods_today[0])
         db.session.commit()
 
-        comp = _login_companion(app)
+        comp = sign_in_seed_companion(app)
         resp = comp.post(f"/transactions/{txn.id}/mark-done")
         assert resp.status_code == 404
 
@@ -539,7 +520,7 @@ class TestMarkDoneIntegration:
         db.session.commit()
         txn_id = txn.id
 
-        comp = _login_companion(app)
+        comp = sign_in_seed_companion(app)
         resp = comp.post(
             f"/transactions/{txn_id}/mark-done",
             data={"render": "mobile_card", "card_prefix": "tp", "can_edit": "0"},
@@ -569,7 +550,7 @@ class TestMarkDoneIntegration:
         txn = generate_row_of(template, seed_periods_today[0])
         db.session.commit()
 
-        comp = _login_companion(app)
+        comp = sign_in_seed_companion(app)
         resp = comp.post(f"/transactions/{txn.id}/mark-done")
         assert resp.status_code == 200
 
@@ -611,7 +592,7 @@ class TestMarkDoneIntegration:
         ))
         db.session.commit()
 
-        comp = _login_companion(app)
+        comp = sign_in_seed_companion(app)
         resp = comp.post(f"/transactions/{txn.id}/mark-done")
         assert resp.status_code == 200
 
@@ -645,7 +626,7 @@ class TestEntryDataInHTML:
         ))
         db.session.commit()
 
-        comp = _login_companion(app)
+        comp = sign_in_seed_companion(app)
         resp = comp.get(f"/companion/period/{seed_periods_today[0].id}")
         assert resp.status_code == 200
         html = resp.data.decode()
@@ -665,7 +646,7 @@ class TestEntryDataInHTML:
         generate_row_of(template, seed_periods_today[0])
         db.session.commit()
 
-        comp = _login_companion(app)
+        comp = sign_in_seed_companion(app)
         resp = comp.get(f"/companion/period/{seed_periods_today[0].id}")
         assert resp.status_code == 200
         html = resp.data.decode()
@@ -684,7 +665,7 @@ class TestEntryDataInHTML:
         generate_row_of(template, seed_periods_today[0])
         db.session.commit()
 
-        comp = _login_companion(app)
+        comp = sign_in_seed_companion(app)
         resp = comp.get(f"/companion/period/{seed_periods_today[0].id}")
         assert resp.status_code == 200
         html = resp.data.decode()
@@ -712,7 +693,7 @@ class TestEntryDataInHTML:
         ))
         db.session.commit()
 
-        comp = _login_companion(app)
+        comp = sign_in_seed_companion(app)
         resp = comp.get(f"/companion/period/{seed_periods_today[0].id}")
         assert resp.status_code == 200
         html = resp.data.decode()
@@ -749,7 +730,7 @@ class TestEntryDataInHTML:
         ))
         db.session.commit()
 
-        comp = _login_companion(app)
+        comp = sign_in_seed_companion(app)
         resp = comp.get(f"/companion/period/{seed_periods_today[0].id}")
         assert resp.status_code == 200
         html = resp.data.decode()
@@ -772,7 +753,7 @@ class TestEmptyStates:
         self, app, db, seed_user, seed_periods_today, seed_companion,
     ):
         """Period with no visible transactions shows empty state message."""
-        comp = _login_companion(app)
+        comp = sign_in_seed_companion(app)
         resp = comp.get(f"/companion/period/{seed_periods_today[0].id}")
         assert resp.status_code == 200
         html = resp.data.decode()
@@ -792,7 +773,7 @@ class TestEmptyStates:
         generate_row_of(template, seed_periods_today[0])
         db.session.commit()
 
-        comp = _login_companion(app)
+        comp = sign_in_seed_companion(app)
         resp = comp.get(f"/companion/period/{seed_periods_today[0].id}")
         assert resp.status_code == 200
         html = resp.data.decode()
@@ -836,7 +817,7 @@ class TestMarkPaidButtonVisibility:
         generate_row_of(template, seed_periods_today[0])
         db.session.commit()
 
-        comp = _login_companion(app)
+        comp = sign_in_seed_companion(app)
         resp = comp.get(f"/companion/period/{seed_periods_today[0].id}")
         assert resp.status_code == 200
         html = resp.data.decode()
@@ -863,7 +844,7 @@ class TestMarkPaidButtonVisibility:
         status_seam.apply_status_change(txn, ref_cache.status_id(StatusEnum.DONE), settlement=settlement_if_settling(txn, ref_cache.status_id(StatusEnum.DONE)))
         db.session.commit()
 
-        comp = _login_companion(app)
+        comp = sign_in_seed_companion(app)
         resp = comp.get(f"/companion/period/{seed_periods_today[0].id}")
         assert resp.status_code == 200
         html = resp.data.decode()
@@ -893,7 +874,7 @@ class TestMarkPaidButtonVisibility:
         txn.status_id = ref_cache.status_id(StatusEnum.CREDIT)
         db.session.commit()
 
-        comp = _login_companion(app)
+        comp = sign_in_seed_companion(app)
         resp = comp.get(f"/companion/period/{seed_periods_today[0].id}")
         assert resp.status_code == 200
         html = resp.data.decode()
@@ -944,7 +925,7 @@ class TestEntryListInlineRendering:
         txn = generate_row_of(template, seed_periods_today[0])
         db.session.commit()
 
-        comp = _login_companion(app)
+        comp = sign_in_seed_companion(app)
         resp = comp.get(f"/companion/period/{seed_periods_today[0].id}")
         assert resp.status_code == 200
         html = resp.data.decode()
@@ -975,7 +956,7 @@ class TestEntryListInlineRendering:
         txn = generate_row_of(template, seed_periods_today[0])
         db.session.commit()
 
-        comp = _login_companion(app)
+        comp = sign_in_seed_companion(app)
         resp = comp.get(f"/companion/period/{seed_periods_today[0].id}")
         assert resp.status_code == 200
         html = resp.data.decode()
@@ -1022,7 +1003,7 @@ class TestCardTapToExpand:
         txn = generate_row_of(template, seed_periods_today[0])
         db.session.commit()
 
-        comp = _login_companion(app)
+        comp = sign_in_seed_companion(app)
         resp = comp.get(f"/companion/period/{seed_periods_today[0].id}")
         assert resp.status_code == 200
         html = resp.data.decode()
@@ -1043,7 +1024,7 @@ class TestCardTapToExpand:
         generate_row_of(template, seed_periods_today[0])
         db.session.commit()
 
-        comp = _login_companion(app)
+        comp = sign_in_seed_companion(app)
         resp = comp.get(f"/companion/period/{seed_periods_today[0].id}")
         assert resp.status_code == 200
         html = resp.data.decode()
@@ -1115,7 +1096,7 @@ class TestTheCompanionAddPurchaseFormReadsTheUsersClock:
             companion_routes, "display_today", lambda: self._SENTINEL,
         )
 
-        comp = _login_companion(app)
+        comp = sign_in_seed_companion(app)
         resp = comp.get(f"/companion/period/{seed_periods_today[0].id}")
         assert resp.status_code == 200
         html = resp.data.decode()

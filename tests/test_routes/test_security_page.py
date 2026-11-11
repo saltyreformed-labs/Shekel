@@ -31,9 +31,10 @@ from app.models.known_device import KnownDevice
 from app.models.user import MfaConfig, User
 from app.services import auth_service, known_device_service, mfa_service
 from tests._test_helpers import enable_mfa
+from tests._two_factor_sign_in import (
+    SEED_COMPANION_PASSWORD, sign_in_seed_companion_by_password,
+)
 
-_COMPANION_EMAIL = "companion@shekel.local"
-_COMPANION_PASSWORD = "companionpass"
 
 #: The Security page's four cards, by the title each one shows.
 _CARDS = (
@@ -56,25 +57,13 @@ def _code(secret):
     return pyotp.TOTP(secret).at(int(time.time()))
 
 
-def _companion_signed_in(app):
-    """Return a browser signed in as the seed companion, with her password alone."""
-    browser = app.test_client()
-    response = browser.post("/login", data={
-        "email": _COMPANION_EMAIL, "password": _COMPANION_PASSWORD,
-    })
-    assert response.status_code == 302, (
-        f"Setup failed: the companion's sign-in answered {response.status_code}"
-    )
-    return browser
-
-
 def _companion_with_two_factor(app, companion_id):
     """Return a signed-in companion browser and her two-factor secret.
 
     She signs in first and gets two-factor after, so no code has been typed
     for her secret yet (the module docstring says why).
     """
-    browser = _companion_signed_in(app)
+    browser = sign_in_seed_companion_by_password(app)
     secret = enable_mfa(db.session, companion_id)
     return browser, secret
 
@@ -195,7 +184,7 @@ class TestEveryReturnPathLandsOnAPageSheCanOpen:
         """
         with app.app_context():
             companion_id = seed_companion["user"].id
-            browser = _companion_signed_in(app)
+            browser = sign_in_seed_companion_by_password(app)
             assert browser.get("/mfa/setup").status_code == 200
             config = db.session.execute(
                 sqlalchemy.select(MfaConfig).where(MfaConfig.user_id == companion_id)
@@ -227,7 +216,7 @@ class TestEveryReturnPathLandsOnAPageSheCanOpen:
             new_password = "a brand new companion passphrase"
 
             response = browser.post("/change-password", data={
-                "current_password": _COMPANION_PASSWORD,
+                "current_password": SEED_COMPANION_PASSWORD,
                 "new_password": new_password,
                 "confirm_password": new_password,
             })
@@ -240,7 +229,7 @@ class TestEveryReturnPathLandsOnAPageSheCanOpen:
                 new_password, companion.password_hash,
             )
             assert not auth_service.verify_password(
-                _COMPANION_PASSWORD, companion.password_hash,
+                SEED_COMPANION_PASSWORD, companion.password_hash,
             )
 
     def test_logging_out_her_other_sessions_lands_on_her_page(
@@ -280,7 +269,7 @@ class TestEveryReturnPathLandsOnAPageSheCanOpen:
             )
 
             response = browser.post("/reauth", data={
-                "password": _COMPANION_PASSWORD, "totp_code": _code(secret),
+                "password": SEED_COMPANION_PASSWORD, "totp_code": _code(secret),
             })
 
             assert response.status_code == 302

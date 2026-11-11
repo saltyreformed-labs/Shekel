@@ -695,9 +695,13 @@ class TestTheStaleFormIsRefused:
             assert "the box now asks for the account&#39;s balance." in html
             assert "Amount owed" not in html
             # Re-opened fresh: the standing held -1,000.00, now an asset's
-            # balance, and not the 1,200.00 typed as owed.
+            # balance, and not the 1,200.00 typed as owed.  Asked of the
+            # amount's spellings, never of the bare digits, which the
+            # account's own id can hold (its sequence starts at a million per
+            # table in name order, so a new table moves it; plan#2538).
             assert 'value="-1000.00"' in html
-            assert "1200" not in html
+            assert "1200.00" not in html
+            assert "1,200.00" not in html
             assert self._rows(AccountAnchorHistory, card.id) == before
 
     def test_the_preview_of_a_stale_form_says_why_instead_of_pricing_it(

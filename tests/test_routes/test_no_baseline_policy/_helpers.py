@@ -179,7 +179,7 @@ def _build_baseline_less_owner(db):
     As a per-test fixture this cost 302 ms of setup for 22 ms of requests,
     236 times over; the file went 82.26 s -> 18.73 s serially.  The full split,
     and what of it this does NOT remove, is stated once in the seeded-start-
-    state block comment in ``tests/conftest.py``.
+    state block comment in ``tests/_seeded_start_states.py``.
 
     Every kind is present deliberately: the door that 500'd the property page
     is reachable only through a Property that SECURES a configured loan, and
@@ -655,8 +655,8 @@ def _route_table_app():
 #: * **The per-test drop and re-clone STAYS, because the clone is the
 #:   isolation.**  A seeded start state changes what a test starts WITH, never
 #:   whether it gets its own database; the same sentence is in
-#:   ``tests/conftest.py``'s seeded-start-state block, which is where the
-#:   mechanism lives.
+#:   ``tests/_seeded_start_states.py``'s seeded-start-state block, which is
+#:   where the mechanism lives.
 #:
 #: **What it costs, and where that cost actually lives.**  Measured serially
 #: 2026-08-29, 252 items in 81.16 s: per-item SETUP is **87%** of that (236

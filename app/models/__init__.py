@@ -36,6 +36,7 @@ from app.models.user import MfaConfig, User, UserSettings
 from app.models.known_device import KnownDevice
 from app.models.guess_record import GuessRecord
 from app.models.passkey import Passkey
+from app.models.passkey_add import PasskeyAdd
 
 # Budget domain
 from app.models.pay_period import PayPeriod
@@ -140,6 +141,7 @@ __all__ = [
     "KnownDevice",
     "MfaConfig",
     "Passkey",
+    "PasskeyAdd",
     "User",
     "UserSettings",
     # Budget domain

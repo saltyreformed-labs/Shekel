@@ -67,6 +67,7 @@ AUDITED_TABLES: tuple[tuple[str, str], ...] = (
     ("auth", "guess_records"),
     ("auth", "known_devices"),
     ("auth", "mfa_configs"),
+    ("auth", "passkey_adds"),
     ("auth", "passkeys"),
     ("auth", "user_settings"),
     ("auth", "users"),

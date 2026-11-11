@@ -15,8 +15,9 @@
 -- Both logins, and their passwords, are made in the database container
 -- (deploy/postgres/provision_roles.sh; rulings plan#3412, plan#3413).
 -- This file only grants: scripts/deploy.sh runs it as shekel_owner after
--- init_db.sql, on every deploy, before the migrations.  A database without
--- shekel_app stops here, at the first GRANT, naming the role.
+-- init_db.sql, on every deploy, as one transaction, before the migrations.
+-- A database without shekel_app stops here, at the first GRANT, naming
+-- the role.
 
 -- ── Connection + schema usage ─────────────────────────────────────
 -- Note: the database name "shekel" is the production default; if a
@@ -58,9 +59,12 @@ GRANT USAGE
 -- file (not only in migration e3c23fadb21d): scripts/deploy.sh re-runs
 -- this file on every deploy, so the blanket GRANT re-opens
 -- UPDATE/DELETE on the ledger tables at each deploy and this REVOKE
--- re-closes it in the same run.  Guarded on table existence because on
--- a FRESH database this file runs before the tables are created --
--- that first deploy's posture is closed later in the same deploy by
+-- re-closes it in the same transaction: the deploy runs this file as one
+-- (psql's --single-transaction, scripts/deploy.sh step 2), so no other
+-- session, the serving app's among them, ever sees the ledger re-opened.
+-- Guarded on table existence because on a FRESH database this file
+-- runs before the tables are created -- that first deploy's posture is
+-- closed later in the same deploy by
 -- scripts/init_database.py (apply_ledger_append_only_privileges, the
 -- shared SQL in app/posting_infrastructure.py; keep both in sync).
 DO $$

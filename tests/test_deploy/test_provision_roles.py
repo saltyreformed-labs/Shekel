@@ -13,9 +13,11 @@ login at 127.0.0.1 with a wrong password measured accepted, 2026-11-10), and ask
 every other address.  The superuser's work runs over the socket, which is how an operator's run
 reaches it with no password.
 
-The last class runs what the deploy then runs as the owner, ``scripts/init_db.sql`` and
-``scripts/init_db_role.sql`` (``scripts/deploy.sh``'s first two steps), logged in as the owner at
-the bridge address, so a grant that needs a superuser's right fails here.
+The last two classes run what the deploy then runs as the owner, ``scripts/init_db.sql`` and
+``scripts/init_db_role.sql`` (``scripts/deploy.sh``'s first two steps), each as the deploy runs
+it, logged in as the owner at the bridge address, so a grant that needs a superuser's right
+fails here.  The last pauses the grants file between its blanket grant and its revoke and reads,
+from another session, what the web login holds then.
 
 ``docker``-marked: ``scripts/test.sh`` deselects them unless asked
 (``PYTEST_MARKER_EXPR=docker``), CI runs them, and this package's conftest refuses the system
@@ -30,6 +32,7 @@ import time
 from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
+from typing import IO
 
 import pytest
 
@@ -44,6 +47,10 @@ _SCRIPT = REPO_ROOT / "deploy" / "postgres" / "provision_roles.sh"
 #: The deploy's two SQL files, as committed, in the order ``scripts/deploy.sh`` runs them.
 _SCHEMAS_SQL = REPO_ROOT / "scripts" / "init_db.sql"
 _GRANTS_SQL = REPO_ROOT / "scripts" / "init_db_role.sql"
+#: What ``scripts/deploy.sh`` hands psql for each file beyond what every one of its runs takes:
+#: the grants run as one transaction (ruling plan#3534; deploy.sh's side is pinned by
+#: ``test_entrypoints.py``, ``test_grants_the_web_login_its_privileges_in_one_transaction``).
+_DEPLOY_OPTIONS = {_SCHEMAS_SQL: (), _GRANTS_SQL: ("--single-transaction",)}
 #: Where the image runs a first-boot hook from, and where an operator runs the script.
 _HOOK = "/docker-entrypoint-initdb.d/10-provision-roles.sh"
 #: The superuser and database the service's environment names.
@@ -55,6 +62,11 @@ _APP = "shekel_app"
 _DOCKER_TIMEOUT_S = 90
 #: How long a started container has to accept a TCP login, its first boot included.
 _READY_S = 60.0
+#: How long a session the test waits on may take to reach the state it waits for (a grant
+#: held open, a file waiting on it): each is a statement or two away, so 30 s is generous.
+_AWAIT_S = 30.0
+#: How often that wait reads the database.
+_POLL_S = 0.2
 #: Every login attribute the script pins off, as ``pg_roles`` names them.
 _ESCALATING = ("rolsuper", "rolcreatedb", "rolcreaterole", "rolreplication", "rolbypassrls")
 #: Objects outside the system catalogs not owned by the owner: schemas, relations (indexes,
@@ -97,6 +109,22 @@ GRANT SELECT, INSERT ON budget.accounts, budget.entries TO {_APP};
 GRANT SELECT, INSERT ON system.audit_log TO {_APP};
 GRANT USAGE ON ALL SEQUENCES IN SCHEMA budget, system TO {_APP};
 """
+#: The posting ledger's two tables, as much of them as the grants file's revoke needs.
+_LEDGER = """
+CREATE TABLE budget.journal_entries (id serial PRIMARY KEY);
+CREATE TABLE budget.account_postings (
+    id serial PRIMARY KEY,
+    journal_entry_id integer NOT NULL REFERENCES budget.journal_entries (id) ON DELETE CASCADE);
+"""
+#: ``t`` when the web login holds UPDATE or DELETE on either ledger table, as the committed
+#: catalog says, else ``f``.
+_LEDGER_OPEN_TO_APP = f"""
+SELECT bool_or(has_table_privilege('{_APP}', ledger, privilege))
+FROM unnest(ARRAY['budget.journal_entries', 'budget.account_postings']) AS ledger,
+     unnest(ARRAY['UPDATE', 'DELETE']) AS privilege
+"""
+#: The application name the session that pauses the grants file connects under.
+_BLOCKER = "shekel-test-blocker"
 
 
 def _password() -> str:
@@ -137,13 +165,19 @@ class _Cluster:
                        "-h", self.address, "-U", role, "-d", _DATABASE, "-v", "ON_ERROR_STOP=1",
                        "--no-psqlrc", "-tAqc", sql)
 
+    def file_command(self, role: str, password: str, sql_file: Path) -> list[str]:
+        """``docker``'s arguments to log in as ``role`` with ``password`` at the bridge address
+        and run the deploy's ``sql_file``, read from standard input, as ``scripts/deploy.sh``
+        runs it: stopping at its first error, with that file's options."""
+        return ["exec", "-i", "-e", f"PGPASSWORD={password}", self.container, "psql",
+                "-h", self.address, "-U", role, "-d", _DATABASE, "-v", "ON_ERROR_STOP=1",
+                "--no-psqlrc", "-q", *_DEPLOY_OPTIONS[sql_file], "-f", "-"]
+
     def run_file(self, role: str, password: str, sql_file: Path
                  ) -> subprocess.CompletedProcess[str]:
-        """Log in as ``role`` with ``password`` at the bridge address and run ``sql_file`` as
-        ``scripts/deploy.sh`` runs it, stopping at its first error."""
-        return _docker("exec", "-i", "-e", f"PGPASSWORD={password}", self.container, "psql",
-                       "-h", self.address, "-U", role, "-d", _DATABASE, "-v", "ON_ERROR_STOP=1",
-                       "--no-psqlrc", "-q", "-f", "-",
+        """Log in as ``role`` with ``password`` at the bridge address and run the deploy's
+        ``sql_file`` as ``scripts/deploy.sh`` runs it."""
+        return _docker(*self.file_command(role, password, sql_file),
                        stdin=sql_file.read_text(encoding="utf-8"))
 
     def provision(self, *env: str) -> subprocess.CompletedProcess[str]:
@@ -215,6 +249,34 @@ def _wait_ready(name: str) -> None:
         time.sleep(0.5)
     log = _docker("logs", name)
     raise AssertionError(f"{name} never accepted a connection:\n{log.stdout}\n{log.stderr}")
+
+
+@contextlib.contextmanager
+def _background(args: list[str], stdin: int | IO[str]) -> Iterator[subprocess.Popen[str]]:
+    """``docker`` with ``args``, started in the background reading ``stdin``, its output
+    captured; killed on the way out if it is still running, and waited for."""
+    with subprocess.Popen(["docker", *args], stdin=stdin, stdout=subprocess.PIPE,
+                          stderr=subprocess.PIPE, text=True) as process:
+        try:
+            yield process
+        finally:
+            if process.poll() is None:
+                process.kill()
+
+
+def _await_row(cluster: _Cluster, sql: str, what: str) -> str:
+    """Read ``sql`` as the superuser until it returns a row; that row.
+
+    Raises:
+        AssertionError: when none comes within ``_AWAIT_S``, naming ``what``.
+    """
+    deadline = time.monotonic() + _AWAIT_S
+    while time.monotonic() < deadline:
+        row = cluster.superuser(sql)
+        if row:
+            return row
+        time.sleep(_POLL_S)
+    raise AssertionError(f"never saw {what} within {_AWAIT_S} s")
 
 
 def _first_boot_refused(tmp_path: Path, **env: str) -> str:
@@ -483,3 +545,69 @@ class TestTheDeploysSqlRunsAsTheOwner:
 
             assert ran.returncode != 0
             assert f'role "{_APP}" does not exist' in ran.stderr
+
+
+@pytest.mark.timeout(120)
+class TestTheGrantsAreOneTransaction:
+    """The grants file, run as the deploy runs it, re-opens the posting ledger to the web login
+    inside its own transaction alone (ruling plan#3534)."""
+
+    def test_no_other_session_sees_the_ledger_re_opened_while_the_grants_run(
+        self, tmp_path: Path,
+    ) -> None:
+        """Paused between its blanket grant and its revoke, the grants file has given the web
+        login UPDATE and DELETE on the ledger in its own transaction alone: another session
+        reads the ledger closed to it then, as before the run and after it.
+
+        The pause is a lock.  A session holding an uncommitted grant on a ledger table's
+        sequence makes the file's sequence grant, which follows its blanket table grant and
+        comes before its revoke, wait for it.  The test reads the web login's privileges while
+        the file waits there, then rolls the blocking grant back and lets the file finish."""
+        owner, app = _password(), _password()
+        with _started(tmp_path, OWNER_ROLE_PASSWORD=owner, APP_ROLE_PASSWORD=app) as cluster:
+            for sql_file in (_SCHEMAS_SQL, _GRANTS_SQL):
+                ran = cluster.run_file(_OWNER, owner, sql_file)
+                assert ran.returncode == 0, f"{sql_file.name} as the owner: {ran.stderr}"
+            made = cluster.login(_OWNER, owner, _LEDGER)
+            assert made.returncode == 0, made.stderr
+            # The default privileges open a table the owner makes to the web login, so the
+            # probe reads a new ledger open ...
+            assert cluster.superuser(_LEDGER_OPEN_TO_APP) == "t"
+            # ... until the grants file's revoke closes it, the state every later deploy meets.
+            ran = cluster.run_file(_OWNER, owner, _GRANTS_SQL)
+            assert ran.returncode == 0, ran.stderr
+            assert cluster.superuser(_LEDGER_OPEN_TO_APP) == "f"
+
+            with _background(["exec", "-i", "-e", f"PGAPPNAME={_BLOCKER}", cluster.container,
+                              "psql", "-U", _SUPERUSER, "-d", _DATABASE, "-v",
+                              "ON_ERROR_STOP=1", "--no-psqlrc", "-q"],
+                             stdin=subprocess.PIPE) as blocker:
+                assert blocker.stdin is not None
+                blocker.stdin.write("BEGIN;\nGRANT SELECT ON SEQUENCE "
+                                    f"budget.journal_entries_id_seq TO {_APP};\n")
+                blocker.stdin.flush()
+                blocking = _await_row(cluster, (
+                    "SELECT pid FROM pg_stat_activity "
+                    f"WHERE application_name = '{_BLOCKER}' AND state = 'idle in transaction'"
+                ), "the blocking grant held open")
+                with (_GRANTS_SQL.open(encoding="utf-8") as source,
+                      _background(cluster.file_command(_OWNER, owner, _GRANTS_SQL),
+                                  stdin=source) as grants):
+                    _await_row(cluster, (
+                        "SELECT pid FROM pg_stat_activity "
+                        f"WHERE usename = '{_OWNER}' AND query LIKE 'GRANT USAGE%SEQUENCES%' "
+                        f"AND pg_blocking_pids(pid) @> ARRAY[{blocking}]"
+                    ), "the grants file waiting at its sequence grant")
+
+                    assert cluster.superuser(_LEDGER_OPEN_TO_APP) == "f", (
+                        "another session read UPDATE or DELETE on the ledger granted to "
+                        f"{_APP} while the grants file ran: the file is not one transaction, "
+                        "and a serving app could edit the ledger between its blanket GRANT "
+                        "and its REVOKE"
+                    )
+
+                    blocker.communicate("ROLLBACK;\n", timeout=_DOCKER_TIMEOUT_S)
+                    _, error = grants.communicate(timeout=_DOCKER_TIMEOUT_S)
+                    assert grants.returncode == 0, error
+            assert blocker.returncode == 0
+            assert cluster.superuser(_LEDGER_OPEN_TO_APP) == "f"

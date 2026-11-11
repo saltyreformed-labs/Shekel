@@ -650,6 +650,22 @@ class TestDeployRun:
             assert "DATABASE_URL_APP" not in call["env"]
         assert image.sentinel().is_file()
 
+    def test_grants_the_web_login_its_privileges_in_one_transaction(
+        self, image: _Image,
+    ) -> None:
+        """psql runs the grants file as one transaction (ruling plan#3534): its blanket grant
+        re-opens UPDATE and DELETE on the posting ledger and its revoke closes them, and a
+        deploy beside a serving app commits the two together, so no request ever runs between
+        them.  ``test_provision_roles.py`` runs the file so on a real cluster."""
+        result = self._deploy(image, OWNER_ROLE_PASSWORD=_password())
+
+        assert result.returncode == 0, result.stderr
+        ran = dict(zip(image.steps(), image.calls(), strict=True))
+        assert "--single-transaction" in ran["init_db_role.sql"]["args"], (
+            "scripts/deploy.sh runs init_db_role.sql a statement at a time: between its "
+            "blanket GRANT and its REVOKE the web login holds UPDATE and DELETE on the ledger"
+        )
+
     def test_skips_the_seed_when_its_sentinel_is_present(self, image: _Image) -> None:
         """A deploy after the first finds the sentinel and runs no seed."""
         image.state_dir.mkdir()

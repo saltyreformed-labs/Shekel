@@ -81,8 +81,19 @@ echo "Schemas ready."
 # shekel_app, the web login, is made in the database container; here the
 # owner grants it data reads and writes on what the owner owns, and the
 # default privileges for what the migrations below create.
+#
+# The file runs as ONE transaction (psql's --single-transaction; ruling
+# plan#3534).  Its blanket GRANT gives shekel_app UPDATE and DELETE on
+# every budget table, the posting ledger's two among them, and its REVOKE
+# then takes those back from the ledger.  Run a statement at a time, each
+# committing alone, the web login would hold them in between; and for
+# those two tables the revoke is the database's only guard against a raw
+# edit by the web login (app/posting_infrastructure.py).  A `docker
+# compose up` that leaves the app's container in place runs this deploy
+# while gunicorn serves (measured 2026-11-11, plan#3490).  As one
+# transaction, no other session ever sees the re-grant.
 echo "Granting shekel_app its privileges..."
-_owner_psql -f "${_scripts}/init_db_role.sql"
+_owner_psql --single-transaction -f "${_scripts}/init_db_role.sql"
 echo "Grants ready."
 
 # ── 3. Initialize database (fresh) or run migrations (existing) ─

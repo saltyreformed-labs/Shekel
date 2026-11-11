@@ -1,7 +1,7 @@
 """``auth.passkeys`` refuses what no writer should be trusted to avoid.
 
-Plan#2538, rulings **plan#3465** and **plan#3467**: a passkey signs in on its
-own, and an account holding one signs in only by passkey.  Migration
+Plan#2538, ruling **plan#3465**: a passkey signs in on its own (ruling
+plan#3467's passkey-only sign-in waits on step plan#3542, ruling plan#3541).  Migration
 ``66184d995b1c`` makes the table and admits the two banner kinds a passkey's
 adding and removing raise.
 

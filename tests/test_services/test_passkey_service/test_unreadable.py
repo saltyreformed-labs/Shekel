@@ -61,10 +61,10 @@ def _sign_in_refusal(user, response_json):
 
 
 def _add_refusal(user, response):
-    """Complete an add to *user* with *response*; return the refusal."""
+    """Complete an add's registration by *user* with *response*; return the refusal."""
     _, state = passkey_service.registration_options(user, origin=ORIGIN)
     with pytest.raises(PasskeyRefused) as caught:
-        passkey_service.add_passkey(
+        passkey_service.complete_registration(
             user, json.dumps(response), "iPhone", origin=ORIGIN, state=state,
         )
     return caught.value
@@ -227,7 +227,7 @@ class TestWhatFido2Raises:
 
 def test_a_sign_in_still_reads_a_correct_response_after_the_checks(user, clock):
     """The checks refuse what is malformed and nothing else: a real key signs in."""
-    _, authenticator = add(user)
+    _, authenticator = add(clock, user)
     options, state = passkey_service.sign_in_options(origin=ORIGIN)
     response = json.dumps(authenticator.get(options))
     assert passkey_service.complete_sign_in(

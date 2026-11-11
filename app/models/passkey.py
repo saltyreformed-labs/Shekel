@@ -5,12 +5,12 @@ One passkey a user added to their account (plan#2538): a key their phone or
 security key made for this site, which signs Shekel's challenge when the
 person unlocks it with Face ID, a fingerprint or the device's passcode.
 
-**What it lets its user do** (rulings plan#3465, plan#3467).  A passkey signs
-in on its own, with no password and no code, and answers the re-confirm Shekel
-asks before a sensitive change.  An account that holds one signs in only by
-passkey: its password-and-code sign-in is closed while a row here names it,
-so the account cannot be phished.  The one statement of that predicate is
-in ``app.services.passkey_service``.
+**What it lets its user do** (ruling plan#3465).  A passkey signs in on its
+own, with no password and no code, and answers the re-confirm Shekel asks
+before a sensitive change.  An account that holds one keeps its password and
+code too, for now (ruling plan#3541): closing them while a row here names the
+account, so it cannot be phished, is step plan#3542, and the one statement of
+"holds a passkey" it will read is in ``app.services.passkey_service``.
 
 **What the row stores is what verifying a signature needs, and no more.**
 The credential's id, which the browser sends back to name the key; its public

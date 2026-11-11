@@ -1,14 +1,18 @@
-"""Adding a passkey: the options the device is asked with, the row kept, and every refusal."""
+"""Adding a passkey: the options the device is asked with, and every refusal of its registration.
+
+The registration's completion keeps nothing (ruling plan#3525): it ends by
+asking the device to sign in with the new passkey, and only that sign-in
+keeps it, which ``test_keeping`` grades.  Each refusal here is asked at the
+completion, so the device is never asked to sign in with a passkey Shekel
+would not keep, and nothing is kept.
+"""
 
 import json
 from datetime import timedelta
 
 import pytest
-from fido2 import cbor
 
 from app.exceptions import ValidationError
-from app.extensions import db
-from app.models.passkey import Passkey
 from app.services import passkey_service
 from app.services.passkey_service import PasskeyRefusal, PasskeyRefused
 from tests._passkeys import (
@@ -45,12 +49,22 @@ def _user(bare_user):
     return bare_user["user"]
 
 
+def _completed(user, response, *, state, name="iPhone"):
+    """Complete the registration with *response*; return the sign-in's options and state."""
+    return passkey_service.complete_registration(
+        user, json.dumps(response), name, origin=ORIGIN, state=state,
+    )
+
+
 def _refusal(user, response, *, state, name="iPhone"):
-    """Complete an add with *response*; return the refusal it raised."""
+    """Complete the registration with *response*; return the refusal it raised.
+
+    Asserts too that the account holds no passkey it did not hold before.
+    """
+    held = len(passkey_service.list_passkeys(user.id))
     with pytest.raises(PasskeyRefused) as caught:
-        passkey_service.add_passkey(
-            user, json.dumps(response), name, origin=ORIGIN, state=state,
-        )
+        _completed(user, response, state=state, name=name)
+    assert len(passkey_service.list_passkeys(user.id)) == held
     return caught.value
 
 
@@ -79,8 +93,8 @@ class TestTheOptions:
 
     def test_every_passkey_the_account_holds_is_excluded(self, user, clock):
         """Two added: the third's options exclude both, by credential id."""
-        first, _ = add(user)
-        second, _ = add(user)
+        first, _ = add(clock, user)
+        second, _ = add(clock, user)
         options, _ = passkey_service.registration_options(user, origin=ORIGIN)
         assert [
             unb64url(each["id"]) for each in options["publicKey"]["excludeCredentials"]
@@ -91,6 +105,7 @@ class TestTheOptions:
         options, state = passkey_service.registration_options(user, origin=ORIGIN)
         assert json.loads(json.dumps(options)) == options
         assert state == {
+            "ceremony": "registration",
             "challenge": options["publicKey"]["challenge"],
             "issued_at": T0.isoformat(),
             "user_id": user.id,
@@ -99,42 +114,13 @@ class TestTheOptions:
     def test_an_account_holding_ten_is_refused_before_the_device_is_asked(self, user, clock):
         """The eleventh's options are refused, so no device makes a key Shekel would not keep."""
         for _ in range(10):
-            add(user)
+            add(clock, user)
         with pytest.raises(PasskeyRefused) as caught:
             passkey_service.registration_options(user, origin=ORIGIN)
         assert caught.value.refusal is PasskeyRefusal.TOO_MANY
         assert str(caught.value) == (
             "An account can hold up to 10 passkeys. Remove one to add another."
         )
-
-
-class TestTheRowKept:
-    """What a completed add stores."""
-
-    def test_the_row_holds_the_key_the_device_made(self, user, clock):
-        """Its credential id, its COSE public key, the counter, the name and the moment."""
-        authenticator = SoftwareAuthenticator()
-        passkey, _ = add(user, authenticator, name="  Josh's iPhone  ")
-        db.session.expire_all()
-        row = db.session.get(Passkey, passkey.id)
-        assert row.user_id == user.id
-        assert row.credential_id == authenticator.credential_id
-        assert cbor.decode(row.public_key) == cbor.decode(authenticator.cose_key())
-        assert row.sign_count == 0
-        assert row.name == "Josh's iPhone"
-        assert row.created_at == T0
-        assert row.last_used_at is None
-
-    def test_a_counting_key_keeps_the_counter_it_reported(self, user, clock):
-        """A key whose counter rose to 1 at its registration is kept at 1."""
-        passkey, _ = add(user, SoftwareAuthenticator(counts=True))
-        assert passkey.sign_count == 1
-
-    def test_the_tenth_is_kept(self, user, clock):
-        """Ten is the cap, not one past it."""
-        for _ in range(10):
-            add(user)
-        assert len(passkey_service.list_passkeys(user.id)) == 10
 
 
 class TestTheName:
@@ -151,14 +137,12 @@ class TestTheName:
         options, state = passkey_service.registration_options(user, origin=ORIGIN)
         response = SoftwareAuthenticator().create(options)
         with pytest.raises(ValidationError, match=message):
-            passkey_service.add_passkey(
-                user, json.dumps(response), name, origin=ORIGIN, state=state,
-            )
+            _completed(user, response, state=state, name=name)
         assert passkey_service.list_passkeys(user.id) == []
 
     def test_sixty_characters_are_kept(self, user, clock):
         """The edge the length check admits."""
-        passkey, _ = add(user, name="x" * 60)
+        passkey, _ = add(clock, user, name="x" * 60)
         assert passkey.name == "x" * 60
 
 
@@ -173,14 +157,13 @@ class TestTheChallenge:
         assert str(refusal) == "That took too long. Please try again."
 
     def test_five_minutes_less_a_microsecond_is_in_time(self, user, clock):
-        """The last instant the challenge lives."""
+        """The last instant the challenge lives: the sign-in is asked for."""
         options, state = passkey_service.registration_options(user, origin=ORIGIN)
         clock.at(T0 + timedelta(minutes=5) - timedelta(microseconds=1))
-        passkey = passkey_service.add_passkey(
-            user, json.dumps(SoftwareAuthenticator().create(options)), "iPhone",
-            origin=ORIGIN, state=state,
+        sign_in_options, _ = _completed(
+            user, SoftwareAuthenticator().create(options), state=state,
         )
-        assert passkey.id is not None
+        assert sign_in_options["publicKey"]["userVerification"] == "required"
 
     def test_five_minutes_to_the_microsecond_is_expired(self, user, clock):
         """The challenge is dead at exactly its lifetime."""
@@ -199,7 +182,6 @@ class TestTheChallenge:
         options, state = passkey_service.registration_options(other, origin=ORIGIN)
         refusal = _refusal(user, SoftwareAuthenticator().create(options), state=state)
         assert refusal.refusal is PasskeyRefusal.WRONG_ACCOUNT
-        assert passkey_service.list_passkeys(user.id) == []
 
     def test_a_challenge_another_add_issued_is_not_verified(self, user, clock):
         """The state of one add and the answer to another: fido2's challenge check."""
@@ -230,11 +212,10 @@ class TestTheCeremony:
         assert refusal.refusal is PasskeyRefusal.NOT_VERIFIED
         assert str(refusal.__cause__) == cause
         assert str(refusal) == "That passkey could not be checked. Please try again."
-        assert passkey_service.list_passkeys(user.id) == []
 
 
 class TestTheKey:
-    """The key the device made must be one a sign-in can verify by."""
+    """The key the device made must at least load as one a sign-in could verify by."""
 
     def test_an_algorithm_the_options_never_offered_is_refused(self, user, clock):
         """An EC key labelled RS1 (SHA-1 RSA), which fido2 knows but Shekel never offers."""
@@ -311,19 +292,18 @@ class TestTheCredentialId:
     """One credential id names one passkey, of one account."""
 
     def test_the_same_passkey_added_twice_is_refused(self, user, clock):
-        """A device that ignored the exclusion, or an answer sent twice."""
+        """A device that ignored the exclusion: refused before it is asked to sign in."""
         authenticator = SoftwareAuthenticator()
-        add(user, authenticator)
+        add(clock, user, authenticator)
         options, state = passkey_service.registration_options(user, origin=ORIGIN)
         refusal = _refusal(user, authenticator.create(options), state=state)
         assert refusal.refusal is PasskeyRefusal.ALREADY_ADDED
         assert str(refusal) == "That passkey has already been added."
-        assert len(passkey_service.list_passkeys(user.id)) == 1
 
     def test_a_credential_another_account_holds_is_refused(self, user, second_user, clock):
-        """The one statement that writes the row asks every account, not this one's."""
+        """The check asks every account, not this one's."""
         authenticator = SoftwareAuthenticator()
-        add(second_user["user"], authenticator)
+        add(clock, second_user["user"], authenticator)
         options, state = passkey_service.registration_options(user, origin=ORIGIN)
         refusal = _refusal(user, authenticator.create(options), state=state)
         assert refusal.refusal is PasskeyRefusal.ALREADY_ADDED
@@ -338,7 +318,7 @@ class TestTheCredentialId:
 
     def test_a_credential_id_of_1023_bytes_is_kept(self, user, clock):
         """The edge the length check admits."""
-        passkey, _ = add(user, SoftwareAuthenticator(credential_id=b"\x07" * 1023))
+        passkey, _ = add(clock, user, SoftwareAuthenticator(credential_id=b"\x07" * 1023))
         assert len(passkey.credential_id) == 1023
 
     def test_an_empty_credential_id_is_refused(self, user, clock):
@@ -382,7 +362,7 @@ class TestTheFlagsAndSize:
 
     def test_backed_up_and_eligible_is_kept(self, user, clock):
         """An iCloud Keychain passkey's flags: BE and BS both set."""
-        passkey, _ = add(user, flags=UP | UV | AT | BE | BS)
+        passkey, _ = add(clock, user, flags=UP | UV | AT | BE | BS)
         assert passkey.id is not None
 
     def test_an_attestation_object_past_8_kib_is_refused(self, user, clock):
@@ -391,7 +371,7 @@ class TestTheFlagsAndSize:
         response = SoftwareAuthenticator().create(options, extensions=padding(8192))
         assert _refusal(user, response, state=state).refusal is PasskeyRefusal.MALFORMED
 
-    def test_an_attestation_object_of_8_kib_is_kept(self, user, clock):
+    def test_an_attestation_object_of_8_kib_is_admitted(self, user, clock):
         """The edge the cap admits: padded by extension outputs to exactly 8,192 bytes.
 
         A ``none`` attestation object around this key and a 16-byte id, with
@@ -407,21 +387,19 @@ class TestTheFlagsAndSize:
         authenticator.counter = 0
         response = authenticator.create(options, extensions=padding(8192 - bare_length - 1))
         assert len(unb64url(response["response"]["attestationObject"])) == 8192
-        passkey = passkey_service.add_passkey(
-            user, json.dumps(response), "iPhone", origin=ORIGIN, state=state,
-        )
-        assert passkey.id is not None
+        sign_in_options, _ = _completed(user, response, state=state)
+        assert sign_in_options["publicKey"]["userVerification"] == "required"
 
 
 class TestTheEleventh:
-    """Ruling plan#3472: up to ten, asked again at the completion."""
+    """Ruling plan#3472: up to ten, asked again when the registration completes."""
 
     def test_an_eleventh_completed_after_its_options_is_refused(self, user, clock):
-        """Options made at nine; a tenth added meanwhile; the eleventh's completion refuses."""
+        """Options made at nine; a tenth added meanwhile; the eleventh's registration refuses."""
         for _ in range(9):
-            add(user)
+            add(clock, user)
         options, state = passkey_service.registration_options(user, origin=ORIGIN)
-        add(user)
+        add(clock, user)
         refusal = _refusal(user, SoftwareAuthenticator().create(options), state=state)
         assert refusal.refusal is PasskeyRefusal.TOO_MANY
         assert len(passkey_service.list_passkeys(user.id)) == 10

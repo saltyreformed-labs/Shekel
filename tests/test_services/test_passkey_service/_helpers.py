@@ -1,7 +1,7 @@
 """Acts the passkey service tests share: a clock set per act, and a passkey added."""
 
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from app.services import passkey_service
 from tests._passkeys import ORIGIN, SoftwareAuthenticator
@@ -11,42 +11,71 @@ from tests._test_helpers import freeze_today
 #: suite runs; the service never reads the calendar.
 T0 = datetime(2026, 3, 1, 12, 0, tzinfo=timezone.utc)
 
+#: When :func:`add` adds a passkey unless told otherwise: a minute before
+#: :data:`T0`.  A kept passkey has signed in once, at its add (ruling
+#: plan#3525), and a challenge issued at or before a passkey's last use is
+#: refused, so a ceremony a case begins at T0 must be issued after the add.
+ADDED_AT = T0 - timedelta(minutes=1)
+
+#: The module whose clock the service reads: the package's one read of it.
+#: Named as text, so a clock that moved modules fails every case at once.
+_CLOCK_MODULE = "app.services.passkey_service._ceremony"
+
 
 class Clock:
-    """The service's clock, set to the moment each act names."""
+    """The service's clock, set to the moment each act names.
+
+    Attributes:
+        moment: The moment it is set to.
+    """
 
     def __init__(self, monkeypatch):
         """Hold *monkeypatch* and start at :data:`T0`."""
         self._monkeypatch = monkeypatch
+        self.moment = T0
         self.at(T0)
 
     def at(self, moment: datetime) -> None:
-        """Freeze the service package's clock at *moment* (UTC)."""
+        """Freeze the service's clock at *moment* (UTC)."""
+        self.moment = moment
         freeze_today(
             self._monkeypatch, moment.date(),
-            modules=(passkey_service.__name__,),
+            modules=(_CLOCK_MODULE,),
             at_time=moment.time(),
         )
 
 
-def add(user, authenticator=None, name="iPhone", **create):
-    """Add a passkey to *user* through both halves of the ceremony; return it and its key.
+def add(clock, user, authenticator=None, name="iPhone", *, at=ADDED_AT, **create):
+    """Add a passkey to *user* at *at* through all three acts; return it and its key.
+
+    The registration's options, its completion, and the sign-in by the new
+    passkey that keeps it, all at *at*.  *clock* is put back where it stood,
+    so the case goes on at its own moment.
 
     Args:
+        clock: The case's :class:`Clock`.
         user: The account adding it.
         authenticator: The key to add, or ``None`` for a new one.
         name: The name typed for it.
+        at: The moment of the add, which is the passkey's first use.
         **create: Passed to :meth:`SoftwareAuthenticator.create`.
 
     Returns:
         The new passkey row and the authenticator holding its key.
     """
     authenticator = SoftwareAuthenticator() if authenticator is None else authenticator
+    resume = clock.moment
+    clock.at(at)
     options, state = passkey_service.registration_options(user, origin=ORIGIN)
-    passkey = passkey_service.add_passkey(
+    sign_in_options, sign_in_state = passkey_service.complete_registration(
         user, json.dumps(authenticator.create(options, **create)), name,
         origin=ORIGIN, state=state,
     )
+    passkey = passkey_service.add_passkey(
+        user, json.dumps(authenticator.get(sign_in_options)),
+        origin=ORIGIN, state=sign_in_state,
+    )
+    clock.at(resume)
     return passkey, authenticator
 
 

@@ -26,7 +26,8 @@ class PasskeyRefusal(Enum):
     name nothing about the account.
     """
 
-    #: No state, or the challenge is ``CHALLENGE_LIFETIME`` old.
+    #: No state of the ceremony being completed, or its challenge is
+    #: ``CHALLENGE_LIFETIME`` old.
     EXPIRED = "expired"
     #: The response is not a credential the service can read.
     MALFORMED = "malformed"
@@ -46,6 +47,8 @@ class PasskeyRefusal(Enum):
     COUNTER_DID_NOT_RISE = "counter_did_not_rise"
     #: An add completed by an account other than the one it was begun for.
     WRONG_ACCOUNT = "wrong_account"
+    #: An add's sign-in answered by a passkey other than the one it made.
+    NOT_THE_NEW_PASSKEY = "not_the_new_passkey"
     #: The new key's algorithm is not one the options offered.
     UNOFFERED_ALGORITHM = "unoffered_algorithm"
     #: The new key cannot verify a signature.
@@ -60,6 +63,10 @@ class PasskeyRefusal(Enum):
 _MESSAGES = {
     PasskeyRefusal.EXPIRED: "That took too long. Please try again.",
     PasskeyRefusal.ALREADY_ADDED: "That passkey has already been added.",
+    PasskeyRefusal.NOT_THE_NEW_PASSKEY: (
+        "That was a different passkey. "
+        "Please try again and choose the one you just made."
+    ),
     PasskeyRefusal.TOO_MANY: (
         f"An account can hold up to {MAX_PASSKEYS} passkeys. "
         "Remove one to add another."

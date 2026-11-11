@@ -11,7 +11,13 @@ from app.models.passkey import Passkey
 from app.services import passkey_service
 from app.services.passkey_service import PasskeyRefusal, PasskeyRefused
 from tests._passkeys import BE, BS, ORIGIN, RP_ID, UP, UV, SoftwareAuthenticator, padding
-from tests.test_services.test_passkey_service._helpers import T0, Clock, add, sign_in
+from tests.test_services.test_passkey_service._helpers import (
+    ADDED_AT,
+    T0,
+    Clock,
+    add,
+    sign_in,
+)
 
 _ONE_MICROSECOND = timedelta(microseconds=1)
 
@@ -49,7 +55,11 @@ class TestTheOptions:
             "rpId": RP_ID,
             "userVerification": "required",
         }
-        assert state == {"challenge": state["challenge"], "issued_at": T0.isoformat()}
+        assert state == {
+            "ceremony": "sign_in",
+            "challenge": state["challenge"],
+            "issued_at": T0.isoformat(),
+        }
 
 
 class TestTheAccount:
@@ -62,7 +72,7 @@ class TestTheAccount:
         holds weak references: a passkey loaded and dropped would leave it.
         The completion that follows loads one, so the count is not deaf.
         """
-        _, authenticator = add(user)
+        _, authenticator = add(clock, user)
         user_id = user.id
         db.session.commit()
         db.session.expunge_all()
@@ -95,7 +105,7 @@ class TestTheAccount:
 
     def test_an_unknown_credential_names_no_one(self, user, clock):
         """A key no account added."""
-        add(user)
+        add(clock, user)
         options, _ = passkey_service.sign_in_options(origin=ORIGIN)
         response = SoftwareAuthenticator().get(options, user_handle=None)
         assert passkey_service.sign_in_account(json.dumps(response)) is None
@@ -106,7 +116,7 @@ class TestASignIn:
 
     def test_an_apple_passkey_signs_in_and_records_its_use(self, user, clock):
         """Counter 0 stays 0; last used moves to the completion's moment."""
-        passkey, authenticator = add(user)
+        passkey, authenticator = add(clock, user)
         options, state = passkey_service.sign_in_options(origin=ORIGIN)
         clock.at(T0 + timedelta(seconds=30))
         signed = sign_in(authenticator, state=state, options=options)
@@ -118,17 +128,17 @@ class TestASignIn:
 
     def test_an_apple_passkey_signs_in_again_with_its_counter_at_zero(self, user, clock):
         """Both counters 0, every time: not a copied key."""
-        _, authenticator = add(user)
+        _, authenticator = add(clock, user)
         clock.at(T0 + timedelta(minutes=1))
         sign_in(authenticator)
         clock.at(T0 + timedelta(minutes=2))
         assert sign_in(authenticator).sign_count == 0
 
     def test_a_counting_key_keeps_its_new_count(self, user, clock):
-        """Registered at 1, signed at 2: kept at 2."""
-        _, authenticator = add(user, SoftwareAuthenticator(counts=True))
+        """Registered at 1, kept by its sign-in at 2, signed in at 3: kept at 3."""
+        _, authenticator = add(clock, user, SoftwareAuthenticator(counts=True))
         clock.at(T0 + timedelta(minutes=1))
-        assert sign_in(authenticator).sign_count == 2
+        assert sign_in(authenticator).sign_count == 3
 
 
 class TestTheCeremony:
@@ -144,16 +154,16 @@ class TestTheCeremony:
     ])
     def test_a_wrong_answer_is_not_verified(self, user, clock, change, cause):
         """Each wrong origin, relying party, flag or type: refused, its use unrecorded."""
-        passkey, authenticator = add(user)
+        passkey, authenticator = add(clock, user)
         options, state = passkey_service.sign_in_options(origin=ORIGIN)
         refusal = _refused(user, authenticator.get(options, **change), state=state)
         assert refusal.refusal is PasskeyRefusal.NOT_VERIFIED
         assert str(refusal.__cause__) == cause
-        assert passkey.last_used_at is None
+        assert passkey.last_used_at == ADDED_AT
 
     def test_another_keys_signature_is_not_verified(self, user, clock):
         """The credential id of the added key, signed by another key."""
-        _, authenticator = add(user)
+        _, authenticator = add(clock, user)
         impostor = SoftwareAuthenticator(credential_id=authenticator.credential_id)
         impostor.user_handle = authenticator.user_handle
         options, state = passkey_service.sign_in_options(origin=ORIGIN)
@@ -163,7 +173,7 @@ class TestTheCeremony:
 
     def test_an_unknown_credential_is_refused(self, user, clock):
         """A key no account added, completed against an account."""
-        add(user)
+        add(clock, user)
         options, state = passkey_service.sign_in_options(origin=ORIGIN)
         stranger = SoftwareAuthenticator()
         stranger.user_handle = user.id.to_bytes(8, "big")
@@ -172,7 +182,7 @@ class TestTheCeremony:
 
     def test_another_accounts_passkey_is_refused_for_this_account(self, user, second_user, clock):
         """The account locked and the passkey's account must be one."""
-        _, theirs = add(second_user["user"])
+        _, theirs = add(clock, second_user["user"])
         options, state = passkey_service.sign_in_options(origin=ORIGIN)
         refusal = _refused(user, theirs.get(options), state=state)
         assert refusal.refusal is PasskeyRefusal.UNKNOWN_CREDENTIAL
@@ -183,27 +193,27 @@ class TestTheFlagsAndSize:
 
     def test_backed_up_but_never_eligible_is_refused(self, user, clock):
         """BS without BE, in an assertion."""
-        _, authenticator = add(user)
+        _, authenticator = add(clock, user)
         options, state = passkey_service.sign_in_options(origin=ORIGIN)
         refusal = _refused(user, authenticator.get(options, flags=UP | UV | BS), state=state)
         assert refusal.refusal is PasskeyRefusal.MALFORMED
 
     def test_an_icloud_keychain_passkey_signs_in(self, user, clock):
         """BE and BS both set, as Apple's synced passkeys report."""
-        _, authenticator = add(user)
+        _, authenticator = add(clock, user)
         clock.at(T0 + timedelta(seconds=1))
         assert sign_in(authenticator, flags=UP | UV | BE | BS) is not None
 
     def test_authenticator_data_past_1_kib_is_refused(self, user, clock):
         """37 bytes and 988 of extension outputs: 1,025, refused before any decode."""
-        _, authenticator = add(user)
+        _, authenticator = add(clock, user)
         options, state = passkey_service.sign_in_options(origin=ORIGIN)
         response = authenticator.get(options, extensions=padding(1025 - 37))
         assert _refused(user, response, state=state).refusal is PasskeyRefusal.MALFORMED
 
     def test_authenticator_data_of_1_kib_signs_in(self, user, clock):
         """The edge the cap admits: 37 bytes and 987 of extension outputs."""
-        _, authenticator = add(user)
+        _, authenticator = add(clock, user)
         clock.at(T0 + timedelta(seconds=1))
         assert sign_in(authenticator, extensions=padding(1024 - 37)) is not None
 
@@ -213,14 +223,14 @@ class TestTheUserHandle:
 
     def test_no_user_handle_is_refused(self, user, clock):
         """A sign-in that names no account requires one."""
-        _, authenticator = add(user)
+        _, authenticator = add(clock, user)
         options, state = passkey_service.sign_in_options(origin=ORIGIN)
         refusal = _refused(user, authenticator.get(options, user_handle=None), state=state)
         assert refusal.refusal is PasskeyRefusal.WRONG_USER_HANDLE
 
     def test_another_accounts_handle_is_refused(self, user, second_user, clock):
         """The handle of an account other than the passkey's."""
-        _, authenticator = add(user)
+        _, authenticator = add(clock, user)
         options, state = passkey_service.sign_in_options(origin=ORIGIN)
         response = authenticator.get(
             options, user_handle=second_user["user"].id.to_bytes(8, "big"),
@@ -234,13 +244,13 @@ class TestTheAccountMustBeActive:
 
     def test_a_deactivated_account_is_refused(self, user, clock):
         """Refused after the signature is proven, its use unrecorded."""
-        passkey, authenticator = add(user)
+        passkey, authenticator = add(clock, user)
         user.is_active = False
         db.session.flush()
         options, state = passkey_service.sign_in_options(origin=ORIGIN)
         refusal = _refused(user, authenticator.get(options), state=state)
         assert refusal.refusal is PasskeyRefusal.ACCOUNT_DISABLED
-        assert passkey.last_used_at is None
+        assert passkey.last_used_at == ADDED_AT
 
 
 class TestOneAnswerOnce:
@@ -248,7 +258,7 @@ class TestOneAnswerOnce:
 
     def test_the_same_answer_sent_twice_is_refused(self, user, clock):
         """Signed in at T0 + 1 s by a challenge issued at T0; the copy at T0 + 2 s is refused."""
-        _, authenticator = add(user)
+        _, authenticator = add(clock, user)
         options, state = passkey_service.sign_in_options(origin=ORIGIN)
         response = authenticator.get(options)
         clock.at(T0 + timedelta(seconds=1))
@@ -260,7 +270,7 @@ class TestOneAnswerOnce:
 
     def test_a_challenge_issued_the_instant_of_the_last_use_is_refused(self, user, clock):
         """Issued at the last use's very moment: "at or before" includes it."""
-        _, authenticator = add(user)
+        _, authenticator = add(clock, user)
         clock.at(T0 + timedelta(minutes=1))
         sign_in(authenticator)
         options, state = passkey_service.sign_in_options(origin=ORIGIN)
@@ -269,7 +279,7 @@ class TestOneAnswerOnce:
 
     def test_a_challenge_issued_a_microsecond_after_the_last_use_signs_in(self, user, clock):
         """The edge the replay bound admits."""
-        _, authenticator = add(user)
+        _, authenticator = add(clock, user)
         clock.at(T0 + timedelta(minutes=1))
         sign_in(authenticator)
         clock.at(T0 + timedelta(minutes=1) + _ONE_MICROSECOND)
@@ -277,7 +287,7 @@ class TestOneAnswerOnce:
 
     def test_a_challenge_issued_before_another_sign_in_is_refused(self, user, clock):
         """Two tabs: the one opened first is refused once the other signed in."""
-        _, authenticator = add(user)
+        _, authenticator = add(clock, user)
         first_options, first_state = passkey_service.sign_in_options(origin=ORIGIN)
         clock.at(T0 + timedelta(seconds=10))
         sign_in(authenticator)
@@ -289,15 +299,15 @@ class TestOneAnswerOnce:
 class TestTheCounter:
     """A counting key's counter must rise; Apple's never counts and is not refused."""
 
-    @pytest.mark.parametrize("reported", [1, 0])
+    @pytest.mark.parametrize("reported", [2, 1])
     def test_a_counter_that_does_not_rise_is_refused(self, user, clock, reported):
-        """Registered at 1: 1 again (equal) or 0 (fallen) is refused, the count kept at 1."""
-        passkey, authenticator = add(user, SoftwareAuthenticator(counts=True))
+        """Kept at 2 by its add's sign-in: 2 again (equal) or 1 (fallen) is refused, the count kept at 2."""
+        passkey, authenticator = add(clock, user, SoftwareAuthenticator(counts=True))
         options, state = passkey_service.sign_in_options(origin=ORIGIN)
         refusal = _refused(user, authenticator.get(options, counter=reported), state=state)
         assert refusal.refusal is PasskeyRefusal.COUNTER_DID_NOT_RISE
-        assert passkey.sign_count == 1
-        assert passkey.last_used_at is None
+        assert passkey.sign_count == 2
+        assert passkey.last_used_at == ADDED_AT
 
 
 class TestTheChallenge:
@@ -305,23 +315,23 @@ class TestTheChallenge:
 
     def test_no_state_is_refused_as_expired(self, user, clock):
         """A second submit finds no state."""
-        _, authenticator = add(user)
+        _, authenticator = add(clock, user)
         options, _ = passkey_service.sign_in_options(origin=ORIGIN)
         refusal = _refused(user, authenticator.get(options), state=None)
         assert refusal.refusal is PasskeyRefusal.EXPIRED
 
     def test_five_minutes_to_the_microsecond_is_expired(self, user, clock):
         """Dead at exactly its lifetime, and its use unrecorded."""
-        passkey, authenticator = add(user)
+        passkey, authenticator = add(clock, user)
         options, state = passkey_service.sign_in_options(origin=ORIGIN)
         clock.at(T0 + timedelta(minutes=5))
         refusal = _refused(user, authenticator.get(options), state=state)
         assert refusal.refusal is PasskeyRefusal.EXPIRED
-        assert passkey.last_used_at is None
+        assert passkey.last_used_at == ADDED_AT
 
     def test_five_minutes_less_a_microsecond_signs_in(self, user, clock):
         """The last instant it lives."""
-        _, authenticator = add(user)
+        _, authenticator = add(clock, user)
         options, state = passkey_service.sign_in_options(origin=ORIGIN)
         clock.at(T0 + timedelta(minutes=5) - _ONE_MICROSECOND)
         assert sign_in(authenticator, state=state, options=options) is not None

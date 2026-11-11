@@ -154,8 +154,9 @@ KIND_DISPLAY: dict[str, dict[str, str]] = {
             "review your active sessions."
         ),
     },
-    # Removing an account's last passkey opens its password sign-in again
-    # (ruling plan#3467), so the copy points at the password.
+    # Whoever removed it was signed in to the account, and the password and
+    # code still sign it in beside any passkey (ruling plan#3541), so the
+    # copy points at the password.
     SecurityEventKind.PASSKEY_REMOVED.value: {
         "title": "A passkey was removed from your account.",
         "detail": (

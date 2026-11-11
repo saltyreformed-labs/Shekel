@@ -54,9 +54,10 @@ _FLAGS_OFFSET = 32
 #: decoded, because fido2's decoder copies the rest of its buffer at every
 #: item, so its time grows with the square of the length (measured by plan
 #: #3482's review: 0.63 s of CPU for 380 KB).  An assertion with no extension
-#: is 37 bytes, and Shekel asks for none; the largest registration Shekel can
-#: be sent is about 3.7 KB (a 1,023-byte credential id and an ML-DSA-87 key of
-#: 2,592 bytes), and Shekel asks for no attestation statement.
+#: is 37 bytes, and Shekel asks for none; the largest registration a real
+#: authenticator sends Shekel is about 3.7 KB (a 1,023-byte credential id and
+#: an ML-DSA-87 key of 2,592 bytes), and Shekel asks for no attestation
+#: statement.  A forged one can be padded to the cap, inside the key too.
 _AUTHENTICATOR_DATA_MAX_BYTES = 1024
 _ATTESTATION_OBJECT_MAX_BYTES = 8 * 1024
 

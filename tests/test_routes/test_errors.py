@@ -430,8 +430,9 @@ class TestErrorPages:
             ProdConfig, "SQLALCHEMY_DATABASE_URI", "postgresql://localhost/shekel"
         )
         # A built ProdConfig needs its rate-limit store's password too
-        # (ruling plan#2633).
+        # (ruling plan#2633), and its passkey origin (plan#3488).
         monkeypatch.setenv("VALKEY_PASSWORD", "a-store-password")
+        monkeypatch.setattr(ProdConfig, "PASSKEY_ORIGIN", "https://budget.example.com")
         config = ProdConfig()
         assert config.DEBUG is False
 

@@ -4,9 +4,11 @@ each copy.
 
 THE ENVIRONMENT IS BUILT WHOLE (:func:`side_environment`): nothing of the shell that runs the
 kit reaches a side, so an operator's ``DATABASE_URL_APP``, ``VALKEY_PASSWORD`` or
-``SHEKEL_FAKE_TODAY`` cannot.  Two things production gives the app are read from the side's own
-tree (:func:`image_environment`), so a cut that changes them is measured with it: every ``ENV``
-of its ``Dockerfile`` but ``PATH``, and the ``TZ`` its production compose file pins.  The
+``SHEKEL_FAKE_TODAY`` cannot.  What production gives the app beside its secrets and URLs is read
+from the side's own tree (:func:`image_environment`), so a cut that changes it is measured with
+it: every ``ENV`` of its ``Dockerfile`` but ``PATH``, the ``TZ`` its production compose file
+pins, and the passkey origin that file names, which a side's app refuses to start without from
+plan#3488 on, and a side from before it names none and reads none.  The
 rate-limit store is not among them: neither probe serves a request, and the app names its store
 in its own code (plan#2634), needing only the store's password to make its app, so every side is
 given one no store holds (:data:`_UNHELD_PASSWORD`).  A harness that renders pages in this
@@ -40,6 +42,8 @@ _BOOT_PROBE = _SIDE / "boot.py"
 _UNHELD_PASSWORD = "rehearsal.invalid"
 #: The production compose file's pin of the app's civil timezone.
 _COMPOSE_TZ = re.compile(r"^\s+TZ: (\S+)$", re.MULTILINE)
+#: The production compose file's passkey origin (plan#3488).
+_COMPOSE_ORIGIN = re.compile(r"^\s+PASSKEY_ORIGIN: (\S+)$", re.MULTILINE)
 _COMPOSE = Path("deploy") / "docker-compose.prod.yml"
 #: ``PYTHONHASHSEED``, fixed on every side (design s.3 item 5).
 _HASH_SEED = "0"
@@ -57,12 +61,13 @@ _QUOTED_LINES = 20
 def image_environment(worktree: Path) -> dict[str, str]:
     """What production gives the app beside its secrets and URLs, read from the side's own
     tree: every ``ENV`` of its ``Dockerfile`` but ``PATH`` (which names the image's venv;
-    :func:`bench.dockerfile_environment`), and the app's ``TZ`` from its production compose
-    file.
+    :func:`bench.dockerfile_environment`), the app's ``TZ`` from its production compose file,
+    and the ``PASSKEY_ORIGIN`` that file names, where it names one: a tree from before
+    plan#3488 names none, and its app reads none.
 
     Raises:
         bench.BenchError: when either file cannot be read, or the compose file pins no
-            single ``TZ``.
+            single ``TZ`` or names more than one ``PASSKEY_ORIGIN``.
     """
     image = bench.dockerfile_environment(worktree)
     try:
@@ -73,14 +78,21 @@ def image_environment(worktree: Path) -> dict[str, str]:
     zones = _COMPOSE_TZ.findall(compose)
     if len(zones) != 1:
         raise bench.BenchError(f"{worktree / _COMPOSE} pins {len(zones)} TZ lines, not one")
+    origins = _COMPOSE_ORIGIN.findall(compose)
+    if len(origins) > 1:
+        raise bench.BenchError(
+            f"{worktree / _COMPOSE} names {len(origins)} PASSKEY_ORIGIN lines, not one")
     environment = {name: value for name, value in image.items() if name != "PATH"}
     environment["TZ"] = zones[0]
+    if origins:
+        environment["PASSKEY_ORIGIN"] = origins[0]
     return environment
 
 
 def side_environment(state: bench.State, url: str, secret_key: str) -> dict[str, str]:
     """The whole environment a side probe runs in, its deploy and its boot, inheriting
-    nothing: production's (:func:`image_environment`), its configuration, the copy's URL, a
+    nothing: production's (:func:`image_environment`, its passkey origin among it), its
+    configuration, the copy's URL, a
     secret key of the run's, a store password no store holds (:data:`_UNHELD_PASSWORD`), the
     fixed hash seed, python-dotenv switched off (:data:`_NO_DOTENV`), and the side's venv first
     on ``PATH``.

@@ -12,6 +12,8 @@ from datetime import timedelta
 from dotenv import load_dotenv
 from sqlalchemy.pool import NullPool
 
+from app.utils.passkey_origin import relying_party_id
+
 # Load .env file if present (development convenience).
 load_dotenv()
 
@@ -381,12 +383,14 @@ class BaseConfig:
     #
     # The site's origin, as a browser writes it (``https://`` and the host,
     # no path): every passkey ceremony is bound to it, and the relying party
-    # id is its host, derived by ``passkey_service.relying_party_id`` and
-    # never read from a request's ``Host`` header.  A passkey made on one
+    # id is its host, derived by ``app.utils.passkey_origin.relying_party_id``
+    # and never read from a request's ``Host`` header.  A passkey made on one
     # origin works on no other, so the test site's passkeys are its own.
     # ``None`` where the environment names none; DevConfig and TestConfig
-    # each state one, and ProdConfig's refusal to build without one is
-    # plan#3488's, which delivers the value.
+    # each state one, and ProdConfig refuses to build without one, or with
+    # one no browser writes (plan#3488).  Production's is named in
+    # ``deploy/docker-compose.prod.yml``; ``docker-compose.yml`` passes a
+    # bundled install's from its ``.env``.
     PASSKEY_ORIGIN = os.getenv("PASSKEY_ORIGIN")
 
 
@@ -695,11 +699,13 @@ class ProdConfig(_ValkeyStore, BaseConfig):
         Raises:
             ValueError: If ``SECRET_KEY`` is missing, matches a known
                 placeholder, or is shorter than the minimum acceptable
-                length, if ``DATABASE_URL`` is missing, or, after both,
-                if the rate-limit store's password is missing
+                length, if ``DATABASE_URL`` is missing, if
+                ``PASSKEY_ORIGIN`` is missing or is not an origin as a
+                browser writes one (``relying_party_id``), or, after
+                those, if the rate-limit store's password is missing
                 (``_ValkeyStore``).  Each branch emits a distinct,
                 actionable error message so the operator knows exactly
-                which secret is misconfigured.
+                which setting is misconfigured.
         """
         if not self.SECRET_KEY:
             raise ValueError(
@@ -723,6 +729,21 @@ class ProdConfig(_ValkeyStore, BaseConfig):
             )
         if not self.SQLALCHEMY_DATABASE_URI:
             raise ValueError("DATABASE_URL must be set in production.")
+        if self.PASSKEY_ORIGIN in (None, ""):
+            # Unset, or set empty: ``docker-compose.yml`` passes a bundled
+            # install's ``.env`` value through, and an install that names
+            # none reaches here with the empty string.
+            raise ValueError(
+                "PASSKEY_ORIGIN is not set: the site's origin, as a browser "
+                "writes it, such as https://shekel.example.com, which every "
+                "passkey is bound to.  Production names it in "
+                "deploy/docker-compose.prod.yml; a bundled install sets it "
+                "in .env (README.md, Quick Start)."
+            )
+        # Refuses, naming the setting and the value, an origin no browser
+        # writes, which every ceremony would then refuse: the service's own
+        # statement of an origin, so the boot and the ceremony cannot differ.
+        relying_party_id(self.PASSKEY_ORIGIN)
         super().__init__()
 
 

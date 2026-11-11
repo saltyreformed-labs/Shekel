@@ -11,7 +11,7 @@ from app import config as config_module
 from app.config import BaseConfig, DevConfig, DevContainerConfig, ProdConfig
 from app.config import TestConfig as _TestConfig
 
-from ._helpers import _VALID_SECRET_KEY, _STORE_PASSWORD, _STORE_SOCKET
+from ._helpers import _PASSKEY_ORIGIN, _VALID_SECRET_KEY, _STORE_PASSWORD, _STORE_SOCKET
 
 
 class TestRateLimitConfig:
@@ -181,12 +181,15 @@ class TestRateLimitConfig:
 
         Ruling plan#2633: with the limiter fail-closed, an app that could
         not log in to its store would fail every rate-limited request
-        while the boot and /health passed.
+        while the boot and /health passed.  Every other setting is valid,
+        the passkey origin included (plan#3488), so the refusal is the
+        password's.
         """
         monkeypatch.setattr(BaseConfig, "SECRET_KEY", _VALID_SECRET_KEY)
         monkeypatch.setattr(
             ProdConfig, "SQLALCHEMY_DATABASE_URI", "postgresql:///shekel"
         )
+        monkeypatch.setattr(ProdConfig, "PASSKEY_ORIGIN", _PASSKEY_ORIGIN)
         if given is None:
             monkeypatch.delenv("VALKEY_PASSWORD", raising=False)
         else:
@@ -200,6 +203,7 @@ class TestRateLimitConfig:
         monkeypatch.setattr(
             ProdConfig, "SQLALCHEMY_DATABASE_URI", "postgresql:///shekel"
         )
+        monkeypatch.setattr(ProdConfig, "PASSKEY_ORIGIN", _PASSKEY_ORIGIN)
         monkeypatch.setenv("VALKEY_PASSWORD", _STORE_PASSWORD)
         config = ProdConfig()
         assert config.RATELIMIT_STORAGE_OPTIONS == {

@@ -64,6 +64,7 @@ Edit `.env` and set these values:
 | `SECRET_KEY` | Yes | Run `openssl rand -hex 32` and paste the output. |
 | `APP_ROLE_PASSWORD` | Yes | The app's least-privilege database role. Run `openssl rand -hex 24` and paste the output. |
 | `SHEKEL_VALKEY_PASSWORD` | Yes | The rate limiter's store. Run `openssl rand -hex 24` and paste the output. |
+| `PASSKEY_ORIGIN` | Yes | The address you open Shekel at, as the browser's address bar shows it with no path: `http://localhost` for this Quick Start, with the port when `NGINX_PORT` is not 80 (`http://localhost:8080`). Every passkey is bound to it. `.env.example` holds the line commented out; uncomment it. |
 | `TOTP_ENCRYPTION_KEY` | No | Required before enabling MFA/TOTP. See [MFA Setup](#mfa-setup). |
 | `REGISTRATION_ENABLED` | No | Set to `true` to enable the `/register` endpoint. Default in production: `false` (see [Security](#security)). |
 | `SEED_USER_EMAIL` | No | Login email, `admin@shekel.local` in `.env.example`. While it is set, the first boot creates this user and the two rows below are required. **Remove from `.env` after the first successful boot** (see [Security](#security)). |
@@ -125,7 +126,9 @@ your `shekel` directory:
    `SHEKEL_REDIS_PASSWORD`, rename it to `SHEKEL_VALKEY_PASSWORD`, keeping its value. The app now
    names its store itself, the bundled Valkey, so if `.env` sets `RATELIMIT_STORAGE_URI`, delete the
    line: nothing reads it, and a store of your own is no longer supported.
-3. Start the new release:
+3. Once, for an install from before passkeys: add `PASSKEY_ORIGIN` to `.env`, as
+   [step 3](#3-configure-environment)'s table says. The app refuses to start without it, naming it.
+4. Start the new release:
 
    ```bash
    docker compose pull && docker compose up -d --remove-orphans
@@ -157,6 +160,7 @@ docker volume rm shekel-prod-pgdata
 |---|---|
 | `POSTGRES_PASSWORD` error on startup | Set `POSTGRES_PASSWORD` in your `.env` file. |
 | `SECRET_KEY` error on startup | Set `SECRET_KEY` in your `.env` file. Run `openssl rand -hex 32` to generate one. |
+| `PASSKEY_ORIGIN` error on startup | Set `PASSKEY_ORIGIN` in your `.env` file to the address you open Shekel at, such as `http://localhost`, with no path and no trailing slash. |
 | `shekel-prod-pgdata ... not found` on first run | Run `docker volume create shekel-prod-pgdata` before `docker compose up`. |
 | MFA enable fails with "TOTP_ENCRYPTION_KEY" message | Set `TOTP_ENCRYPTION_KEY` in `.env`. See [MFA Setup](#mfa-setup) for generation instructions. |
 | `/register` returns 404 | `REGISTRATION_ENABLED` is `false` (the production default). Set `REGISTRATION_ENABLED=true` in `.env` to re-enable. |

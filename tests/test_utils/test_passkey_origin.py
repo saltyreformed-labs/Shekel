@@ -11,7 +11,7 @@ import pytest
 
 from app import config as config_module
 from app.config import TestConfig
-from app.services.passkey_service import relying_party_id
+from app.utils.passkey_origin import relying_party_id
 
 
 @pytest.mark.parametrize("origin, host", [

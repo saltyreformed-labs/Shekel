@@ -35,6 +35,10 @@
 #    that actually carries the proxy hop in shared mode.
 #    See the gunicorn.conf.py block-comment for the full rationale.
 #
+# 4. The app's passkey origin is production's own name (plan#2538),
+#    named here rather than in the host's ``.env``, so a release
+#    delivers it with this file.
+#
 # OPERATOR PRE-FLIGHT (one-time, when first switching to shared mode)
 # -------------------------------------------------------------------
 # 1. Create the shekel-frontend network on the host with a pinned subnet:
@@ -424,6 +428,14 @@ services:
       # exists in the running image).  docker-compose.dev.yml pins the
       # same value so dev and prod compute identical calendar dates.
       TZ: America/New_York
+      # The site's origin, which every passkey is bound to (plan#2538):
+      # production's one name, served on the home network and through
+      # the Cloudflare tunnel alike, so one passkey serves both roads.
+      # The base file passes a bundled install's from ``.env``; this
+      # value replaces it, and the app refuses to start without one, or
+      # with one no browser writes (app/config.py, ProdConfig).  The test
+      # site's origin is its own, and so are its passkeys.
+      PASSKEY_ORIGIN: https://shekel.saltyreformed.com
       # Shared mode: the in-stack ``backend`` bridge no longer carries
       # the reverse-proxy hop -- the shared /opt/docker/nginx talks to
       # the app over ``shekel-frontend``.  Override the bundled-mode

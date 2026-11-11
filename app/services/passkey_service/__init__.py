@@ -26,9 +26,9 @@ leaves to its caller, each a step of the Web Authentication specification:
 * **The origin, exactly.**  fido2's default accepts any subdomain of the
   relying party; this server accepts the one origin configuration names and
   nothing else.  The relying party id is that origin's host
-  (:func:`relying_party_id`), from configuration and never from the request's
-  ``Host`` header, so a request that names another host still gets this site's
-  ceremony.
+  (:func:`app.utils.passkey_origin.relying_party_id`), from configuration and
+  never from the request's ``Host`` header, so a request that names another
+  host still gets this site's ceremony.
 * **The credential.**  A sign-in finds it by its id and its user by it; a
   re-confirm finds it only among the signed-in user's own.  The user handle
   the authenticator returns must be the one :func:`._ceremony.user_handle`
@@ -104,11 +104,7 @@ from app.services.passkey_service._adding import (
     complete_registration,
     registration_options,
 )
-from app.services.passkey_service._ceremony import (
-    CHALLENGE_LIFETIME,
-    Ceremony,
-    relying_party_id,
-)
+from app.services.passkey_service._ceremony import CHALLENGE_LIFETIME, Ceremony
 from app.services.passkey_service._refusals import (
     MAX_PASSKEYS,
     PasskeyRefusal,
@@ -130,7 +126,6 @@ __all__ = [
     "passkey_held_by",
     "re_confirm_options",
     "registration_options",
-    "relying_party_id",
     "remove_passkey",
     "sign_in_account",
     "sign_in_options",

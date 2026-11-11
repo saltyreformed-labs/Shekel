@@ -30,12 +30,15 @@ IS the stored column cannot fail at all.
 
 Usage::
 
-    DATABASE_URL=postgresql://... VALKEY_PASSWORD=unused PYTHONPATH=. python \\
+    DATABASE_URL=postgresql://... VALKEY_PASSWORD=unused \\
+        PASSKEY_ORIGIN=https://shekel.test PYTHONPATH=. python \\
         tests/manual/measure_settled_derived_plan_reproduction.py
 
 ``VALKEY_PASSWORD``: ``create_app("production")`` refuses to build without the
 rate-limit store's password from plan#2634 on, and a tree before it reads none; this
-harness reaches no store, so any value serves both sides.
+harness reaches no store, so any value serves both sides.  ``PASSKEY_ORIGIN`` likewise
+from plan#3488 on, which must be an origin as a browser writes one; this harness runs no
+passkey ceremony, so any such origin serves both sides.
 
 Prints one line per (rule, type) cell plus every row that does not reproduce.
 """

@@ -27,7 +27,8 @@ def _side(root: Path, dockerfile: str, compose: str) -> Path:
 
 _DOCKERFILE = ('FROM python\nENV PATH="/opt/venv/bin:$PATH"\nRUN true\nENV PSYCOPG_IMPL=c\n'
                "ENV LC_ALL=C.UTF-8\n")
-_PROD_COMPOSE = "services:\n  app:\n    environment:\n      TZ: America/New_York\n"
+_PROD_COMPOSE = ("services:\n  app:\n    environment:\n      TZ: America/New_York\n"
+                 "      PASSKEY_ORIGIN: https://shekel.example.com\n")
 
 
 def _state(worktree: Path, python: Path) -> bench.State:
@@ -46,8 +47,10 @@ def test_the_side_environment_is_built_whole_from_the_side_s_tree(tmp_path, monk
     the configuration, URL, key, a store password no store holds, and the seed, and the side's
     venv first: nothing else, so a variable of the shell that runs the kit never reaches the
     side, the store's password among them, and no store address, which the app names in its
-    own code (plan#2634; ruling plan#2473)."""
+    own code (plan#2634; ruling plan#2473).  The passkey origin is the side's compose file's,
+    never the shell's (plan#3488)."""
     monkeypatch.setenv("DATABASE_URL_APP", "postgresql:///operator")
+    monkeypatch.setenv("PASSKEY_ORIGIN", "https://operator.example.com")
     monkeypatch.setenv("SHEKEL_FAKE_TODAY", "2026-01-01")
     monkeypatch.setenv("RATELIMIT_STORAGE_URI", "redis://operator:6379/0")
     monkeypatch.setenv("VALKEY_PASSWORD", "the-operator-s")
@@ -56,6 +59,7 @@ def test_the_side_environment_is_built_whole_from_the_side_s_tree(tmp_path, monk
                                    "postgresql:///copy", "k" * 64)
     assert built == {
         "PSYCOPG_IMPL": "c", "LC_ALL": "C.UTF-8", "TZ": "America/New_York",
+        "PASSKEY_ORIGIN": "https://shekel.example.com",
         "FLASK_ENV": "production", "SECRET_KEY": "k" * 64,
         "DATABASE_URL": "postgresql:///copy",
         "VALKEY_PASSWORD": "rehearsal.invalid",
@@ -69,6 +73,25 @@ def test_a_side_whose_compose_file_pins_no_single_timezone_is_refused(tmp_path, 
     """No ``TZ``, or two, is refused by name rather than guessed."""
     tree = _side(tmp_path, _DOCKERFILE, compose)
     with pytest.raises(bench.BenchError, match=r"docker-compose\.prod\.yml pins [02] TZ lines"):
+        sides.image_environment(tree)
+
+
+def test_a_side_whose_compose_file_names_no_origin_is_given_none(tmp_path, monkeypatch):
+    """A tree from before plan#3488 names no ``PASSKEY_ORIGIN``, and its app reads none: its
+    side is given none, the shell's included, rather than one its own files never named."""
+    monkeypatch.setenv("PASSKEY_ORIGIN", "https://operator.example.com")
+    tree = _side(tmp_path, _DOCKERFILE,
+                 "services:\n  app:\n    environment:\n      TZ: America/New_York\n")
+    assert sides.image_environment(tree) == {
+        "PSYCOPG_IMPL": "c", "LC_ALL": "C.UTF-8", "TZ": "America/New_York"}
+
+
+def test_a_side_whose_compose_file_names_two_origins_is_refused(tmp_path):
+    """Two ``PASSKEY_ORIGIN`` lines are refused by name rather than one chosen."""
+    tree = _side(tmp_path, _DOCKERFILE,
+                 _PROD_COMPOSE + "      PASSKEY_ORIGIN: https://other.example.com\n")
+    with pytest.raises(bench.BenchError,
+                       match=r"docker-compose\.prod\.yml names 2 PASSKEY_ORIGIN lines"):
         sides.image_environment(tree)
 
 

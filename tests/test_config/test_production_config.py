@@ -7,7 +7,7 @@ import pytest
 from app import create_app
 from app.config import BaseConfig, ProdConfig
 
-from ._helpers import _VALID_SECRET_KEY, _STORE_PASSWORD
+from ._helpers import _PASSKEY_ORIGIN, _VALID_SECRET_KEY, _STORE_PASSWORD
 
 
 class TestProdConfig:
@@ -121,6 +121,7 @@ class TestProdConfig:
         monkeypatch.setattr(
             ProdConfig, "SQLALCHEMY_DATABASE_URI", "postgresql:///shekel"
         )
+        monkeypatch.setattr(ProdConfig, "PASSKEY_ORIGIN", _PASSKEY_ORIGIN)
         monkeypatch.setenv("VALKEY_PASSWORD", _STORE_PASSWORD)
         config = ProdConfig()
         assert config.SECRET_KEY == _VALID_SECRET_KEY
@@ -197,9 +198,92 @@ class TestProdConfig:
             ProdConfig, "SQLALCHEMY_DATABASE_URI", "postgresql:///shekel"
         )
         monkeypatch.setattr(BaseConfig, "TOTP_ENCRYPTION_KEY", None)
+        monkeypatch.setattr(ProdConfig, "PASSKEY_ORIGIN", _PASSKEY_ORIGIN)
         monkeypatch.setenv("VALKEY_PASSWORD", _STORE_PASSWORD)
         config = ProdConfig()
         assert config.TOTP_ENCRYPTION_KEY is None
+
+    @pytest.mark.parametrize("given", [None, ""])
+    def test_prodconfig_refuses_to_build_without_a_passkey_origin(
+        self, monkeypatch, given
+    ):
+        """ProdConfig refuses an unset or empty PASSKEY_ORIGIN by name (plan#3488).
+
+        Unset is the environment naming none; empty is a bundled install
+        whose ``.env`` names none, which ``docker-compose.yml``'s
+        ``${PASSKEY_ORIGIN:-}`` hands the app as the empty string.  Every
+        other setting is valid, the store's password included, so the
+        refusal is the origin's.
+        """
+        monkeypatch.setattr(BaseConfig, "SECRET_KEY", _VALID_SECRET_KEY)
+        monkeypatch.setattr(
+            ProdConfig, "SQLALCHEMY_DATABASE_URI", "postgresql:///shekel"
+        )
+        monkeypatch.setattr(ProdConfig, "PASSKEY_ORIGIN", given)
+        monkeypatch.setenv("VALKEY_PASSWORD", _STORE_PASSWORD)
+        with pytest.raises(ValueError, match="PASSKEY_ORIGIN is not set") as caught:
+            ProdConfig()
+        assert "deploy/docker-compose.prod.yml" in str(caught.value)
+        assert ".env" in str(caught.value)
+
+    @pytest.mark.parametrize("given", [
+        "https://budget.example.com/",   # a trailing slash
+        "budget.example.com",            # no scheme
+        "http://budget.example.com",     # insecure, and not localhost
+    ])
+    def test_prodconfig_refuses_an_origin_no_browser_writes(
+        self, monkeypatch, given
+    ):
+        """An origin no browser writes is refused at the boot, naming the value.
+
+        Every ceremony compares the browser's origin with this one exactly,
+        so such a value would refuse every passkey while the app served
+        everything else: the boot refuses it instead, by the service's own
+        statement of an origin (``app.utils.passkey_origin``), whose every
+        form is graded in ``tests/test_utils/test_passkey_origin.py``.
+        """
+        monkeypatch.setattr(BaseConfig, "SECRET_KEY", _VALID_SECRET_KEY)
+        monkeypatch.setattr(
+            ProdConfig, "SQLALCHEMY_DATABASE_URI", "postgresql:///shekel"
+        )
+        monkeypatch.setattr(ProdConfig, "PASSKEY_ORIGIN", given)
+        monkeypatch.setenv("VALKEY_PASSWORD", _STORE_PASSWORD)
+        with pytest.raises(ValueError, match="PASSKEY_ORIGIN must be an origin") as caught:
+            ProdConfig()
+        assert repr(given) in str(caught.value)
+
+    def test_prodconfig_carries_its_passkey_origin(self, monkeypatch):
+        """The control for the refusals above: an origin a browser writes builds, carried."""
+        monkeypatch.setattr(BaseConfig, "SECRET_KEY", _VALID_SECRET_KEY)
+        monkeypatch.setattr(
+            ProdConfig, "SQLALCHEMY_DATABASE_URI", "postgresql:///shekel"
+        )
+        monkeypatch.setattr(ProdConfig, "PASSKEY_ORIGIN", _PASSKEY_ORIGIN)
+        monkeypatch.setenv("VALKEY_PASSWORD", _STORE_PASSWORD)
+        assert ProdConfig().PASSKEY_ORIGIN == "https://budget.example.com"
+
+    @pytest.mark.parametrize(("secret_key", "database_uri", "named"), [
+        ("", "postgresql:///shekel", "SECRET_KEY is required"),
+        (_VALID_SECRET_KEY, None, "DATABASE_URL"),
+        (_VALID_SECRET_KEY, "postgresql:///shekel", "PASSKEY_ORIGIN is not set"),
+    ])
+    def test_the_origin_is_named_after_the_secret_key_and_database_url(
+        self, monkeypatch, secret_key, database_uri, named
+    ):
+        """SECRET_KEY, then DATABASE_URL, then PASSKEY_ORIGIN, each before the store's password.
+
+        Every case leaves the origin and the store's password unset too, so
+        the refusal it names is the first an operator who misconfigured
+        all of them reads; locking the order stops a refactor from swapping
+        them.  That the store's password is named after a valid origin is
+        ``test_prodconfig_refuses_to_build_without_the_password``'s.
+        """
+        monkeypatch.setattr(BaseConfig, "SECRET_KEY", secret_key)
+        monkeypatch.setattr(ProdConfig, "SQLALCHEMY_DATABASE_URI", database_uri)
+        monkeypatch.setattr(ProdConfig, "PASSKEY_ORIGIN", None)
+        monkeypatch.delenv("VALKEY_PASSWORD", raising=False)
+        with pytest.raises(ValueError, match=named):
+            ProdConfig()
 
 
 class TestCreateAppBuildsTheConfiguration:
@@ -228,8 +312,25 @@ class TestCreateAppBuildsTheConfiguration:
         monkeypatch.setattr(
             ProdConfig, "SQLALCHEMY_DATABASE_URI", "postgresql:///shekel"
         )
+        monkeypatch.setattr(ProdConfig, "PASSKEY_ORIGIN", _PASSKEY_ORIGIN)
         monkeypatch.delenv("VALKEY_PASSWORD", raising=False)
         with pytest.raises(ValueError, match="VALKEY_PASSWORD is not set"):
+            create_app("production")
+
+    def test_a_missing_passkey_origin_stops_the_production_boot(self, monkeypatch):
+        """Every other setting valid and no origin: ``create_app`` raises, naming it (plan#3488).
+
+        The deploy's own boot, entrypoint step 3's ``create_app``, so a
+        release whose host files name no origin stops there and
+        ``shekel-deploy`` rolls the image back.
+        """
+        monkeypatch.setattr(BaseConfig, "SECRET_KEY", _VALID_SECRET_KEY)
+        monkeypatch.setattr(
+            ProdConfig, "SQLALCHEMY_DATABASE_URI", "postgresql:///shekel"
+        )
+        monkeypatch.setattr(ProdConfig, "PASSKEY_ORIGIN", None)
+        monkeypatch.setenv("VALKEY_PASSWORD", _STORE_PASSWORD)
+        with pytest.raises(ValueError, match="PASSKEY_ORIGIN is not set"):
             create_app("production")
 
     def test_a_missing_store_password_stops_the_dev_container_boot(self, monkeypatch):

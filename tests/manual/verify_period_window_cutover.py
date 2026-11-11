@@ -50,15 +50,19 @@ database can express a disagreement at all.
 **Usage** (from the repository root, against a production CLONE)::
 
     DATABASE_URL=postgresql://.../shekel_dev VALKEY_PASSWORD=unused \\
+        PASSKEY_ORIGIN=https://shekel.test \\
         .venv/bin/python tests/manual/verify_period_window_cutover.py before.json
     # ... make the change ...
     DATABASE_URL=postgresql://.../shekel_dev VALKEY_PASSWORD=unused \\
+        PASSKEY_ORIGIN=https://shekel.test \\
         .venv/bin/python tests/manual/verify_period_window_cutover.py after.json
     diff before.json after.json
 
 ``VALKEY_PASSWORD``: ``create_app("production")`` refuses to build without the
 rate-limit store's password from plan#2634 on, and a tree before it reads none; this
-harness reaches no store, so any value serves both sides.
+harness reaches no store, so any value serves both sides.  ``PASSKEY_ORIGIN`` likewise
+from plan#3488 on, which must be an origin as a browser writes one; this harness runs no
+passkey ceremony, so any such origin serves both sides.
 
 For the HEAD side use ``git worktree add`` -- never ``git checkout``, which
 reverts the working tree and discards the change under test

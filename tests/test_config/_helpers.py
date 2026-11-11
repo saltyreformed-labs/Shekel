@@ -24,6 +24,13 @@ _STORE_PASSWORD = "a-store-password"
 _STORE_SOCKET = "valkey+unix:///run/valkey/valkey.sock"
 
 
+# A passkey origin for the tests that expect ProdConfig to build: from
+# plan#3488 it refuses to build without one, or with one no browser
+# writes.  Not TestConfig's own, so a test reading it back reads the
+# value it set.
+_PASSKEY_ORIGIN = "https://budget.example.com"
+
+
 # Helper URIs for the sentinel tests.  Constructed at module import so
 # the sentinel substring inside them comes from the production
 # constant -- a refactor that renames the sentinel constant cannot

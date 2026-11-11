@@ -387,6 +387,15 @@ services:
       # too (defense-in-depth against this docker default being
       # removed).
       REGISTRATION_ENABLED: ${REGISTRATION_ENABLED:-false}
+      # The site's origin, as a browser's address bar writes it with no
+      # path (``http://localhost`` for the Quick Start), which every
+      # passkey is bound to (plan#2538).  Required, and with no default:
+      # the app's production configuration refuses to start without one,
+      # or with one no browser writes, naming it (app/config.py,
+      # ProdConfig).  Not ``${PASSKEY_ORIGIN:?...}``, which would fail the
+      # parse of shared-mode production too, whose override names its
+      # origin in place of the host's ``.env`` (deploy/docker-compose.prod.yml).
+      PASSKEY_ORIGIN: ${PASSKEY_ORIGIN:-}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       SLOW_REQUEST_THRESHOLD_MS: ${SLOW_REQUEST_THRESHOLD_MS:-500}
       AUDIT_RETENTION_DAYS: ${AUDIT_RETENTION_DAYS:-365}

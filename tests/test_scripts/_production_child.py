@@ -9,8 +9,9 @@ def production_env(database_url: str) -> dict:
     """Build the child's environment: the production config, on *database_url*.
 
     Only what Python needs to run is inherited.  ``ProdConfig`` refuses to
-    start without a SECRET_KEY of real length and its rate-limit store's
-    password; a child that only reads and writes its database uses neither.
+    start without a SECRET_KEY of real length, its passkey origin (plan#3488)
+    and its rate-limit store's password; a child that only reads and writes
+    its database uses none of them.
     An explicitly EMPTY ``DATABASE_URL_APP`` (the config resolver reads it as
     unset) leaves no other database to reach.
 
@@ -31,6 +32,8 @@ def production_env(database_url: str) -> dict:
         "DATABASE_URL": database_url,
         "DATABASE_URL_APP": "",
         "SECRET_KEY": secrets.token_hex(32),
+        # ``.test`` is reserved (RFC 2606): it names no real site.
+        "PASSKEY_ORIGIN": "https://shekel.test",
         "VALKEY_PASSWORD": secrets.token_hex(16),
     })
     return env

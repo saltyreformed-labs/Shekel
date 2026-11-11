@@ -21,6 +21,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
+import yaml
 
 from tests.test_deploy._compose import BASE_COMPOSE, NGINX_TEST_IMAGE
 
@@ -337,6 +338,13 @@ class TestDeployComposeParses:
         # accidentally filter them).
         assert "\n  app:" in merged
         assert "\n  db:" in merged
+        # The merged app carries production's passkey origin (plan#3488):
+        # the override's value in place of the base file's pass-through of
+        # .env's, which this run's environment and /dev/null leave empty.
+        merged_app = yaml.safe_load(merged)["services"]["app"]
+        assert merged_app["environment"]["PASSKEY_ORIGIN"] == (
+            "https://shekel.saltyreformed.com"
+        )
 
         # Re-run with the disabled profile activated to confirm the
         # nginx service definition is otherwise still attached to the

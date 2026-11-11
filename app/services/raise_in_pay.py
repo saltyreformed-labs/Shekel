@@ -4,8 +4,8 @@ Task plan#3169 (plan step salary:X-av-3b), ruling **R-SAL95** ("Refuse it,
 label held") as ruling **plan#3091** moves the day it compares on: recorded pay
 includes only the raises dated on or before the FIRST DAY its paycheck pays
 for.  :meth:`~app.services.payroll_basis.PayrollBasis.raise_in_pay` returns a
-:class:`RaiseInPay`, and both of its readers read it, so the raise door's
-refusal and the Raises card's label cannot disagree about one raise:
+:class:`RaiseInPay`, and every reader reads it, so the raise doors' refusals
+and the Raises card's label cannot disagree about one raise:
 
 * **the raise doors refuse a raise no paycheck would get**, in the words of
   ruling **plan#3374** (:attr:`RaiseInPay.refusal`);
@@ -14,7 +14,12 @@ refusal and the Raises card's label cannot disagree about one raise:
   2026-09-24`` for a yearly one (ruling **plan#3375**:
   :attr:`RaiseInPay.labels`).  A yearly raise is saved while any year still
   reaches pay, and so is a saved raise a later entry comes to hold (a Record
-  or a Fix): it stays, labelled.
+  or a Fix): it stays, labelled;
+* **the Retirement page's end-year Save refuses an end year that leaves a
+  yearly raise reaching no paycheck**, in that page's own words (task
+  plan#3500, ruling **plan#3492**: :attr:`RaiseInPay.end_year_refusal`).  One
+  rule for every door that writes a raise; only the words differ, because
+  that Save edits nothing but the end year.
 
 **Which application reaches pay and which entry holds it are the walk's own
 rules**, and :meth:`~app.services.payroll_basis.PayrollBasis.raise_in_pay`
@@ -129,6 +134,30 @@ class RaiseInPay:
         return (
             f"A raise starting by {opens} is already in your pay from "
             f"{holder.payday.isoformat()}. Start it after {opens}, or fix your pay."
+        )
+
+    @property
+    def end_year_refusal(self) -> "str | None":
+        """Return why the Retirement page's end-year Save refuses the raise, or ``None``.
+
+        Ruling **plan#3492**, the words fitted to that page, whose Save edits
+        only a yearly raise's end year: the year saved, and the payday of the
+        entry holding the raise's LAST application, as :attr:`refusal` names
+        it.  The year is that entry's last held year, which IS the year saved:
+        when no application reaches pay every one is held, and a yearly raise
+        lands once in every year it is believed (never on February 29,
+        ``ck_salary_raises_recurring_not_on_february_29``), so its last lands
+        in its end year.  ``None`` when a paycheck gets the raise, which
+        always holds for a raise believed with no end year: a later year
+        lands after the last entry opens.
+        """
+        if self.reaches_pay:
+            return None
+        holder = self.held[-1]
+        return (
+            f"Every year of this raise through {holder.last_year} is already in "
+            f"your pay from {holder.payday.isoformat()}, so it changes no "
+            "paycheck. Remove it on the salary page instead."
         )
 
 

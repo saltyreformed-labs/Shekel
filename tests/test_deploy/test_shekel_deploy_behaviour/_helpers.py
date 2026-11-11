@@ -19,6 +19,11 @@ from tests._repo_root import REPO_ROOT
 _DEPLOY_SCRIPT = REPO_ROOT / "deploy" / "shekel-deploy.sh"
 
 
+#: The files the script sources from beside itself, every ``deploy/_*.sh``: with
+#: :data:`_DEPLOY_SCRIPT`, the one script's text.
+_DEPLOY_PARTS = tuple(sorted((REPO_ROOT / "deploy").glob("_*.sh")))
+
+
 _OLD = "sha256:" + "a" * 64
 
 
@@ -674,11 +679,13 @@ def _the_script_s_stamp_read() -> str:
 
     Returns:
         The one ``SELECT ... public.alembic_version ...`` statement the script
-        holds, exactly as ``docker exec psql -c`` would send it.
+        holds, in any of its files, exactly as ``docker exec psql -c`` would
+        send it.
     """
     found = re.findall(
         r'"(SELECT version_num FROM public\.alembic_version[^"]*)"',
-        _DEPLOY_SCRIPT.read_text(encoding="utf-8"),
+        "".join(part.read_text(encoding="utf-8")
+                for part in (_DEPLOY_SCRIPT, *_DEPLOY_PARTS)),
     )
     assert len(found) == 1, found
     return found[0]

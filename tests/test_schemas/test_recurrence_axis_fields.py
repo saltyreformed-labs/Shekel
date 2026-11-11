@@ -566,10 +566,10 @@ class TestTheTripleMustBeStorable:
         both reached the same 500.  The guard read "skip when EITHER axis is
         absent", which conflates two different submissions: "neither axis" is
         an amount-only edit and must be skipped, while "a unit and no
-        placement" is half a cadence -- and both write doors pop the placement
-        with no default (``recurrence_spec_from_form``,
-        ``update_recurrence_rule_from_form``), so it reached the flush as an
-        unhandled ``KeyError``.
+        placement" is half a cadence -- and both write doors popped the
+        placement with no default (``recurrence_spec_from_form`` and
+        ``update_recurrence_rule_from_form``, deleted at plan step R7e), so it
+        reached the flush as an unhandled ``KeyError``.
 
         The EMPTY spelling is the worse of the two and needed its own case: the
         field is ``allow_none``, so ``_normalize_empty_inputs`` keeps the key

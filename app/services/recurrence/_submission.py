@@ -124,9 +124,16 @@ class RecurrenceSubmission:
             rule alone and its other fields unapplied.
         starts_on: The rule's FIRST OCCURRENCE as stated, or :data:`UNSET`.
             There is no cleared state: the column is ``NOT NULL``, and an empty
-            "Starts on" box reaches the schema as no key at all, so on an
-            update it leaves the stored date alone exactly as a locked control
-            does (and a create refuses it).
+            "Starts on" box reaches the schema as no key at all, so it reads
+            exactly as a locked control does.  What an unstated start then
+            means is the door's.  Where the app derives the start -- a payroll
+            line, on a create or an update, and a transfer that becomes a
+            loan's standing payment -- the route states the derived date here
+            before anything reads it (``salary.items._settle_line_cadence``,
+            ``_loan_destination.settle_loan_start``).  Elsewhere the update
+            merge (:meth:`applied_to`) leaves the stored date alone, and a
+            create refuses it: a template's schema, and the transfer create
+            door for any other destination.
         reading: How the start is read (the "repeating on" control), or
             :data:`UNSET`.  **It rides on** ``starts_on``: the two are one
             statement of when the rule fires and the control is rendered only

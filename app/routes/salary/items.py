@@ -756,9 +756,9 @@ def update_line(line_id):
         )
         return _edit_page(profile.id).to_response()
 
-    # Re-point, author, or clear the line's cadence rule from the payload
-    # (plan step salary:R15-c), through the dispatcher every recurrence
-    # form's update runs
+    # Re-point, author, or clear the line's cadence rule from the submission
+    # the schema composed (plan step salary:R15-c), through the dispatcher
+    # every recurrence form's update runs
     # (:func:`~app.routes._recurrence_form_helpers.resolve_recurrence_rule_for_update`)
     # once the derived facts are settled in (:func:`_settle_line_cadence`).
     # The pass is the PRE-WRITE one its refusals read (plan step R7d-f) and

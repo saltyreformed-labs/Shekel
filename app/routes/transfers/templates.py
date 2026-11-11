@@ -17,6 +17,7 @@ again.
 """
 
 import logging
+from typing import Any
 
 from flask import Response, abort, flash, redirect, render_template, request, url_for
 from flask_login import current_user
@@ -35,7 +36,8 @@ from app.services import (
     category_service,
     template_amount_service,
 )
-from app.services.pay_calendar import calendar_for
+from app.services.pay_calendar import DerivedPeriod, calendar_for
+from app.services.recurrence import RecurrenceSubmission
 from app.routes._commit_helpers import (
     STALE_EDITING_MESSAGE,
     StaleConflictContext,
@@ -205,7 +207,11 @@ def new_transfer_template():
     )
 
 
-def _settle_create_references(data, submission, start_period_id):
+def _settle_create_references(
+    data: dict[str, Any],
+    submission: RecurrenceSubmission,
+    start_period_id: int | None,
+) -> tuple[DerivedPeriod | None, RecurrenceSubmission | Response]:
     """Refuse, or settle, everything the create payload REFERS to.
 
     One step rather than three consecutive guards, and the reason is the route
@@ -477,8 +483,8 @@ def update_transfer_template(template_id):
     one-time transfer into one, or a repeating transfer moved onto one --
     takes the create door's two loan-destination rules through
     :func:`~app.routes._loan_destination.settle_destination_for_update`,
-    which derives the first occurrence into the payload and decides the
-    closing bound the write states; and a loan's standing payment cannot be
+    which states in the submission the derived first occurrence and the
+    closing bound the write carries; and a loan's standing payment cannot be
     moved off its loan at all (ruling **R-R76**).  The FK ownership check
     therefore runs FIRST, because that settle reads the destination's loan
     terms.

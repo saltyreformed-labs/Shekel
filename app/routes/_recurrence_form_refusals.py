@@ -226,8 +226,9 @@ def refuse_inverted_window(
     **The update door's half of a rule the schema can only half see** (plan
     step R7c-b).  ``require_end_bound_after_start`` compares the two values a
     SUBMISSION states; an update states at most one of them and keeps the
-    stored other, so the pair the save would actually write is invisible to it.
-    Two ordinary edits produce it and both were unhandled 500s:
+    stored other, so the pair the edit authors -- one bound submitted, the
+    other kept -- is invisible to it.  Two ordinary edits produce an
+    inverted one and both were unhandled 500s:
 
     * clearing "Starts on" while setting an earlier "Ends on" -- the cleared
       date box drops the key, the stored start is kept, and the new bound lands
@@ -236,30 +237,54 @@ def refuse_inverted_window(
       control, which no reviewer listed and which the schema cannot see at all
       because the bound is not in the payload.
 
-    **``ck_recurrence_rules_valid_window`` stands behind this since plan step
-    R7d-g**, and this door is still the one that can REPORT the mistake: the
-    constraint refuses the pair at the flush as an ``IntegrityError``, which
-    is a 500 and not a sentence, so the door grades the same pair first and
-    says so.  The CHECK was held back until R7d-g on a developer ruling
-    (2026-08-15): the columns carried DERIVED loan-payment windows beside
-    authored ones, and an empty derived window was a correct answer a
-    constraint could not tell from a user's mistake.  Nothing derived is
-    stored there now.  See
+    **``ck_recurrence_rules_valid_window`` stands behind both doors since plan
+    step R7d-g**, and it is neither door's way of saying no: it refuses an
+    inverted STORED pair at the flush as an ``IntegrityError``, which is a 500
+    and not a sentence.  This door grades the authored pair before any write;
+    the write door grades the pair it would store before its first assignment
+    (:class:`~app.services.recurrence.EmptyAuthoredWindowError`).  They are
+    different pairs, as the paragraphs below show.  The CHECK was held back
+    until R7d-g on a developer ruling (2026-08-15): the columns carried
+    DERIVED loan-payment windows beside authored ones, and an empty derived
+    window was a correct answer a constraint could not tell from a user's
+    mistake.  Nothing derived is stored there now.  See
     :func:`~app.schemas.validation.end_bound_before_start_message`, which both
     doors word the refusal with.
 
-    **Grades the spec the re-point branch WRITES** (plan step R7e): the
-    EFFECTIVE pair on both sides -- submitted where the form stated it, stored
-    where it did not -- is
-    :meth:`~app.services.recurrence.RecurrenceSubmission.applied_to`'s, the
-    one spelling of that merge, which
+    **Grades the AUTHORED pair: the spec the re-point branch hands the write
+    door, not the pair that door stores** (plan step R7e).  The spec is
+    :meth:`~app.services.recurrence.RecurrenceSubmission.applied_to`'s --
+    each bound submitted where the form stated it, the rule's stored value
+    where it did not, in the one spelling of that merge -- and
     :func:`~app.routes._recurrence_form_helpers.resolve_recurrence_rule_for_update`
-    computes ONCE and hands both to this refusal and to the write.  Until
-    R7e this door spelled the merge inline beside the writer's own spelling,
-    so it graded what the save would store only while the two agreed.  The
-    stored half is the owner's word for EVERY definition (plan step R7d-g), a
-    second recurring transfer into a loan included, so it is graded as
-    stated.  Until R7d-g it was read through the composed door's cache arm
+    computes it ONCE and hands the same value to this refusal and to
+    :func:`~app.services.recurrence.reauthor_rule`.  Until R7e this door
+    spelled the merge inline beside the writer's own spelling, so the two
+    read one spec only while the two spellings agreed.
+
+    **On a paycheck cadence the write door stores a different start, so it
+    grades a different pair** (``_resolution._first_occurrence``): the payday
+    of the paycheck HOSTING the authored date, which inside the schedule is
+    that date or up to a pay period EARLIER, and the owner's first payday for
+    a date before it.  Each door therefore refuses an edit the other admits,
+    and neither is redundant (both cases are in
+    ``tests/test_routes/test_recurrence_form_helpers/test_window.py``):
+
+    * a stop between the hosting payday and the typed start inverts the
+      authored pair and not the stored one, so of the two doors only THIS
+      one refuses it
+      (``test_a_stop_between_the_payday_and_the_typed_start_is_refused``).
+      An ordinary edit form posts the stored stop beside the start, and the
+      schema then refuses the pair first; this door is the one that refuses
+      a submission leaving the stop out;
+    * a start lifted onto the first payday, past the stop, inverts the stored
+      pair and not the authored one, so only the write door refuses it
+      (``test_a_cadence_switch_that_lifts_the_stored_start_past_the_stop_is_refused``).
+
+    The stored half of the merge is the owner's word for EVERY definition
+    (plan step R7d-g), a second recurring transfer into a loan included, so
+    it is graded as stated.  Until R7d-g it was read through the composed
+    door's cache arm
     (ruling **R-R56**), because the loan's standing payment stored the
     chokepoints' payoff there and a loan cleared before its first installment
     stored an INVERTED pair through the sync's own production door; that arm
@@ -274,10 +299,11 @@ def refuse_inverted_window(
     of the bound.
 
     Args:
-        reauthored: The spec the re-point branch will write, or ``None`` when
-            the update re-points no rule (the template has none, or the
-            submission names no cadence) -- skipped, because the create
-            branch authors from a submission the schema has already compared.
+        reauthored: The spec the re-point branch hands the write door, or
+            ``None`` when the update re-points no rule (the template has
+            none, or the submission names no cadence) -- skipped, because
+            the create branch authors from a submission the schema has
+            already compared.
         ctx: The form context, read for where a refusal sends the user.
 
     Returns:
@@ -561,11 +587,14 @@ def refuse_recurrence_update(
             the 2026-08-16 ruling has it (a producer below the route takes the
             pass and never builds one); regeneration afterwards builds its own,
             as a writer must.
-        reauthored: The spec the re-point branch will write, or ``None``
-            where it writes none -- what the fourth rule grades
-            (:func:`refuse_inverted_window`).  Computed by the caller, which
-            writes the same value, so the rule grades exactly what the save
-            stores.
+        reauthored: The spec the re-point branch hands the write door, or
+            ``None`` where it re-points nothing -- what the fourth rule
+            grades (:func:`refuse_inverted_window`).  Computed once by the
+            caller, which hands the same value to the write, so the rule
+            grades the AUTHORED pair the write is given.  The write door
+            grades the pair it would STORE, whose start on a paycheck cadence
+            is the payday hosting the typed date, so each refuses an edit the
+            other admits (see :func:`refuse_inverted_window`).
 
     Returns:
         * ``None`` -- the update may proceed.

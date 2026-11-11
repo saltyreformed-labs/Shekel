@@ -466,11 +466,12 @@ def settle_destination_for_update(
        :func:`~app.routes._recurrence_form_refusals.is_loan_payment_or_standing`
        (plan step R7d-f-5).  Asked first, and of the stored
        definition, because it is what makes every move settled below a move
-       of a definition whose bounds are its OWNER's: the start rule 2
-       derives cannot trip the presence refusal the edit door keeps for the
-       standing payment (``refuse_recurrence_update``'s
-       ``LOAN_PAYMENT_BOUND_IS_DERIVED`` arm reads ``starts_on``'s PRESENCE,
-       and rule 2 writes that key).
+       of a definition whose bounds are its OWNER's: the bounds rule 2
+       states cannot trip the refusal the edit door keeps for the standing
+       payment (``refuse_recurrence_update``'s
+       ``LOAN_PAYMENT_BOUND_IS_DERIVED`` arm asks the submission's
+       ``states_a_bound``, and rule 2 states the start, its reading and the
+       stop in it).
     2. **The standing branch, where the definition WOULD be the standing
        payment of the loan the edit leaves it paying into** -- no active
        recurring transfer into that loan is OLDER than it, the seam's own

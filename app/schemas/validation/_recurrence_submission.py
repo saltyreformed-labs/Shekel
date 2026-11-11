@@ -48,9 +48,11 @@ RECURRENCE_SUBMISSION_KEY: str = "recurrence"
 #: presence is how a form says "not mine to state", so a consumer spelling a
 #: different string would read a locked control's silence as a stated value.
 #: Until plan step R7e the route helpers read these keys too; since then the
-#: only reader outside the schema is the route that words
+#: only readers outside the schema are the two route doors that word
 #: :data:`~._recurrence.RECURRENCE_NEEDS_A_START`, which is keyed by the
-#: start.
+#: start: the update dispatcher's authoring branch
+#: (``_recurrence_form_helpers.resolve_recurrence_rule_for_update``) and the
+#: transfer create door (``_loan_destination.settle_first_occurrence``).
 #:
 #: **``repeats_on`` replaced ``nominal_day`` at plan step recurrence:R8-c**
 #: (developer ruling 2026-11-02, the rename approved with its tests): the

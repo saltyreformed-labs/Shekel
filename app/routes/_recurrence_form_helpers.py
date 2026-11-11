@@ -330,13 +330,17 @@ def resolve_recurrence_rule_for_update(
     """
     submission = ctx.submission
     rule = template.recurrence_rule
-    # **The spec the re-point branch WRITES, merged ONCE** (plan step R7e):
-    # the inverted-window refusal grades it and the write below stores it, so
-    # "the refusal grades what the save would write" holds by construction
+    # **The spec the re-point branch hands the write door, merged ONCE** (plan
+    # step R7e): the inverted-window refusal grades it and ``reauthor_rule``
+    # below is handed it, so the two read one authored spec by construction
     # rather than by two spellings of one merge agreeing.  Each spelled it
     # inline until this step -- field by field, each on its own presence read.
-    # ``None`` where nothing is re-pointed: the template has no rule, or the
-    # submission names no cadence.
+    # What the write door STORES is not this spec's pair on a paycheck
+    # cadence, whose start it moves onto the payday hosting the typed date, so
+    # each door grades its own pair and refuses an edit the other admits
+    # (``refuse_inverted_window`` names both cases).  ``None`` where nothing
+    # is re-pointed: the template has no rule, or the submission names no
+    # cadence.
     reauthored = (
         submission.applied_to(rule)
         if rule is not None and submission.named_cadence is not None

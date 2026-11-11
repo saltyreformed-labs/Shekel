@@ -37,7 +37,8 @@ leaves to its caller, each a step of the Web Authentication specification:
   issued, and a completion refuses a challenge issued at or before the
   passkey's ``last_used_at``, then moves ``last_used_at`` to now: so a signed
   answer cannot sign in twice, which the signature counter cannot promise
-  because Apple's passkeys always report 0.  A counter that does count must
+  because Apple's passkeys always report 0.  Every kept passkey has a last
+  use, since it signed in once to be kept.  A counter that does count must
   rise, or the key may have been copied.  A challenge lives
   :data:`CHALLENGE_LIFETIME`.
 * **Adding.**  Up to :data:`MAX_PASSKEYS` per account (ruling plan#3472),
@@ -317,7 +318,8 @@ def _complete_assertion(
     _ceremony.refuse_unless_by(
         assertion, user, handle_required=ceremony is Ceremony.SIGN_IN,
     )
-    if passkey.last_used_at is not None and issued.issued_at <= passkey.last_used_at:
+    # Every kept passkey has a last use: the add's own sign-in.
+    if issued.issued_at <= passkey.last_used_at:
         raise PasskeyRefused(PasskeyRefusal.REPLAYED)
     counter = assertion.response.authenticator_data.counter
     _ceremony.refuse_a_counter_that_did_not_rise(passkey.sign_count, counter)

@@ -5,7 +5,7 @@ plan#3467's passkey-only sign-in waits on step plan#3542, ruling plan#3541).  Mi
 ``66184d995b1c`` makes the table and admits the two banner kinds a passkey's
 adding and removing raise.
 
-* :class:`TestTheColumns` -- the eight columns, only the last use nullable,
+* :class:`TestTheColumns` -- the eight columns, none nullable,
   and the absences pinned like presences, because each would be a stored copy
   of something derivable (rule 14).
 * :class:`TestTheKeys` -- FIRING CONTROLS.  The service never writes these
@@ -69,6 +69,7 @@ def _a_passkey(user_id, credential_id=b"\x01" * 16, **overrides):
         "public_key": b"\xa5\x01\x02\x03\x26",
         "name": "iPhone",
         "created_at": _T0,
+        "last_used_at": _T0,
     }
     fields.update(overrides)
     return Passkey(**fields)
@@ -138,15 +139,19 @@ class TestTheColumns:
             "name", "created_at", "last_used_at",
         }
 
-    def test_only_the_last_use_is_nullable_in_the_database(self, app, db):
-        """Asked of ``information_schema``, not the model."""
+    def test_no_column_is_nullable_in_the_database(self, app, db):
+        """Asked of ``information_schema``, not the model.
+
+        Not even the last use: a passkey is kept only once it has signed in
+        (ruling plan#3525), so every row has one from its add.
+        """
         nullable = db.session.execute(sqlalchemy.text(
             "SELECT column_name FROM information_schema.columns "
             "WHERE table_schema = 'auth' AND table_name = 'passkeys' "
             "AND is_nullable = 'YES'"
         )).scalars().all()
 
-        assert nullable == ["last_used_at"]
+        assert nullable == []
 
     def test_the_user_id_is_indexed(self, app, db):
         """The Security page, the closed-road question and re-confirm ask by user."""
@@ -172,6 +177,20 @@ class TestTheColumns:
 
 class TestTheKeys:
     """Each refusal, fired and named, beside the edge it admits."""
+
+    def test_a_passkey_that_never_signed_in_is_refused(self, app, db, seed_user):
+        """No last use: the row a passkey kept before its sign-in would be (ruling plan#3525).
+
+        A NOT NULL refusal names its column rather than a constraint, so it is
+        named here by its SQLSTATE, ``not_null_violation``, and the column.
+        """
+        db.session.add(_a_passkey(seed_user["user"].id, last_used_at=None))
+        with pytest.raises(sqlalchemy.exc.IntegrityError) as excinfo:
+            db.session.flush()
+        db.session.rollback()
+
+        assert excinfo.value.orig.sqlstate == "23502"
+        assert excinfo.value.orig.diag.column_name == "last_used_at"
 
     def test_an_empty_credential_id_is_refused(self, app, db, seed_user):
         """A key the browser cannot name could never be found."""

@@ -16,7 +16,9 @@ account, so it cannot be phished, is step plan#3542, and the one statement of
 The credential's id, which the browser sends back to name the key; its public
 key, as the COSE bytes the authenticator gave (RFC 9052), from which the
 signature is checked; the signature counter; the name the user gave it; when
-it was added; and when it last signed Shekel in.  Nothing derivable is stored
+it was added; and when it last signed Shekel in, which is never empty because
+a passkey is kept only once it has signed in (ruling plan#3525).  Nothing
+derivable is stored
 (CLAUDE.md rule 14): not the authenticator's model id (AAGUID), not the
 transports it reported (no reader needs either), not a count of the user's
 passkeys, and not a WebAuthn user handle, which the service derives from the
@@ -93,12 +95,13 @@ class Passkey(db.Model):
     )
     name = db.Column(db.String(NAME_MAX_LENGTH), nullable=False)
     created_at = db.Column(db.DateTime(timezone=True), nullable=False)
-    # NULL means the passkey has not signed anyone in since it was added.
-    # Two readers: the Security page shows it as "last used", and the
-    # service refuses a challenge issued at or before it, so one signed
-    # answer cannot sign in twice (Apple's counter never moves, so the
-    # counter cannot do that job).
-    last_used_at = db.Column(db.DateTime(timezone=True), nullable=True)
+    # Never NULL: a new passkey signs in once before it is kept (ruling
+    # plan#3525), so every row has signed someone in, first at the moment it
+    # was added.  Two readers: the Security page shows it as "last used",
+    # and the service refuses a challenge issued at or before it, so one
+    # signed answer cannot sign in twice (Apple's counter never moves, so
+    # the counter cannot do that job).
+    last_used_at = db.Column(db.DateTime(timezone=True), nullable=False)
 
     def __repr__(self):
         return f"<Passkey id={self.id} user_id={self.user_id}>"

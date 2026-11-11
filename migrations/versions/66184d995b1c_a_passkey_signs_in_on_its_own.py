@@ -20,9 +20,10 @@ you?" banners a passkey's adding and removing raise.
   so ``ck_passkeys_sign_count_range`` holds it to 0 through 4294967295.
 * ``name`` -- the label the user gave it, never blank
   (``ck_passkeys_name_not_blank``).
-* ``created_at``, and ``last_used_at`` (NULL until it first signs someone
-  in), which is also the replay bound: the service refuses a challenge issued
-  at or before it.
+* ``created_at``, and ``last_used_at``, which is never NULL: a passkey is
+  kept only once it has signed someone in (ruling plan#3525), so its last use
+  starts at its add.  It is also the replay bound: the service refuses a
+  challenge issued at or before it.
 * **Absent on purpose** (CLAUDE.md rule 14): the authenticator's model id,
   its transports, a per-user WebAuthn handle (the service derives it from the
   user's id), a count of a user's passkeys.
@@ -131,7 +132,7 @@ def upgrade():
         ),
         sa.Column('name', sa.String(length=60), nullable=False),
         sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
-        sa.Column('last_used_at', sa.DateTime(timezone=True), nullable=True),
+        sa.Column('last_used_at', sa.DateTime(timezone=True), nullable=False),
         sa.PrimaryKeyConstraint('id', name='pk_passkeys'),
         sa.ForeignKeyConstraint(
             ['user_id'], ['auth.users.id'],

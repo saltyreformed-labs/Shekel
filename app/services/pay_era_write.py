@@ -438,8 +438,12 @@ def rephase_earliest_era(user_id: int, rephase: EarliestRephase) -> None:
     ``/register`` and ``scripts/seed_user.py``), whose new user no other
     transaction can see until it commits.  Two migrations write the table
     too -- ``6fc77e86d76f`` inserts the eras and ``3ec5291ca4e2`` updates
-    them -- and ``entrypoint.sh`` runs them (``scripts/init_database.py``)
-    before it hands over to gunicorn, so before the app serves a request.
+    them -- and the deploy runs them (``scripts/init_database.py``, in the
+    migrate service) while no web server serves: a migration arrives only
+    with a new image, and an ``up`` that moves it stops the web server's old
+    container before the deploy starts and starts the new one after it
+    (:mod:`app.services.user_write_lock` states that order and what would
+    break it; ruling plan#3534).
     *Until that step a first-schedule
     generate that read an empty record before a first schedule committed,
     and retired every era after this door's read, would have left the UPDATE

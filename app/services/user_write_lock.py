@@ -93,12 +93,24 @@ the signed-in user's own row, and no row lock rides on it.  **The deploy is the
 one place it is not first, and what keeps that safe is an ORDER, not this
 module**: the deploy reconciles take every owner's lock, ascending, at the
 start of each reconcile FUNCTION, but ``scripts/init_database.py`` runs them
-in the one transaction that has already run the migrations and the
-infrastructure DDL, with their table locks.  That is safe because
-``entrypoint.sh`` runs ``init_database.py`` before it hands over to gunicorn,
-so no request can hold an owner's lock while the deploy waits.  If that
-order ever changes, a request could take owner A's lock, block on a migrated
-table, and deadlock against the deploy waiting on A.
+in the one transaction that has already run the migrations, with their table
+locks, so a request could take owner A's lock, block on a migrated table, and
+deadlock against the deploy waiting on A.  The order that keeps a migration
+from meeting a request (ruling plan#3534; measured 2026-11-11 on Docker
+Compose 5.7.0): the deploy runs in the migrate service, which the web server's
+service waits on, and a migration arrives only with a new image, which both
+services run.  An ``up`` that moves the image makes every container it changes
+before it starts any, stopping the web server's old container as it replaces
+it, so no old server is serving when the deploy starts, and the new one starts
+only once the deploy exits 0.  An ``up`` that leaves the web server's
+container in place runs the deploy again beside live requests, but the
+database is then already at the image's head and nothing migrates: before its
+first owner lock that deploy holds no lock a request waits on, so a request
+holding one finishes and the deploy takes it after.  What would break the
+order is a database behind the image its web server runs, so a restore must
+bring the server back through ``up``, which deploys before it starts it, and a
+new image is deployed through an ``up`` of the web server, never through the
+migrate service alone.
 
 Shipping the lock with a detected-and-rolled-back deadlock was strictly better
 than shipping the silent ledger divergence it replaced; shipping it with a

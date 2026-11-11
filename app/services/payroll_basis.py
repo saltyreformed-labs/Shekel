@@ -45,6 +45,7 @@ from app.services.recurrence import (
 )
 from app.services.pay_banner import ForecastRaise, PayBanner, PayEvent, RecordedChange
 from app.services.pay_rate import BasePay, PayRate
+from app.services.raise_in_pay import HeldYears, RaiseInPay
 from app.services.salary_raises import (
     RaiseTerms,
     applications_between,
@@ -801,16 +802,22 @@ class PayrollBasis:
             )
             if change is not None
         ]
-        last = _priced_days(self._paid_days_of(payday))[-1]
-        before = _priced_days(
-            self._paid_days_of(previous_payday(self.calendar, payday)),
-        )[-1]
+        last = self._last_priced_day(payday)
+        before = self._last_priced_day(previous_payday(self.calendar, payday))
         events.extend(
             ForecastRaise(raise_obj)
             for landed, raise_obj in self._in_force_on(last).raised
             if landed > before
         )
         return PayBanner(tuple(events))
+
+    def _last_priced_day(self, payday: date) -> date:
+        """Return the last day the paycheck paid on *payday* is priced over (:func:`_priced_days`).
+
+        What :meth:`banner_on` and :meth:`raise_in_pay` read to ask whether a
+        paycheck pays a day on or after a raise lands.
+        """
+        return _priced_days(self._paid_days_of(payday))[-1]
 
     def _recorded_change(self, entry: _Entry) -> "RecordedChange | None":
         """Return what *entry* changes: its pay against the pay before its paycheck opens.
@@ -832,6 +839,55 @@ class PayrollBasis:
         else:
             change = RecordedChange(after.annual - before.annual, yearly=True)
         return None if change.change == ZERO else change
+
+    def raise_in_pay(self, raise_obj) -> RaiseInPay:
+        """Return which of *raise_obj*'s years recorded pay holds, and whether any reaches pay.
+
+        Ruling **R-SAL95** on the day each entry opens (ruling **plan#3091**),
+        for the raise doors' refusal and the Raises card's label alike
+        (:mod:`app.services.raise_in_pay` works the examples).  Each
+        application is HELD by the first entry opening on or after the day it
+        lands, whose recorded pay includes it, and one before the first entry
+        by that entry (**R-SAL59**).  It REACHES pay when the walk applies it
+        (:meth:`_walk`: it lands after the day the entry in force opens) and
+        some paycheck PAYS a day of it before an entry holds it: a day its
+        base is priced over (:func:`_priced_days`, ruling **plan#3089**) on
+        or after the day it lands, which is the paycheck before the holder's
+        when one does, as :meth:`banner_on` reads "a paycheck pays a day of
+        it".  An application after the last entry opens always reaches pay,
+        so the walk need only see whether one exists: a raise lands once in
+        each year it is believed, unbroken from its start's year, so the next
+        lands by the end of the year after.
+
+        Args:
+            raise_obj: A raise row, or any raise-shaped object
+                :func:`~app.services.salary_raises.applications_between` reads.
+
+        Returns:
+            The :class:`~app.services.raise_in_pay.RaiseInPay`.
+        """
+        last = self._pay_list[-1].opens
+        through = date(max(raise_obj.effective_date.year, last.year + 1), 12, 31)
+        held: "dict[_Entry, list[int]]" = {}
+        reaches = False
+        for landed, _rank, _raise in applications_between((raise_obj,), date.min, through):
+            holder = next((entry for entry in self._pay_list if entry.opens >= landed), None)
+            reaches = reaches or (
+                landed > self._entry_on(landed).opens
+                and (holder is None or landed <= self._last_priced_day(
+                    previous_payday(self.calendar, holder.payday),
+                ))
+            )
+            if holder is not None:
+                held.setdefault(holder, []).append(landed.year)
+        return RaiseInPay(
+            bool(raise_obj.is_recurring),
+            tuple(
+                HeldYears(years[0], years[-1], entry.opens, entry.payday)
+                for entry, years in held.items()
+            ),
+            reaches,
+        )
 
     def rhythm_changes_without_pay(self) -> "list[RhythmChangeWithoutPay]":
         """Return each change of rhythm whose pay is priced by carrying the yearly pay.

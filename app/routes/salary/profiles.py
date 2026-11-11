@@ -55,7 +55,7 @@ from app.routes.salary._helpers import (
     _create_schema,
     _line_cadence_context,
     _get_investment_accounts,
-    _raise_form_bounds,
+    _raise_card_context,
     _regenerate_salary_transactions,
     _update_schema,
 )
@@ -443,7 +443,9 @@ def edit_profile(profile_id):
             ctx.calendar(), profile.period_end_days_before_payday, ctx.as_of,
         ),
         **_line_cadence_context(profile, ctx.calendar),
-        **_raise_form_bounds(),
+        # What recorded pay holds of each raise, off the basis the pay list
+        # is priced from (task plan#3169).
+        **_raise_card_context(profile, lambda: basis),
     )
 
 

@@ -373,6 +373,12 @@ def build_composition(breakdown: PaycheckBreakdown) -> dict[str, object]:
     under an active calibration: the basis is now stated on every paycheck,
     so a ``$0.00`` federal line carries its reason either way.
 
+    **It names which year's tax rules priced them** (plan step salary:X-at-6,
+    ruling **R-SAL75**; finding **N-235**): ``tax_rules`` is the tax lines'
+    own ``rules``, the basis of the law the engine priced them on, so the
+    cockpit and the card print the year off the paycheck rather than working
+    it out, and the card steps with the period like the stub's payday does.
+
     Args:
         breakdown: The focused period's breakdown.
 
@@ -381,7 +387,8 @@ def build_composition(breakdown: PaycheckBreakdown) -> dict[str, object]:
         post_tax_total/taxable_earnings_total/after_tax_total/kept_from_gross
         Decimals, the ``pct_net`` (of ``kept_from_gross``) / ``pct_pre_tax``
         / ``pct_taxes`` / ``pct_post_tax`` one-decimal percentages of gross,
-        and ``tax_stub_payday`` (a :class:`~datetime.date` or ``None``).
+        ``tax_stub_payday`` (a :class:`~datetime.date` or ``None``) and
+        ``tax_rules`` (a :class:`~app.services.tax_config_service.TaxLawBasis`).
     """
     gross = breakdown.earnings.gross_biweekly
     pre_tax_total = breakdown.deductions.total_pre_tax
@@ -406,6 +413,7 @@ def build_composition(breakdown: PaycheckBreakdown) -> dict[str, object]:
         "pct_taxes": _pct_of_gross(taxes_total, gross),
         "pct_post_tax": _pct_of_gross(post_tax_total, gross),
         "tax_stub_payday": breakdown.taxes.stub_payday,
+        "tax_rules": breakdown.taxes.rules,
     }
 
 

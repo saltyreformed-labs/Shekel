@@ -37,6 +37,7 @@ from app.services.paycheck_calculator import (
     PeriodInfo,
     TaxLines,
 )
+from app.services.tax_config_service import TaxLawBasis
 from tests._tax_configs import own_year_rules
 
 TODAY = date(2026, 6, 5)
@@ -423,6 +424,22 @@ class TestBuildComposition:
         """No stub on or before the payday: the key is None, the formulas' answer."""
         comp = svc.build_composition(_scenario()[2][1])
         assert comp["tax_stub_payday"] is None
+
+    def test_names_the_rules_that_priced_the_taxes(self):
+        """The card carries the tax lines' own basis, the engine's answer (R-SAL75).
+
+        A 2028 paycheck priced on 2027's rules: the key is that very basis,
+        so the cockpit says "2028 on 2027's tax rules" off the paycheck.
+        """
+        rules = TaxLawBasis(
+            tax_year=2028, federal_year=2027, state_year=2027, fica_year=2027,
+        )
+        breakdown = _pair(
+            1, date(2028, 6, 1), date(2028, 6, 14), "52000", "2000", "1400",
+            rules=rules,
+        )[1]
+        comp = svc.build_composition(breakdown)
+        assert comp["tax_rules"] is rules
 
     def test_zero_gross_percentages_are_zero(self):
         """A zero-gross period yields 0% segments (no division by zero)."""

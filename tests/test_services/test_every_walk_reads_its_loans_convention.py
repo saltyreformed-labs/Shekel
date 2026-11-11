@@ -17,17 +17,18 @@ calculator's hypothetical loan -- is driven here.
 
 **Where it arrives is the one interest producer**
 (:func:`app.utils.money.installment_interest`), spied on in every module that
-calls it (:data:`_WALKS`, held to the modules that import it by a census), so
+calls it (:data:`_WALKS`, held by a census to the modules that hold it), so
 each walk is graded on what it HANDS the producer: the loan's convention and
 the window its installment charges for.
 """
 
-import ast
+import importlib
 import pathlib
+import pkgutil
 from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
 from unittest import mock
 
 import pytest
@@ -53,6 +54,7 @@ from app.services.loan_ledger import (
 )
 from app.services.loan_ledger._charges import contract_charges
 from app.services.rate_period_engine import BalanceAnchor, replay_schedule
+from app.utils import money
 from app.utils.money import installment_interest
 from tests._test_helpers import create_loan_account
 from tests.oracles.loan_monthly_composition import rate_period
@@ -68,7 +70,8 @@ _REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
 #: posted ledger's replay, the contractual schedule (its replay rows and its
 #: walk between two rate periods), the forward projection, and the payoff
 #: strategy.  :class:`TestTheSpiesSeeEveryCaller` holds this to the modules
-#: that import the producer, so a sixth caller cannot charge interest unspied.
+#: that hold the producer, by identity, so a sixth module cannot bind it under
+#: any name unspied.
 _WALKS = {
     "replay": "app.services.loan_ledger._replay",
     "schedule": "app.services.rate_period_engine",
@@ -514,36 +517,53 @@ class TestEveryWalkHandsTheProducerTheLoansConvention:
         )
 
 
-class TestTheSpiesSeeEveryCaller:
-    """The walks spied on above are every module in ``app/`` that charges interest."""
+def _every_app_module() -> dict[str, ModuleType]:
+    """Import every module under this tree's ``app/`` and return each by its dotted name.
 
-    def test_every_importer_of_the_producer_is_a_walk_spied_on(self):
-        """Census of ``app/``: who imports the producer, by either of its names.
+    Each module is imported as ``pkgutil`` lists it, before the walk descends
+    into it, so a package that fails to import raises here and fails the
+    census: left to the walk alone, its ``ImportError`` would be swallowed and
+    every module beneath it skipped.
+    """
+    modules = {"app": importlib.import_module("app")}
+    for info in pkgutil.walk_packages([str(_REPO_ROOT / "app")], prefix="app."):
+        modules[info.name] = importlib.import_module(info.name)
+    return modules
+
+
+class TestTheSpiesSeeEveryCaller:
+    """The walks spied on above are every module in ``app/`` holding the producer."""
+
+    def test_every_holder_of_the_producer_is_a_walk_spied_on(self):
+        """Census of ``app/`` by IDENTITY: which modules bind the producer, under any name.
 
         ``installment_interest`` and the unrounded ``accrued_interest`` beneath
-        it; savings' own ``accrued_interest`` (``interest_projection``) is a
-        different function, outside ``app.utils.money``, until plan#3356
-        folds it in.  A module importing ``app.utils.money`` whole would hide
-        from this, so the census refuses that shape too.
-        """
-        importers: set[str] = set()
-        whole_module: set[str] = set()
-        for path in (_REPO_ROOT / "app").rglob("*.py"):
-            module = ".".join(
-                path.relative_to(_REPO_ROOT).with_suffix("").parts,
-            ).removesuffix(".__init__")
-            for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
-                if isinstance(node, ast.ImportFrom) and node.module == "app.utils.money":
-                    if {alias.name for alias in node.names} & {
-                        "installment_interest", "accrued_interest",
-                    }:
-                        importers.add(module)
-                elif isinstance(node, ast.ImportFrom) and node.module == "app.utils":
-                    if any(alias.name == "money" for alias in node.names):
-                        whole_module.add(module)
-                elif isinstance(node, ast.Import):
-                    if any(alias.name == "app.utils.money" for alias in node.names):
-                        whole_module.add(module)
+        it, however a module came to hold one: imported by name, renamed,
+        relatively, or from a module that re-exports it.  Identity rather than
+        names, so savings' own ``accrued_interest`` (``interest_projection``),
+        a different function until plan#3356 folds it in, is not counted.  A
+        module holding ``app.utils.money`` itself could call the producer as
+        an attribute unseen, so the one module holding it is its package, to
+        which the import system binds it.
 
-        assert importers == set(_WALKS.values())
-        assert not whole_module
+        What this cannot see: a formula spelled inline, or the producer
+        reached through an object a module holds (a partial, a class
+        attribute).  Rule 14's review is that.
+        """
+        modules = _every_app_module()
+
+        def holders(*targets: object) -> set[str]:
+            """The modules, ``app.utils.money`` aside, binding any of *targets*."""
+            return {
+                name for name, module in modules.items()
+                if name != "app.utils.money"
+                and any(
+                    value is target
+                    for value in vars(module).values() for target in targets
+                )
+            }
+
+        assert holders(
+            money.installment_interest, money.accrued_interest,
+        ) == set(_WALKS.values())
+        assert holders(money) == {"app.utils"}

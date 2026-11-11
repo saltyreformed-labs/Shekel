@@ -2,8 +2,8 @@
 Shekel Budget App -- Reference Table Enums
 
 Python Enums whose members correspond 1:1 with rows in the ref schema
-lookup tables.  The *value* of each member is the database ``name``
-column after all migrations have run.
+lookup tables (all but :class:`TaxTypeEnum`).  The *value* of each member
+is the database ``name`` column after all migrations have run.
 
 These enums are the single source of truth for valid reference values.
 The ref_cache module maps each member to its database integer ID at
@@ -184,9 +184,9 @@ class CalcMethodEnum(enum.Enum):
 
 
 class TaxTypeEnum(enum.Enum):
-    """Tax type values.
+    """How a state taxes income, as the tax law states it; no ``ref`` table.
 
-    Values match ``ref.tax_types.name`` in the database.
+    Compared as members; plan step salary:X-at-2 dropped ``ref.tax_types`` (plan#3211).
     """
 
     FLAT = "flat"
@@ -216,12 +216,12 @@ class RaiseTypeEnum(enum.Enum):
     is narrower than "display-only" and an adversarial review of that step is
     why the sentence says so.  No projection branches on it -- every engine
     applies every raise uniformly on the pay list's walk
-    (``salary_raises.applications_between``, read by
-    ``PayrollBasis.base_pay_on`` since plan step salary:X-av-3a) and stops
-    each one at its own stored ``salary.salary_raises.terminal_year``.
+    (``salary_raises.applications_between``, read by the basis since plan
+    step salary:X-av-3a, through ``PayrollBasis.pay_rate_on`` since task
+    plan#3100) and stops each one at its own stored ``terminal_year``.
     It is still LOGIC to the storage tier: ``raise_type_id`` is a member of
-    ``uq_salary_raises_profile_type_year_month``, so the type decides whether
-    a second raise on the same (profile, year, month) can be written at all,
+    ``uq_salary_raises_profile_type_date``, so the type decides whether
+    a second raise on the same profile and start date can be written at all,
     and ``salary.add_raise`` has a whole duplicate-handling branch keyed on
     that constraint.
 
@@ -751,12 +751,12 @@ class StatementSourceEnum(enum.Enum):
     **Losing ``FITID`` costs nothing, and that is measured rather than
     assumed.**  A line's identity is
     ``(account, posted_on, amount, sequence within that group)``
-    (:func:`app.services.statement_import.line_identity`), which every source
+    (``uq_bank_statement_lines_identity``), which every source
     can compute including one carrying no id of its own.  Compared across two
     SECU exports twelve days apart, that key reproduced the ``FITID`` key
     exactly: 0 keys present in only one export, 0 lines whose ``FITID``
     disagreed, over 342 shared lines.  So an external id is stored as a
-    CORROBORATING fact (``bank_statement_lines.external_id``) rather than as the
+    CORROBORATING fact (``budget.line_source_ids``) rather than as the
     thing identity rests on, and the importer has ONE identity rule instead of
     one per format -- which is what lets ``X-f6b``'s automated source join
     without re-opening the question.

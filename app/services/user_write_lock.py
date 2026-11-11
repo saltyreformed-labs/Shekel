@@ -7,21 +7,23 @@ that take none are named below).  **Since plan task plan#3077 it is taken
 from exactly one module** (rulings **R-CC106**, **R-CC114**, **R-CC115**,
 **R-CC121**): :mod:`app.db_transaction`, at the start of every command
 transaction a signed-in request opens -- before it reads any of the owner's
-data; the signed-in user's own row and the role row joined to it, read to
-sign the request in, are the only rows read first, and the user's row is
-re-read under the lock -- and at a sign-in right after the account is found.
-*From plan step ``balance:X-bn`` until that task this module's
-``lock_every_user_writes`` took every owner's too, at the start of each of the
-deploy's three ledger reconciles, its only callers, which went with the
-stored ledger's writes (plan step plan#2914).*  No service takes it for
-itself, and ``tests/test_arch/test_the_owner_lock_has_one_home.py`` refuses
-one that tries.  **The writers that take none, each named so it is not
-mistaken for covered**: registration (``/register`` and
-``scripts/seed_user.py``) writes a user that is not committed, so no other
-transaction can reach it; the deploy (``scripts/init_database.py``) runs
-before ``entrypoint.sh`` hands over to gunicorn, so no request is there to
-race it; and every script that writes an EXISTING user's rows holds no
-request, so nothing takes the lock for it.
+data; what it reads first, none of it a row a write decides on, is listed in
+:func:`app.db_transaction._lock_the_open_transaction` -- and at a sign-in
+(:func:`app.db_transaction.bind_sign_in_owner`): the code step and a known
+browser's password step right after the account is found, before their
+checks, and a stranger's password step only once its check has committed and
+found the password right (ruling plan#3110).  *From plan step
+``balance:X-bn`` until that task this module's ``lock_every_user_writes``
+took every owner's too, at the start of each of the deploy's three ledger
+reconciles, its only callers, which went with the stored ledger's writes
+(plan step plan#2914).*  No service takes it for itself, and
+``tests/test_arch/test_the_owner_lock_has_one_home.py`` refuses one that
+tries.  **The writers that take none, each named so it is not mistaken for
+covered**: registration (``/register`` and ``scripts/seed_user.py``) writes a
+user that is not committed, so no other transaction can reach it; the deploy
+(``scripts/init_database.py``) runs before ``entrypoint.sh`` hands over to
+gunicorn, so no request is there to race it; and every script that writes an
+EXISTING user's rows holds no request, so nothing takes the lock for it.
 Four operator scripts write rows the lock covers and take none --
 ``scripts/reset_mfa.py`` (``mfa_configs``), ``scripts/rotate_totp_key.py``
 (every ``totp_secret_encrypted``), ``scripts/rotate_sessions.py`` (every
@@ -138,10 +140,11 @@ precedent to copy.
 Transaction-scoped: PostgreSQL releases the lock at COMMIT or ROLLBACK, so it
 cannot leak -- and a request that commits and goes on writing takes it again
 in its next transaction (:mod:`app.db_transaction`).  A request's transaction
-takes it once: at its start, or, at a sign-in, right after the account is
-found.  *The deploy's three reconciles each took every owner's lock again in
-its one transaction, relying on the lock being re-entrant, until plan task
-plan#3077 deleted them; nothing takes it twice in one transaction since.*
+takes it once: at its start, or, at a sign-in, where
+:func:`app.db_transaction.bind_sign_in_owner` takes it (above).  *The
+deploy's three reconciles each took every owner's lock again in its one
+transaction, relying on the lock being re-entrant, until plan task plan#3077
+deleted them; nothing takes it twice in one transaction since.*
 
 Flask-isolated -- takes and returns plain data, never imports ``request`` /
 ``session``.  Takes no transaction of its own: the caller owns the boundary,

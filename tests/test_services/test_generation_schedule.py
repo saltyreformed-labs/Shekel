@@ -111,7 +111,7 @@ from app.services.amount_ownership import state_own_amount
 from app.tax_law import TaxLaw
 
 #: The one database door every pay-calendar derivation goes through, as
-#: ``tests/test_arch/test_one_read_pass_per_render.py`` names it.  A service
+#: ``tests/test_arch/test_one_read_pass_per_render/`` names it.  A service
 #: that derives one below its caller's door shows up here as a non-zero count.
 _CALENDAR_DOOR = ("app.services.pay_calendar._loader", "calendar_for")
 
@@ -575,6 +575,7 @@ class TestThePaycheckSeesTheWholeSchedule:
         make_cadence_rule(template, EVERY_PERIOD)
 
         profile = SalaryProfile(
+            period_end_days_before_payday=6,
             user_id=seed_user["user"].id,
             scenario_id=seed_user["scenario"].id,
             template_id=template.id,
@@ -641,10 +642,10 @@ class TestThePaycheckSeesTheWholeSchedule:
             # at module scope it would read as a collaborator of the tests.
             from app.services import paycheck_calculator  # pylint: disable=import-outside-toplevel
             # Pylint: ``import-outside-toplevel`` -- see above.
-            from app.services.tax_config_service import (  # pylint: disable=import-outside-toplevel
-                load_tax_configs_for_year,
+            from tests._tax_configs import (  # pylint: disable=import-outside-toplevel
+                tax_configs_for,
             )
-            configs = load_tax_configs_for_year(profile, 2026)
+            configs = tax_configs_for(profile, 2026)
             # Pylint: ``import-outside-toplevel`` -- see above.
             from app.services.payroll_basis import (  # pylint: disable=import-outside-toplevel
                 PayrollBasis,
@@ -1538,7 +1539,7 @@ class TestOneScheduleReadServesTheWholeRequest:
     the caller's :class:`~app.services.pay_calendar.PayCalendar`.  So the
     number this asserts is ZERO derivations inside the service -- the request's
     one derivation happens at its door, which is what ledger row **P68** asked
-    for.  ``tests/test_arch/test_one_read_pass_per_render.py`` grades the
+    for.  ``tests/test_arch/test_one_read_pass_per_render/`` grades the
     render's total; this grades the service's share of it.
 
     **Plan step R7d-c-1 made it the read PASS, and the zero now has a

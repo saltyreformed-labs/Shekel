@@ -96,6 +96,7 @@ def _salary_profile(seed_user):
     # proved by passing the archive cases and failing that one.
     make_every_period_rule(db.session, template)
     profile = SalaryProfile(
+        period_end_days_before_payday=6,
         user_id=seed_user["user"].id,
         scenario_id=seed_user["scenario"].id,
         filing_status_id=db.session.query(FilingStatus).first().id,
@@ -329,6 +330,7 @@ class TestArchivingFreezesWhatItWasPricing:
         """
         with app.app_context():
             profile = SalaryProfile(
+                period_end_days_before_payday=6,
                 user_id=seed_user["user"].id,
                 scenario_id=seed_user["scenario"].id,
                 filing_status_id=db.session.query(FilingStatus).first().id,

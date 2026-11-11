@@ -19,8 +19,7 @@ from decimal import Decimal
 
 import pytest
 
-from app.exceptions import StatementParseError
-from app.services.statement_import import parse_statement
+from app.services.statement_import import StatementParseError, parse_statement
 from app.enums import StatementSourceEnum
 
 from . import _csv_builder as build

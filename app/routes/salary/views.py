@@ -101,17 +101,10 @@ def projection(profile_id):
     # salary:S11-c-2c, live in that one producer now.
     breakdowns = ctx.paychecks().for_profile(profile).over(periods)
 
-    # Pair periods with breakdowns
+    # Pair periods with breakdowns.  The ledger badges and tints each row
+    # whose paycheck carries a banner: the engine badges a raise on the one
+    # paycheck it first reaches (ruling plan#3092), so the row is the step.
     projection_data = list(zip(periods, breakdowns))
-
-    # The calculator badges raise_event on every period of a raise month, so
-    # the ledger flags the raise badge/row-tint only on each run's first
-    # paycheck -- the step -- not on every paycheck of the month (P-SA1,
-    # projection surface).  The template checks ``period.period_id in`` this
-    # set.
-    raise_run_start_ids = salary_cockpit_service.raise_run_start_period_ids(
-        projection_data,
-    )
 
     # Summary framing above the ledger (restyled in P3): the next raise,
     # the next third paycheck, and the per-calendar-year net totals.  All
@@ -138,5 +131,4 @@ def projection(profile_id):
         profile=profile,
         projection_data=projection_data,
         projection_summary=projection_summary,
-        raise_run_start_ids=raise_run_start_ids,
     )

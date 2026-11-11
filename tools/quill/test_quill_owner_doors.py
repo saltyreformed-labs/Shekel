@@ -211,7 +211,7 @@ def test_a_leaf_still_being_filed_is_dropped_though_its_split_step_owns_a_findin
     dropping the leaf takes it out of the split (R-BAL205), which leaves that step a plain step
     that may own it, so the finding does not hold the drop."""
     tracker = FakeTracker()
-    tracker.add(1)
+    tracker.add(1, priority="Medium")
     tracker.add(3, "finding", blocked_by=(1,))
     FailOnce(tracker, "block")
     assert run(tracker, code, *leaf_filing(tmp_path, "Leaf")) == 2
@@ -241,7 +241,7 @@ def test_a_split_hands_the_split_steps_open_findings_to_its_new_leaf(code, tmp_p
     """Each open finding the step owns is blocked by the leaf, then unlinked from the step,
     before the leaf's mark comes off (R-BAL202); one shipped or dropped stays where it is."""
     tracker = FakeTracker()
-    tracker.add(1)
+    tracker.add(1, priority="Medium")
     tracker.add(3, "finding", blocked_by=(1,))
     tracker.add(4, "finding", blocked_by=(1,), is_open=False, state_reason="NOT_PLANNED")
     tracker.add(5, "finding", blocked_by=(1,))
@@ -260,7 +260,7 @@ def test_a_split_cut_short_between_a_findings_writes_is_finished_by_the_same_com
     leaf stays marked; run again, the command removes only the split step's link, then the
     mark."""
     tracker = FakeTracker()
-    tracker.add(1)
+    tracker.add(1, priority="Medium")
     tracker.add(3, "finding", blocked_by=(1,))
     FailOnce(tracker, "unblock")
     assert run(tracker, code, *leaf_filing(tmp_path, "Leaf")) == 2

@@ -27,6 +27,7 @@ def _add_salary_profile(owner):
         name="single"
     ).one()
     profile = SalaryProfile(
+        period_end_days_before_payday=6,
         user_id=owner["user"].id,
         scenario_id=owner["scenario"].id,
         filing_status_id=filing_status.id,

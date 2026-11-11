@@ -186,7 +186,7 @@
         <span class="sal-rule-name">{{ r.raise_type.name|title if r.raise_type else '--' }}</span>
         <span class="sal-rule-cad">
           {{ 'every' if r.is_recurring else 'one-time,' }}
-          {{ r.effective_month|month_name(abbr=true) }}{{ '' if r.is_recurring else ' ' ~ r.effective_year }}
+          {{ r.effective_date.strftime('%b %-d' if r.is_recurring else '%b %-d, %Y') }}
         </span>
         <span class="sal-rule-amt font-mono">
           {%- if r.percentage -%}

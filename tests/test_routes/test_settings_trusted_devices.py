@@ -24,8 +24,9 @@ import pyotp
 import sqlalchemy
 
 from app.extensions import db
-from app.models.trusted_device import TrustedDevice
-from app.services import trusted_device_service
+from app.models.known_device import KnownDevice
+from app.services import known_device_service
+from tests._csrf_tokens import without_csrf_tokens
 from tests._test_helpers import enable_mfa
 from tests.conftest import SEED_USER_EMAIL, SEED_USER_PASSWORD
 
@@ -98,19 +99,21 @@ def _firefox_that_trusted_itself(app, secret):
 
 def _trust(user_id, user_agent):
     """Trust a device for *user_id* through the service, committed; return its id."""
-    trusted_device_service.trust_device(user_id, user_agent)
+    known_device_service.record_sign_in(
+        user_id, None, user_agent, now=datetime.now(timezone.utc), trust=True,
+    )
     db.session.commit()
     return db.session.execute(
-        sqlalchemy.select(sqlalchemy.func.max(TrustedDevice.id))
-        .where(TrustedDevice.user_id == user_id)
+        sqlalchemy.select(sqlalchemy.func.max(KnownDevice.id))
+        .where(KnownDevice.user_id == user_id)
     ).scalar_one()
 
 
 def _move_trust_to(device_id, instant):
     """Set *device_id*'s ``trusted_at`` to *instant*, committed."""
     db.session.execute(
-        sqlalchemy.update(TrustedDevice)
-        .where(TrustedDevice.id == device_id)
+        sqlalchemy.update(KnownDevice)
+        .where(KnownDevice.id == device_id)
         .values(trusted_at=instant)
     )
     db.session.commit()
@@ -119,9 +122,17 @@ def _move_trust_to(device_id, instant):
 def _device_ids_of(user_id):
     """Return the ids of every device row *user_id* holds, live or dead."""
     return sorted(db.session.execute(
-        sqlalchemy.select(TrustedDevice.id)
-        .where(TrustedDevice.user_id == user_id)
+        sqlalchemy.select(KnownDevice.id)
+        .where(KnownDevice.user_id == user_id)
     ).scalars())
+
+
+def _is_trusted(device_id):
+    """Return whether *device_id*'s row holds a trust, read fresh."""
+    return db.session.execute(
+        sqlalchemy.select(KnownDevice.trusted_at)
+        .where(KnownDevice.id == device_id)
+    ).scalar_one() is not None
 
 
 def _text(html):
@@ -290,7 +301,9 @@ class TestForgetting:
 
         assert response.status_code == 302
         assert response.headers["Location"].endswith(_SECURITY_PAGE)
-        assert _device_ids_of(user_id) == []
+        # The trust goes and the row stays: the browser is still known (ruling
+        # plan#2997).
+        assert len(_device_ids_of(user_id)) == 1
         after = browser.get(_SECURITY_PAGE).get_data(as_text=True)
         assert "Device forgotten." in after
         assert _rows(after) == []
@@ -300,7 +313,13 @@ class TestForgetting:
     def test_another_users_device_and_a_missing_one_are_one_404(
         self, auth_client, seed_user, seed_second_user,
     ):
-        """Both refused alike and nothing deleted; the user's own id still routes."""
+        """Both refused alike and no trust forgotten; the user's own id still routes.
+
+        "Alike" is the two pages with their CSRF tokens blanked: each token is
+        signed with the second it is minted in, so two requests that fall in
+        different seconds carry different tokens whatever the route does
+        (finding plan#3244; it refused two merge-queue runs on 2026-11-10).
+        """
         user_id = seed_user["user"].id
         mine = _trust(user_id, _FIREFOX_LINUX)
         theirs = _trust(seed_second_user["user"].id, _CHROME_WINDOWS)
@@ -311,13 +330,15 @@ class TestForgetting:
 
         assert theirs_response.status_code == 404
         assert missing_response.status_code == 404
-        assert theirs_response.get_data() == missing_response.get_data()
-        assert _device_ids_of(seed_second_user["user"].id) == [theirs]
-        assert _device_ids_of(user_id) == [mine]
+        assert without_csrf_tokens(
+            theirs_response.get_data(as_text=True),
+        ) == without_csrf_tokens(missing_response.get_data(as_text=True))
+        assert _is_trusted(theirs)
+        assert _is_trusted(mine)
         # The pair: the same URL, with the user's own device, routes and forgets.
         mine_response = auth_client.post(f"/trusted-devices/{mine}/forget")
         assert mine_response.status_code == 302
-        assert _device_ids_of(user_id) == []
+        assert not _is_trusted(mine)
 
     def test_the_forget_and_the_refusal_are_logged(
         self, auth_client, seed_user, seed_second_user, caplog,
@@ -337,7 +358,7 @@ class TestForgetting:
         refused = [
             r for r in caplog.records
             if getattr(r, "event", None) == "resource_not_found"
-            and getattr(r, "model", None) == "TrustedDevice"
+            and getattr(r, "model", None) == "KnownDevice"
         ]
         assert [r.device_id for r in forgotten] == [mine]
         assert [r.pk for r in refused] == [theirs]

@@ -134,7 +134,9 @@ def _bracket_federal(profile, gross_biweekly, pay_periods_per_year, bracket_set,
         gross_biweekly: The period gross to withhold against.
         pay_periods_per_year: The full-year denominator IRS Pub 15-T
             annualises against, off :attr:`_WageBasis.periods_per_year`.
-        bracket_set: The TaxBracketSet to withhold against.
+        bracket_set: The year's :class:`app.tax_law.FederalRules` for the
+            filer's status; the formula withholds on their
+            ``withholding_rules`` (ruling plan#3213).
         annual_pre_tax: Annualised pre-tax deduction total.
 
     Returns:
@@ -161,7 +163,8 @@ def _bracket_state(taxable_biweekly, pay_periods_per_year, state_config):
         pay_periods_per_year: The full-year denominator the annual state tax
             is computed over and divided back by, off
             :attr:`_WageBasis.periods_per_year`.
-        state_config: The StateTaxConfig (or None).
+        state_config: The year's
+            :class:`~app.services.tax_config_service.StateTaxRules` (or None).
 
     Returns:
         Decimal biweekly state withholding.

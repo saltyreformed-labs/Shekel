@@ -38,8 +38,6 @@ _BOOT_PROBE = _SIDE / "boot.py"
 #: pass on a live one: where nothing listens at the code's address the connection fails naming
 #: it, and where a store does, the store refuses the password.
 _UNHELD_PASSWORD = "rehearsal.invalid"
-#: The side's ``Dockerfile`` lines that set its image's environment.
-_IMAGE_ENV = re.compile(r"^ENV ([A-Z_][A-Z0-9_]*)=(\S+)$", re.MULTILINE)
 #: The production compose file's pin of the app's civil timezone.
 _COMPOSE_TZ = re.compile(r"^\s+TZ: (\S+)$", re.MULTILINE)
 _COMPOSE = Path("deploy") / "docker-compose.prod.yml"
@@ -58,15 +56,16 @@ _QUOTED_LINES = 20
 
 def image_environment(worktree: Path) -> dict[str, str]:
     """What production gives the app beside its secrets and URLs, read from the side's own
-    tree: every ``ENV`` of its ``Dockerfile`` but ``PATH`` (which names the image's venv),
-    and the app's ``TZ`` from its production compose file.
+    tree: every ``ENV`` of its ``Dockerfile`` but ``PATH`` (which names the image's venv;
+    :func:`bench.dockerfile_environment`), and the app's ``TZ`` from its production compose
+    file.
 
     Raises:
         bench.BenchError: when either file cannot be read, or the compose file pins no
             single ``TZ``.
     """
+    image = bench.dockerfile_environment(worktree)
     try:
-        dockerfile = (worktree / "Dockerfile").read_text(encoding="utf-8")
         compose = (worktree / _COMPOSE).read_text(encoding="utf-8")
     except OSError as exc:
         raise bench.BenchError(f"{worktree} cannot give production's environment: {exc}") \
@@ -74,8 +73,7 @@ def image_environment(worktree: Path) -> dict[str, str]:
     zones = _COMPOSE_TZ.findall(compose)
     if len(zones) != 1:
         raise bench.BenchError(f"{worktree / _COMPOSE} pins {len(zones)} TZ lines, not one")
-    environment = {name: value for name, value in _IMAGE_ENV.findall(dockerfile)
-                   if name != "PATH"}
+    environment = {name: value for name, value in image.items() if name != "PATH"}
     environment["TZ"] = zones[0]
     return environment
 

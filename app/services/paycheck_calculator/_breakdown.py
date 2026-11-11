@@ -319,15 +319,19 @@ class Earnings:
     deposit met two or three app rows.
 
     Attributes:
-        annual_salary: The yearly figure on the payday: :attr:`base_biweekly`
-            times the paychecks a year of the rhythm in force on it
+        annual_salary: The yearly figure on the payday: the paycheck's pay
+            RATE, the pay in force on the last day it pays for, times the
+            paychecks a year of the rhythm in force on it
             (:attr:`~app.services.payroll_basis.BasePay.annual`; ruling
             **R-SAL59**, plan step salary:X-av-3a -- the post-raise annual
-            salary the rate was divided from until then).
-        base_biweekly: What the SALARY pays for one paycheck -- the rate
-            :meth:`~app.services.payroll_basis.PayrollBasis.base_pay_on`
-            walks the pay list to (plan step salary:X-av-3a), and the
-            base every PERCENTAGE line is a percentage of
+            salary the rate was divided from until then).  It was
+            :attr:`base_biweekly` times the count until task plan#3100, when
+            a paycheck a raise starts inside began paying part of it.
+        base_biweekly: What the SALARY pays for one paycheck -- each weekday
+            of its pay period at the pay in force that day
+            (:meth:`~app.services.payroll_basis.PayrollBasis.base_pay_on`,
+            ruling **plan#3089**), and the base every PERCENTAGE line is a
+            percentage of
             (R-SAL38: never of gross, so a percentage earning is not circular
             and no existing line moves when an earning joins).
         gross_biweekly: ``base_biweekly`` plus the TAXABLE earning lines --

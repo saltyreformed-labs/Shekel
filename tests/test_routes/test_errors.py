@@ -55,7 +55,7 @@ class TestErrorPages:
             rate_app = create_app("testing")
             rate_app.config["RATELIMIT_ENABLED"] = True
 
-            from app.extensions import limiter  # pylint: disable=import-outside-toplevel
+            from app.rate_limits import limiter  # pylint: disable=import-outside-toplevel
             limiter.enabled = True
             limiter.init_app(rate_app)
 
@@ -115,7 +115,7 @@ class TestErrorPages:
             rate_app = create_app("testing")
             rate_app.config["RATELIMIT_ENABLED"] = True
 
-            from app.extensions import limiter  # pylint: disable=import-outside-toplevel
+            from app.rate_limits import limiter  # pylint: disable=import-outside-toplevel
             limiter.enabled = True
             limiter.init_app(rate_app)
 
@@ -157,7 +157,7 @@ class TestErrorPages:
         rate_app = create_app("testing")
         rate_app.config["RATELIMIT_ENABLED"] = True
 
-        from app.extensions import limiter  # pylint: disable=import-outside-toplevel
+        from app.rate_limits import limiter  # pylint: disable=import-outside-toplevel
         limiter.enabled = True
         limiter.init_app(rate_app)
 

@@ -63,9 +63,10 @@ class UserScopedMixin:
         tables whose ``user_id`` carries ``unique=True``.
       * ``budget.transactions`` -- the FK is ``ON DELETE RESTRICT``; see
         below.
-      * ``salary.state_child_deductions`` -- its migration named the FK
-        ``fk_state_child_deductions_user_id``, and production holds that
-        name, so the mixin's default-named FK would diverge (plan#1858).
+      * ``auth.known_devices`` -- its migrations named the FK
+        ``fk_known_devices_user_id`` (``b7e4c19a2d60`` renamed
+        ``fk_trusted_devices_user_id`` with its table), so the mixin's
+        default-named FK would diverge.
 
     ``Transaction`` HAS a ``user_id`` since plan step
     ``pay_calendar:C13-a`` (ruling **R-PC32**) -- until then it had none
@@ -214,11 +215,14 @@ class SortOrderMixin:
 
       ``sort_order`` -- INTEGER NOT NULL DEFAULT 0.  A user-assignable
                         rank used to order rows in dropdowns and lists;
-                        lower sorts first, ties broken by name.
+                        lower sorts first, each reader breaking ties its
+                        own way: salary profiles by name, a profile's
+                        lines by id, the order they were added (task
+                        plan#3148).
 
     Applied to every table whose ``sort_order`` is exactly this shape
-    (accounts, categories, salary profiles, both template tables,
-    paycheck deductions, tax brackets).  Like :class:`UserScopedMixin`
+    (accounts, categories, salary profiles, both template tables and
+    paycheck lines).  Like :class:`UserScopedMixin`
     this is a mid-table column, so extracting it reorders the column to
     the table tail; the same order-independence argument applies (see
     :class:`UserScopedMixin` -- order is load-bearing nowhere here, so
@@ -299,7 +303,7 @@ class CreatedAtMixin:
 
     Use on tables that record events at a moment in time and never
     update afterwards: anchor history, rate history, pay periods,
-    salary raises, tax-year configurations, etc.  A separate
+    salary raises, etc.  A separate
     ``updated_at`` would be misleading on these rows because they
     are not edited after the initial INSERT -- amendment is modeled
     as a new row, not an update of an existing row.

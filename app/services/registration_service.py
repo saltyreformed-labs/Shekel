@@ -5,8 +5,8 @@ Everything a new owner needs before they can be shown a screen: the ``User``
 row and its settings, the REAL pay calendar they stated, a baseline scenario,
 the default Checking account and the category tree.  (It copied the tax law
 into per-user rows too until plan step salary:X-at-1; the law has one home,
-:mod:`app.tax_law`, and nothing reads the copies already made, which stay in
-their tables until plan step salary:X-at-2 drops them.)
+:mod:`app.tax_law`, and plan step salary:X-at-2 dropped the copies with their
+tables.)
 :func:`register_user` is the one door, and
 :class:`RegistrationSpec` is what a sign-up says.
 
@@ -14,7 +14,7 @@ their tables until plan step salary:X-at-2 drops them.)
 that forced the question** (developer, 2026-09-06).  This lived in
 :mod:`app.services.auth_service`, which is now two subjects in one file: an
 IDENTITY tier -- hashing, verification, the HIBP breach check, the lockout
-counters, ``authenticate`` and ``change_password`` -- and this one, which
+counters, the sign-in password checks and ``change_password`` -- and this one, which
 builds an owner's whole financial baseline and touches eight tables.  The two
 share nothing but :func:`~app.services.auth_service.hash_password`, which this
 module imports and nothing here is imported back.

@@ -3236,6 +3236,7 @@ def _build_full_user_data(db, seed_user, periods):
 
     # d) Salary profile.
     salary_profile = SalaryProfile(
+        period_end_days_before_payday=6,
         user_id=user.id,
         scenario_id=scenario.id,
         filing_status_id=filing_single.id,
@@ -3378,6 +3379,7 @@ def seed_full_second_user_data(app, db, seed_second_user, seed_second_periods):
 
     # d) Salary profile.
     salary_profile = SalaryProfile(
+        period_end_days_before_payday=6,
         user_id=user.id,
         scenario_id=scenario.id,
         filing_status_id=filing_single.id,

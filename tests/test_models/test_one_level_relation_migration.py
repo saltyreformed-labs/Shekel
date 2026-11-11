@@ -61,6 +61,11 @@ _LATEST = load_migration_module(
 _R23 = load_migration_module(
     "cddb15ffba5f_a_mis_dated_loan_statement_is_withdrawn.py",
 )
+#: The revision that moves a source's id off the sighting into its own key
+#: (plan step plan#2232).  Stepped down FIRST and up LAST, for ``_LATEST``'s
+#: reason: ``_LATER``'s downgrade reads ``statement_line_sightings
+#: .external_id``, which exists only below this revision.
+_ID_KEY = load_migration_module("6534c1bfeeb1_a_bank_id_names_one_line.py")
 
 
 def _sql(statement, **params):
@@ -181,6 +186,7 @@ class TestTheRoundTrip:
             "'account_anchor_history' AND operation = 'UPDATE'"
         )[0][0]
 
+        _run(_ID_KEY.downgrade, db.session)
         _run(_R23.downgrade, db.session)
         _run(_LATEST.downgrade, db.session)
         _run(_LATER.downgrade, db.session)
@@ -282,6 +288,7 @@ class TestTheRoundTrip:
         )[0][0] == audit_updates_before
 
         _run(_R23.upgrade, db.session)
+        _run(_ID_KEY.upgrade, db.session)
 
     def test_the_upgrade_refuses_a_database_without_the_evidence_ladder(
         self, db,
@@ -292,6 +299,7 @@ class TestTheRoundTrip:
         ``uncorroborated`` row has no id to default the owner's rows to, and
         the revision says so instead of writing a wrong literal.
         """
+        _run(_ID_KEY.downgrade, db.session)
         _run(_R23.downgrade, db.session)
         _run(_LATEST.downgrade, db.session)
         _run(_LATER.downgrade, db.session)

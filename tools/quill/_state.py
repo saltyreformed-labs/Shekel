@@ -111,7 +111,7 @@ from tools.ci.gitcmd import DEV, MAIN
 from tools.quill._fields import ON_HOLD
 from tools.quill._git import MARKERS, Claim, task_file
 from tools.quill._tracker import BareCard, Card
-from tools.quill.setup_tracker import FILING, TASK
+from tools.quill.setup_tracker import FILING, MOVES_MONEY_LABEL, TASK
 
 #: How long a claim's branch may go without a commit before ``quill next`` reports it
 #: stale: the build plan's three days, measured from the branch's last commit since the
@@ -125,6 +125,13 @@ SHIPPABLE = ("step", "finding")
 #: the one card each is blocked by.  A finding and a ruling always name one; a question names
 #: the step it is asked for, when it has one (plan#1861's item 10).
 OWNED = ("finding", "ruling", "question")
+
+
+def moves_money(card: BareCard) -> bool:
+    """Whether ``card``'s release moves money: its OWN moves-money label (R-BAL287), never a
+    parent's.  The one reading of it: ``/release``'s card reader takes it through the door,
+    and ``quill claim`` for a card's Release kit (ruling plan#2860)."""
+    return MOVES_MONEY_LABEL in card.labels
 
 
 def leaves(card: BareCard, cards: Mapping[int, BareCard],
@@ -277,6 +284,14 @@ def above(card: BareCard, cards: Mapping[int, BareCard]) -> Iterator[BareCard]:
         yield card
 
 
+def at_and_above(card: BareCard, cards: Mapping[int, BareCard]) -> Iterator[BareCard]:
+    """``card``, then the steps above it, nearest first (:func:`above`): what a leaf inherits
+    from, each step's wait and Priority, nothing copied (R-BAL182).  The one walk
+    :func:`blockers`, :func:`held_at`, ``_next._rank`` and ``_next.ranked`` read."""
+    yield card
+    yield from above(card, cards)
+
+
 def missing(cards: Mapping[int, BareCard]) -> set[int]:
     """Cards the decisions below would read that ``cards`` does not hold yet:
     blockers, parents, and every step linked under a card, each read to decide whether
@@ -374,7 +389,7 @@ def left_bare(card: Card, cards: Mapping[int, Card], shipped: Iterable[int],
 def held_at(card: BareCard, cards: Mapping[int, BareCard]) -> BareCard | None:
     """The nearest card at or above ``card`` marked On hold (ruling plan#1832), or None: a pause
     is set once, and a leaf inherits every step above it (R-BAL182); nothing is copied."""
-    return next((step for step in (card, *above(card, cards)) if step.priority == ON_HOLD), None)
+    return next((step for step in at_and_above(card, cards) if step.priority == ON_HOLD), None)
 
 
 def never_offered(card: Card, cards: Mapping[int, Card], shipped: Iterable[int]) -> str | None:
@@ -419,7 +434,7 @@ def has_turn(card: Card, cards: Mapping[int, Card], shipped: Iterable[int]) -> b
 
 def blockers(card: BareCard, cards: Mapping[int, BareCard]) -> set[int]:
     """Every blocker of ``card`` and of each step above it, which a leaf inherits (R-BAL182)."""
-    return {blocker for step in (card, *above(card, cards)) for blocker in step.blocked_by}
+    return {blocker for step in at_and_above(card, cards) for blocker in step.blocked_by}
 
 
 def workable(card: Card, cards: Mapping[int, Card], shipped: Iterable[int],

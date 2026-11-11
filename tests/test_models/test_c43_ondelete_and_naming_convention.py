@@ -103,6 +103,7 @@ import pytest
 from sqlalchemy import inspect, text
 from sqlalchemy.exc import IntegrityError
 
+from tests._rewind_tax_tables import rewind_the_per_user_tax_tables
 from tests._test_helpers import rewind_paycheck_lines_rename
 
 from app.extensions import SHEKEL_NAMING_CONVENTION
@@ -111,7 +112,6 @@ from app.models.ref import AccountType
 from app.models.salary_profile import SalaryProfile
 from app.models.salary_raise import SalaryRaise
 from app.models.savings_goal import SavingsGoal
-from app.models.tax_config import StateTaxConfig, TaxBracketSet
 from app.models.transfer import Transfer
 
 
@@ -136,8 +136,15 @@ def _c43_schema(app, db):
     model-contract cases read metadata only and are unaffected.  Nothing
     is replayed: the ``db`` fixture re-clones the per-worker database for
     every test, and no case here reads a line through the models.
+
+    Two more of the specs, ``fk_state_tax_configs_tax_type_id`` and
+    ``fk_tax_bracket_sets_filing_status_id``, are on tables plan step
+    salary:X-at-2 dropped, so its downgrade runs first, newest first
+    (:func:`~tests._rewind_tax_tables.rewind_the_per_user_tax_tables`, ruling
+    plan#3235).
     """
     with app.app_context():
+        rewind_the_per_user_tax_tables(db.session)
         rewind_paycheck_lines_rename(db.session)
 
 
@@ -172,6 +179,14 @@ _M_C43 = _load_migration(
     "b4b588a49a0c_c43_fk_ondelete_restrict_and_naming_.py"
 )
 
+#: The tables two of C-43's ``REF_FK_SPECS`` are on, which plan step
+#: salary:X-at-2 dropped with their models (ruling plan#3235): no model is left
+#: to declare those keys, so the model-contract check skips them by name.
+_TABLES_NO_MODEL_DECLARES = frozenset({
+    ("salary", "state_tax_configs"),
+    ("salary", "tax_bracket_sets"),
+})
+
 
 # Mapping of (model class, column attribute name) for every FK that
 # C-43 touched.  Used by ``TestNamingConventionContract`` to assert
@@ -203,11 +218,6 @@ MODEL_FK_NAME_CONTRACT: tuple[tuple[type, str, str, str], ...] = (
      "fk_salary_profiles_filing_status_id"),
     (SalaryRaise, "raise_type_id",
      "fk_salary_raises_raise_type_id", "fk_salary_raises_raise_type_id"),
-    (StateTaxConfig, "tax_type_id",
-     "fk_state_tax_configs_tax_type_id", "fk_state_tax_configs_tax_type_id"),
-    (TaxBracketSet, "filing_status_id",
-     "fk_tax_bracket_sets_filing_status_id",
-     "fk_tax_bracket_sets_filing_status_id"),
     (Transfer, "pay_period_id",
      "fk_transfers_pay_period_id", "fk_transfers_pay_period_id"),
 )
@@ -558,8 +568,9 @@ class TestRestrictBehavior:
             scenario_id = seed_user["scenario"].id
             db.session.execute(text(
                 "INSERT INTO salary.salary_profiles "
-                "(user_id, scenario_id, filing_status_id, state_code) "
-                "VALUES (:uid, :sid, 1, 'NC')"
+                "(user_id, scenario_id, filing_status_id, state_code, "
+                "period_end_days_before_payday) "
+                "VALUES (:uid, :sid, 1, 'NC', 6)"
             ), {"uid": user_id, "sid": scenario_id})
             db.session.commit()
             try:
@@ -1077,6 +1088,8 @@ class TestNamingConventionContract:
         """
         for spec in _M_C43.REF_FK_SPECS:
             _src_schema, _src_table, _src_col, _, _, _, _, new_name, _ondelete = spec
+            if (_src_schema, _src_table) in _TABLES_NO_MODEL_DECLARES:
+                continue
             # Look up the model + column from MODEL_FK_NAME_CONTRACT, by the
             # name C-43 wrote (its fourth element).
             matching = [

@@ -15,10 +15,11 @@ and their ladders, the child deduction tiers and the FICA rows equalled the
 code field for field, and the state rows' tax type did; the state rate and
 deduction were graded by re-pricing instead: every projected paycheck and the
 Taxes tab, whose figures read them, priced from the code as they did from the
-copies, and a planted North Carolina rate moved the result.)  A copy cannot
+copies, and a planted North Carolina rate moved the result.)  A copy could not
 reach a year its owner never received, and a correction to the code never
 reached a row already copied.  Now nothing in the app writes the law: a new year, or a
-correction, is a release that edits these modules.
+correction, is a release that edits these modules.  The copies' five tables went
+at plan step salary:X-at-2.
 
 **Adding a tax year** is a new ``_year_<YYYY>.py`` beside the others, listed
 in :data:`LAW` below.  Its federal rules must cover every filing status and it
@@ -60,9 +61,10 @@ from app.tax_law._types import (
 )
 from app.tax_law._year_2025 import YEAR_2025
 from app.tax_law._year_2026 import YEAR_2026
+from app.tax_law._year_2027 import YEAR_2027
 
 #: Every tax year the app carries, oldest first.
-LAW = TaxLaw(years=(YEAR_2025, YEAR_2026))
+LAW = TaxLaw(years=(YEAR_2025, YEAR_2026, YEAR_2027))
 
 __all__ = [
     "LAW",

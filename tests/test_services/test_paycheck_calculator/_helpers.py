@@ -7,7 +7,7 @@ from datetime import date, timedelta
 from decimal import Decimal
 
 from app import ref_cache
-from app.enums import PaycheckLineKindEnum
+from app.enums import PaycheckLineKindEnum, TaxTypeEnum
 from app.services.pay_calendar import DerivedPeriod
 from tests._test_helpers import payroll_basis
 
@@ -36,12 +36,13 @@ class FakeRaise:
     """Minimal stand-in for a SalaryRaise ORM object."""
 
     def __init__(self, percentage=None, flat_amount=None,
-                 effective_month=3, effective_year=2026,
+                 effective_date=date(2026, 3, 1),
                  is_recurring=False, terminal_year=None):
         self.percentage = Decimal(str(percentage)) if percentage else None
         self.flat_amount = Decimal(str(flat_amount)) if flat_amount else None
-        self.effective_month = effective_month
-        self.effective_year = effective_year
+        # The day the raise starts (plan step salary plan#3048, ruling
+        # plan#3090); a year and a month, landed on the 1st, until then.
+        self.effective_date = effective_date
         self.is_recurring = is_recurring
         # The last year the raise is believed to happen, None for
         # indefinitely.  REQUIRED on the stand-in since plan step
@@ -189,7 +190,7 @@ class FakeBracket:
         self.sort_order = sort_order
 
 
-class FakeBracketSet:
+class FakeFederalRules:
     def __init__(self, standard_deduction=Decimal("15000"),
                  child_credit_amount=Decimal("2000"),
                  other_dependent_credit_amount=Decimal("500"),
@@ -199,24 +200,23 @@ class FakeBracketSet:
         self.other_dependent_credit_amount = other_dependent_credit_amount
         self.brackets = brackets or []
 
+    @property
+    def withholding_rules(self):
+        """The rules withholding prices on: these, as the fake states no withholding figure.
 
-class FakeTaxType:
-    def __init__(self, name="flat"):
-        self.name = name
+        Mirrors :attr:`app.tax_law.FederalRules.withholding_rules`, which the
+        withholding formula reads (ruling plan#3213).
+        """
+        return self
 
 
-class FakeStateTaxConfig:
-    def __init__(self, flat_rate="0.045", tax_type_name="flat"):
+class FakeStateTaxRules:
+    def __init__(self, flat_rate="0.045"):
         self.flat_rate = Decimal(str(flat_rate))
-        self.tax_type = FakeTaxType(tax_type_name)
-        # Resolve the integer ID from the ref_cache for ID-based lookups.
-        from app import ref_cache  # pylint: disable=import-outside-toplevel
-        from app.enums import TaxTypeEnum  # pylint: disable=import-outside-toplevel
-        _name_to_enum = {e.value: e for e in TaxTypeEnum}
-        self.tax_type_id = ref_cache.tax_type_id(_name_to_enum[tax_type_name])
+        self.tax_type = TaxTypeEnum.FLAT
 
 
-class FakeFicaConfig:
+class FakeFicaRules:
     def __init__(self, ss_rate="0.062", ss_wage_base="168600",
                  medicare_rate="0.0145", medicare_surtax_rate="0.009",
                  medicare_surtax_threshold="200000"):
@@ -263,6 +263,9 @@ class FakeProfile:
                  other_dependents=0, *, user_id=_STAND_IN_OWNER):
         self.user_id = user_id
         self.pay_entries = [FakePayEntry(pay_from, Decimal(str(pay)))]
+        # The job's pay periods end six days before payday (ruling
+        # plan#3096), as every profile the suite builds states.
+        self.period_end_days_before_payday = 6
         self.raises = raises or []
         self.lines = lines or []
         self.pay_stubs = []

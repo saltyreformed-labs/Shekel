@@ -78,11 +78,15 @@ def calculate_benefit(benefit_multiplier, consecutive_high_years,
 def project_profile_salaries(basis, start_year, end_year):
     """Project a salary profile's yearly salary for each year in a range.
 
-    **Each year's salary is the paycheck engine's own base pay on December 1,
-    times that day's paychecks a year** -- :meth:`~app.services.payroll_basis
-    .PayrollBasis.base_pay_on`'s :attr:`~app.services.payroll_basis.BasePay
-    .annual` -- since plan step salary:X-av-3a (ruling **R-SAL59**: the
-    yearly figure is pay x paychecks a year, derived and never stored).
+    **Each year's salary is the pay in force on December 1, times that
+    day's paychecks a year** -- :meth:`~app.services.payroll_basis
+    .PayrollBasis.pay_rate_on`'s :attr:`~app.services.payroll_basis.PayRate
+    .annual`, the one derivation of a pay rate since task plan#3100, and the
+    engine's own base pay on December 1 from plan step salary:X-av-3a
+    (ruling **R-SAL59**: the yearly figure is pay x paychecks a year, derived
+    and never stored).  A rate and not a paycheck: a paycheck whose pay
+    period straddles a raise pays part of it (ruling **plan#3089**), and is
+    no year's salary.
     Until then this walked ``salary_raises.apply_raises`` over the profile's
     stored annual salary: a second walk of the raises beside the engine's,
     agreeing because both called one function, and one the pay list's
@@ -114,7 +118,7 @@ def project_profile_salaries(basis, start_year, end_year):
         list of (year, Decimal salary) tuples.
     """
     return [
-        (year, basis.base_pay_on(date(year, 12, 1)).annual)
+        (year, basis.pay_rate_on(date(year, 12, 1)).annual)
         for year in range(start_year, end_year + 1)
     ]
 

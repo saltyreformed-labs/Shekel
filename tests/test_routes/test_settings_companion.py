@@ -17,12 +17,9 @@ from app.enums import RoleEnum
 from app.extensions import db
 from app.models.transaction_entry import TransactionEntry
 from app.models.user import User, UserSettings
-from app.services.auth_service import (
-    authenticate,
-    find_sign_in_user,
-    verify_password,
-)
+from app.services.auth_service import verify_password
 from app.exceptions import AuthError
+from tests._sign_in import stranger_signs_in
 from tests._test_helpers import figure_source_columns, generate_row_of, make_expense_template
 
 
@@ -238,7 +235,7 @@ class TestCreateCompanion:
     ):
         """Companion created via settings can log in with the chosen password.
 
-        Routes auth_service.authenticate() with the companion's new
+        Signs in as a stranger's browser does with the companion's new
         credentials and verifies that (a) the call succeeds, (b) the
         returned user has the companion role, and (c) is_active is True.
         """
@@ -250,7 +247,7 @@ class TestCreateCompanion:
             ),
         )
         with app.app_context():
-            user = authenticate(find_sign_in_user("login@shekel.local"), "loginpassword12")
+            user = stranger_signs_in("login@shekel.local", "loginpassword12")
             assert user.role_id == ref_cache.role_id(RoleEnum.COMPANION)
             assert user.is_active is True
 
@@ -378,12 +375,12 @@ class TestEditCompanion:
 
         # New password authenticates.
         with app.app_context():
-            user = authenticate(find_sign_in_user(updated.email), "brandnewpass12")
+            user = stranger_signs_in(updated.email, "brandnewpass12")
             assert user.id == comp_id
 
             # Old password no longer works.
             with pytest.raises(AuthError):
-                authenticate(find_sign_in_user(updated.email), "companionpass")
+                stranger_signs_in(updated.email, "companionpass")
 
     def test_edit_companion_blank_password_keeps_hash(
         self, app, auth_client, db, seed_user, seed_companion,
@@ -408,7 +405,7 @@ class TestEditCompanion:
         assert updated.password_hash == original_hash
         # Old password still works.
         with app.app_context():
-            user = authenticate(find_sign_in_user(updated.email), "companionpass")
+            user = stranger_signs_in(updated.email, "companionpass")
             assert user.id == comp_id
 
     def test_edit_companion_password_change_sets_session_invalidated_at(
@@ -511,9 +508,9 @@ class TestDeactivateCompanion:
         auth_client.post(f"/settings/companions/{comp_id}/deactivate")
 
         with app.app_context():
-            # auth_service.authenticate raises AuthError for inactive users.
+            # A stranger's sign-in raises AuthError for inactive users.
             with pytest.raises(AuthError, match="disabled"):
-                authenticate(find_sign_in_user("companion@shekel.local"), "companionpass")
+                stranger_signs_in("companion@shekel.local", "companionpass")
 
     def test_deactivate_preserves_entries(
         self, app, db, auth_client, seed_user, seed_companion, seed_periods_today,
@@ -613,7 +610,7 @@ class TestReactivateCompanion:
         auth_client.post(f"/settings/companions/{comp_id}/reactivate")
 
         with app.app_context():
-            user = authenticate(find_sign_in_user("companion@shekel.local"), "companionpass")
+            user = stranger_signs_in("companion@shekel.local", "companionpass")
             assert user.id == comp_id
             assert user.is_active is True
 

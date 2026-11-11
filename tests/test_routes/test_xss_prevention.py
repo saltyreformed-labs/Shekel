@@ -23,6 +23,7 @@ from app.models.salary_profile import SalaryProfile
 from app.services import transfer_service
 from app.services import account_service
 
+from tests._stub_period import stub_period_on
 from tests._test_helpers import (
     cadence_payload,
     create_loan_account,
@@ -130,6 +131,7 @@ def _create_salary_profile(seed_user, seed_periods_today):
         db.session.query(FilingStatus).filter_by(name="single").one()
     )
     profile = SalaryProfile(
+        period_end_days_before_payday=6,
         user_id=seed_user["user"].id,
         scenario_id=seed_user["scenario"].id,
         filing_status_id=filing_single.id,
@@ -339,6 +341,7 @@ class TestXSSPrevention:
                 "pay_amount": "2884.62",  # $75,000.00 a year / 26
                 # The first period's payday.
                 "pay_payday": seed_periods_today[0].start_date.isoformat(),
+                **stub_period_on(seed_periods_today[0].start_date.isoformat()),
                 "filing_status_id": filing_single.id,
                 "state_code": "NC",
             })

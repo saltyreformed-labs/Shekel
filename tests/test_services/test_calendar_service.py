@@ -67,7 +67,7 @@ from app.services.balance_at import _context as resolution_context
 from app.services.calendar_infrequency import is_infrequent as _is_infrequent
 from app.services.pay_rhythm import FixedDays
 from app.services.payroll_basis import PayrollBasis
-from app.services.tax_config_service import load_tax_configs_for_year
+from tests._tax_configs import tax_configs_for
 from app.services.calendar_service import (
     CalendarAccountNotResolvableError,
     DailyView,
@@ -1555,6 +1555,7 @@ class TestThirdPaycheckDetection:
             user_id = seed_user["user"].id
             calendar = calendar_for(user_id)
             profile = SalaryProfile(
+                period_end_days_before_payday=6,
                 user_id=user_id,
                 scenario_id=seed_user["scenario"].id,
                 filing_status_id=1,
@@ -1568,7 +1569,7 @@ class TestThirdPaycheckDetection:
             )
             db.session.flush()
 
-            configs = load_tax_configs_for_year(profile, 2026)
+            configs = tax_configs_for(profile, 2026)
             breakdowns = paycheck_calculator.project_salary(
                 PayrollBasis(profile, calendar),
                 [p for p in calendar.saved() if p.start_date.year == 2026],

@@ -194,6 +194,7 @@ def _build_scenario(db, seed_user, *, tax_rate=None, with_pension=True):
     filing = db.session.query(FilingStatus).first()
 
     profile = SalaryProfile(
+        period_end_days_before_payday=6,
         user_id=user.id,
         scenario_id=scenario.id,
         filing_status_id=filing.id,
@@ -539,8 +540,7 @@ class TestComputeReadinessWhatif:
             raise_row = SalaryRaise(
                 salary_profile_id=profile.id,
                 raise_type_id=ref_cache.raise_type_id(RaiseTypeEnum.MERIT),
-                effective_month=1,
-                effective_year=effective_year,
+                effective_date=date(effective_year, 1, 1),
                 percentage=Decimal("0.0500"),
                 is_recurring=True,
             )

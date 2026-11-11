@@ -10,7 +10,7 @@ made up and worked by hand in its case.
 
 The shared fixtures: ``simple_bracket_set`` (10% to $50,000, 22% above, a
 $15,000 standard deduction), ``nc_state_config`` (4.5% flat, no standard
-deduction) and ``FakeFicaConfig`` (6.2% Social Security on a $168,600 base,
+deduction) and ``FakeFicaRules`` (6.2% Social Security on a $168,600 base,
 1.45% Medicare).  The owner is paid ``$2,307.69`` a paycheck ($60,000 a year
 over 26); with no line the established baseline is federal 173.08, state
 103.85, Social Security 143.08, Medicare 33.46.
@@ -23,7 +23,7 @@ from app.services.paycheck_calculator import calculate_paycheck, project_salary
 from app.services.paycheck_calculator._calendar_questions import _get_cumulative_wages
 from tests._test_helpers import payroll_basis
 
-from ._helpers import FakeDeduction, FakeFicaConfig, FakeProfile, _period, _timing_id
+from ._helpers import FakeDeduction, FakeFicaRules, FakeProfile, _period, _timing_id
 
 
 def _owner(*lines, pay_from=date(2026, 1, 16)):
@@ -191,7 +191,7 @@ class TestTheYearToDateCountsSocialSecurityWages:
         configs = {
             "bracket_set": simple_bracket_set,
             "state_config": nc_state_config,
-            "fica_config": FakeFicaConfig(ss_wage_base="5000"),
+            "fica_config": FakeFicaRules(ss_wage_base="5000"),
         }
         breakdowns = project_salary(
             payroll_basis(_owner(_health(), pay_from=date(2026, 1, 2)), periods),

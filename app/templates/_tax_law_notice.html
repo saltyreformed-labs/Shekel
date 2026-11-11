@@ -1,17 +1,25 @@
 {# The tax-law notice (plan step salary:X-at-4; rulings salary:R-SAL74,
-   R-SAL86 and R-SAL87).
+   R-SAL86, R-SAL87 and plan#3198).
 
    Rendered from base.html on every owner page when ``tax_law_gaps`` is
    non-empty: from November 1, when the app lacks next year's tax law, and
-   from January on for as long as it lacks the current year's.  Each gap is
-   one sentence pair -- a whole year the app does not carry, or a state a
-   year leaves out that an earlier year lists -- naming the year whose rules
-   price it meanwhile, which is the resolver's own answer for that piece
-   (``app/services/tax_law_alarm.py``).  A whole missing year says its
-   paychecks and estimates use the newest year's rules -- the words ruling
-   R-SAL87 approved -- unless a state is priced on an OLDER year (the newest
-   year itself lacks it); then that one sentence names each part's year
-   instead (ruling R-SAL91), so no sentence claims a year a line does not use.
+   from January on for as long as it lacks the current year's.  The gaps
+   (``app/services/tax_law_alarm.py``) come one per missing piece, by year,
+   and each missing YEAR is one sentence pair, however many pieces it lacks
+   (ruling plan#3198), so they are grouped here by year.  Within a year the
+   whole-year gap and the missing states are each picked out by their own
+   filter on ``state``, so a sentence never rests on which gap comes first.
+   ``gaps`` never gives one year both, because it judges a year it carries
+   by its states and a year it lacks as a whole, so each year is one pair.
+
+   A year missing states names them together, in the one wording of a list
+   of states (the ``name_states`` filter, ruling plan#3202), and says their
+   tax uses "older rules".  A whole missing year says its paychecks and
+   estimates use the newest year's rules -- the words ruling R-SAL87
+   approved -- unless a state is priced on a year older still
+   (``priced_older``: the newest year itself lacks it); then it says "older
+   rules" too, so no sentence names a year a line does not use.  The weekly
+   email names each part's year instead (scripts/check_tax_law.py).
 
    NO close button (ruling R-SAL87): the notice goes away when the law is
    added, and a dismissal would silence the one alarm that needs no email
@@ -26,22 +34,23 @@
   <div class="alert alert-warning d-flex align-items-start mb-0" role="alert">
     <i class="bi bi-calendar2-x me-2 fs-5" aria-hidden="true"></i>
     <div class="flex-grow-1">
-      {% for gap in tax_law_gaps %}
+      {% for tax_year, year_gaps in tax_law_gaps|groupby("tax_year") %}
+      {% set states = year_gaps|rejectattr("state", "none")|map(attribute="state")|list %}
       <p class="mb-0">
-        {% if gap.state is none %}
-        Shekel doesn't have the {{ gap.tax_year }} tax rules yet.
+        {% for gap in year_gaps|selectattr("state", "none") %}
+        Shekel doesn't have the {{ tax_year }} tax rules yet.
         {% if gap.priced_older %}
-        Federal tax, Social Security and Medicare for {{ gap.tax_year }} use {{ gap.fallback_year }}'s rules, and
-        {% for older in gap.priced_older %}{{ older.state }} tax uses {{ older.fallback_year }}'s{{ " and " if not loop.last }}{% endfor %},
-        until an app update adds them.
+        Paychecks and tax estimates for {{ tax_year }} use older rules until an app update adds them.
         {% elif gap.fallback_year is not none %}
-        Paychecks and tax estimates for {{ gap.tax_year }} use {{ gap.fallback_year }}'s rules until an app update adds them.
+        Paychecks and tax estimates for {{ tax_year }} use {{ gap.fallback_year }}'s rules until an app update adds them.
         {% else %}
-        It has no earlier year's rules to use for {{ gap.tax_year }} until an app update adds them.
+        It has no earlier year's rules to use for {{ tax_year }} until an app update adds them.
         {% endif %}
-        {% else %}
-        Shekel's {{ gap.tax_year }} tax rules are missing {{ gap.state }}.
-        {{ gap.state }} tax for {{ gap.tax_year }} uses {{ gap.fallback_year }}'s rules until an app update adds them.
+        {% endfor %}
+        {% if states %}
+        {% set named = states|name_states %}
+        Shekel's {{ tax_year }} tax rules are missing {{ named }}.
+        {{ named }} tax for {{ tax_year }} {{ "uses" if states|length == 1 else "use" }} older rules until an app update adds them.
         {% endif %}
       </p>
       {% endfor %}

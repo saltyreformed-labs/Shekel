@@ -1,8 +1,9 @@
-"""``quill claim`` files its card's two finishing tasks (ruling plan#1875): last in the card's
-order, each body naming the card, decided before the claim's push and written after it; a
-re-claim finds them filed and files none; a claim a failure cut short is finished by the same
-command run again where its branch is checked out (R-BAL186).  Over the in-memory tracker
-(:class:`_fake.FakeTracker`) and the ``code`` fixture's real git.
+"""``quill claim`` files its card's finishing tasks (ruling plan#1875), a Release kit among them
+while it moves money (rulings plan#2860, plan#3201): last in the card's order, each body naming
+the card, decided before the claim's push and written after it; a re-claim finds them filed and
+files none; a claim a failure cut short is finished by the same command run again where its
+branch is checked out (R-BAL186).  Over the in-memory tracker (:class:`_fake.FakeTracker`) and
+the ``code`` fixture's real git.
 """
 from __future__ import annotations
 
@@ -14,12 +15,14 @@ from tools.quill._fake import AnswerLostOnce, FailOnce, FakeTracker, claim, leaf
 from tools.quill._state import SHIPPABLE
 from tools.quill._tasks import finishing
 from tools.quill.check import Draft, Owner, violations
-from tools.quill.setup_tracker import FILING, TASK
+from tools.quill.setup_tracker import FILING, MOVES_MONEY_LABEL, TASK
 
-(REVIEW, REVIEW_TEXT), (LAND, LAND_TEXT) = finishing(1)
+(REVIEW, REVIEW_TEXT), (LAND, LAND_TEXT) = finishing(1, money=False)
+(KIT, KIT_TEXT), _, _ = finishing(1, money=True)
 
-#: What a claim of step 1, on the board, writes when it files both finishing tasks as plan#2
-#: and plan#3: each created marked, linked under it, put on the board under it, unmarked.
+#: What a claim of step 1, on the board and moving no money, writes when it files both its
+#: finishing tasks as plan#2 and plan#3: each created marked, linked under it, put on the board
+#: under it, unmarked.
 FILES_BOTH = [("create", 2, "task", REVIEW, ("filing",), None), ("add_child", 1, 2),
               ("board_add", 2), ("unmark", 2),
               ("create", 3, "task", LAND, ("filing",), None), ("add_child", 1, 3),
@@ -73,7 +76,46 @@ def test_two_cards_claimed_each_file_their_own(code):
     assert run(tracker, code, "claim", "plan#1") == 0
     assert run(tracker, code, "claim", "plan#5") == 0
     assert _order(tracker) == [6, 7] and _order(tracker, 5) == [8, 9]
-    assert tracker.bodies[8] == finishing(5)[0][1] != tracker.bodies[6] == REVIEW_TEXT
+    assert tracker.bodies[8] == finishing(5, money=False)[0][1] != (
+        tracker.bodies[6]) == REVIEW_TEXT
+
+
+def test_a_claim_of_a_card_that_moves_money_files_its_release_kit_first(code):
+    """Rulings plan#2860, plan#3201: a card carrying the moves-money label files the Release
+    kit, then the review, then the suite and pull request, its order the build's; the kit's
+    body names its card's kit and its limits, and the review's says what it grades of a kit.
+    The two-task claim above is the same command on a card without the label."""
+    tracker = FakeTracker()
+    tracker.add(1, labels=("balance", MOVES_MONEY_LABEL))
+    assert run(tracker, code, "claim", "plan#1") == 0
+    assert _order(tracker) == [2, 3, 4]
+    assert [(tracker.cards_by_number[n].title, tracker.bodies[n]) for n in (2, 3, 4)] == [
+        (KIT, KIT_TEXT), (REVIEW, REVIEW_TEXT), (LAND, LAND_TEXT)]
+    assert KIT_TEXT.startswith("plan#1 moves money, so `/release` refuses a release ")
+    assert "`~/projects/shekel-handoffs/kits/plan-1/`" in KIT_TEXT
+    assert ("built in at most one session: no planted-defect trials, no independent "
+            "recalculation and no undo rehearsal") in KIT_TEXT
+    assert ("the review grades the kit too, for correctness on production alone: whether it "
+            "tells a safe release from an unsafe one, never rare edge cases") in REVIEW_TEXT
+
+
+def test_a_card_labelled_after_its_claim_gets_its_kit_from_the_claim_run_again(code, capsys):
+    """The label added once the review and the suite are filed: `quill claim` run again where
+    its branch is checked out files the kit, above the review still to begin, as it finishes
+    any claim missing a finishing task; run once more, it is refused, writing nothing."""
+    tracker = FakeTracker()
+    tracker.add(1)
+    assert run(tracker, code, "claim", "plan#1") == 0
+    assert _order(tracker) == [2, 3]
+    tracker.relabel(1, (MOVES_MONEY_LABEL,), ())
+    capsys.readouterr()
+    assert run(tracker, code, "claim", "plan#1") == 0
+    assert _order(tracker) == [4, 2, 3]
+    assert (tracker.cards_by_number[4].title, tracker.bodies[4]) == (KIT, KIT_TEXT)
+    assert "  in plan#1's order: placed above plan#2\n" in capsys.readouterr().out
+    writes = list(tracker.writes)
+    assert run(tracker, code, "claim", "plan#1") == 1
+    assert tracker.writes == writes
 
 
 def test_a_review_filed_under_a_card_whose_suite_stands_goes_above_it(code):
@@ -212,7 +254,7 @@ def test_each_finishing_task_passes_the_check_under_live_work(kind):
     owner ``quill claim`` files them under (it refuses any other card first): the check a
     filing makes passes it, so the claim never grades them again
     (``_filing.finishing_filings``)."""
-    for title, body in finishing(1):
+    for title, body in finishing(1, money=True):
         assert not violations(Draft(TASK, title, body, (), None, Owner(kind, True, False)))
 
 
@@ -221,7 +263,7 @@ def test_a_released_claims_finishing_tasks_are_dropped_before_its_step_splits(co
     """A step split into smaller steps is never shipped itself (R-BAL177), so a leaf is refused
     while the finishing tasks a claim filed are open; dropped, the split goes ahead."""
     tracker = FakeTracker()
-    tracker.add(1)
+    tracker.add(1, priority="Medium")
     assert run(tracker, code, "claim", "plan#1") == 0
     _released(tracker, code)
     assert run(tracker, code, *leaf_filing(tmp_path, "Half")) == 1

@@ -48,7 +48,8 @@ MARK = "ZZVERIFY-RECURRENCE"
 #:
 #: **The limiter being REAL is the point**, so the run is paced to it rather
 #: than the other way round: the dev app runs prod's Valkey limiter at 30
-#: requests a minute per IP, ``recurrence_form.js`` fetches the occurrence
+#: requests a minute on each page for each signed-in browser
+#: (``app.rate_limits``), ``recurrence_form.js`` fetches the occurrence
 #: preview on every field change, and this script changes a field about sixty
 #: times.  At 2.5s that is 24 a minute, the same headroom
 #: :data:`POST_SPACING_SECONDS` leaves the crafted POSTs.
@@ -70,8 +71,9 @@ MARK = "ZZVERIFY-RECURRENCE"
 #: payment-less loan and a one-time transfer into it: 185 fetches, so a drive
 #: adding more than 15 would meet 429s in a fresh window too.  Run it once an
 #: hour; the preview route's counter is
-#: ``LIMITS:LIMITER/<ip>/templates.preview_recurrence/200/1/hour`` in the
-#: dev Valkey, its length the fetches still in the window.
+#: ``LIMITS:LIMITER/known-device:<id>/templates.preview_recurrence/200/1/hour``
+#: in the dev Valkey, ``<id>`` the signed-in browser's record (``user:<id>``
+#: for a browser no record names), its length the fetches still in the window.
 FIELD_SPACING_MS = 2500
 
 #: How long to wait between crafted POSTs.  See the module docstring.

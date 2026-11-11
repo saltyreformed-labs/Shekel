@@ -45,14 +45,18 @@ def calculate_paycheck(basis: PayrollBasis, period: DerivedPeriod, tax_configs,
                        *, configs_by_year=None):
     """Calculate a single paycheck for a given period.
 
-    The BASE pay is what the profile's pay list pays on the payday: the entry
-    it is priced from, carried across any change of rhythm and raised by each
-    forecast raise landing after that entry, each step rounded to the cent
-    (:meth:`~app.services.payroll_basis.PayrollBasis.base_pay_on`, since plan
-    step **salary:X-av-3a**; the post-raise annual over the payday's count
-    until then).  It is a RATE: the same figure for every paycheck in one
-    salary segment, and a function of the pay list, the raises and the
-    rhythm alone -- the payday SET does not reach it.  See
+    The BASE pay is what the profile's pay list pays on the payday: each
+    weekday of the paycheck's pay period at the pay in force that day -- the
+    entry in force, carried across any change of rhythm and raised by each
+    forecast raise landing after that entry opens, each step rounded to the
+    cent (:meth:`~app.services.payroll_basis.PayrollBasis.base_pay_on`, since
+    plan step **salary:X-av-3a**, weekday by weekday since task plan#3100;
+    the post-raise annual over the payday's count until then).  It is a
+    RATE: the same figure for every paycheck in one salary segment, but the
+    one paycheck a raise starts inside, which pays each side's share of its
+    weekdays (ruling **plan#3089**); a function of the pay list, the raises,
+    the rhythm and the paycheck's own pay period alone --
+    the payday SET does not reach it.  See
     the package docstring section "The per-paycheck gross -- a RATE, not a share
     of a year" for what that replaced (plan step **balance:X-aw**, ruling
     **balance:R-HW**, superseding audit MED-05 / PA-07).  **The gross is the
@@ -82,10 +86,14 @@ def calculate_paycheck(basis: PayrollBasis, period: DerivedPeriod, tax_configs,
                       "The four calendar questions" for what a partial
                       sequence cost.
         period:       The ``DerivedPeriod`` this paycheck is for.
-        tax_configs:  dict with keys:
-                      - bracket_set: TaxBracketSet
-                      - state_config: StateTaxConfig
-                      - fica_config: FicaConfig
+        tax_configs:  dict with keys (as
+                      :meth:`app.services.income_service.ProfilePaychecks.law`
+                      resolves them):
+                      - bracket_set: :class:`app.tax_law.FederalRules`, whose
+                        ``withholding_rules`` the withholding formula prices on
+                      - state_config:
+                        :class:`app.services.tax_config_service.StateTaxRules`
+                      - fica_config: :class:`app.tax_law.FicaRules`
         configs_by_year: ``{tax_year: configs dict}`` covering the year of
                       every pay stub that may price the paycheck
                       (:func:`~._stubs.tax_years_for`), or ``None`` when
@@ -102,9 +110,10 @@ def calculate_paycheck(basis: PayrollBasis, period: DerivedPeriod, tax_configs,
     Returns:
         PaycheckBreakdown dataclass.
     """
-    # Steps 1-2: the payday's base pay, read ONCE -- the rate the pay list
-    # walks to (off the basis's raise set; plan step salary:X-av-3a) and the
-    # rhythm in force on the payday (plan step salary:X-av-2).  Deliberately
+    # Steps 1-2: the payday's base pay, read ONCE -- each weekday it pays
+    # for at the pay in force that day (off the basis's raise set; plan step
+    # salary:X-av-3a, task plan#3100), its rate, and the rhythm in force on
+    # the payday (plan step salary:X-av-2).  Deliberately
     # NOT a function of the payday SET: that is what plan step balance:X-aw
     # removed (finding N-239).  The rate is the base every percentage line is
     # a percentage of (ruling R-SAL38); the count is what the withholding

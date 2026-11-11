@@ -75,7 +75,7 @@ def compute_income_statement(
     (:func:`_window_test`; the read filed them on it, as plan task plan#2771
     built, until finding plan#2875 moved the filing here), so the render
     derives the owner's schedule once
-    (``tests/test_arch/test_one_read_pass_per_render.py``).  **Another owner's
+    (``tests/test_arch/test_one_read_pass_per_render/``).  **Another owner's
     calendar is refused**, whatever the window: an opening filed in another
     owner's paycheck would be in no paycheck of its own owner's, and the read
     refused the pairing while it filed (plan task plan#2771).

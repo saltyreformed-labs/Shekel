@@ -14,21 +14,21 @@ from app.extensions import db
 from app.models.transaction_template import TransactionTemplate
 from app.models.transfer_template import TransferTemplate
 from app.services import template_amount_service as tas
+from tests._form_controls import FormControls
 from tests._test_helpers import (
-    _FormControls,
     create_savings_account,
     make_every_period_rule,
     make_salary_profile,
 )
 
 
-class _EnabledFormControls(_FormControls):
+class _EnabledFormControls(FormControls):
     """The shared form reader, leaving out a disabled control as a browser does.
 
     A browser posts no disabled ``<input>`` or ``<select>``, and the edit form
     of a loan's standing payment renders seven: the destination (ruling
     **R-R76**) and the recurrence controls the loan locks.  The shared reader
-    (``tests._test_helpers.rendered_form_controls``) fails on any disabled
+    (``tests._form_controls.rendered_form_controls``) fails on any disabled
     control rather than model one.  This models those two shapes exactly: the
     control is not posted, and nor are a disabled select's options.  A disabled
     ``<fieldset>`` or ``<optgroup>`` still fails, since a browser's rule there

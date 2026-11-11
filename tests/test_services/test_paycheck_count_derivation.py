@@ -40,7 +40,7 @@ from app.services.balance_at import BalanceContext
 from app.services.balance_at._inputs import _contribution_inputs_for_accounts
 from app.services.pay_calendar import PayCadence, PayCalendar, PayCalendarError
 from app.services.payroll_basis import PayrollBasis
-from app.services.tax_config_service import load_tax_configs_for_year
+from tests._tax_configs import tax_configs_for
 from app.services.tax_report_service import compute_tax_report
 
 from tests._test_helpers import (
@@ -118,6 +118,7 @@ def _investment_account_with_an_active_deduction(db, seed_user, name):
         ),
     ))
     profile = SalaryProfile(
+        period_end_days_before_payday=6,
         user_id=user_id, scenario_id=seed_user["scenario"].id,
         filing_status_id=1, name=f"{name} profile",
         state_code="NC",
@@ -246,6 +247,7 @@ class TestTheCountIsTheSchedule:
         with app.app_context():
             user_id = seed_user["user"].id
             profile = SalaryProfile(
+                period_end_days_before_payday=6,
                 user_id=user_id,
                 scenario_id=seed_user["scenario"].id,
                 filing_status_id=1,
@@ -258,7 +260,7 @@ class TestTheCountIsTheSchedule:
 
             calendar = _calendar(cadence_days, count, user_id=user_id)
             periods = list(calendar.saved())
-            configs = load_tax_configs_for_year(profile, 2026)
+            configs = tax_configs_for(profile, 2026)
 
             breakdowns = paycheck_calculator.project_salary(
                 PayrollBasis(profile, calendar), periods, configs,
@@ -314,6 +316,7 @@ class TestTheCountIsTheSchedule:
         with app.app_context():
             user_id = seed_user["user"].id
             profile = SalaryProfile(
+                period_end_days_before_payday=6,
                 user_id=user_id,
                 scenario_id=seed_user["scenario"].id,
                 filing_status_id=1,
@@ -396,6 +399,7 @@ class TestWhichOwnerTheSeamSERVESAndWhichItREFUSES:
         with app.app_context():
             user_id = seed_user["user"].id
             profile = SalaryProfile(
+                period_end_days_before_payday=6,
                 user_id=user_id, scenario_id=seed_user["scenario"].id,
                 filing_status_id=1, name="No paydays",
                 state_code="NC",
@@ -427,6 +431,7 @@ class TestWhichOwnerTheSeamSERVESAndWhichItREFUSES:
         with app.app_context():
             user_id = seed_user["user"].id
             profile = SalaryProfile(
+                period_end_days_before_payday=6,
                 user_id=user_id, scenario_id=seed_user["scenario"].id,
                 filing_status_id=1, name="No cadence",
                 state_code="NC",

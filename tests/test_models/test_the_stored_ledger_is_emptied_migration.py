@@ -129,7 +129,7 @@ class TestTheRevision:
     def test_revision_and_down_revision(self):
         """revision / down_revision pin the migration into the chain."""
         assert _MIGRATION.revision == "d913d743c78c"
-        assert _MIGRATION.down_revision == "897a6663d221"
+        assert _MIGRATION.down_revision == "5f2c46a35a79"
 
     def test_it_is_reviewed_under_its_ruling(self):
         """A destructive migration carries the ``Review:`` line, naming plan#3068."""

@@ -11,7 +11,7 @@ from ._helpers import (
     _period,
     twenty_four_rule,
     FakeDeduction,
-    FakeStateTaxConfig,
+    FakeStateTaxRules,
     FakeProfile,
 )
 
@@ -613,7 +613,7 @@ class TestPreTaxDeductionTaxImpact:
         Reduction: 81.78 - 72.78 = $9.00 (= $200 * 4.5% flat rate)
         """
         # State config with standard deduction (not in default fixture).
-        state_with_std_ded = FakeStateTaxConfig(flat_rate="0.045")
+        state_with_std_ded = FakeStateTaxRules(flat_rate="0.045")
         state_with_std_ded.standard_deduction = Decimal("12750")
 
         configs = {

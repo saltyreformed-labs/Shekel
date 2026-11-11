@@ -29,6 +29,7 @@ from app.models.ref import (
     TransactionType,
 )
 from app.utils.dates import display_today
+from tests._csrf_tokens import without_csrf_tokens
 from tests._test_helpers import (
     freeze_today, make_every_period_rule, make_recurring_raise, start_test_pay_list,
 )
@@ -78,6 +79,7 @@ def _create_salary_profile(seed_user, db_session, name="Main Job"):
     rule = make_every_period_rule(db_session, template)
 
     profile = SalaryProfile(
+        period_end_days_before_payday=6,
         user_id=seed_user["user"].id,
         scenario_id=seed_user["scenario"].id,
         template_id=template.id,
@@ -910,8 +912,7 @@ class TestRetirementProjections:
             salary_profile_id=profile.id,
             raise_type_id=merit.id,
             percentage=Decimal("0.0300"),
-            effective_month=1,
-            effective_year=date.today().year + 1,
+            effective_date=date(date.today().year + 1, 1, 1),
             is_recurring=True,
         )
         db.session.add(raise_obj)
@@ -1877,8 +1878,7 @@ class TestTheRailStatesEachRecurringRaisesEndYear:
             salary_profile_id=profile.id,
             raise_type_id=merit.id,
             percentage=Decimal("0.0250"),
-            effective_month=1,
-            effective_year=starts,
+            effective_date=date(starts, 1, 1),
             is_recurring=True,
             terminal_year=None if ends_after is None else starts + ends_after,
         ))
@@ -1983,8 +1983,7 @@ class TestTheRailStatesEachRecurringRaisesEndYear:
             salary_profile_id=profile.id,
             raise_type_id=merit.id,
             percentage=Decimal("0.0250"),
-            effective_month=1,
-            effective_year=date.today().year + 1,
+            effective_date=date(date.today().year + 1, 1, 1),
             is_recurring=False,
         ))
         db.session.commit()
@@ -2730,7 +2729,7 @@ class TestTheRailProbesARaisesEndYear:
         )
         effective = display_today().year + 1
         row = make_recurring_raise(
-            profile.id, db.session, effective_year=effective,
+            profile.id, db.session, effective_date=date(effective, 1, 1),
         )
         db.session.commit()
         return row.id, effective
@@ -2893,7 +2892,7 @@ class TestTheRailProbesARaisesEndYear:
         foreign_profile = _create_salary_profile(seed_second_user, db.session)
         foreign_effective = display_today().year + 7
         foreign = make_recurring_raise(
-            foreign_profile.id, db.session, effective_year=foreign_effective,
+            foreign_profile.id, db.session, effective_date=date(foreign_effective, 1, 1),
         )
         db.session.commit()
 
@@ -2973,7 +2972,7 @@ class TestTheRailProbesARaisesEndYear:
             .filter_by(user_id=seed_user["user"].id).one()
         )
         other = make_recurring_raise(
-            profile.id, db.session, effective_year=effective + 1,
+            profile.id, db.session, effective_date=date(effective + 1, 1, 1),
             terminal_year=effective + 4,
         )
         settings = db.session.query(UserSettings).filter_by(
@@ -3113,10 +3112,9 @@ class TestTheRailProbesARaisesEndYear:
         assert probed.headers.get(RETARGET_HEADER) == "#assumptions-region"
         assert RETARGET_HEADER not in saved.headers
 
-        def without_tokens(html):
-            return re.sub(r'name="csrf_token" value="[^"]*"', 'name="csrf_token"', html)
-
-        assert without_tokens(probed.data.decode()) == without_tokens(saved.data.decode())
+        assert without_csrf_tokens(probed.data.decode()) == without_csrf_tokens(
+            saved.data.decode(),
+        )
         assert f"it takes effect in {effective}." in probed.data.decode()
 
 
@@ -3208,8 +3206,8 @@ class TestTheRailSavesARaisesEndYear:
         )
         effective = current_payday.year - 1
         row = make_recurring_raise(
-            profile.id, db.session, effective_year=effective,
-            effective_month=effective_month, terminal_year=terminal_year,
+            profile.id, db.session, effective_date=date(effective, effective_month, 1),
+            terminal_year=terminal_year,
         )
         db.session.commit()
         return row.id, effective, profile.id
@@ -3436,7 +3434,7 @@ class TestTheRailSavesARaisesEndYear:
             seed_user, db, seed_periods_today,
         )
         other = make_recurring_raise(
-            profile_id, db.session, effective_year=effective + 1,
+            profile_id, db.session, effective_date=date(effective + 1, 1, 1),
             terminal_year=effective + 4,
         )
         db.session.commit()
@@ -3480,7 +3478,7 @@ class TestTheRailSavesARaisesEndYear:
         self._seed_saveable_raise(seed_user, db, seed_periods_today)
         foreign_profile = _create_salary_profile(seed_second_user, db.session)
         foreign = make_recurring_raise(
-            foreign_profile.id, db.session, effective_year=display_today().year + 2,
+            foreign_profile.id, db.session, effective_date=date(display_today().year + 2, 1, 1),
         )
         db.session.commit()
         foreign_id = foreign.id
@@ -3510,7 +3508,7 @@ class TestTheRailSavesARaisesEndYear:
         one_time = SalaryRaise(
             salary_profile_id=profile_id,
             raise_type_id=ref_cache.raise_type_id(RaiseTypeEnum.MERIT),
-            effective_month=6, effective_year=effective + 1,
+            effective_date=date(effective + 1, 6, 1),
             percentage=Decimal("0.0200"), is_recurring=False,
         )
         db.session.add(one_time)
@@ -3694,7 +3692,7 @@ class TestTheRailSavesARaisesEndYear:
         db.session.delete(first_raise)
         second = _create_salary_profile(seed_user, db.session, name="Second Job")
         second_id = second.id
-        row = make_recurring_raise(second_id, db.session, effective_year=effective)
+        row = make_recurring_raise(second_id, db.session, effective_date=date(effective, 1, 1))
         db.session.commit()
         raise_id = row.id
         real = retirement_mod.salary_regeneration.regenerate_salary_transactions
@@ -3747,7 +3745,7 @@ class TestTheRailSavesARaisesEndYear:
             seed_user, db, seed_periods_today,
         )
         other = make_recurring_raise(
-            profile_id, db.session, effective_year=effective + 1,
+            profile_id, db.session, effective_date=date(effective + 1, 1, 1),
         )
         db.session.commit()
         other_id = other.id

@@ -428,10 +428,10 @@ was the hardcoded `26` this table used to name.
 | HP       | `hash_password()` returns bcrypt hash                 | ✅ `test_hash_password_returns_bcrypt_hash`                  |
 | HP       | `verify_password()` returns True for matching pair    | ✅ `test_verify_password_returns_true_for_correct_password`  |
 | SP       | `verify_password()` returns False for wrong password  | ✅ `test_verify_password_returns_false_for_wrong_password`   |
-| HP       | `authenticate()` returns User on valid credentials    | ✅ `test_authenticate_returns_user_on_valid_credentials`     |
-| SP       | `authenticate()` raises AuthError on wrong email      | ✅ `test_authenticate_raises_auth_error_on_wrong_email`      |
-| SP       | `authenticate()` raises AuthError on wrong password   | ✅ `test_authenticate_raises_auth_error_on_wrong_password`   |
-| SP       | `authenticate()` raises AuthError on disabled account | ✅ `test_authenticate_raises_auth_error_on_disabled_account` |
+| HP       | Stranger sign-in returns User on valid credentials    | ✅ `test_authenticate_returns_user_on_valid_credentials`     |
+| SP       | Stranger sign-in raises AuthError on wrong email      | ✅ `test_authenticate_raises_auth_error_on_wrong_email`      |
+| SP       | Stranger sign-in raises AuthError on wrong password   | ✅ `test_authenticate_raises_auth_error_on_wrong_password`   |
+| SP       | Stranger sign-in raises AuthError on disabled account | ✅ `test_authenticate_raises_auth_error_on_disabled_account` |
 
 **Estimated new tests: ~~7~~ Done**
 

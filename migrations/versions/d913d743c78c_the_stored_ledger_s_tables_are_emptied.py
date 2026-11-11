@@ -1,7 +1,7 @@
 """The stored ledger's tables are emptied: every row of its three tables is deleted
 
 Revision ID: d913d743c78c
-Revises: 897a6663d221
+Revises: 5f2c46a35a79
 Create Date: 2026-11-09 20:06:09
 
 Plan step **balance:X-ew**'s second leaf (plan#2914, task plan#3078), ruling
@@ -97,7 +97,7 @@ from alembic import op
 
 # revision identifiers, used by Alembic.
 revision = "d913d743c78c"
-down_revision = "897a6663d221"
+down_revision = "5f2c46a35a79"
 branch_labels = None
 depends_on = None
 

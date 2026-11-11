@@ -30,11 +30,6 @@ from app.enums import (
     StatementBalanceEvidenceEnum,
     StatementSourceEnum,
 )
-from app.exceptions import (
-    StatementAccountMismatch,
-    StatementBalanceUnexplained,
-    StatementLineConflict,
-)
 from app.models.merchant import Merchant
 from app.models.statement_import import (
     AccountExternalIdentity,
@@ -44,7 +39,13 @@ from app.models.statement_import import (
 )
 from app.models.transaction import Transaction
 from app.services import account_service
-from app.services.statement_import import plan_statement, record_statement
+from app.services.statement_import import (
+    StatementAccountMismatch,
+    StatementBalanceUnexplained,
+    StatementLineConflict,
+    plan_statement,
+    record_statement,
+)
 from app.services.statement_import._balance import bank_levels
 from app.models.ref import AccountType
 from app.services.ledger_lines import linked_key

@@ -30,7 +30,8 @@ A TASK (ruling ``balance:R-BAL386``) is a piece of one step or finding, a sub-is
 of it done when its file ``plan/tasks/N`` is in git (``_state.done_tasks``):
 ``file task`` files one, on the board under a step the board holds (ruling plan#1814,
 ``_command.on_board``; ``sync`` puts on one that is not, ruling plan#1842), ``claim`` files a
-card's two finishing tasks (ruling plan#1875, ``_filing.finishing_filings``),
+card's finishing tasks (ruling plan#1875, its Release kit only while it moves money, ruling
+plan#2860; ``_filing.finishing_filings``),
 ``start`` begins it with a commit naming it (ruling plan#1872), the commit hook stamps each
 commit of the piece with it (:mod:`commit_hook`), ``task-file`` writes its file for the commit
 that finishes the piece (:mod:`_tasks`), and ``sync``, ``drop`` and ``show`` read it; ``sync``
@@ -65,7 +66,10 @@ keeps (plan#1861's item 10, :mod:`_pr`, :mod:`_filing`).  ``arc`` sets a card's 
 its arc label back to display it, ``label`` adds or removes a label a person chooses (ruling
 plan#2221), and ``priority`` and ``effort`` set or clear a card's Priority and Effort
 (plan#2491, :mod:`_arc_label`); ``file step`` and ``file finding`` file a card holding its
-Effort, the filing session's estimate (ruling plan#2492, :mod:`_filing`).
+Effort, the filing session's estimate (ruling plan#2492, :mod:`_filing`), and ``file step`` at
+the top level and ``file question`` one holding no Priority but the one the filing session
+suggests and its reason, GitHub's pending suggestion (rulings plan#3224, plan#3233), by the
+rubric in ``docs/plans/priority.md`` (``_fields.RUBRIC``).
 
 Usage, from the repository root (``plan#N`` or ``N`` names a card)::
 
@@ -74,14 +78,15 @@ Usage, from the repository root (``plan#N`` or ``N`` names a card)::
     python -m tools.quill.quill release plan#N
     python -m tools.quill.quill show plan#N | OLD-ID
     python -m tools.quill.quill file step --arc ARC --title NAME --body-file SPEC
-                                         --effort SESSIONS [--parent plan#P]
+                                         --effort SESSIONS
+                                         (--suggest PRIORITY --why SENTENCE | --parent plan#P)
     python -m tools.quill.quill file finding --arc ARC --title NAME --owner plan#S --text SENTENCE
                                             --effort SESSIONS
     python -m tools.quill.quill file ruling --arc ARC --title NAME
                                 (--owner plan#S --question-file Q | [--owner plan#S]
                                  --from-question plan#Q) --answer-file A
     python -m tools.quill.quill file question --arc ARC --title NAME --body-file QUESTION
-                                             [--owner plan#S]
+                                             --suggest PRIORITY --why SENTENCE [--owner plan#S]
     python -m tools.quill.quill file task --parent plan#N --title NAME --body-file PIECE
                                          [--before plan#T]
     python -m tools.quill.quill start plan#T
@@ -166,7 +171,7 @@ from tools.quill._export import cmd_export
 from tools.quill._fields import ON_HOLD
 from tools.quill._filing import cmd_file
 from tools.quill._github import CredentialsError, GitHubError
-from tools.quill._next import next_step
+from tools.quill._next import next_step, unranked_lines
 from tools.quill._show import cmd_show
 from tools.quill._state import (
     STALE_CLAIM,
@@ -220,7 +225,9 @@ def cmd_next(args, tracker: Tracker, root: Path) -> int:
     """The step :func:`_next.next_step` hands out, Urgent, then High, then the board's order, each
     step's unfinished prerequisites just ahead of it, and never one On hold; then how far ``sync``
     is behind (:func:`_sync.behind`), what it cannot offer that a person must act on, each step
-    waiting on one On hold, by name (ruling plan#1830, plan#1820's spec), whether a release is due
+    waiting on one On hold, by name (ruling plan#1830, plan#1820's spec), each piece of a split
+    step on the board that no Priority ranks (:func:`_next.unranked_lines`, ruling plan#3304),
+    whether a release is due
     for a version (:func:`_versions.due_line`, ruling plan#2829), and last,
     after every line no further read can cost, each claimed card, and each task under one,
     holding a comment of the developer's that no answer of quill's has followed (plan#1822,
@@ -244,6 +251,8 @@ def cmd_next(args, tracker: Tracker, root: Path) -> int:
     for wait in answer.waiting:
         print(f"WAITING: {_label(wait.step)} needs what is {ON_HOLD}: "
               f"{' and '.join(map(_label, wait.on))}")
+    for line in unranked_lines(order, cards, shipped):
+        print(f"UNRANKED: {line}")
     for claim in stale_claims(reads.claims, datetime.now(UTC)):
         print(f"STALE CLAIM: plan#{claim.card} on {holder(claim)}: no commit for more than "
               f"{STALE_CLAIM.days} days -- {release_hint(claim)} keeps its work and frees it")
@@ -263,8 +272,9 @@ def cmd_claim(args, tracker: Tracker, root: Path,
     """Claim a card (R-BAL359): a commit adding its ship marker, made on ``origin/dev`` --
     or with ``--here`` on the commit checked out, for work already started -- and pushed
     create-only as the branch ``card/N`` (:func:`_git.claim`), then checked out here as
-    that branch, with no upstream; then its two finishing tasks filed under it, last in its
-    order, unless they are filed already (ruling plan#1875): decided before the push
+    that branch, with no upstream; then its finishing tasks filed under it, last in its
+    order, unless they are filed already (ruling plan#1875; a Release kit among them while
+    it moves money, ruling plan#2860): decided before the push
     (:func:`_filing.finishing_filings`), written after it.  Refused, with nothing written,
     for what is no work to claim (work shown done that a revert unshipped says to sync
     first); for what is never offered (:func:`_state.never_offered`: On hold, ruling plan#1832,
@@ -324,8 +334,9 @@ def _claimed_again(tracker: Tracker, root: Path, card: Card, cards: dict[int, Ca
                    reads: _git.Reads) -> int:
     """``claim`` of ``card``, which one of ``reads``' claims holds: refused, with nothing
     written, but where that claim's branch is checked out here and some of the card's
-    finishing tasks are not filed (a failure cut the claim short, or the claim came before
-    ruling plan#1875), the claim is finished: they are filed
+    finishing tasks are not filed (a failure cut the claim short, the claim came before
+    ruling plan#1875, or the card was labelled moves-money after it, so its Release kit is
+    missing, ruling plan#2860), the claim is finished: they are filed
     (:func:`_filing.file_finishing`, R-BAL186)."""
     held = reads.claims[card.number]
     finishing = (_filing.finishing_filings(tracker, root, card, cards, reads)

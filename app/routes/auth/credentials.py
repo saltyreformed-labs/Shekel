@@ -5,13 +5,14 @@ The password-credential lifecycle: login (including the handoff into
 the MFA pending state that :mod:`~app.routes.auth.mfa` consumes, and the
 skip of that state on a trusted device), registration, and logout.  Each
 route registers against the shared ``auth_bp`` from
-:mod:`~app.routes.auth._bp`; the sign-in completion, the open-redirect
-guard and the form-error flattener come from
+:mod:`~app.routes.auth._bp`; the browser's standing, the sign-in
+completion, the open-redirect guard and the form-error flattener come from
 :mod:`~app.routes.auth._helpers`.
 """
 
 import logging
 from datetime import datetime, timezone
+from typing import NamedTuple
 
 from flask import (
     abort,
@@ -30,21 +31,24 @@ from marshmallow import ValidationError as MarshmallowValidationError
 from app import ref_cache
 from app.db_transaction import bind_sign_in_owner
 from app.enums import RoleEnum
-from app.extensions import db, limiter
-from app.models.trusted_device import TrustedDevice
+from app.extensions import db
 from app.models.user import MfaConfig, User
 from app.schemas.validation import LoginSchema, RegisterSchema
-from app.services import (
-    auth_service,
-    registration_service,
-    trusted_device_service,
-)
+from app.services import auth_service, registration_service
+from app.services.guess_record_service import Held
+from app.services.known_device_service import BrowserStanding
 from app.exceptions import AuthError, ConflictError, ValidationError
+from app.rate_limits import limiter
 from app.routes.auth._bp import auth_bp
 from app.routes.auth._helpers import (
+    _MFA_PENDING_AT_KEY,
+    _MFA_PENDING_NEXT_KEY,
+    _MFA_PENDING_USER_ID_KEY,
+    _browser_standing,
     _complete_sign_in,
     _first_validation_message,
     _is_safe_redirect,
+    _users_knowing_this_browser,
 )
 from app.utils.log_events import (
     AUTH,
@@ -55,7 +59,6 @@ from app.utils.log_events import (
     EVT_USER_REGISTERED,
     log_event,
 )
-from app.utils.trusted_device_cookie import device_token
 
 logger = logging.getLogger(__name__)
 
@@ -85,26 +88,82 @@ def _render_register_form():
     return render_template("auth/register.html")
 
 
-def _trusted_device_of(user: User) -> TrustedDevice | None:
-    """Return the live trusted device this browser holds for *user*, or ``None``.
+class _PasswordChecked(NamedTuple):
+    """What ``/login``'s password check decided, for the rest of the sign-in.
 
-    Read only once *user*'s password was correct (plan#2173, ruling
-    plan#2406): the browser's cookie for THAT user, judged by
-    :func:`~app.services.trusted_device_service.find_live_device`, so a
-    cookie alone, another user's cookie, and a device past its thirty days
-    or forgotten by a ``session_invalidated_at`` bump all answer ``None``.
+    Attributes:
+        user: The account the password signs in to.
+        standing: This browser's standing for it, or ``None`` for a stranger.
+        checked: For a stranger, the record of the email as its try's
+            judgment left it, which a sign-in this password finishes clears
+            if it still holds it; ``None`` for a known browser, which never
+            reads the strangers' record.
+    """
+
+    user: User
+    standing: BrowserStanding | None
+    checked: Held | None
+
+
+def _check_the_password(email: str, password: str) -> _PasswordChecked:
+    """Check the password typed at ``/login``; return the account, the browser, and what to clear.
+
+    Two flows, chosen by what this browser's cookie is worth for the account
+    typed (plan#2772):
+
+    * **A browser known to the account** checks its password under the
+      account's owner lock, taken first (ruling **R-CC121**, "Lock, then
+      check"): its wrong guesses count on its own record, and the lock keeps
+      two of them from counting once.  Whether it is known is asked first,
+      before the account is found, of every device cookie the browser sent,
+      with no lock held and no record loaded
+      (:func:`_users_knowing_this_browser`): so a made-up cookie never makes
+      a stranger take the lock, and the email typed never changes that
+      question's work (ruling plan#3130).  Under the lock the browser is read
+      again (:func:`_browser_standing`), and a browser whose record its own
+      guesses deleted between the two reads goes on as a stranger, with the
+      lock it already took still held through its check: it held a live
+      cookie for this account a moment ago, so its wait is no clue to
+      whether the email has one.
+    * **Every other try is a stranger's** and runs the same steps whatever the
+      email and the answer, with no lock held (ruling plan#3110): the
+      password check, the guess record's one statement and a commit
+      (:func:`~app.services.auth_service.check_strangers_password`).  So a
+      wrong password at a real account costs what one at an email no account
+      has does, and no try waits on another try at the same email through its
+      check.  Only a right password the lock let through takes the owner's
+      lock, on the way to signing in, and under it the account is read again
+      and its hash confirmed
+      (:func:`~app.services.auth_service.confirm_strangers_password`).
 
     Args:
-        user: The user whose password was just accepted.
+        email: The email typed, as the form normalised it.
+        password: The password typed.
 
     Returns:
-        The live :class:`~app.models.trusted_device.TrustedDevice`, or
-        ``None``.
+        The :class:`_PasswordChecked`.
+
+    Raises:
+        AuthError: The password does not sign in, for any of the reasons the
+            two flows refuse it.
     """
-    token = device_token(user.id)
-    if token is None:
-        return None
-    return trusted_device_service.find_live_device(user.id, token)
+    known_to = _users_knowing_this_browser()
+    user = auth_service.find_sign_in_user(email)
+    if user is not None and user.id in known_to:
+        bind_sign_in_owner(user.id, user.data_owner_id)
+        standing = _browser_standing(user)
+        if standing is not None:
+            return _PasswordChecked(
+                auth_service.authenticate_known_browser(
+                    user, password, device=standing.device,
+                ),
+                standing, None,
+            )
+    proof = auth_service.check_strangers_password(email, user, password)
+    bind_sign_in_owner(proof.user_id, proof.owner_id)
+    return _PasswordChecked(
+        auth_service.confirm_strangers_password(user, proof), None, proof.held,
+    )
 
 
 @auth_bp.route("/login", methods=["GET", "POST"])
@@ -138,15 +197,14 @@ def login():
         try:
             login_data = LoginSchema().load(request.form)
             email = login_data["email"]
-            password = login_data["password"]
-            # Find the account, take its owner's lock, THEN check it (ruling
-            # R-CC121, "Lock, then check"): the check reads the lockout
-            # columns and writes the failed-attempt count, and a signed-in
-            # door writes the same row under that lock.
-            user = auth_service.find_sign_in_user(email)
-            if user is not None:
-                bind_sign_in_owner(user.id, user.data_owner_id)
-            user = auth_service.authenticate(user, password)
+            # The password, a known browser's under the owner's lock and a
+            # stranger's with none held until it is right (ruling plan#3110).
+            # What this browser's cookie is worth for the account is read
+            # once, and the count and the code's skip below turn on it
+            # (plan#2772).
+            user, standing, checked = _check_the_password(
+                email, login_data["password"],
+            )
 
             # Check if MFA is enabled for this user.
             mfa_config = (
@@ -157,20 +215,22 @@ def login():
             if mfa_config:
                 # A trusted device skips only the code, never this
                 # password (plan#2173, ruling plan#2406).
-                device = _trusted_device_of(user)
-                if device is not None:
-                    response = _complete_sign_in(user, request.args.get("next"))
+                if standing is not None and standing.trusted:
+                    device_id = standing.device.id
+                    response = _complete_sign_in(
+                        user, request.args.get("next"), checked=None,
+                    )
                     log_event(
                         logger, logging.INFO, EVT_TRUSTED_DEVICE_SIGN_IN, AUTH,
                         "User logged in on a trusted device",
-                        user_id=user.id, device_id=device.id,
+                        user_id=user.id, device_id=device_id,
                     )
                     return response
                 # Store pending auth state in session (user is NOT logged in yet).
-                flask_session["_mfa_pending_user_id"] = user.id
+                flask_session[_MFA_PENDING_USER_ID_KEY] = user.id
                 # Validate the next parameter at storage time (defense in depth).
                 pending_next = request.args.get("next")
-                flask_session["_mfa_pending_next"] = (
+                flask_session[_MFA_PENDING_NEXT_KEY] = (
                     pending_next if _is_safe_redirect(pending_next) else None
                 )
                 # Stamp the pending state with a timestamp so /mfa/verify
@@ -178,15 +238,20 @@ def login():
                 # Without this, a captured session cookie remains a valid
                 # MFA pending state for the entire 31-day default Flask
                 # session lifetime -- audit finding F-002.
-                flask_session["_mfa_pending_at"] = (
+                flask_session[_MFA_PENDING_AT_KEY] = (
                     datetime.now(timezone.utc).isoformat()
                 )
                 return redirect(url_for("auth.mfa_verify"))
 
             # No MFA -- complete login immediately, through the one
             # completion every sign-in shares (it stamps the lifecycle
-            # keys and validates ``next``).
-            response = _complete_sign_in(user, request.args.get("next"))
+            # keys and validates ``next``).  A stranger's clear compares
+            # against what its try's judgment left; a known browser's clears
+            # nothing.  With a code, the code form reads the lock again and
+            # clears against that instead.
+            response = _complete_sign_in(
+                user, request.args.get("next"), checked=checked,
+            )
             log_event(logger, logging.INFO, EVT_LOGIN_SUCCESS, AUTH,
                       "User logged in", user_id=user.id, email=email)
             return response
@@ -200,11 +265,11 @@ def login():
                 "Login failed: schema validation",
                 ip=request.remote_addr,
             )
-            flash("Invalid email or password.", "danger")
+            flash(auth_service.INVALID_SIGN_IN_MESSAGE, "danger")
         except AuthError:
             log_event(logger, logging.WARNING, EVT_LOGIN_FAILED, AUTH,
                       "Login failed", email=email, ip=request.remote_addr)
-            flash("Invalid email or password.", "danger")
+            flash(auth_service.INVALID_SIGN_IN_MESSAGE, "danger")
 
     return render_template("auth/login.html")
 

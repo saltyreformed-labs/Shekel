@@ -12,8 +12,11 @@ bridge.  ``nginx_forwarded`` spells the header the way nginx writes it:
 
 import os
 import re
+import secrets
 import subprocess
 import sys
+from contextlib import contextmanager
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -22,11 +25,14 @@ from flask_login import login_user
 
 from app import CONFIG_MAP, create_app
 from app.extensions import db
+from app.models.known_device import KnownDevice
+from app.services import known_device_service
+from app.rate_limits import rate_limit_key
 from app.utils.client_address import (
     believe_forwarded_address_from,
     parse_trusted_networks,
-    rate_limit_key,
 )
+from tests._test_helpers import capture_sql_statements
 
 NGINX = "172.32.0.4"
 CLIENT = "8.8.8.8"
@@ -234,7 +240,12 @@ class TestWhatALimitCountsASignedOutVisitorAs:
 
 
 class TestWhatALimitCountsASignedInPersonAs:
-    """A signed-in request counts against its account, wherever it arrives from."""
+    """A signed-in request counts against its known browser's own budget, else its account's.
+
+    Wherever it arrives from (ruling plan#3108).  The browser's budget is its
+    record's, so only a cookie that names a live record of the signed-in
+    user buys one.
+    """
 
     def test_the_key_is_the_account_whatever_the_address(self, app, seed_user):
         """Two addresses, one signed-in account, one key: its id.
@@ -247,6 +258,83 @@ class TestWhatALimitCountsASignedInPersonAs:
             with app.test_request_context(environ_base={"REMOTE_ADDR": address}):
                 login_user(user)
                 assert rate_limit_key() == f"user:{user.id}"
+
+    def test_a_known_browser_counts_as_its_record(self, app, seed_user):
+        """A cookie naming the user's live record: that record's own key."""
+        user = seed_user["user"]
+        token, device_id = _a_known_browser(user.id)
+
+        with _signed_in_request(app, user, token):
+            assert rate_limit_key() == f"known-device:{device_id}"
+
+    def test_a_made_up_cookie_counts_as_the_account(self, app, seed_user):
+        """A cookie naming no record, beside the user's live one: the account's key."""
+        user = seed_user["user"]
+        _a_known_browser(user.id)
+
+        with _signed_in_request(app, user, secrets.token_urlsafe(32)):
+            assert rate_limit_key() == f"user:{user.id}"
+
+    def test_one_request_reads_the_record_once(self, app, seed_user):
+        """Asked by two limits, as the app's defaults are, the record is read once."""
+        user = seed_user["user"]
+        token, device_id = _a_known_browser(user.id)
+
+        with _signed_in_request(app, user, token):
+            keys, statements = capture_sql_statements(
+                lambda: (rate_limit_key(), rate_limit_key()),
+            )
+
+        assert keys == (f"known-device:{device_id}",) * 2
+        assert len([
+            statement for statement, _ in statements
+            if "known_devices" in statement
+        ]) == 1, statements
+
+    def test_a_shared_g_is_not_answered_for_another_cookie(self, app, seed_user):
+        """Two request contexts on the test's one ``g``: each answered for its own cookie.
+
+        A test's app context reuses one ``g`` for every request context it
+        pushes, so a read kept by user alone would answer the second request
+        with the first one's record.
+        """
+        user = seed_user["user"]
+        token, device_id = _a_known_browser(user.id)
+
+        with _signed_in_request(app, user, token):
+            assert rate_limit_key() == f"known-device:{device_id}"
+        with _signed_in_request(app, user, secrets.token_urlsafe(32)):
+            assert rate_limit_key() == f"user:{user.id}"
+
+
+def _a_known_browser(user_id):
+    """Record a finished sign-in for *user_id* on a new browser, committed.
+
+    Returns:
+        ``(token, device_id)``: the browser's cookie value and its record's
+        id, read from the table rather than through the key's own lookup.
+    """
+    token = known_device_service.record_sign_in(
+        user_id, None, "", now=datetime.now(timezone.utc),
+    )
+    db.session.commit()
+    device_id = db.session.query(KnownDevice).filter_by(user_id=user_id).one().id
+    return token, device_id
+
+
+@contextmanager
+def _signed_in_request(app, user, token):
+    """Push a request from *user*'s session whose browser sends *token* as its device cookie.
+
+    Yields:
+        Nothing; the request context is current inside the block.
+    """
+    with app.test_request_context(
+        environ_base={"REMOTE_ADDR": CLIENT},
+        headers={"Cookie": f"shekel_device_{user.id}={token}"},
+    ):
+        login_user(user)
+        yield
 
 
 class TestTheFactoryInstallsIt:

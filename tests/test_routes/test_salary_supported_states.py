@@ -39,6 +39,7 @@ from app.services.obligations_aggregator import todays_price
 from app.services.salary_paydays import paycheck_on
 from app.services.tax_report_service import compute_tax_report
 from app.tax_law import TaxLaw
+from tests._stub_period import stub_period_on
 from tests._test_helpers import (
     add_test_pay_stub,
     freeze_today,
@@ -81,7 +82,10 @@ def _profile_form(state_code):
 
 def _create_form(state_code):
     """The NEW profile form: the profile's controls plus its first pay entry."""
-    return {**_profile_form(state_code), "pay_amount": "3000.00", "pay_payday": "2026-01-02"}
+    return {
+        **_profile_form(state_code), "pay_amount": "3000.00", "pay_payday": "2026-01-02",
+        **stub_period_on("2026-01-02"),
+    }
 
 
 def _update_form(profile, state_code):
@@ -351,7 +355,11 @@ class TestTheEngine:
     def test_an_unlisted_state_is_refused_by_name(
         self, app, db, seed_user, seed_periods, law,
     ):  # pylint: disable=unused-argument
-        """QQ was priced $0.00; now the refusal names the profile, its state and the law's."""
+        """QQ was priced $0.00; now the refusal names the profile, its state and the law's.
+
+        The law's two states read "NC and ZZ", the one wording of a list of
+        states (ruling plan#3202; "NC, ZZ" until then).
+        """
         profile = make_salary_profile(
             seed_user, db.session, name="Day Job", pay=Decimal("3000.00"),
             state_code="QQ", pay_from=date(2026, 1, 2),
@@ -363,7 +371,7 @@ class TestTheEngine:
 
         assert str(refused.value) == (
             f'Salary profile "Day Job" (id {profile.id}) is in \'QQ\', which '
-            "Shekel's tax law does not list (it lists NC, ZZ).  Choose a state "
+            "Shekel's tax law does not list (it lists NC and ZZ).  Choose a state "
             "the law lists on the profile's edit page."
         )
 

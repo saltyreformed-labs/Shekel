@@ -769,6 +769,7 @@ class TestASettleBooksTheFreshestFigure:
 
         filing = db.session.query(FilingStatus).first()
         profile = SalaryProfile(
+            period_end_days_before_payday=6,
             user_id=seed_user["user"].id,
             scenario_id=seed_user["scenario"].id,
             filing_status_id=filing.id,

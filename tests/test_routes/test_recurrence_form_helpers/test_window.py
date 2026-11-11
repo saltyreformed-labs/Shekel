@@ -5,6 +5,7 @@ whose stop falls before its start (R7c-b).
 from datetime import date
 from decimal import Decimal
 
+import pytest
 from flask import Response, get_flashed_messages
 
 from app import ref_cache
@@ -263,6 +264,64 @@ class TestAnUpdateMayNotInvertTheWindow:
             assert rule.starts_on == date(2025, 6, 1)
             assert rule.end_date == date(2025, 12, 1)
             assert ref_cache.recurrence_unit_id(RecurrenceUnitEnum.MONTH) == rule.unit_id
+
+    @pytest.mark.usefixtures("seed_periods")
+    def test_a_stop_between_the_payday_and_the_typed_start_is_refused(self, app, seed_user):
+        """The authored pair inverts though the pair the DOOR would store does not (plan step R7e).
+
+        The case above, the other way round, and the one only
+        ``refuse_inverted_window`` can refuse.  On a paycheck cadence the
+        write door stores the payday of the paycheck HOSTING the typed date
+        (``_first_occurrence``), which for a date inside the schedule is that
+        date or up to a pay period EARLIER.  So a stop between the two
+        inverts the pair the owner stated and not the pair the door would
+        store.  An every-paycheck rule ``[2026-01-02, 2026-01-18]`` is edited
+        to start on Tuesday 2026-01-20, which the 2026-01-16 paycheck hosts,
+        and the "Ends" control is left alone.  The owner's own dates say the
+        rule stops before it starts, and the write door alone would store
+        ``[2026-01-16, 2026-01-18]``, an ordered pair it has no reason to
+        refuse.  This door refuses it, in the sentence naming the start the
+        owner TYPED, and the rule reads as it did.
+        """
+        with app.test_request_context():
+            user_id = seed_user["user"].id
+            calendar = calendar_for(user_id)
+            rule = build_transient_rule(
+                submission_from(
+                    validated_cadence(
+                        unit=RecurrenceUnitEnum.PERIOD, starts_on=date(2026, 1, 2),
+                    ),
+                    EndsOnDate(on=date(2026, 1, 18)),
+                ).authored(user_id),
+                calendar,
+            )
+            # The typed start is no payday, and the paycheck hosting it is
+            # paid before the stop: the stored pair would be ordered.
+            assert calendar.span_containing(date(2026, 1, 20)).start_date == (
+                date(2026, 1, 16)
+            )
+
+            refusal = resolve_recurrence_rule_for_update(
+                self._template_with(rule, user_id),
+                ctx=self._ctx(
+                    validated_cadence(
+                        unit=RecurrenceUnitEnum.PERIOD, starts_on=date(2026, 1, 20),
+                    ),
+                    None,
+                ),
+                pass_ctx=BalanceContext.build(user_id),
+            )
+            flashed = get_flashed_messages()
+
+            assert isinstance(refusal, Response), (
+                "an edit whose typed start falls after its stop was saved, as "
+                f"[{rule.starts_on}, {rule.end_date}]"
+            )
+            assert end_bound_before_start_message(
+                date(2026, 1, 18), date(2026, 1, 20),
+            ) in flashed, flashed
+            assert rule.starts_on == date(2026, 1, 2)
+            assert rule.end_date == date(2026, 1, 18)
 
     def test_moving_the_start_PAST_a_stored_end_is_refused(
         self, app, auth_client, seed_user, db, seed_periods,  # pylint: disable=unused-argument

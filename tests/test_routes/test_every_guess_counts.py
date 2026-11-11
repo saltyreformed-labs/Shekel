@@ -16,7 +16,7 @@ browser whose record has gone (``stranger_client``).  The known browser's side
 is ``tests/test_adversarial/test_known_browser_sign_in.py``.
 
 The ``/login`` password and its lock have their own tests in
-``tests/test_services/`` and ``tests/test_routes/test_auth.py``.
+``tests/test_services/`` and ``tests/test_routes/test_auth/test_login_and_logout.py``.
 """
 
 import logging

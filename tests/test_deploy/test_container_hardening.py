@@ -31,6 +31,8 @@ from pathlib import Path
 import pytest
 import yaml
 
+from tests.test_deploy._compose import rendered
+
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEPLOY_DIR = REPO_ROOT / "deploy"
@@ -43,8 +45,10 @@ BUNDLED_NGINX_CONF = DEPLOY_DIR / "nginx-bundled" / "nginx.conf"
 # Production services that must carry the full hardening bundle.
 # valkey (redis before ruling R-BAL298) was hardened in an earlier
 # commit; including it here pins the regression surface so the
-# existing fields cannot be removed.
-HARDENED_SERVICES = ("db", "app", "nginx", "valkey")
+# existing fields cannot be removed.  migrate, the one-shot deploy
+# (card plan#2166), runs the app's image as the app's user and carries
+# the app's hardening.
+HARDENED_SERVICES = ("db", "app", "migrate", "nginx", "valkey")
 # The services the shared-mode merge still runs: nginx is parked in
 # its disabled profile there, so the merged result holds no nginx.
 MERGED_SERVICES = tuple(name for name in HARDENED_SERVICES if name != "nginx")
@@ -253,6 +257,7 @@ class TestBaseComposeHardeningFields:
         [
             ("db", 256),
             ("app", 256),
+            ("migrate", 256),
             ("nginx", 64),
             ("valkey", 64),
         ],
@@ -363,9 +368,9 @@ class TestBaseComposeHardeningFields:
         starve the entrypoints of CAP_CHOWN/CAP_SETUID/CAP_SETGID
         and the container would fail to start.
 
-        The app service runs as the unprivileged ``shekel`` user
-        baked into the Dockerfile (USER directive), so it does not
-        need a compose-level ``user:`` override and is intentionally
+        The app and migrate services run as the unprivileged ``shekel``
+        user baked into the Dockerfile (USER directive), so they do not
+        need a compose-level ``user:`` override and are intentionally
         excluded from this parametrize.
         """
         service = parsed["services"][service_name]
@@ -618,6 +623,7 @@ class TestProdComposeOverrideInheritsHardening:
         with PROD_COMPOSE_OVERRIDE.open(encoding="utf-8") as fh:
             return yaml.safe_load(fh)
 
+    @pytest.mark.parametrize("service_name", ("app", "migrate"))
     @pytest.mark.parametrize(
         "field",
         (
@@ -630,24 +636,28 @@ class TestProdComposeOverrideInheritsHardening:
             "pids_limit",
             "logging",
             "user",
+            "deploy",
+            "healthcheck",
         ),
     )
-    def test_app_override_does_not_redeclare_hardening(
+    def test_app_image_override_does_not_redeclare_hardening(
         self,
         parsed: dict,
+        service_name: str,
         field: str,
     ) -> None:
-        """Each hardening key the base file sets on the app service
-        must NOT appear under ``services.app`` in the override.
+        """Each hardening key the base file sets on the services that
+        run the app's image must NOT appear under them in the override.
         Redeclaring would reset the value to whatever the override
         specified -- silently weakening the posture if the override
-        forgot a directive.
+        forgot a directive (or, for migrate's ``healthcheck``, bringing
+        back the image's gunicorn probe a deploy never answers).
         """
-        app = parsed["services"]["app"]
-        assert field not in app, (
+        service = parsed["services"][service_name]
+        assert field not in service, (
             f"deploy/docker-compose.prod.yml redeclares "
-            f"services.app.{field!r}; this overrides (rather than "
-            f"inherits) the base file's hardening.  Remove the "
+            f"services.{service_name}.{field!r}; this overrides (rather "
+            f"than inherits) the base file's hardening.  Remove the "
             f"redeclaration and let compose merge from base."
         )
 
@@ -682,57 +692,7 @@ class TestMergedComposeHardeningSurvivesOverride:
             pytest.skip(
                 "docker not available; cannot run docker compose config"
             )
-        env = {
-            "PATH": (
-                "/usr/local/bin:/usr/local/sbin:/usr/bin:"
-                "/usr/sbin:/bin:/sbin"
-            ),
-            "POSTGRES_PASSWORD": "test-postgres-password",
-            "SECRET_KEY": (
-                # 32-char fake key satisfies app/config.py's
-                # _MIN_SECRET_KEY_LENGTH check.
-                "a" * 32
-            ),
-            "APP_ROLE_PASSWORD": "test-app-role-password",
-            # Synthetic image digest satisfies the Commit C-36 / F-060
-            # required-form interpolation in deploy/docker-compose.prod.yml
-            # (``image: ghcr.io/saltyreformed-labs/shekel@${SHEKEL_IMAGE_DIGEST:?...}``).
-            # 64 hex chars is the canonical OCI digest shape; the
-            # value never reaches a real pull because ``compose config``
-            # only renders the merged YAML.
-            "SHEKEL_IMAGE_DIGEST": "sha256:" + "0" * 64,
-            # The Valkey password: the app's and the valkey service's
-            # VALKEY_PASSWORD interpolate
-            # ``${SHEKEL_VALKEY_PASSWORD:?...}`` from .env.  Synthetic
-            # value satisfies the required-form check; the test never
-            # actually starts the valkey container.
-            "SHEKEL_VALKEY_PASSWORD": "test-valkey-password",
-        }
-        result = subprocess.run(
-            [
-                "docker",
-                "compose",
-                "--env-file",
-                "/dev/null",
-                "-f",
-                str(BASE_COMPOSE),
-                "-f",
-                str(PROD_COMPOSE_OVERRIDE),
-                "config",
-            ],
-            capture_output=True,
-            text=True,
-            timeout=DOCKER_SUBPROCESS_TIMEOUT_S,
-            check=False,
-            cwd=str(REPO_ROOT),
-            env=env,
-        )
-        assert result.returncode == 0, (
-            f"docker compose config failed:\n"
-            f"  stdout: {result.stdout}\n"
-            f"  stderr: {result.stderr}"
-        )
-        return yaml.safe_load(result.stdout)
+        return rendered(BASE_COMPOSE, PROD_COMPOSE_OVERRIDE)
 
     @pytest.mark.parametrize("service_name", MERGED_SERVICES)
     def test_merged_service_carries_security_opt(

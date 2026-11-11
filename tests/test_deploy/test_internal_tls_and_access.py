@@ -11,9 +11,9 @@ The artifacts under audit are:
     cloudflared/config.yml                Adds metrics: 127.0.0.1:2000 +
                                           originRequest.access block.
     deploy/docker-compose.prod.yml        Adds db service TLS command +
-                                          volumes for cert/key + app
-                                          DATABASE_URL ?sslmode=require +
-                                          DB_SSLMODE + PGSSLMODE.
+                                          volumes for cert/key +
+                                          DB_SSLMODE + PGSSLMODE on the
+                                          app and migrate services.
     scripts/_entrypoint_lib.sh            Honours DB_SSLMODE in the
                                           database URL each entrypoint
                                           builds (its behaviour is
@@ -40,6 +40,7 @@ Docker daemon on every test host.
 """
 from __future__ import annotations
 
+import os
 import re
 import shutil
 import subprocess
@@ -47,6 +48,8 @@ from pathlib import Path
 
 import pytest
 import yaml
+
+from tests.test_deploy._compose import rendered
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -358,7 +361,7 @@ class TestProdComposeOverridePostgresTLS:
 
         The base ``docker-compose.yml`` has no command override on
         the db service; without this layer, the postgres process
-        starts with the image default (``ssl=off``) and DATABASE_URL's
+        starts with the image default (``ssl=off``) and every URL's
         ``?sslmode=require`` fails at every connect.
         """
         db = parsed["services"]["db"]
@@ -477,11 +480,18 @@ class TestProdComposeOverridePostgresTLS:
         )
 
 
-class TestProdComposeOverrideAppDatabaseUrl:
-    """The override repins the app service's DATABASE_URL with
-    ``?sslmode=require`` so the SQLAlchemy engine refuses any
-    connection the server cannot upgrade to TLS.  Audit finding
-    F-154 / Commit C-37.
+class TestProdComposeOverrideConnectionTLS:
+    """The override gives the two services that log in to the database
+    the TLS mode each entrypoint builds its URL with, ``DB_SSLMODE``,
+    and libpq's own default, ``PGSSLMODE``, so the SQLAlchemy engine and
+    every ``psql`` refuse any connection the server cannot upgrade to
+    TLS.  Audit finding F-154 / Commit C-37.
+
+    No service is given a database URL to override: the web
+    entrypoint builds the web login's (``DATABASE_URL_APP``) and the
+    migrate service's the owner's (``DATABASE_URL``), each from
+    ``DB_SSLMODE`` (``scripts/_entrypoint_lib.sh``, whose URL is graded
+    in ``test_entrypoints.py``).
     """
 
     @pytest.fixture(scope="class")
@@ -491,59 +501,33 @@ class TestProdComposeOverrideAppDatabaseUrl:
         with PROD_COMPOSE_OVERRIDE.open(encoding="utf-8") as fh:
             return yaml.safe_load(fh)
 
-    def test_app_database_url_requires_ssl(self, parsed: dict) -> None:
-        """The app service's DATABASE_URL must end in
-        ``?sslmode=require`` (or carry it as a non-trailing query
-        parameter).
-        """
-        env = parsed["services"]["app"].get("environment") or {}
-        database_url = env.get("DATABASE_URL")
-        assert database_url, (
-            "deploy/docker-compose.prod.yml services.app.environment "
-            "does not override DATABASE_URL (audit F-154): the base "
-            "file's plaintext URL would survive the merge"
-        )
-        # The URL must include a sslmode=require parameter.  Accept
-        # ?sslmode=require, &sslmode=require, or sslmode=require as
-        # the last param.
-        assert "sslmode=require" in database_url, (
-            f"deploy/docker-compose.prod.yml services.app.environment"
-            f".DATABASE_URL does not request sslmode=require (audit "
-            f"F-154): {database_url!r}"
-        )
-
-    def test_app_db_sslmode_env_var_set(self, parsed: dict) -> None:
-        """``DB_SSLMODE=require`` is consumed by entrypoint.sh when
-        constructing DATABASE_URL_APP (the least-privilege role's
-        URL).  Without this var, the runtime app would connect under
-        the owner role's TLS-enabled URL but the gunicorn process
-        would re-export DATABASE_URL_APP without the sslmode flag,
+    @pytest.mark.parametrize("service_name", ("app", "migrate"))
+    def test_db_sslmode_env_var_set(self, parsed: dict, service_name: str) -> None:
+        """``DB_SSLMODE=require`` is what the service's entrypoint
+        appends as ``?sslmode=`` to the URL it builds: without it the
+        web login's URL, or the owner's, would connect without TLS,
         defeating the C-37 fix at the very last hop.
         """
-        env = parsed["services"]["app"].get("environment") or {}
+        env = parsed["services"][service_name].get("environment") or {}
         assert env.get("DB_SSLMODE") == "require", (
-            f"deploy/docker-compose.prod.yml services.app.environment"
-            f".DB_SSLMODE is not 'require' (audit F-154): "
-            f"{env.get('DB_SSLMODE')!r}.  entrypoint.sh's "
-            f"DATABASE_URL_APP construction reads this env var."
+            f"deploy/docker-compose.prod.yml services.{service_name}"
+            f".environment.DB_SSLMODE is not 'require' (audit F-154): "
+            f"{env.get('DB_SSLMODE')!r}.  The entrypoint's URL "
+            f"construction reads this env var."
         )
 
-    def test_app_pgsslmode_env_var_set(self, parsed: dict) -> None:
-        """``PGSSLMODE=require`` is the standard libpq env var.
-
-        Every ``psql`` call in entrypoint.sh (init_db.sql apply,
-        role provisioning) reads this env var for its connection.
-        (The audit-trigger check left the shell for step 3's one
-        transaction at plan step balance:X-cv; it connects through
-        ``DATABASE_URL``, whose ``sslmode`` the test above pins.)
-        Setting it once on the app
-        service means we do not have to thread ``--set
-        sslmode=require`` through every psql invocation.
+    @pytest.mark.parametrize("service_name", ("app", "migrate"))
+    def test_pgsslmode_env_var_set(self, parsed: dict, service_name: str) -> None:
+        """``PGSSLMODE=require`` is the standard libpq env var: the
+        mode of every libpq connection that names none.  On migrate,
+        that is the deploy's ``psql`` (``scripts/deploy.sh``'s schemas
+        and grants), which takes no URL; on both, the entrypoint's wait
+        for the server (``pg_isready``).
         """
-        env = parsed["services"]["app"].get("environment") or {}
+        env = parsed["services"][service_name].get("environment") or {}
         assert env.get("PGSSLMODE") == "require", (
-            f"deploy/docker-compose.prod.yml services.app.environment"
-            f".PGSSLMODE is not 'require' (audit F-154): "
+            f"deploy/docker-compose.prod.yml services.{service_name}"
+            f".environment.PGSSLMODE is not 'require' (audit F-154): "
             f"{env.get('PGSSLMODE')!r}"
         )
 
@@ -575,7 +559,6 @@ class TestGenerateCertScript:
             f"{GENERATE_CERT_SCRIPT}"
         )
         # On POSIX systems os.access(X_OK) is the canonical check.
-        import os
         assert os.access(GENERATE_CERT_SCRIPT, os.X_OK), (
             "scripts/generate_pg_cert.sh is not executable; the "
             "operator would have to chmod +x it manually"
@@ -630,7 +613,6 @@ class TestGenerateCertScript:
         than a partial cert + chown failure.  We rely on the test
         environment NOT being uid 0 (standard CI / dev posture).
         """
-        import os
         if os.geteuid() == 0:
             pytest.skip(
                 "running as root; cannot exercise the non-root "
@@ -659,12 +641,16 @@ class TestGenerateCertScript:
 
     def test_validates_days_argument(self, tmp_path: Path) -> None:
         """``--days abc`` must fail with a clear error rather than
-        passing the bad value through to openssl."""
+        passing the bad value through to openssl.  The output folder
+        is the test's own, so a script that skipped the check could
+        write nothing into the checkout's deploy/postgres/."""
         result = subprocess.run(
             [
                 str(GENERATE_CERT_SCRIPT),
                 "--days",
                 "abc",
+                "--output-dir",
+                str(tmp_path),
             ],
             capture_output=True,
             text=True,
@@ -823,44 +809,7 @@ class TestMergedComposeCarriesTLS:
             pytest.skip(
                 "docker not available; cannot run docker compose config"
             )
-        env = {
-            "PATH": (
-                "/usr/local/bin:/usr/local/sbin:/usr/bin:"
-                "/usr/sbin:/bin:/sbin"
-            ),
-            "POSTGRES_PASSWORD": "test-postgres-password",
-            "SECRET_KEY": "a" * 32,
-            "APP_ROLE_PASSWORD": "test-app-role-password",
-            "SHEKEL_IMAGE_DIGEST": "sha256:" + "0" * 64,
-            # The Valkey password the app and the valkey service
-            # interpolate (``${SHEKEL_VALKEY_PASSWORD:?...}``).
-            "SHEKEL_VALKEY_PASSWORD": "test-valkey-password",
-        }
-        result = subprocess.run(
-            [
-                "docker",
-                "compose",
-                "--env-file",
-                "/dev/null",
-                "-f",
-                str(BASE_COMPOSE),
-                "-f",
-                str(PROD_COMPOSE_OVERRIDE),
-                "config",
-            ],
-            capture_output=True,
-            text=True,
-            timeout=DOCKER_SUBPROCESS_TIMEOUT_S,
-            check=False,
-            cwd=str(REPO_ROOT),
-            env=env,
-        )
-        assert result.returncode == 0, (
-            f"docker compose config failed:\n"
-            f"  stdout: {result.stdout}\n"
-            f"  stderr: {result.stderr}"
-        )
-        return yaml.safe_load(result.stdout)
+        return rendered(BASE_COMPOSE, PROD_COMPOSE_OVERRIDE)
 
     def test_merged_db_command_runs_postgres_with_ssl_on(
         self, merged: dict
@@ -914,39 +863,28 @@ class TestMergedComposeCarriesTLS:
             f"{sources!r}"
         )
 
-    def test_merged_app_database_url_carries_sslmode(
-        self, merged: dict
+    @pytest.mark.parametrize("service_name", ("app", "migrate"))
+    def test_merged_service_carries_db_sslmode_and_pgsslmode(
+        self, merged: dict, service_name: str
     ) -> None:
-        """The merged app service must have DATABASE_URL with
-        ``?sslmode=require``.  Compose maps environment dicts by
-        key, so the override replaces the base file's plaintext
-        URL on this specific key without touching other env vars.
+        """The merged app and migrate services' environments carry
+        DB_SSLMODE and PGSSLMODE, so the URL each entrypoint builds
+        and every libpq connection naming no mode require TLS, and
+        neither is given a database URL the base file could leave in
+        plaintext.
         """
-        env = merged["services"]["app"].get("environment") or {}
-        database_url = env.get("DATABASE_URL")
-        assert database_url, (
-            "merged app service has no DATABASE_URL after override"
-        )
-        assert "sslmode=require" in database_url, (
-            f"merged app DATABASE_URL does not request sslmode=require"
-            f": {database_url!r}"
-        )
-
-    def test_merged_app_carries_db_sslmode_and_pgsslmode(
-        self, merged: dict
-    ) -> None:
-        """The merged app service environment must carry
-        DB_SSLMODE and PGSSLMODE so entrypoint.sh and every
-        psql call inherit the same TLS posture.
-        """
-        env = merged["services"]["app"].get("environment") or {}
+        env = merged["services"][service_name].get("environment") or {}
         assert env.get("DB_SSLMODE") == "require", (
-            f"merged app DB_SSLMODE != 'require': "
+            f"merged {service_name} DB_SSLMODE != 'require': "
             f"{env.get('DB_SSLMODE')!r}"
         )
         assert env.get("PGSSLMODE") == "require", (
-            f"merged app PGSSLMODE != 'require': "
+            f"merged {service_name} PGSSLMODE != 'require': "
             f"{env.get('PGSSLMODE')!r}"
+        )
+        assert "DATABASE_URL" not in env, (
+            f"merged {service_name} is given a DATABASE_URL; its "
+            f"entrypoint builds the one it connects by"
         )
 
 

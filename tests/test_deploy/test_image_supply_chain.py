@@ -41,6 +41,8 @@ from pathlib import Path
 import pytest
 import yaml
 
+from tests.test_deploy._compose import CONFIG_ENV
+from tests.test_deploy._compose import config as compose_config
 from tests.test_deploy.test_uv_build_hashes import BUILD_HASHES_SETTING, PYPROJECT
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -74,9 +76,12 @@ UV_STAGE_PATTERN = re.compile(
 # Pattern matching the ``SHEKEL_IMAGE_DIGEST`` interpolation in the
 # prod override.  Required-form (``:?``) is what makes the missing-
 # digest case a hard parse failure instead of a silent fallback to
-# ``:latest``.
+# ``:latest``.  The line may carry a YAML anchor (``&name``) before
+# the reference, as the app's does so the migrate service can run the
+# same pin.
 REQUIRED_DIGEST_INTERPOLATION_PATTERN = re.compile(
-    r"image:\s+ghcr\.io/saltyreformed-labs/shekel@\$\{SHEKEL_IMAGE_DIGEST:\?[^}]+\}",
+    r"image:\s+(?:&[\w-]+\s+)?"
+    r"ghcr\.io/saltyreformed-labs/shekel@\$\{SHEKEL_IMAGE_DIGEST:\?[^}]+\}",
 )
 
 DOCKER_SUBPROCESS_TIMEOUT_S = 60
@@ -774,6 +779,19 @@ class TestProdComposeOverridePinsByDigest:
             "be used in shared-mode production (audit finding F-060)."
         )
 
+    def test_migrate_service_runs_the_app_s_pinned_image(self, parsed: dict) -> None:
+        """The override pins the migrate service, the deploy, to the app's image.
+
+        Without its own ``image:`` here, the migrate service would inherit the
+        base file's ``:latest`` and run whatever that tag names, holding the
+        database owner's password, while the app runs the pinned build.
+        """
+        services = parsed["services"]
+        assert services["migrate"].get("image") == services["app"]["image"], (
+            "deploy/docker-compose.prod.yml does not pin services.migrate.image "
+            "to the app's digest; the deploy would run the base file's ``:latest``."
+        )
+
     def test_image_uses_required_digest_interpolation(self, text: str) -> None:
         """The image override uses ``${SHEKEL_IMAGE_DIGEST:?...}``.
 
@@ -831,9 +849,10 @@ class TestBaseComposeDocumentsOverride:
         # current layout).
         app_match = re.search(r"^  app:\s*$", text, re.MULTILINE)
         assert app_match is not None, "no ``app:`` service in base compose"
-        # Find the image line after the app service marker.
+        # Find the image line after the app service marker; it may carry
+        # the YAML anchor the migrate service runs the same image by.
         image_match = re.search(
-            r"^    image:\s*ghcr\.io/saltyreformed-labs/shekel:latest\b",
+            r"^    image:\s*(?:&[\w-]+\s+)?ghcr\.io/saltyreformed-labs/shekel:latest\b",
             text[app_match.start():],
             re.MULTILINE,
         )
@@ -930,46 +949,19 @@ class TestComposeOverrideRequiresDigest:
 
     @pytest.fixture
     def base_env(self) -> dict[str, str]:
-        """Minimal env that satisfies the OTHER required interpolations
-        in the base compose (POSTGRES_PASSWORD, SECRET_KEY,
-        APP_ROLE_PASSWORD).  Each test then layers SHEKEL_IMAGE_DIGEST
-        on top (or omits it deliberately).
+        """The render's environment with every OTHER required variable
+        set (``CONFIG_ENV`` less ``SHEKEL_IMAGE_DIGEST``), so the
+        missing-digest test is refused for the digest and nothing else.
+        Each test then layers SHEKEL_IMAGE_DIGEST on top (or omits it
+        deliberately).
         """
-        return {
-            "PATH": (
-                "/usr/local/bin:/usr/local/sbin:/usr/bin:"
-                "/usr/sbin:/bin:/sbin"
-            ),
-            "POSTGRES_PASSWORD": "test-postgres-password",
-            "SECRET_KEY": "a" * 32,
-            "APP_ROLE_PASSWORD": "test-app-role-password",
-            # The Valkey password the app and the valkey service
-            # interpolate (``${SHEKEL_VALKEY_PASSWORD:?...}``).
-            "SHEKEL_VALKEY_PASSWORD": "test-valkey-password",
-        }
+        return {name: value for name, value in CONFIG_ENV.items()
+                if name != "SHEKEL_IMAGE_DIGEST"}
 
     def _run_compose_config(self, env: dict[str, str]) -> subprocess.CompletedProcess:
         """Helper: run ``docker compose config`` against the merged
         base + prod override with a synthetic env."""
-        return subprocess.run(
-            [
-                "docker",
-                "compose",
-                "--env-file",
-                "/dev/null",
-                "-f",
-                str(DOCKER_COMPOSE),
-                "-f",
-                str(PROD_COMPOSE_OVERRIDE),
-                "config",
-            ],
-            capture_output=True,
-            text=True,
-            timeout=DOCKER_SUBPROCESS_TIMEOUT_S,
-            check=False,
-            cwd=str(REPO_ROOT),
-            env=env,
-        )
+        return compose_config(DOCKER_COMPOSE, PROD_COMPOSE_OVERRIDE, env=env)
 
     def test_missing_digest_fails_compose_parse(
         self, base_env: dict[str, str],
@@ -1027,6 +1019,11 @@ class TestComposeOverrideRequiresDigest:
             f"override in deploy/docker-compose.prod.yml.\n"
             f"  stdout: {result.stdout}"
         )
+        # The deploy runs the web server's pinned build: a migrate
+        # service left on the base file's ``:latest`` would run
+        # whatever that tag names, with the owner's password.
+        services = yaml.safe_load(merged)["services"]
+        assert services["migrate"]["image"] == services["app"]["image"] == expected_image
 
 
 # ──────────────────────────────────────────────────────────────────
@@ -1042,6 +1039,9 @@ TAG_AND_DIGEST_PATTERN = re.compile(r"^[^@\s]+:[\w.-]+@sha256:[0-9a-f]{64}$")
 PINNED_ELSEWHERE = frozenset({
     ("docker-compose.yml", "app"),
     ("deploy/docker-compose.prod.yml", "app"),
+    # The migrate service runs the app's image (the anchor on the app's line).
+    ("docker-compose.yml", "migrate"),
+    ("deploy/docker-compose.prod.yml", "migrate"),
 })
 
 

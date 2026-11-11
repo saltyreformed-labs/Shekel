@@ -5,7 +5,7 @@
 #
 # Networks:
 #   frontend: Nginx (externally accessible)
-#   backend:  Nginx + App + DB (internal only)
+#   backend:  Nginx + App + Migrate + DB (internal only)
 #   Valkey joins none: the app reaches it over a socket file in the
 #   valkey-socket volume the two share.
 #
@@ -61,8 +61,18 @@ services:
     user: postgres
     environment:
       POSTGRES_USER: shekel_user
+      # The superuser's password.  It never leaves this container (ruling
+      # plan#3412): no other service is given it, and it is kept for
+      # break-glass work an operator does here.
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
       POSTGRES_DB: shekel
+      # The two logins' passwords, which deploy/postgres/provision_roles.sh
+      # (mounted below) sets, the one place a login is made or its password
+      # set (ruling plan#3413): the database owner's, shekel_owner, which the
+      # migrate service logs in with, and the web server's, shekel_app, the
+      # app's.
+      OWNER_ROLE_PASSWORD: ${OWNER_ROLE_PASSWORD:?Set OWNER_ROLE_PASSWORD in .env}
+      APP_ROLE_PASSWORD: ${APP_ROLE_PASSWORD:?Set APP_ROLE_PASSWORD in .env}
     volumes:
       # PG 18+ docker-library images (PR docker-library/postgres#1259)
       # default PGDATA to /var/lib/postgresql/$PG_MAJOR/docker and refuse
@@ -73,6 +83,20 @@ services:
       # another mount-path edit.  Mirrors the dev/test-db migration in
       # docker-compose.dev.yml.
       - shekel-prod-pgdata:/var/lib/postgresql
+      # The logins' provisioning script, as the image's first-boot hook: the
+      # image runs it once, when it makes the cluster on an empty volume, and
+      # an operator runs it by hand in this container after a password
+      # changes or on a database made before it (the script says when).  It
+      # must stay executable, as committed: the image runs an executable
+      # hook and sources any other.  create_host_path: false makes a missing
+      # host file refuse the start by name, where Docker would otherwise make
+      # an empty directory at that path and the first boot would fail on it.
+      - type: bind
+        source: ./deploy/postgres/provision_roles.sh
+        target: /docker-entrypoint-initdb.d/10-provision-roles.sh
+        read_only: true
+        bind:
+          create_host_path: false
     networks:
       - backend
     healthcheck:
@@ -286,7 +310,11 @@ services:
     # for the audit's production hardening but should still pin a
     # digest by adding a sibling ``docker-compose.override.yml``
     # (see deploy/README.md) before any non-trivial deployment.
-    image: ghcr.io/saltyreformed-labs/shekel:latest
+    #
+    # The anchor is this image's one home in this file: the migrate
+    # service below runs it too, so the deploy and the web server it
+    # prepares the database for are one build.
+    image: &shekel-image ghcr.io/saltyreformed-labs/shekel:latest
     # Always pull the latest image -- prevents stale cached :latest tags
     # from causing port mismatches or missing fixes.  When the prod
     # override pins a digest, this is a no-op for that pull because
@@ -304,6 +332,12 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      migrate:
+        # The deploy (the migrate service below) exits 0 before the web
+        # server starts, so it never serves a database the deploy has not
+        # brought to this image's schema.  A deploy that fails leaves the
+        # app's new container created and not started.
+        condition: service_completed_successfully
       valkey:
         # service_healthy ensures Valkey answers PING before Gunicorn
         # starts.  This matters because the app runs with
@@ -312,64 +346,24 @@ services:
         # ready, the very first auth attempt would return 500 instead
         # of the user's expected 200/302.
         condition: service_healthy
+    # The web server's settings and its own credentials, and no other
+    # (rulings plan#3412, plan#3413): the secret key, the web login's
+    # password, the TOTP keys and the rate-limit store's password.  No
+    # owner or superuser password, no database URL holding one, and no
+    # seed credential: those are the migrate service's and the db
+    # service's, so gunicorn, which inherits this environment, holds none
+    # of them.  The database's host, port and name are the entrypoint's
+    # defaults (scripts/_entrypoint_lib.sh), their one home.
     environment:
       FLASK_ENV: production
       SECRET_KEY: ${SECRET_KEY:?Set SECRET_KEY in .env}
-      # Owner role connection URL (full DDL rights).  Used by
-      # entrypoint.sh's deployment scripts (init_db.sql,
-      # init_database.py, seed_*.py).  See audit finding F-081 /
-      # remediation Commit C-13 for the two-role policy.
-      DATABASE_URL: postgresql://shekel_user:${POSTGRES_PASSWORD}@db:5432/shekel
-      DB_HOST: db
-      DB_PORT: "5432"
-      DB_USER: shekel_user
-      # DB_PASSWORD must match POSTGRES_PASSWORD (set on the db service
-      # above).  entrypoint.sh reads it as PGPASSWORD for psql commands
-      # that create schemas and run seed scripts.
-      DB_PASSWORD: ${POSTGRES_PASSWORD}
-      DB_NAME: shekel
-      # Least-privilege application role password.  entrypoint.sh
-      # provisions the shekel_app role under this password (via
-      # init_db.sql) and constructs DATABASE_URL_APP from it
-      # immediately before exec'ing Gunicorn so the runtime app uses
-      # DML-only credentials.  Required, no default -- a missing
-      # value fails the entrypoint shape check.  See audit finding
-      # F-081.
+      # The web login's password.  deploy/postgres/provision_roles.sh sets
+      # it in the db container (above), and entrypoint.sh builds the URL
+      # the server connects by, DATABASE_URL_APP, from it: data reads and
+      # writes only, granted by the deploy.  Required, no default -- a
+      # missing value fails the entrypoint's shape check.  See audit
+      # finding F-081.
       APP_ROLE_PASSWORD: ${APP_ROLE_PASSWORD:?Set APP_ROLE_PASSWORD in .env}
-      # Seed user credentials.  These are read by entrypoint.sh's
-      # ``python scripts/seed_user.py`` step on first start, then
-      # scrubbed from the entrypoint shell's env (and from
-      # ``os.environ`` inside the script) BEFORE Gunicorn is exec'd.
-      # The scrub means ``cat /proc/<gunicorn-pid>/environ | grep SEED_USER``
-      # returns nothing in steady state -- closing the in-process
-      # exposure called out in audit finding F-022.  See
-      # remediation Commit C-34 for the full mechanism.
-      #
-      # NOTE: ``docker exec shekel-prod-app env`` still surfaces these
-      # values because Docker stores them in ``Container.Config.Env``
-      # at container creation time, independent of any in-container
-      # ``unset``.  Migrating these to Docker secrets (Commit C-38)
-      # closes that residual channel.  In the meantime, the operator
-      # SHOULD remove the SEED_USER_* lines from .env after the first
-      # successful boot and recreate the container
-      # (``docker compose up -d --force-recreate app``) so the stored
-      # configured env no longer carries the password.
-      SEED_USER_EMAIL: ${SEED_USER_EMAIL:-}
-      SEED_USER_PASSWORD: ${SEED_USER_PASSWORD:-}
-      SEED_USER_DISPLAY_NAME: ${SEED_USER_DISPLAY_NAME:-Budget Admin}
-      # The seeded owner's pay schedule.  SEED_USER_LAST_PAYDAY is
-      # REQUIRED whenever the seed step actually runs (i.e. whenever
-      # SEED_USER_EMAIL is set and the sentinel is absent) and has no
-      # default: Shekel budgets by paycheck, and an invented payday is
-      # what plan step X-ad-a removed from /register.  ISO YYYY-MM-DD,
-      # and it must fall within one cadence of the day the container
-      # boots -- seed_user.py exits 1 with an actionable message
-      # otherwise.  The other two default to the app's biweekly premise
-      # and ~2-year horizon.  Not secrets, so they are not in the
-      # post-seed scrub set.
-      SEED_USER_LAST_PAYDAY: ${SEED_USER_LAST_PAYDAY:-}
-      SEED_USER_CADENCE_DAYS: ${SEED_USER_CADENCE_DAYS:-}
-      SEED_USER_NUM_PERIODS: ${SEED_USER_NUM_PERIODS:-}
       GUNICORN_WORKERS: ${GUNICORN_WORKERS:-2}
       TOTP_ENCRYPTION_KEY: ${TOTP_ENCRYPTION_KEY:-}
       # Retired TOTP keys for non-destructive rotation.  Empty in
@@ -389,7 +383,6 @@ services:
       REGISTRATION_ENABLED: ${REGISTRATION_ENABLED:-false}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       SLOW_REQUEST_THRESHOLD_MS: ${SLOW_REQUEST_THRESHOLD_MS:-500}
-      AUDIT_RETENTION_DAYS: ${AUDIT_RETENTION_DAYS:-365}
       # Flask-Limiter storage: the valkey service above, over its socket
       # file in the valkey-socket volume (mounted below; ruling
       # plan#2612).  The app names that address in its own code
@@ -430,15 +423,6 @@ services:
     volumes:
       # Shared volume: app copies static files here for Nginx to serve.
       - static_files:/var/www/static
-      # Writable per-app state (currently only the seed-complete
-      # sentinel touched by entrypoint.sh after a successful first
-      # run).  The volume is forward-compatible with the planned
-      # Commit C-35 ``read_only: true`` rootfs hardening: even when
-      # the rest of /home/shekel/app becomes immutable, this mount
-      # remains writable so the sentinel survives container restarts.
-      # The volume is internal -- nginx never reads it, so the path
-      # cannot be served as a static asset.  See audit finding F-022.
-      - shekel-prod-app-state:/home/shekel/app/state
       # Valkey's socket, the rate limiter's store, at the path the app's
       # code names.  Read-only: the app connects to the socket, which a
       # read-only mount allows, and can neither remove it nor put a file
@@ -481,9 +465,9 @@ services:
     # the host; the reservation tells the daemon's OOM scorer to
     # prefer evicting other containers under host pressure.  pids
     # covers the master, both workers, and short-lived subprocesses
-    # (psql/python in entrypoint.sh, healthcheck shells).  Migrated
-    # 2026-05-14 from legacy mem_limit/pids_limit to the Compose-Spec
-    # deploy.resources form.
+    # (entrypoint.sh's pg_isready and static copy, healthcheck
+    # processes).  Migrated 2026-05-14 from legacy mem_limit/pids_limit
+    # to the Compose-Spec deploy.resources form.
     deploy:
       resources:
         limits: { cpus: '2', memory: 1G, pids: 200 }
@@ -500,7 +484,6 @@ services:
     # /opt/venv -- restarting the container reverts to the
     # last-deployed image.  Writable surfaces:
     #   - /tmp:                              tmpfs (Python/cryptography temps)
-    #   - /home/shekel/app/state:            named volume (seed sentinel)
     #   - /var/www/static:                   shared volume (entrypoint copies static files)
     # (/run/valkey, Valkey's socket, is mounted read-only.)
     # PYTHONDONTWRITEBYTECODE=1 above suppresses the __pycache__
@@ -523,6 +506,106 @@ services:
       # control server initialise cleanly; the socket is ephemeral
       # per-process anyway.
       - /home/shekel/.gunicorn
+
+  # ── The Deploy (one-shot, before the app) ────────────────────────
+  # The schemas, the web login's grants, the migrations, the reference
+  # rows and the first user's seed, run from the app's image as the
+  # database owner, shekel_owner, which owns every table and is not a
+  # superuser (card plan#2166; rulings plan#3412, plan#3413).  Its
+  # entrypoint, scripts/owner_entrypoint.sh, loads the owner's password,
+  # the one credential this service holds, builds the owner's URL from it
+  # and sets the deploy's configuration (FLASK_ENV=deploy, its one home,
+  # ruling plan#3451); its command, scripts/deploy.sh, is the deploy.  It
+  # exits when the deploy does, and the app starts only when it exits 0.
+  # ``docker compose up`` runs it again on every up, so every deploy runs
+  # the migrations.  A maintenance script runs here as the owner with no
+  # deploy, its own command in place of deploy.sh:
+  #   docker compose run --rm --no-deps migrate python scripts/<name>.py
+  migrate:
+    # The app's image (its anchor, above), with no pull of its own: ``up``
+    # pulls the app's before it creates either container, and a ``run``
+    # uses the image the last ``up`` pulled, the one the app runs.
+    image: *shekel-image
+    container_name: shekel-prod-migrate
+    entrypoint: ["/home/shekel/app/scripts/owner_entrypoint.sh"]
+    command: ["/home/shekel/app/scripts/deploy.sh"]
+    # A one-shot: a deploy that fails stays failed, for the operator to
+    # read (``docker compose logs migrate``), rather than retrying.
+    restart: "no"
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      # The owner's password, which deploy/postgres/provision_roles.sh set
+      # in the db container.  Required, no default: the entrypoint refuses
+      # to start without it.
+      OWNER_ROLE_PASSWORD: ${OWNER_ROLE_PASSWORD:?Set OWNER_ROLE_PASSWORD in .env}
+      # The first user's seed, read by the deploy's last step on a deploy
+      # whose state volume holds no seed sentinel, and skipped while
+      # SEED_USER_EMAIL is empty (use /register instead).  Only this
+      # service is given them, so the web server never holds them (audit
+      # finding F-022).  Docker keeps them in this container's stored
+      # environment (``docker inspect``), so remove the SEED_USER_EMAIL and
+      # SEED_USER_PASSWORD lines from .env after the first deploy that
+      # seeds: the next ``docker compose up -d`` makes this container again
+      # without them.
+      SEED_USER_EMAIL: ${SEED_USER_EMAIL:-}
+      SEED_USER_PASSWORD: ${SEED_USER_PASSWORD:-}
+      SEED_USER_DISPLAY_NAME: ${SEED_USER_DISPLAY_NAME:-Budget Admin}
+      # The seeded owner's pay schedule.  SEED_USER_LAST_PAYDAY is
+      # REQUIRED whenever the seed step actually runs (i.e. whenever
+      # SEED_USER_EMAIL is set and the sentinel is absent) and has no
+      # default: Shekel budgets by paycheck, and an invented payday is
+      # what plan step X-ad-a removed from /register.  ISO YYYY-MM-DD,
+      # and it must fall within one cadence of the day of the deploy --
+      # seed_user.py exits 1 with an actionable message otherwise.  The
+      # other two default to the app's biweekly premise and ~2-year
+      # horizon.
+      SEED_USER_LAST_PAYDAY: ${SEED_USER_LAST_PAYDAY:-}
+      SEED_USER_CADENCE_DAYS: ${SEED_USER_CADENCE_DAYS:-}
+      SEED_USER_NUM_PERIODS: ${SEED_USER_NUM_PERIODS:-}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      # The audit log's retention, read by scripts/audit_cleanup.py, which
+      # runs here as the owner.
+      AUDIT_RETENTION_DAYS: ${AUDIT_RETENTION_DAYS:-365}
+      # As the app's, for the same read-only root: no __pycache__ writes,
+      # and each log line reaches Docker as it is written.
+      PYTHONDONTWRITEBYTECODE: "1"
+      PYTHONUNBUFFERED: "1"
+    volumes:
+      # The seed sentinel, which the deploy writes after the first seed
+      # (scripts/deploy.sh), so later deploys skip that step.  Internal:
+      # nginx never reads it.  See audit finding F-022.
+      - shekel-prod-app-state:/home/shekel/app/state
+    networks:
+      - backend
+    # The image's HEALTHCHECK asks gunicorn's /health, which a deploy never
+    # serves: a deploy longer than its start period would read unhealthy.
+    healthcheck:
+      disable: true
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    # The deploy runs its steps one after another, and a maintenance run is
+    # one script, so a small pids cap; memory as the app's, since both
+    # import the same app.
+    # No reservation: it holds none of the host between deploys.
+    deploy:
+      resources:
+        limits: { cpus: '2', memory: 1G, pids: 100 }
+    # The app's hardening, for the same image and user: no capability, no
+    # privilege gain, an immutable root.  Writable surfaces:
+    #   - /tmp:                      tmpfs
+    #   - /home/shekel/app/state:    named volume (seed sentinel)
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp
 
   # ── Nginx Reverse Proxy ──────────────────────────────────────────
   nginx:
@@ -650,11 +733,11 @@ volumes:
     external: true
   # Static files shared between app and Nginx containers.
   static_files:
-  # App-internal mutable state (writable on a read-only rootfs).
-  # Currently holds only the seed-complete sentinel.  Compose
-  # auto-creates this volume on first ``up`` -- not external because
-  # losing the sentinel only causes the next start to re-run the
-  # idempotent seed script.  Audit finding F-022 / Commit C-34.
+  # The deploy's mutable state (writable on a read-only rootfs), mounted
+  # by the migrate service alone.  Currently holds only the seed-complete
+  # sentinel.  Compose auto-creates this volume on first ``up`` -- not
+  # external because losing the sentinel only causes the next deploy to
+  # re-run the idempotent seed script.  Audit finding F-022 / Commit C-34.
   shekel-prod-app-state:
   # Valkey's socket file, the one way to reach it (ruling plan#2612):
   # mounted by the valkey service, which makes the socket, and the app

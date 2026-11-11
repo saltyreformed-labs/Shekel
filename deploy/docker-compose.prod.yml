@@ -35,6 +35,11 @@
 #    that actually carries the proxy hop in shared mode.
 #    See the gunicorn.conf.py block-comment for the full rationale.
 #
+# 4. Every password comes from a file under secrets/ (DOCKER SECRETS
+#    below), each mounted only into the services that use it, and the
+#    migrate service, the deploy, runs the app's pinned image (IMAGE
+#    DIGEST PINNING below).
+#
 # OPERATOR PRE-FLIGHT (one-time, when first switching to shared mode)
 # -------------------------------------------------------------------
 # 1. Create the shekel-frontend network on the host with a pinned subnet:
@@ -108,11 +113,12 @@
 # ``cap_drop``, ``read_only``, ``tmpfs``, ``mem_limit``,
 # ``pids_limit``, ``logging``, or ``user`` settings from the base
 # docker-compose.yml.  Compose merges per-key by default for those
-# scalars; the only keys this file overrides are ``image`` (pin to
-# digest), ``environment.*`` (FORWARDED_ALLOW_IPS), ``networks``
-# (replaces the list), and ``profiles`` (adds disabled to nginx).
-# Every hardening field on the app and db services flows through
-# to the shared-mode runtime unchanged.  Verified by ``docker
+# scalars; the only keys this file sets are ``image`` (pin to
+# digest), ``environment.*``, ``secrets``, ``networks`` (replaces
+# the app's list), ``profiles`` (adds disabled to nginx), and the
+# db's ``command`` and ``volumes``.  Every hardening field on the
+# app, migrate and db services flows through to the shared-mode
+# runtime unchanged.  Verified by ``docker
 # compose -f docker-compose.yml -f deploy/docker-compose.prod.yml
 # config`` and by the test suite under
 # tests/test_deploy/test_container_hardening.py.
@@ -122,7 +128,8 @@
 # Shared-mode production replaces the base file's ``:latest`` tag
 # with an immutable ``@sha256:<digest>`` reference, sourced from
 # the host ``.env`` via the ``SHEKEL_IMAGE_DIGEST`` interpolation
-# below.  The ``:?`` syntax FAILS the compose parse loudly if the
+# below, on the app and on the migrate service, which runs the
+# app's image (the anchor on the app's ``image:`` line).  The ``:?`` syntax FAILS the compose parse loudly if the
 # variable is missing or empty: that is intentional -- a missing
 # digest in production would silently fall back to whatever
 # ``:latest`` resolved to at the time of pull, defeating both the
@@ -161,12 +168,13 @@
 #   2. ``services.db.volumes`` adds two read-only bind mounts that
 #      expose ``deploy/postgres/server.crt`` and ``server.key`` at
 #      the paths referenced above.
-#   3. ``services.app.environment`` overrides ``DATABASE_URL`` with
-#      ``?sslmode=require`` so the SQLAlchemy engine refuses any
-#      cleartext connection.  ``DB_SSLMODE=require`` and
-#      ``PGSSLMODE=require`` make the entrypoint's
-#      ``DATABASE_URL_APP`` construction and every ``psql`` call
-#      pick up the same posture.
+#   3. ``DB_SSLMODE=require`` on the app and migrate services puts
+#      ``?sslmode=require`` on the URL each entrypoint builds
+#      (scripts/_entrypoint_lib.sh): the web login's DATABASE_URL_APP
+#      and the owner's DATABASE_URL, so the SQLAlchemy engine refuses
+#      any cleartext connection.  ``PGSSLMODE=require`` gives the same
+#      mode to every libpq connection that names none: the deploy's
+#      ``psql`` (scripts/deploy.sh) and each entrypoint's wait.
 #
 # Operator pre-flight (one-time, before the first
 # ``docker compose up`` in shared mode):
@@ -195,16 +203,23 @@
 #
 # DOCKER SECRETS (Commit C-38 / audit findings F-148, F-109)
 # ----------------------------------------------------------
-# Shared-mode production reads the four production-only secrets
-# (``SECRET_KEY``, ``POSTGRES_PASSWORD``, ``APP_ROLE_PASSWORD``,
-# ``TOTP_ENCRYPTION_KEY``) from operator-managed files under
-# ``/opt/docker/shekel/secrets/`` instead of the host ``.env`` file.
+# Shared-mode production reads its secrets from operator-managed
+# files under ``/opt/docker/shekel/secrets/`` instead of the host
+# ``.env`` file, and mounts each into the services that use it and no
+# other (rulings plan#3412, plan#3413):
+#
+#   secret_key           app
+#   totp_encryption_key  app
+#   valkey_password      app, valkey
+#   app_role_password    app (logs in with it), db (sets it)
+#   owner_role_password  migrate (logs in with it), db (sets it)
+#   postgres_password    db alone: the superuser's never leaves it
+#
 # The audit's threat model: ``Container.Config.Env`` (visible via
 # ``docker inspect``) and the on-disk ``.env`` file are the two
 # channels through which a secret leaks beyond the running container;
-# Docker secrets close both -- the file at rest stays under whatever
-# permission the operator set on the host (mode 0600 root-only is
-# the recommended posture), and ``docker inspect`` shows only the
+# Docker secrets close both -- the file at rest stays under the 0700
+# secrets/ directory, and ``docker inspect`` shows at most the
 # placeholder the operator left in ``.env`` to satisfy the base
 # file's ``${VAR:?...}`` interpolation.
 #
@@ -213,25 +228,23 @@
 #     secret via ``${VAR:?...}`` interpolation -- compose validates
 #     at config-time that the variable is set.  Operators using
 #     docker secrets put a non-empty PLACEHOLDER (any string) in
-#     ``.env`` so the interpolation succeeds; the placeholder is
-#     overwritten at runtime by the entrypoint (or, for the db
-#     service, by the postgres image's ``POSTGRES_PASSWORD_FILE``
-#     handling).
+#     ``.env`` so the interpolation succeeds.  The app's entrypoint
+#     overwrites its placeholders from the files; this file blanks
+#     the db's and the migrate service's, so neither container holds
+#     one.
 #   * The db service uses the postgres image's native
 #     ``POSTGRES_PASSWORD_FILE`` env var -- the image's
 #     ``docker-entrypoint.sh`` reads the file and exports the value.
 #     We must override the base file's ``POSTGRES_PASSWORD`` to an
 #     empty string so the postgres image's "both set" exclusivity
 #     check passes (it errors when both ``POSTGRES_PASSWORD`` and
-#     ``POSTGRES_PASSWORD_FILE`` are non-empty).
-#   * The app service uses ``entrypoint.sh::_load_secret`` to read
-#     each ``/run/secrets/<name>`` file and export the value into
-#     env BEFORE the existing shape checks (SECRET_KEY length,
-#     APP_ROLE_PASSWORD length).  When ``POSTGRES_PASSWORD`` is
-#     loaded from a file, the entrypoint also rebuilds
-#     ``DATABASE_URL`` and ``DB_PASSWORD`` from primitives so the
-#     deploy scripts (init_database.py, seed_*.py) connect under
-#     the real password rather than the .env placeholder.
+#     ``POSTGRES_PASSWORD_FILE`` are non-empty).  Its provisioning
+#     script, deploy/postgres/provision_roles.sh, reads the two
+#     logins' passwords from their files.
+#   * The app and migrate services' entrypoints read each
+#     ``/run/secrets/<name>`` file with ``_load_secret``
+#     (scripts/_entrypoint_lib.sh) and export the value into env
+#     before their checks and the URL each builds.
 #
 # Operator pre-flight (one-time, when first migrating to docker
 # secrets -- see ``docs/runbook_secrets.md`` "Migrating to Docker
@@ -245,27 +258,31 @@
 #
 #     # Write each secret value.  ``printf`` (no trailing newline) is
 #     # preferred so the file content matches the exact secret bytes;
-#     # the entrypoint loader strips a trailing newline if ``echo``
-#     # was used by mistake but printf-style is the documented form.
+#     # the loaders strip a trailing newline if ``echo`` was used by
+#     # mistake but printf-style is the documented form.
 #     printf '%s' '<SECRET_KEY-value>'        > /opt/docker/shekel/secrets/secret_key
 #     printf '%s' '<POSTGRES_PASSWORD-value>' > /opt/docker/shekel/secrets/postgres_password
 #     printf '%s' '<APP_ROLE_PASSWORD-value>' > /opt/docker/shekel/secrets/app_role_password
+#     printf '%s' '<OWNER_ROLE_PASSWORD-value>' > /opt/docker/shekel/secrets/owner_role_password
 #     printf '%s' '<TOTP_ENCRYPTION_KEY-value>' > /opt/docker/shekel/secrets/totp_encryption_key
 #
 #     # File modes: compose v2 (non-Swarm) IGNORES the uid:/gid:/mode:
-#     # fields on the secret references below -- the container sees the
-#     # HOST file's ownership and mode (see .claude/rules/deploy.md).
-#     # The app-consumed secrets are read by uid 1000 (the ``shekel``
-#     # user), which matches the operating user's uid, so 0600 works:
+#     # fields on a secret reference -- the container sees the HOST
+#     # file's ownership and mode (see .claude/rules/deploy.md).  The
+#     # secrets the app image alone reads are read by uid 1000 (the
+#     # ``shekel`` user), which matches the operating user's uid, so
+#     # 0600 works:
 #     chmod 0600 /opt/docker/shekel/secrets/secret_key \
-#                /opt/docker/shekel/secrets/app_role_password \
 #                /opt/docker/shekel/secrets/totp_encryption_key
-#     # postgres_password is read by the DB container as uid 70
-#     # (postgres), which cannot read a josh-owned 0600 file.  Either
-#     # chown it to 70 with mode 0600, or leave it 0644 and rely on
-#     # the 0700 directory for containment -- the deployed posture is
-#     # the latter:
-#     chmod 0644 /opt/docker/shekel/secrets/postgres_password
+#     # The three the DB container reads, as uid 70 (postgres), which
+#     # cannot read a josh-owned 0600 file.  Either chown each to 70
+#     # with mode 0600, which would shut out the app image's uid 1000
+#     # from the two it also reads, or leave them 0644 and rely on the
+#     # 0700 directory for containment -- the deployed posture is the
+#     # latter:
+#     chmod 0644 /opt/docker/shekel/secrets/postgres_password \
+#                /opt/docker/shekel/secrets/app_role_password \
+#                /opt/docker/shekel/secrets/owner_role_password
 #
 #     # Replace the real values in /opt/docker/shekel/.env with
 #     # placeholder strings so the base file's ${VAR:?...}
@@ -275,6 +292,7 @@
 #     SECRET_KEY=replaced_by_docker_secret
 #     POSTGRES_PASSWORD=replaced_by_docker_secret
 #     APP_ROLE_PASSWORD=replaced_by_docker_secret
+#     OWNER_ROLE_PASSWORD=replaced_by_docker_secret
 #
 # TOTP_ENCRYPTION_KEY_OLD note: this variable is empty in steady
 # state (populated only during a documented rotation, see
@@ -347,20 +365,27 @@ services:
       # postgres image sees it.
       POSTGRES_PASSWORD: ""
       POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
-    # Docker secrets default to root:root mode 0400 inside the
-    # container.  With ``user: postgres`` (uid 70 in alpine) on the
-    # base service, the postgres entrypoint cannot read the secret
-    # file -- the docker-entrypoint.sh's ``< file_env`` redirection
-    # fails with "Permission denied" and the container exits before
-    # the cluster boots.  ``uid: "70"`` makes Compose chown the
-    # secret to postgres at mount time so the entrypoint can read it.
-    # ``mode: "0400"`` preserves the strict permission posture.
+      # The two logins' passwords: deploy/postgres/provision_roles.sh
+      # reads each from its file below, and blanking the variables keeps
+      # .env's placeholder out of this container's stored environment, so
+      # a missing file is refused as empty rather than set as a password.
+      OWNER_ROLE_PASSWORD: ""
+      APP_ROLE_PASSWORD: ""
+    # The superuser's password, for the image, and the two logins'
+    # passwords, for the provisioning script: the only service given
+    # postgres_password (ruling plan#3412).  Compose ignores a file
+    # secret's uid, gid and mode outside Swarm (it says so on every
+    # ``config``), so the container sees each host file's own owner and
+    # mode, and the postgres user (uid 70) reads these three only because
+    # the host files are 0644 inside the 0700 secrets/ directory (the
+    # file-level DOCKER SECRETS block).
     secrets:
       - source: postgres_password
         target: postgres_password
-        uid: "70"
-        gid: "70"
-        mode: 0400
+      - source: owner_role_password
+        target: owner_role_password
+      - source: app_role_password
+        target: app_role_password
     volumes:
       # Shared-mode TLS material.  Mounts the operator-generated
       # cert and key read-only into the canonical Postgres cert
@@ -410,7 +435,10 @@ services:
     # clear remediation message, matching the rest of the compose
     # stack's required-secret handling (SECRET_KEY, POSTGRES_PASSWORD,
     # APP_ROLE_PASSWORD).  Audit findings F-060, F-155 / Commit C-36.
-    image: ghcr.io/saltyreformed-labs/shekel@${SHEKEL_IMAGE_DIGEST:?Set SHEKEL_IMAGE_DIGEST=sha256:... in /opt/docker/shekel/.env to pin the production image (audit finding F-060). See deploy/README.md "Image digest pinning" for the procedure.}
+    # The anchor is the pin's one home in this file: the migrate service
+    # below runs the same digest, so the deploy and the web server are one
+    # build.
+    image: &shekel-image ghcr.io/saltyreformed-labs/shekel@${SHEKEL_IMAGE_DIGEST:?Set SHEKEL_IMAGE_DIGEST=sha256:... in /opt/docker/shekel/.env to pin the production image (audit finding F-060). See deploy/README.md "Image digest pinning" for the procedure.}
     environment:
       # Pin the app's civil timezone (parity audit 2026-06-12, finding
       # M01 in shekel-audits/dev-prod-parity/findings.md).  The image
@@ -422,8 +450,10 @@ services:
       # process timezone IS the app timezone.  tzdata ships in
       # python:3.14-slim (verified: /usr/share/zoneinfo/America/New_York
       # exists in the running image).  docker-compose.dev.yml pins the
-      # same value so dev and prod compute identical calendar dates.
-      TZ: America/New_York
+      # same value so dev and prod compute identical calendar dates.  The
+      # anchor is its one home in this file: the deploy runs the app's
+      # code (the migrations, the seed) and computes the same dates.
+      TZ: &civil-timezone America/New_York
       # Shared mode: the in-stack ``backend`` bridge no longer carries
       # the reverse-proxy hop -- the shared /opt/docker/nginx talks to
       # the app over ``shekel-frontend``.  Override the bundled-mode
@@ -432,79 +462,80 @@ services:
       # cloudflared sidecar.  Audit finding F-015, Commit C-33.
       FORWARDED_ALLOW_IPS: 172.32.0.0/24
       # ── Postgres TLS (Commit C-37 / F-154) ────────────────────
-      # Override the base file's plaintext DATABASE_URL with an
-      # explicit ``?sslmode=require``.  SQLAlchemy / psycopg (libpq) honour
-      # the URL parameter and refuse any connection that the
-      # postgres server cannot upgrade to TLS.  ``sslmode=require``
-      # is the strict-but-not-cert-verifying mode appropriate for
-      # the self-signed cert generated by
-      # ``scripts/generate_pg_cert.sh``: the channel is encrypted
-      # but libpq does not validate the cert chain (which would
-      # require shipping the CA pem to every client and is
-      # operationally costly for a single-host deployment).
-      DATABASE_URL: postgresql://shekel_user:${POSTGRES_PASSWORD}@db:5432/shekel?sslmode=require
-      # entrypoint.sh constructs DATABASE_URL_APP just before
-      # exec'ing Gunicorn.  Setting DB_SSLMODE here makes the
-      # constructed URL include ``?sslmode=require`` so the
-      # least-privilege ``shekel_app`` role connects under the
-      # same TLS posture as the owner role above.  See
-      # entrypoint.sh §9 for the construction.
-      DB_SSLMODE: require
+      # entrypoint.sh builds the URL the server connects by,
+      # DATABASE_URL_APP, with ``?sslmode=`` and this value
+      # (scripts/_entrypoint_lib.sh), so SQLAlchemy / psycopg (libpq)
+      # refuse any connection the postgres server cannot upgrade to TLS.
+      # ``require`` is the strict-but-not-cert-verifying mode appropriate
+      # for the self-signed cert generated by
+      # ``scripts/generate_pg_cert.sh``: the channel is encrypted but
+      # libpq does not validate the cert chain (which would require
+      # shipping the CA pem to every client and is operationally costly
+      # for a single-host deployment).  The anchor is the mode's one home
+      # in this file: the migrate service below connects under it too.
+      DB_SSLMODE: &tls-mode require
       # Blanked: the app reads the store's password from the
       # valkey_password file below, as the valkey service does (see its
       # block above), so its stored environment holds none.
       VALKEY_PASSWORD: ""
-      # Standard libpq env var.  Every psql call in entrypoint.sh
-      # (init_db.sql apply, role provisioning, audit-trigger
-      # health check) reads PGSSLMODE for its connection.  Setting
-      # it here once means we do not have to thread ``--set
-      # sslmode=require`` through every psql invocation.
-      PGSSLMODE: require
+      # Standard libpq env var: the mode of every libpq connection this
+      # container makes without naming one, as the entrypoint's wait
+      # (pg_isready) and an operator's psql do.
+      PGSSLMODE: *tls-mode
     secrets:
-      # Docker secrets exposed to the app container as files under
-      # /run/secrets/<name>.  ``entrypoint.sh::_load_secret`` reads
-      # each file (if present) at container start and exports the
-      # value into env BEFORE the existing SECRET_KEY /
-      # APP_ROLE_PASSWORD shape checks.  See the file-level "DOCKER
-      # SECRETS" comment block above for the threat-model rationale
-      # and the operator pre-flight commands.  Audit finding F-148 /
-      # Commit C-38.
+      # The web server's own secrets, and no other (rulings plan#3412,
+      # plan#3413): no superuser or owner password.  Exposed as files
+      # under /run/secrets/<name>; ``_load_secret``
+      # (scripts/_entrypoint_lib.sh) reads each file at container start
+      # and exports the value into env BEFORE entrypoint.sh's SECRET_KEY
+      # / APP_ROLE_PASSWORD shape checks.  See the file-level "DOCKER
+      # SECRETS" comment block above for the threat-model rationale and
+      # the operator pre-flight commands.  Audit finding F-148 / Commit
+      # C-38.
       #
-      # ``uid: "1000"`` is the ``shekel`` user the Dockerfile creates
-      # via ``useradd --create-home --uid 1000 --gid 1000 shekel`` and
-      # the runtime user the Dockerfile's trailing ``USER 1000:1000``
-      # directive switches to.  Without it, the secret file is owned
-      # root:root mode 0400 inside the container and the entrypoint
-      # cannot read it.  Mirror the postgres uid override above; both
-      # services use the same pattern.
+      # Compose ignores a file secret's uid, gid and mode outside Swarm,
+      # so the container sees each host file's own owner and mode: the
+      # app's user, uid 1000 (the Dockerfile's ``USER 1000:1000``), reads
+      # them as the host files' owner, the operating user, uid 1000 too.
       - source: secret_key
         target: secret_key
-        uid: "1000"
-        gid: "1000"
-        mode: 0400
-      - source: postgres_password
-        target: postgres_password
-        uid: "1000"
-        gid: "1000"
-        mode: 0400
       - source: app_role_password
         target: app_role_password
-        uid: "1000"
-        gid: "1000"
-        mode: 0400
       - source: totp_encryption_key
         target: totp_encryption_key
-        uid: "1000"
-        gid: "1000"
-        mode: 0400
       - source: valkey_password
         target: valkey_password
-        uid: "1000"
-        gid: "1000"
-        mode: 0400
     networks:
       - backend
       - shekel-frontend
+
+  # ── The deploy, as production runs it ───────────────────────────
+  # The app's pinned image, under the app's timezone and TLS mode (their
+  # anchors, above), with the owner's password from its file and no
+  # other secret (rulings plan#3412, plan#3413).  It stays on the base
+  # file's backend network alone: it reaches the database and nothing
+  # the shared nginx or the tunnel can reach.  Everything else, the
+  # hardening included, is the base file's.
+  migrate:
+    image: *shekel-image
+    environment:
+      TZ: *civil-timezone
+      # The owner's URL takes ``?sslmode=`` from DB_SSLMODE
+      # (scripts/_entrypoint_lib.sh), and the deploy's psql takes its
+      # mode from PGSSLMODE (scripts/deploy.sh).
+      DB_SSLMODE: *tls-mode
+      PGSSLMODE: *tls-mode
+      # Blanked: the entrypoint reads the owner's password from the
+      # owner_role_password file below, so this container's stored
+      # environment holds no placeholder, and a missing file is refused
+      # as unset rather than tried as a password.
+      OWNER_ROLE_PASSWORD: ""
+    secrets:
+      # Read by the app image's user, uid 1000, as the host file's owner;
+      # the db's user, uid 70, reads it through the file's 0644 mode (the
+      # file-level DOCKER SECRETS block).
+      - source: owner_role_password
+        target: owner_role_password
 
   nginx:
     profiles: ["disabled"]
@@ -518,10 +549,12 @@ services:
 # ``file:`` semantics: compose REQUIRES each referenced file to
 # exist at ``docker compose up`` time -- a missing file fails the
 # parse with ``error decoding 'secrets': no such file or directory``.
-# The entrypoint.sh helper handles the "file present but empty"
-# case (rejects with a clear error), the "file missing" case
-# (no-op, falls back to env), and the "file readable" case (loads
-# and exports).
+# The readers, the entrypoints' ``_load_secret``
+# (scripts/_entrypoint_lib.sh) and provision_roles.sh's
+# ``_password``, handle the "file present but empty" case (reject
+# with a clear error), the "file missing" case (fall back to env,
+# which this file blanks wherever it mounts the file), and the "file
+# readable" case (load and export).
 secrets:
   secret_key:
     file: /opt/docker/shekel/secrets/secret_key
@@ -529,6 +562,10 @@ secrets:
     file: /opt/docker/shekel/secrets/postgres_password
   app_role_password:
     file: /opt/docker/shekel/secrets/app_role_password
+  # The database owner's password: provision_roles.sh sets it in the db
+  # service, and the migrate service logs in with it.
+  owner_role_password:
+    file: /opt/docker/shekel/secrets/owner_role_password
   totp_encryption_key:
     file: /opt/docker/shekel/secrets/totp_encryption_key
   # Valkey's password, which start.sh hashes into the ACL and the app

@@ -23,6 +23,7 @@ from pathlib import Path
 import pytest
 
 from tests.test_deploy._compose import BASE_COMPOSE, NGINX_TEST_IMAGE
+from tests.test_deploy._compose import rendered_text
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEPLOY_DIR = REPO_ROOT / "deploy"
@@ -246,58 +247,9 @@ class TestDeployComposeParses:
         if not _docker_available():
             pytest.skip("docker not available; cannot run docker compose config")
 
-        # The base docker-compose.yml uses ${VAR:?error message} for
-        # required secrets.  ``compose config`` performs interpolation
-        # before validation, so unset values fail the parse even though
-        # the test only checks structure.  Provide synthetic non-empty
-        # values for the required variables.  These never reach a
-        # running container -- ``config`` only renders the merged YAML.
-        # ``--env-file /dev/null`` ensures the developer's real .env
-        # at the repo root is NOT read into this subprocess (which
-        # would leak production-shaped values into pytest output if
-        # ``compose config`` ever started echoing them).
-        env = {
-            "PATH": "/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin",
-            "POSTGRES_PASSWORD": "test-postgres-password",
-            "SECRET_KEY": "test-secret-key",
-            "APP_ROLE_PASSWORD": "test-app-role-password",
-            # Synthetic image digest satisfies the Commit C-36 / F-060
-            # required-form interpolation in deploy/docker-compose.prod.yml
-            # (``image: ghcr.io/saltyreformed-labs/shekel@${SHEKEL_IMAGE_DIGEST:?...}``).
-            # 64 hex chars is the canonical OCI digest shape; the
-            # value never reaches a real pull because ``compose config``
-            # only renders the merged YAML.
-            "SHEKEL_IMAGE_DIGEST": "sha256:" + "0" * 64,
-            # The Valkey password the app and the valkey service
-            # interpolate (``${SHEKEL_VALKEY_PASSWORD:?...}``).
-            "SHEKEL_VALKEY_PASSWORD": "test-valkey-password",
-        }
-        result = subprocess.run(
-            [
-                "docker",
-                "compose",
-                "--env-file",
-                "/dev/null",
-                "-f",
-                str(BASE_COMPOSE),
-                "-f",
-                str(PROD_COMPOSE_OVERRIDE),
-                "config",
-            ],
-            capture_output=True,
-            text=True,
-            timeout=DOCKER_SUBPROCESS_TIMEOUT_S,
-            check=False,
-            cwd=str(REPO_ROOT),
-            env=env,
-        )
-        assert result.returncode == 0, (
-            "docker compose config failed for the merged base + "
-            "shared-mode override:\n"
-            f"  stdout: {result.stdout}\n"
-            f"  stderr: {result.stderr}"
-        )
-        merged = result.stdout
+        # Placeholders for the required variables, and no .env:
+        # tests/test_deploy/_compose.py's CONFIG_ENV says why each.
+        merged = rendered_text(BASE_COMPOSE, PROD_COMPOSE_OVERRIDE)
         # Behavioural assertions on the merged result -- catches a
         # silently-malformed override that parses but does not have
         # the intended effect.
@@ -333,42 +285,18 @@ class TestDeployComposeParses:
             "that deploy/docker-compose.prod.yml parks the nginx "
             "service in the 'disabled' profile"
         )
-        # Sanity check: app and db survived the merge (we did not
-        # accidentally filter them).
+        # Sanity check: app, migrate and db survived the merge (we did
+        # not accidentally filter them).
         assert "\n  app:" in merged
+        assert "\n  migrate:" in merged
         assert "\n  db:" in merged
 
         # Re-run with the disabled profile activated to confirm the
         # nginx service definition is otherwise still attached to the
         # override (catches the regression where someone deletes the
         # nginx block entirely instead of disabling its profile).
-        result_with_profile = subprocess.run(
-            [
-                "docker",
-                "compose",
-                "--env-file",
-                "/dev/null",
-                "--profile",
-                "disabled",
-                "-f",
-                str(BASE_COMPOSE),
-                "-f",
-                str(PROD_COMPOSE_OVERRIDE),
-                "config",
-            ],
-            capture_output=True,
-            text=True,
-            timeout=DOCKER_SUBPROCESS_TIMEOUT_S,
-            check=False,
-            cwd=str(REPO_ROOT),
-            env=env,
-        )
-        assert result_with_profile.returncode == 0, (
-            "docker compose config (with --profile disabled) failed:\n"
-            f"  stdout: {result_with_profile.stdout}\n"
-            f"  stderr: {result_with_profile.stderr}"
-        )
-        with_profile = result_with_profile.stdout
+        with_profile = rendered_text(
+            BASE_COMPOSE, PROD_COMPOSE_OVERRIDE, profiles=("disabled",))
         assert "\n  nginx:" in with_profile, (
             "nginx service is missing entirely from the merged compose "
             "even with --profile disabled -- the override should disable "

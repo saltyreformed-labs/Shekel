@@ -34,6 +34,7 @@ import pytest
 import yaml
 
 from app import config as config_module
+from tests.test_deploy._compose import rendered_text
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -93,12 +94,13 @@ def _service_secret_names(compose: dict[str, object], service: str) -> set[str]:
       uid: ..., gid: ..., mode: ...}, ...]`` (list of mappings).
 
     Commit 4e551f5 moved the prod override to the long form to add
-    the ``uid``/``gid`` override the non-root container user needs in
-    order to read the root-owned ``/run/secrets/<name>`` file (without
-    it the entrypoint cannot open the secret and the container exits
-    before boot).  The secret is still mounted; only the YAML spelling
-    changed.  Asserting on this parsed name set keeps the deploy tests
-    coupled to behaviour rather than to one of two valid spellings
+    ``uid``/``gid``/``mode`` fields, which compose ignores for a file
+    secret outside Swarm (it warns so on every ``config``, measured
+    2026-11-11 on compose 5.7.0), so card plan#2166 removed them: the
+    container sees the host file's own owner and mode.  The secret is
+    mounted either way; only the YAML spelling differs.  Asserting on
+    this parsed name set keeps the deploy tests coupled to behaviour
+    rather than to one of two valid spellings
     (testing-standards.md: test behaviour, not implementation).
 
     Args:
@@ -1002,6 +1004,7 @@ class TestProdComposeSecretsBlock:
             "secret_key",
             "postgres_password",
             "app_role_password",
+            "owner_role_password",
             "totp_encryption_key",
             "valkey_password",
         ],
@@ -1028,7 +1031,6 @@ class TestProdComposeSecretsBlock:
         "secret_name",
         [
             "secret_key",
-            "postgres_password",
             "app_role_password",
             "totp_encryption_key",
             "valkey_password",
@@ -1037,7 +1039,11 @@ class TestProdComposeSecretsBlock:
     def test_app_service_grants_access_to_secret(
         self, prod_compose: dict[str, object], secret_name: str,
     ) -> None:
-        """The app service's ``secrets:`` list grants access to every required secret."""
+        """The app service's ``secrets:`` list grants access to each of its own secrets.
+
+        Its own and no other: which secrets each service may NOT be given is
+        ``test_compose_layout.py``'s (rulings plan#3412, plan#3413).
+        """
         granted = _service_secret_names(prod_compose, "app")
         assert secret_name in granted, (
             f"app service in deploy/docker-compose.prod.yml does not "
@@ -1136,42 +1142,7 @@ class TestProdComposeMergedConfig:
         if not _docker_available():
             pytest.skip("docker not available; cannot run docker compose config")
 
-        env = {
-            "PATH": "/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin",
-            "POSTGRES_PASSWORD": "test-postgres-password",
-            "SECRET_KEY": "test-secret-key",
-            "APP_ROLE_PASSWORD": "test-app-role-password",
-            "SHEKEL_IMAGE_DIGEST": "sha256:" + "0" * 64,
-            # The Valkey password the app and the valkey service
-            # interpolate (``${SHEKEL_VALKEY_PASSWORD:?...}``).
-            "SHEKEL_VALKEY_PASSWORD": "test-valkey-password",
-        }
-        result = subprocess.run(
-            [
-                "docker",
-                "compose",
-                "--env-file",
-                "/dev/null",
-                "-f",
-                str(DOCKER_COMPOSE),
-                "-f",
-                str(DOCKER_COMPOSE_PROD),
-                "config",
-            ],
-            capture_output=True,
-            text=True,
-            timeout=DOCKER_SUBPROCESS_TIMEOUT_S,
-            check=False,
-            cwd=str(REPO_ROOT),
-            env=env,
-        )
-        assert result.returncode == 0, (
-            "docker compose config failed for the merged base + "
-            "shared-mode override:\n"
-            f"  stdout: {result.stdout}\n"
-            f"  stderr: {result.stderr}"
-        )
-        merged = result.stdout
+        merged = rendered_text(DOCKER_COMPOSE, DOCKER_COMPOSE_PROD)
 
         # Every required secret appears in the merged top-level
         # secrets: block.  Compose annotates each secret with a
@@ -1181,6 +1152,7 @@ class TestProdComposeMergedConfig:
             "secret_key",
             "postgres_password",
             "app_role_password",
+            "owner_role_password",
             "totp_encryption_key",
         ):
             expected = f"file: /opt/docker/shekel/secrets/{secret}"
@@ -1215,7 +1187,6 @@ class TestProdComposeMergedConfig:
         app_secrets = _service_secret_names(merged_doc, "app")
         for secret in (
             "secret_key",
-            "postgres_password",
             "app_role_password",
             "totp_encryption_key",
         ):

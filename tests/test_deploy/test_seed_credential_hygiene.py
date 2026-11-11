@@ -24,6 +24,7 @@ import textwrap
 from pathlib import Path
 
 import pytest
+import yaml
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -532,40 +533,33 @@ class TestDockerignoreCoverage:
 
 
 class TestComposeEntrypointAgreement:
-    """The state-volume mount path matches the deploy's sentinel path.
+    """The state volume is the deploy's, mounted where scripts/deploy.sh writes its sentinel.
 
     A drift here would silently break the sentinel (scripts/deploy.sh
-    would write to the rootfs path while the volume sits empty at a
-    different mount point).
+    would write to the read-only rootfs while the volume sits empty at a
+    different mount point), and a second service mounting it would hold
+    state only the deploy writes.
     """
 
     def test_state_mount_path_matches_sentinel_path(self) -> None:
-        """docker-compose.yml mounts the volume at the path scripts/deploy.sh writes to."""
-        compose_text = DOCKER_COMPOSE.read_text(encoding="utf-8")
-        deploy_text = DEPLOY_SCRIPT.read_text(encoding="utf-8")
+        """docker-compose.yml mounts the state volume on the migrate service alone, at the
+        path scripts/deploy.sh writes the sentinel to."""
+        services = yaml.safe_load(DOCKER_COMPOSE.read_text(encoding="utf-8"))["services"]
+        mounts = {(name, entry.split(":")[1]) for name, spec in services.items()
+                  for entry in spec.get("volumes") or []
+                  if isinstance(entry, str) and entry.split(":")[0] == "shekel-prod-app-state"}
 
-        # Extract the mount target from docker-compose.yml.
-        mount_match = re.search(
-            r"shekel-prod-app-state:([^\s:]+)", compose_text,
-        )
-        assert mount_match is not None, (
-            "docker-compose.yml does not mount shekel-prod-app-state"
-        )
-        mount_target = mount_match.group(1)
-
-        # Extract the sentinel directory from scripts/deploy.sh.
         sentinel_dir_match = re.search(
-            r'SEED_STATE_DIR="([^"]+)"', deploy_text,
+            r'SEED_STATE_DIR="([^"]+)"', DEPLOY_SCRIPT.read_text(encoding="utf-8"),
         )
         assert sentinel_dir_match is not None, (
             "scripts/deploy.sh does not declare SEED_STATE_DIR"
         )
         sentinel_dir = sentinel_dir_match.group(1)
 
-        assert mount_target == sentinel_dir, textwrap.dedent(f"""
-            Mount path drift between docker-compose.yml and scripts/deploy.sh:
-              docker-compose.yml mounts at:  {mount_target}
-              scripts/deploy.sh writes to:    {sentinel_dir}
-            The sentinel will land on the read-only rootfs (or be lost
-            on every restart) instead of the persistent volume.
+        assert mounts == {("migrate", sentinel_dir)}, textwrap.dedent(f"""
+            docker-compose.yml mounts shekel-prod-app-state as {sorted(mounts)}, where
+            scripts/deploy.sh, the migrate service's command, writes the sentinel to
+            {sentinel_dir}.  The volume belongs on the migrate service alone, at that path:
+            elsewhere the sentinel lands on the read-only rootfs (or is lost on every deploy).
         """).strip()

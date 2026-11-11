@@ -13,9 +13,10 @@
 #
 # Primary workflow (operator decision 2026-06-12, parity audit
 # shekel-audits/dev-prod-parity/findings.md): the CONTAINERIZED app is
-# the daily dev server -- full production parity (same entrypoint
-# pipeline incl. the audit-trigger boot gate, least-privilege
-# shekel_app role, valkey-backed fail-closed rate limiting, hardened
+# the daily dev server -- full production parity (the same one-shot
+# deploy, the migrate service, as the database owner, incl. the
+# audit-trigger gate; the same web entrypoint and least-privilege
+# shekel_app role; valkey-backed fail-closed rate limiting; hardened
 # read-only rootfs) with live reload via the source bind mount:
 #   docker compose -f docker-compose.dev.yml up -d --remove-orphans
 #   docker logs -f shekel-dev-app
@@ -67,6 +68,15 @@ services:
       POSTGRES_USER: shekel_user
       POSTGRES_PASSWORD: shekel_pass
       POSTGRES_DB: shekel
+      # The two logins' passwords, which deploy/postgres/provision_roles.sh
+      # (mounted below) sets, as in production (rulings plan#3412,
+      # plan#3413).  Non-secret development values -- anyone reading this
+      # file knows them and the dev DB is host-only -- written once each:
+      # the anchors hand the migrate service the owner's and the app its
+      # own.  Production uses real random secrets (docker-compose.yml's
+      # ${...:?...} interpolations).  See audit finding F-081.
+      OWNER_ROLE_PASSWORD: &owner-role-password dev-only-shekel-owner-role-password
+      APP_ROLE_PASSWORD: &app-role-password dev-only-shekel-app-role-password-change-in-prod
     ports:
       # Loopback-only bind (audit finding F-057 / Commit C-35).  The
       # dev databases use the public credentials shekel_user / shekel_pass
@@ -94,7 +104,21 @@ services:
       # (that service was deleted at ``balance:X-br-4``; its own comment
       # block carried the fuller version of this note).
       - pgdata:/var/lib/postgresql
-      - ./scripts/init_db.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+      # The logins' provisioning script, as the image's first-boot hook,
+      # mounted as docker-compose.yml mounts it (that file says why each
+      # option).  The schemas are the deploy's, made by the owner, so no
+      # schema file runs here.  The image runs the hook only when it makes
+      # the cluster on an empty volume, so a dev database made before the
+      # hook needs the script once, by hand, after this container is made
+      # again with the two variables above:
+      #   docker exec shekel-dev-db /docker-entrypoint-initdb.d/10-provision-roles.sh
+      # and again after a production clone is restored into it.
+      - type: bind
+        source: ./deploy/postgres/provision_roles.sh
+        target: /docker-entrypoint-initdb.d/10-provision-roles.sh
+        read_only: true
+        bind:
+          create_host_path: false
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U shekel_user -d shekel"]
       interval: 10s
@@ -166,6 +190,10 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      migrate:
+        # Mirrors prod: the deploy (the migrate service below) exits 0
+        # before the dev server starts.
+        condition: service_completed_successfully
       valkey:
         # Mirrors prod: the limiter runs fail-closed (no in-memory
         # fallback, errors not swallowed), so the app must not boot
@@ -186,36 +214,21 @@ services:
       # calendar dates as prod and as host ``flask run`` (which
       # inherits the host's America/New_York).  Without this the
       # container defaults to UTC and "today" diverges from the
-      # operator's wall clock between 20:00 and midnight Eastern.
-      TZ: America/New_York
+      # operator's wall clock between 20:00 and midnight Eastern.  The
+      # anchor hands the migrate service the same zone, as production's
+      # override does.
+      TZ: &civil-timezone America/New_York
       # SECRET_KEY must be set in .env (or shell env) -- no placeholder
       # default.  Generate with:
       #   python -c "import secrets; print(secrets.token_hex(32))"
       # The :? syntax fails compose with a clear error if unset.
       SECRET_KEY: ${SECRET_KEY:?Set SECRET_KEY in .env (see .env.example)}
-      DATABASE_URL: postgresql://shekel_user:shekel_pass@db:5432/shekel
-      DB_HOST: db
-      DB_PORT: "5432"
-      DB_USER: shekel_user
-      DB_PASSWORD: shekel_pass
-      DB_NAME: shekel
-      # Least-privilege app role password.  Required by entrypoint.sh
-      # in every environment.  The value below is a non-secret
-      # development default -- anyone reading the compose file knows
-      # it and the dev DB is host-only -- so we hard-code it here
-      # rather than forcing every developer to add another line to
-      # .env.  Production uses a real random secret via
-      # docker-compose.yml's APP_ROLE_PASSWORD: ${APP_ROLE_PASSWORD:?...}
-      # check.  See audit finding F-081 / Commit C-13.
-      APP_ROLE_PASSWORD: dev-only-shekel-app-role-password-change-in-prod
-      SEED_USER_EMAIL: admin@shekel.local
-      # A brand-new dev stack's first login.  Not the seed's published
-      # default ChangeMe!2026: the deploy seeds under FLASK_ENV=deploy on
-      # every stack, and the seed refuses that default everywhere but a
-      # host run and the suite (ruling plan#3448).  A non-secret
-      # development value, like APP_ROLE_PASSWORD above.
-      SEED_USER_PASSWORD: dev-only-shekel-seed-password
-      SEED_USER_DISPLAY_NAME: Budget Admin
+      # The web login's password (the db service's anchor), as
+      # production's app holds its own and no other: no owner or
+      # superuser password and no database URL holding one.  The
+      # database's host, port and name are the entrypoint's defaults
+      # (scripts/_entrypoint_lib.sh).
+      APP_ROLE_PASSWORD: *app-role-password
       TOTP_ENCRYPTION_KEY: ${TOTP_ENCRYPTION_KEY:-}
       # Idle-session ceiling for the containerized dev app.  BaseConfig
       # defaults IDLE_TIMEOUT_MINUTES to 720 (12h, app/config.py); dev
@@ -271,8 +284,9 @@ services:
         volume:
           nocopy: true
     # Override: use Flask dev server instead of Gunicorn.
-    # The entrypoint.sh still runs (DB init, seeding), then exec's
-    # this command instead of the Dockerfile CMD (gunicorn).
+    # The entrypoint.sh still runs (its secret checks and the wait for
+    # PostgreSQL), then exec's this command instead of the Dockerfile
+    # CMD (gunicorn).
     command: ["flask", "run", "--host=0.0.0.0", "--port=5000"]
     healthcheck:
       # Override the image HEALTHCHECK, which probes Gunicorn's :8000
@@ -294,12 +308,63 @@ services:
     # rootfs and crashes prod.  The source bind mount above stays rw,
     # so the reloader and ``__pycache__`` writes are unaffected (prod
     # needs PYTHONDONTWRITEBYTECODE=1 because its app dir is immutable
-    # image content; dev deliberately omits it).  The entrypoint's
-    # static-volume copy is failure-tolerant (``|| true``) and its
-    # seed sentinel lands in the rw bind mount, so the read-only
-    # rootfs does not break startup.  no-new-privileges also comes
+    # image content; dev deliberately omits it).  No static volume is
+    # mounted here, so the entrypoint skips its static copy, and the
+    # seed sentinel is the migrate service's, so the read-only rootfs
+    # does not break startup.  no-new-privileges also comes
     # from the daemon default on this host; declared here so the
     # committed file carries the posture on any host.
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp
+
+  # ── The deploy (one-shot, before the app) ────────────────────────
+  # Production's migrate service (docker-compose.yml says what it runs and
+  # why), run on this checkout: the schemas, the grants, the migrations,
+  # the reference rows and the seed, as the database owner, before the dev
+  # server starts.  ``up`` runs it again on every up, so a new migration in
+  # the checkout is applied when the stack next comes up.
+  migrate:
+    # Built from this checkout as the app is: both builds run in one pass
+    # from the same layers, and both run the checkout's code through the
+    # bind mount below.
+    build: .
+    container_name: shekel-dev-migrate
+    entrypoint: ["/home/shekel/app/scripts/owner_entrypoint.sh"]
+    command: ["/home/shekel/app/scripts/deploy.sh"]
+    restart: "no"
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      # The app's zone (its anchor, above): the deploy runs the app's
+      # code and computes the same dates.
+      TZ: *civil-timezone
+      # The owner's password (the db service's anchor), the one credential
+      # this service holds, as production's holds.
+      OWNER_ROLE_PASSWORD: *owner-role-password
+      SEED_USER_EMAIL: admin@shekel.local
+      # A brand-new dev stack's first login.  Not the seed's published
+      # default ChangeMe!2026: the deploy seeds under FLASK_ENV=deploy on
+      # every stack, and the seed refuses that default everywhere but a
+      # host run and the suite (ruling plan#3448).  A non-secret
+      # development value, like the role passwords above.
+      SEED_USER_PASSWORD: dev-only-shekel-seed-password
+      SEED_USER_DISPLAY_NAME: Budget Admin
+    volumes:
+      # The checkout: the deploy runs its migrations and scripts, and
+      # writes the seed sentinel under its state/.
+      - .:/home/shekel/app
+    # The image's HEALTHCHECK asks gunicorn's /health, which a deploy never
+    # serves (docker-compose.yml's migrate service).
+    healthcheck:
+      disable: true
+    # Hardened as the dev app is, since it runs the code under test: an
+    # app write outside /tmp or its mounts fails here as in production.
     security_opt:
       - no-new-privileges:true
     cap_drop:

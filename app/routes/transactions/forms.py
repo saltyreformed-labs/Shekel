@@ -281,7 +281,7 @@ def render_full_edit(txn, *, page_refusal):
         # producer the C key asks too, over the ``payment_withdraws`` read
         # above), so its caption names those lines and the press posts them
         # (ruling **R-CC127**).
-        credit_offered=transaction_service.credit_offered(txn),
+        credit_offered=transaction_service.credit_offered(txn, credit_cards),
         credit_on=transaction_service.credit_day(txn, calendar),
         credit_cards=credit_cards,
         credit_frees_a_line=transaction_service.credit_frees_a_line(

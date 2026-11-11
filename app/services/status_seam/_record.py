@@ -492,6 +492,29 @@ def tender_account_id_of(row: Transaction) -> int:
     return row.account_id if movement is None else movement.account_id
 
 
+def booked_tender_id(row: Transaction, named: Optional[int]) -> int:
+    """Return the account a settle of *row* books its payment on: the one named, else the default.
+
+    **The one spelling of "where does this settle's money land"** (plan
+    task plan#3234), asked by the seam's writer (``_covering._cover``, with
+    its :class:`Settlement`'s ``account_id``) and by the settle verb's card
+    day (``transaction_service._card_day.settle_day_on_a_card``, with the
+    tender its door named), so the day a payment is dated by and the account
+    it is booked on cannot be read off two different accounts.
+
+    Args:
+        row: The transaction about to settle.
+        named: The tender a door named, already gated, or ``None``.
+
+    Returns:
+        *named* when it is not ``None``, else :func:`tender_account_id_of`.
+
+    Raises:
+        ValueError: From :func:`covering_movement_of`, on a row holding two.
+    """
+    return tender_account_id_of(row) if named is None else named
+
+
 def settled_on_a_card(row: Transaction) -> bool:
     """Return whether *row* is Paid with its money moved on a credit card.
 

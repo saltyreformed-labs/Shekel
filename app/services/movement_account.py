@@ -367,24 +367,26 @@ def credit_cards(txn: Transaction, owner: OwnerAccounts) -> tuple[Account, ...]:
     an ask to add one), the C key and the palette press at once only when it
     holds one (plan task plan#3114), and the purchase list's tick is drawn
     from it (:func:`tick_cards`).  The owner's active cards
-    (:attr:`OwnerAccounts.cards`).  A row that lives on a card means that
-    card, however many the owner has (decided under R-BAL207 at plan task
-    plan#2929: a bill on the card says "this went on this card", ruling
-    plan#2926, and asking which would ask what the row already says).  It
-    read the cards among the "Paid from" list until plan task plan#3232,
-    when that list stopped holding cards (ruling plan#3227).
+    (:attr:`OwnerAccounts.cards`), **less the row's own account** (plan task
+    plan#3234, ruling plan#3225): on a bill that lives on a card, Paid with
+    its card picked records that it went on that card, so Credit there means
+    another card.  With the Visa and the Amex, a bill living on the Amex
+    offers the Visa alone; on the owner's only card it offers none, and
+    Credit is not drawn (``transaction_service.credit_offered``).  It
+    answered the row's own card alone there until that task (decided under
+    R-BAL207 at plan task plan#2929), and read the cards among the "Paid
+    from" list until plan task plan#3232, when that list stopped holding
+    cards (ruling plan#3227).
 
     Args:
-        txn: The row, its ``account`` loaded (a joined load).
+        txn: The row.
         owner: The row OWNER's :class:`OwnerAccounts`.
 
     Returns:
-        The row's own card alone when it lives on one; else the owner's cards
-        in account order, which may be none.
+        The owner's cards in account order but the row's own account, which
+        may be none.
     """
-    if is_revolving(txn.account):
-        return (txn.account,)
-    return owner.cards
+    return tuple(card for card in owner.cards if card.id != txn.account_id)
 
 
 def tick_cards(txn: Transaction, owner: OwnerAccounts) -> tuple[Account, ...]:
@@ -395,11 +397,14 @@ def tick_cards(txn: Transaction, owner: OwnerAccounts) -> tuple[Account, ...]:
     more cards"): no tick where it is empty, the tick alone for one card, and
     the tick with a pick for two or more.  :func:`credit_cards` less one
     case: a row that lives on a card files every purchase on that card
-    already, so a tick there could only name the account the purchase is on,
-    and a control that can change nothing is not drawn (ruling **R-CC34**'s
-    reason for the "Paid from" picker).  With no card the tick is not drawn
-    either: the door would refuse it in words (:func:`the_card`), after the
-    owner had typed the purchase.
+    already, so its tick is not drawn.  It was drawn nowhere there because it
+    could only name the account the purchase is on, and a control that can
+    change nothing is not drawn (ruling **R-CC34**'s reason for the "Paid
+    from" picker); since plan task plan#3234 :func:`credit_cards` leaves out
+    the row's own card there, so the tick could name another, and whether it
+    should be drawn so, as Credit is, is question plan#3411.  With no card
+    the tick is not drawn either: the door would refuse it in words
+    (:func:`the_card`), after the owner had typed the purchase.
 
     Args:
         txn: The purchase's row, its ``account`` loaded.
@@ -518,6 +523,16 @@ def the_card(
     ``transaction_service._credit`` at plan task plan#2930, when the purchase
     doors became its second caller.
 
+    **On a row that lives on a card the choices are the OTHER cards** (plan
+    task plan#3234, ruling plan#3225), so its refusals say so: on the
+    owner's only card there is no other to put it on (Credit is not drawn
+    there, ``transaction_service.credit_offered``), and with two or more
+    others the count is of those.  No screen's tick there reaches this: the
+    add form draws none (:func:`tick_cards`, question plan#3411), and the
+    edit form draws one only on a purchase already on another card or an old
+    flagged line, which ``entry_service._details.tick_edit`` answers before
+    asking it.  Posted by hand, a tick there reads the same choices.
+
     Args:
         txn: The row pressed, or the purchase's row.
         card_account_id: The card the owner named, or ``None``.
@@ -540,10 +555,22 @@ def the_card(
     cards = credit_cards(txn, owner_accounts(txn.user_id))
     if len(cards) == 1:
         return cards[0]
+    lives_on_a_card = is_revolving(txn.account)
+    if not cards and lives_on_a_card:
+        raise ValidationError(
+            f"{what} cannot go on another credit card: {txn.name} lives on "
+            f"{txn.account.name}, your only card. Add the card it went on "
+            f"under Accounts, then {again} again."
+        )
     if not cards:
         raise ValidationError(
             f"{what} cannot go on a credit card: there is no credit card in "
             f"the app yet. Add your card under Accounts, then {again} again."
+        )
+    if lives_on_a_card:
+        raise ValidationError(
+            f"{txn.name} lives on {txn.account.name}, and you have "
+            f"{len(cards)} other credit cards: pick the one {what} went on."
         )
     raise ValidationError(
         f"You have {len(cards)} credit cards: pick the one {what} went on."
@@ -554,8 +581,11 @@ def _named_card(txn: Transaction, card_account_id: int, *, what: str) -> Account
     """Return the card *card_account_id* names, once a Credit press or a CC tick may name it.
 
     :func:`the_card`'s named arm, the cards those two acts admit: the row's
-    own account when it is a card, archived or not (a row that lives on a
-    card means it, :func:`credit_cards`), or an ACTIVE card of the ROW's
+    own account when it is a card, archived or not (the money is on it: no
+    screen names it since plan task plan#3234, :func:`credit_cards` leaving
+    it out, and a Credit naming it anyway records what Paid with that card
+    picked records, on the same day unless the press posts a day of its
+    own), or an ACTIVE card of the ROW's
     owner, never the caller's (a companion's tick names the owner's card,
     ruling **R-CC11**).  The refusals are "Paid from"'s, in its order: one
     answer for "no such account" and "not the owner's", raised before the

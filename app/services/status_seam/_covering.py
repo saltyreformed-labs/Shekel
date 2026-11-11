@@ -203,8 +203,8 @@ from app.services.settle_day import (
 )
 from app.services.status_seam._record import (
     Settlement,
+    booked_tender_id,
     covering_movement_of,
-    tender_account_id_of,
 )
 from app.utils.log_events import BUSINESS, EVT_CREDIT_UNMARKED, log_event
 
@@ -506,8 +506,8 @@ def _cover(
 
     **And books it on the TENDER** (plan step ``credit_card:CC-5-3``, rulings
     **R-CC15** and **R-CC42**): the account the record names when the door
-    named one, else the seam's one default,
-    :func:`~._record.tender_account_id_of` -- the kept movement's own account
+    named one, else the seam's one default (:func:`~._record.booked_tender_id`
+    over :func:`~._record.tender_account_id_of`) -- the kept movement's own account
     for a re-settle, the row's own for a first settle -- so a revert keeps
     where the money moved exactly as it keeps a stated figure, and only a
     NAMED tender re-points a kept movement (:func:`_re_point`).  Through
@@ -530,10 +530,7 @@ def _cover(
     if not settlement.amount:
         _withdraw(row, press)
         return
-    account_id = (
-        settlement.account_id if settlement.account_id is not None
-        else tender_account_id_of(row)
-    )
+    account_id = booked_tender_id(row, settlement.account_id)
     movement = covering_movement_of(row)
     if movement is not None:
         re_pointed = _re_point(row, movement, account_id, press)

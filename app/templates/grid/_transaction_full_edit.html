@@ -619,8 +619,8 @@
          offered only on a row drawn Credit and is disabled elsewhere.  Its
          title names the Credit button above on a row that offers it
          (`credit_offered`) and the purchases on a row tracking them; on any
-         other row it is the generic one.  (Paid still puts a Projected row
-         on a card when its kept payment is there, finding plan#3105.) #}
+         other row it is the generic one.  (Paid puts a Projected row on a
+         card when it lives there or its kept payment is, finding plan#3105.) #}
       {% set allowed_ids = allowed_status_ids if allowed_status_ids is defined else none %}
       <div class="mb-2">
         <label class="form-label mb-0 small">Status</label>

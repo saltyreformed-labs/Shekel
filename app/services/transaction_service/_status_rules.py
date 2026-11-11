@@ -29,6 +29,7 @@ from app import ref_cache
 from app.enums import StatusEnum
 from app.exceptions import ValidationError
 from app.models.transaction import Transaction
+from app.services.account_projection import is_revolving
 from app.services.state_machine import allowed_transitions, verify_transition
 from app.services.status_seam import drawn_status_id, settled_on_a_card
 from app.utils.balance_predicates import (
@@ -334,7 +335,10 @@ def _how_it_goes_on_a_card(txn: Transaction) -> str:
     (Credit is per purchase); any other expense by its Credit button, which
     the popover offers on a Projected row only
     (``transaction_service.credit_offered``), so a paid or cancelled one is
-    set back to Projected first.
+    set back to Projected first.  A bill that lives on a card is put there
+    by Paid with its card picked (plan task plan#3234, ruling plan#3225), and
+    Credit there means another card, drawn only when there is one, so its
+    sentence names Paid.
 
     Args:
         txn: The row a Save asked to put in Credit.
@@ -349,6 +353,11 @@ def _how_it_goes_on_a_card(txn: Transaction) -> str:
             "it tracks its purchases, so each purchase goes on the card by its "
             "own CC tick"
         )
+    lives_on = ""
+    press = "press Credit"
+    if is_revolving(txn.account):
+        lives_on = f"it lives on {txn.account.name}, so "
+        press = "press Paid"
     if is_projected(txn):
-        return "open it and press Credit instead"
-    return "set it back to Projected, then open it and press Credit"
+        return f"{lives_on}open it and {press} instead"
+    return f"{lives_on}set it back to Projected, then open it and {press}"

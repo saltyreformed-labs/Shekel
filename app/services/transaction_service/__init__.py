@@ -46,7 +46,7 @@ X-f2-c3 is the change that had to buy the room -- it publishes
 cannot show and book two different numbers (**N-231**) -- so it
 makes the shape rather than shaving prose a fifth time.
 
-SIX leaves, cut by what each DECIDES rather than by size:
+SEVEN leaves, cut by what each DECIDES rather than by size:
 
 * :mod:`._status_rules` -- which settled status a row's TYPE takes, what a
   dropdown may therefore offer, and what a status it posts back means;
@@ -67,6 +67,9 @@ SIX leaves, cut by what each DECIDES rather than by size:
   rows offer it, and whether the C key and the palette press it at once or
   open the popover (plan task plan#3114); and Undo CC, the revert
   that takes it off the card (plan task plan#3055);
+* :mod:`._card_day` -- the day money put on a CARD is dated, by Credit or by
+  a Paid whose payment lands on the card (plan task plan#3234, ruling
+  plan#3225): one leaf both read, since ``._credit`` enters the settle verb;
 * :mod:`._delete` -- what REMOVING a row means: the four-step sequence and its
   order, which existed twice until plan step ``bank_import:X-gb`` gave the
   delete route and ``statement_match``'s undo one verb to share.
@@ -74,8 +77,8 @@ SIX leaves, cut by what each DECIDES rather than by size:
 **The public surface is this module and ``__all__`` is it.**
 """
 
+from app.services.transaction_service._card_day import credit_day
 from app.services.transaction_service._credit import (
-    credit_day,
     credit_frees_a_line,
     credit_moves_payment,
     credit_offered,

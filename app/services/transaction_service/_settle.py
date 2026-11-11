@@ -67,6 +67,7 @@ from app.utils.log_events import (
     log_event,
 )
 
+from ._card_day import settle_day_on_a_card
 from ._row_rules import reject_unsettleable, settles_from_entries
 
 logger = logging.getLogger(__name__)
@@ -442,7 +443,8 @@ def settle_transaction(
     the statement covers, and stamping the user's today instead would date the
     money to when they got round to reconciling.  ``None`` leaves the seam's own
     rule in force -- the user's today on first entry to the settled band,
-    preserved on re-entry -- which is what every other door means.
+    preserved on re-entry -- which is what every other door means, but where
+    the payment lands on a card: that takes the row's own date, as Credit does.
 
     Does NOT commit -- the caller owns the session boundary.
 
@@ -478,9 +480,12 @@ def settle_transaction(
         settle_day: The civil day the money moved and HOW that day is known
             (:class:`app.services.settle_day.SettleDay`), when the CALLER knows
             it -- the reconcile tick's statement date on the ``asserted``
-            basis, the matcher's bank day on ``observed``.  ``None`` derives it
-            through the seam.  A day in the future or one supplied for a non-settled
-            status is refused there (rulings **R-EJ** / finding **N-183**);
+            basis, the matcher's bank day on ``observed``.  ``None`` derives it:
+            the row's own date where the payment lands on a card, as Credit
+            dates one (``._card_day.settle_day_on_a_card``, plan task
+            plan#3234), else the seam's rule.  A day in the future or one
+            supplied for a non-settled status is refused there (rulings
+            **R-EJ** / finding **N-183**);
             the tick cannot reach either, because an assertion's own
             ``observed_on`` is already refused in the future by
             ``anchor_service``.
@@ -745,6 +750,10 @@ def _settle(
         # questions until plan step X-au-d, whose third was a cache refresh
         # this verb no longer performs -- a derived row holds no cache.
         basis = derived_amount_basis(txn.account.user_id, txn.scenario_id)
+        # A payment landing on a card is dated as Credit dates one: the row's
+        # own date, not today (plan task plan#3234, ruling plan#3225).
+        if settle_day is None:
+            settle_day = settle_day_on_a_card(txn, tender)
         # What this settle BOOKS, read from the same published rule the
         # reconcile panel prefills from, so the figure offered and the figure
         # recorded cannot differ.

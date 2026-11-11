@@ -30,15 +30,19 @@ moves its kept payment onto the row's own account as it reverts, so a later
 Paid leaves checking and a later Credit puts it back on the card.
 
 **The press says its day and asks which card** (plan task plan#3056).  The
-popover shows the day :func:`credit_day` gives and lets the owner type the real
-one, and asks which card when the owner has two or more; it reads
+popover shows the day ``._card_day.credit_day`` gives and lets the owner type
+the real one, and asks which card when the owner has two or more; it reads
 ``movement_account.credit_cards`` for the choice and :func:`credit_frees_a_line` for the
-caption naming the bank lines the press frees.
+caption naming the bank lines the press frees.  The day is a leaf of its own
+since plan task plan#3234, because Paid onto a card dates a row by it too
+(ruling plan#3225), and on a bill that lives on a card Credit means another
+card (:func:`credit_offered`).
 
 **The C key and the palette open the popover where the press needs what only it asks**
 (plan task plan#3114, ruling plan#3112).  They post no card, no day and no
 line, so with no card, two or more, or a bank line the press would free, they
-open the popover; on every other row they press at once
+open the popover; on a bill that lives on the owner's only card Credit is not
+offered, so they do nothing; on every other row they press at once
 (:func:`credit_opens_the_popover_by_key`, over the two producers above).
 Which rows offer Credit at all is :func:`credit_offered`, read by the popover
 and the cell alike.
@@ -47,8 +51,8 @@ and the cell alike.
 status Credit holds its live CC Payback, and Undo CC on it still deletes that
 payback (``credit_workflow.unmark_credit``).  A press on one changes nothing.
 
-Architecture: no Flask imports; reads the row, the owner's cards, the
-pay calendar and what a moved payment's matches would withdraw; mutates
+Architecture: no Flask imports; reads the row, the owner's cards, the day
+``._card_day`` gives and what a moved payment's matches would withdraw; mutates
 through the settle verb and the status door only; does not commit.
 """
 
@@ -60,27 +64,27 @@ from datetime import date
 from typing import TYPE_CHECKING
 
 from app import ref_cache
-from app.enums import SettledDayBasisEnum, StatusEnum
+from app.enums import StatusEnum
 from app.exceptions import ValidationError
 from app.models.account import Account
 from app.models.transaction import Transaction
+from app.services.account_projection import is_revolving
 from app.services.credit_workflow import get_active_payback, unmark_credit
 from app.services.match_press import Press
 from app.services.movement_account import OwnerAccounts, credit_cards, the_card
-from app.services.pay_calendar import FiledRow, PayCalendar, calendar_for
-from app.services.settle_day import SettleDay, recorded_settle_day
+from app.services.settle_day import recorded_settle_day
 from app.services.status_seam import (
     covering_movement_of,
     pending_payment_withdrawals,
     settle_day_for_status,
     settled_on_a_card,
 )
+from app.services.transaction_service._card_day import credit_settle_day
 from app.services.transaction_service._door import apply_requested_status
 from app.services.transaction_service._settle import settle_onto_card
 from app.services.transaction_service._status_rules import settled_status_id
 from app.services.transfer_legs import PlanItem, TransferLeg, cell_key
 from app.utils.balance_predicates import is_credit, is_projected
-from app.utils.dates import display_today
 from app.utils.log_events import BUSINESS, EVT_CREDIT_MARKED, log_event
 
 if TYPE_CHECKING:  # pragma: no cover -- annotations only
@@ -99,7 +103,7 @@ def mark_as_credit(
     (:func:`._settle.settle_onto_card`: the card is gated here, by
     ``movement_account.the_card``, and not by "Paid from"'s gate, which
     refuses a card, plan task plan#3232), on the day the owner typed, else
-    the day :func:`credit_day` gives it, so it records one covering movement
+    the day ``._card_day.credit_day`` gives it, so it records one covering movement
     on the card carrying the row's figure, and no CC Payback row.
 
     Refused, before anything is written: an income row (nothing is bought
@@ -132,7 +136,7 @@ def mark_as_credit(
             named none (``movement_account.the_card``).
         day: The day under the popover's "Money moved on" box (plan task
             plan#3056), or ``None`` when the press named none: then
-            :func:`credit_day`.  Entered either way, as the press is the
+            ``._card_day.credit_day``.  Entered either way, as the press is the
             owner's statement that the money went on the card.
         press: The save's :class:`~app.services.match_press.Press`, for the
             settle's removal act: putting a reverted row's kept payment on
@@ -163,9 +167,8 @@ def mark_as_credit(
             "Only projected transactions can be marked as credit."
         )
     card = the_card(txn, card_account_id, what=txn.name, again="press Credit")
-    own_day = credit_day(txn)
-    settle_day = SettleDay(day=own_day, basis=SettledDayBasisEnum.ENTERED)
-    if day is not None and day != own_day:
+    settle_day = credit_settle_day(txn)
+    if day is not None and day != settle_day.day:
         settle_day = settle_day_for_status(
             txn.user_id, settled_status_id(txn), day, recorded_settle_day(txn),
         )
@@ -221,42 +224,6 @@ def undo_credit(txn: Transaction, *, press: Press | None = None) -> None:
     apply_requested_status(
         txn, ref_cache.status_id(StatusEnum.PROJECTED), press=press,
     )
-
-
-def credit_day(txn: Transaction, calendar: PayCalendar | None = None) -> date:
-    """Return the day a Credit press puts *txn* on the card.
-
-    The row's own date, because the date decides the statement, the due date
-    and the interest (ruling plan#2910), and the owner presses Credit after
-    the purchase: 20 of the 21 Credit rows on the 2026-11-04 production dump
-    were pressed 4 to 22 days after their date.  A date that has not come is
-    today, because a settle day cannot be in the future (ruling R-EJ; S10 of
-    the trace).  A row with no date reads its paycheck's first day, today if
-    that has not come either: it has no day of its own, and its paycheck's
-    first day is where its money is budgeted.
-
-    The paycheck is read off the owner's one calendar after the row (the read
-    order ``require_period`` asks its callers to state); no destructive pay
-    period door can commit between the two reads, both following the
-    request's owner lock (plan step ``balance:X-bn``).  A caller that has
-    already derived it passes it in (the popover, which shows this day in its
-    "Money moved on" box, plan task plan#3056), so one request derives it
-    once.
-
-    Args:
-        txn: The row about to be put on the card.
-        calendar: The row OWNER's calendar, when the caller derived it after
-            reading the row; ``None`` derives it here.
-
-    Returns:
-        The civil day.
-    """
-    own = txn.due_date
-    if own is None:
-        if calendar is None:
-            calendar = calendar_for(txn.user_id)
-        own = calendar.require_period(FiledRow.for_row(txn)).start_date
-    return min(own, display_today())
 
 
 def credit_moves_payment(txn: Transaction, cards: tuple[Account, ...]) -> bool:
@@ -326,7 +293,7 @@ def credit_frees_a_line(
     )
 
 
-def credit_offered(txn: Transaction) -> bool:
+def credit_offered(txn: Transaction, cards: tuple[Account, ...]) -> bool:
     """Return whether Credit is offered on *txn*: the popover's button, the C key, the palette.
 
     **The one predicate for "can this row be put on the card from the grid"**
@@ -343,13 +310,26 @@ def credit_offered(txn: Transaction) -> bool:
     popover's template and the cell's each spelled this predicate until this
     task; both now draw the route's answer.
 
+    **Not on a bill that lives on the owner's only card** (plan task
+    plan#3234, ruling plan#3225): Paid with its card picked records that it
+    went on that card, so Credit there means ANOTHER card, and with none
+    there is nothing for it to do (*cards* is empty:
+    ``movement_account.credit_cards`` leaves out the row's own account).
+    With no card at all a row on checking still offers it, drawn disabled
+    beside the ask to add one.  A press on such a bill anyway is refused in
+    words (``movement_account.the_card``).
+
     Args:
-        txn: The row.
+        txn: The row, its ``account`` loaded (a joined load).
+        cards: What ``movement_account.credit_cards`` answered for it.
 
     Returns:
         ``True`` when Credit is offered.
     """
-    return txn.is_expense and is_projected(txn) and not txn.tracks_purchases
+    return (
+        txn.is_expense and is_projected(txn) and not txn.tracks_purchases
+        and (len(cards) > 0 or not is_revolving(txn.account))
+    )
 
 
 def credit_opens_the_popover_by_key(
@@ -401,10 +381,13 @@ def credit_opens_the_popover_by_key(
     moving: dict[Hashable, tuple[Transaction, tuple[Account, ...]]] = {}
     for item in items:
         key = cell_key(item)
-        if isinstance(item, TransferLeg) or not credit_offered(item):
+        if isinstance(item, TransferLeg):
             answers[key] = None
             continue
         cards = credit_cards(item, owner)
+        if not credit_offered(item, cards):
+            answers[key] = None
+            continue
         if len(cards) != 1:
             answers[key] = True
         elif credit_moves_payment(item, cards):

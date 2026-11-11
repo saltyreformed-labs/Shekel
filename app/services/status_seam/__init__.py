@@ -103,6 +103,7 @@ Architecture:
 
 from app.services.status_seam._record import (
     Settlement,
+    booked_tender_id,
     correction_record,
     covering_movement_of,
     drawn_status_id,
@@ -167,6 +168,7 @@ __all__ = [
     "sync_side_records",
     "figure_for_status",
     "tender_for_status",
+    "booked_tender_id",
     "correction_record",
     "covering_movement_of",
     "drawn_status_id",

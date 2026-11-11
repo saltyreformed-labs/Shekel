@@ -130,8 +130,9 @@
      (`transaction_service.credit_offered`, read by the route) so the C key
      (app.js) and the palette's Credit only act where the popover draws its
      Credit button -- an expense, Projected, a row rather than a transfer
-     leg, not an envelope.  So a row already on the card (stored Paid, drawn
-     Credit) carries none, as an old Credit row carries none.
+     leg, not an envelope, and not a bill on the owner's only card, which
+     Paid puts there (plan task plan#3234).  So a row already on the card
+     (stored Paid, drawn Credit) carries none, as an old Credit row carries none.
      data-credit-opens-popover marks a row where they open the popover rather
      than press (plan task plan#3114, ruling plan#3112): no card, so the
      popover asks for one; two or more, so it asks which; or a press that

@@ -21,6 +21,8 @@ from tests._test_helpers import transient_cadence_rule, validated_cadence
 from tests.oracles.recurrence_baseline import EVERY_N_PERIODS, MONTHLY, QUARTERLY
 from tests.test_routes._recurrence_submission import submission_from
 
+from ._helpers import _update
+
 
 class TestTheColumnSaysWhatTheCadenceSays:
     """An authored interval reaches the column, for every unit.
@@ -69,11 +71,7 @@ class TestTheColumnSaysWhatTheCadenceSays:
                     unit=unit, interval_n=interval, **stated,
                 ),
             }
-            reauthor_rule(
-                rule,
-                submission_from(data).applied_to(rule),
-                calendar_for(seed_user["user"].id),
-            )
+            assert _update(rule, data, seed_user["user"].id) is None
             assert "interval_n" not in data, (
                 "interval_n must be popped whether or not it is written, so "
                 "the caller's setattr loop never sees a stray kwarg"
@@ -278,17 +276,15 @@ class TestSwitchingToACadenceWithNoDayOfMonth:
             )
             assert rule.nominal_day == 31
 
-            reauthor_rule(
+            assert _update(
                 rule,
-                submission_from(
-                    {
-                        **validated_cadence(
-                            unit=RecurrenceUnitEnum.PERIOD, states_a_start=False,
-                        ),
-                    },
-                ).applied_to(rule),
-                calendar_for(seed_user["user"].id),
-            )
+                {
+                    **validated_cadence(
+                        unit=RecurrenceUnitEnum.PERIOD, states_a_start=False,
+                    ),
+                },
+                seed_user["user"].id,
+            ) is None
 
             assert rule.nominal_day is None
             assert rule.unit_id == ref_cache.recurrence_unit_id(
@@ -350,23 +346,21 @@ class TestSwitchingToACadenceWithNoDayOfMonth:
                 calendar_for(seed_user["user"].id),
             )
 
-            reauthor_rule(
+            assert _update(
                 rule,
-                submission_from(
-                    {
-                        **validated_cadence(
-                            unit=RecurrenceUnitEnum.MONTH,
-                            placement=(
-                                PeriodPlacementEnum.PERIOD_STARTING_ON_OR_AFTER
-                            ),
-                            starts_on=date(2026, 4, 30),
-                            nominal_day=31,
+                {
+                    **validated_cadence(
+                        unit=RecurrenceUnitEnum.MONTH,
+                        placement=(
+                            PeriodPlacementEnum.PERIOD_STARTING_ON_OR_AFTER
                         ),
-                        "starts_on": date(2026, 4, 30),
-                        "repeats_on": MonthReading(nominal_day=31),
-                    },
-                ).applied_to(rule),
-                calendar_for(seed_user["user"].id),
-            )
+                        starts_on=date(2026, 4, 30),
+                        nominal_day=31,
+                    ),
+                    "starts_on": date(2026, 4, 30),
+                    "repeats_on": MonthReading(nominal_day=31),
+                },
+                seed_user["user"].id,
+            ) is None
 
             assert rule.nominal_day == 31

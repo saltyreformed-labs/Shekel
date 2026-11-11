@@ -4,8 +4,13 @@
 
 from types import SimpleNamespace
 
+from app.routes._recurrence_form_helpers import resolve_recurrence_rule_for_update
+from app.routes._recurrence_form_refusals import RecurrenceFormContext
+from app.routes._redirect_target import RedirectTarget
+from app.services.balance_at import BalanceContext
 from app.services.pay_calendar import calendar_for
 from app.services.recurrence import recurrence_spec, resolve
+from tests.test_routes._recurrence_submission import submission_from
 
 
 class _Definition(SimpleNamespace):
@@ -63,3 +68,35 @@ def _phase_of_spec(spec):
         int: Its ``offset_periods`` phase.
     """
     return resolve(spec, calendar_for(spec.user_id)).offset_periods
+
+
+def _update(rule, data, user_id):
+    """Drive the UPDATE door once, the way the update routes do, and return its answer.
+
+    ``resolve_recurrence_rule_for_update`` is the door ``update_template``,
+    ``update_transfer_template`` and the payroll line's update take: it merges
+    the submission onto the stored rule ONCE
+    (:meth:`~app.services.recurrence.RecurrenceSubmission.applied_to`), hands
+    that spec to the refusals, then to ``reauthor_rule``.  A case that called
+    ``reauthor_rule(rule, submission.applied_to(rule), ...)`` itself restated
+    that composition and graded none of it (an adversarial review of plan step
+    R7e); this is the door, with a :class:`_Definition` standing in for the
+    template.
+
+    Args:
+        rule: The stored :class:`RecurrenceRule`, re-pointed in place.
+        data: A post-``load()`` payload (``validated_cadence``'s shape), its
+            recurrence keys consumed into the submission.
+        user_id: The owner the stand-in claims, and whose read pass is built.
+
+    Returns:
+        ``None`` when the rule was re-pointed, or the refusal's ``Response``.
+    """
+    return resolve_recurrence_rule_for_update(
+        _Definition(recurrence_rule=rule, to_account_id=None, user_id=user_id),
+        ctx=RecurrenceFormContext(
+            submission=submission_from(data),
+            redirect=RedirectTarget("templates.edit_template", {"template_id": 1}),
+        ),
+        pass_ctx=BalanceContext.build(user_id),
+    )

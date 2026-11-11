@@ -9,12 +9,12 @@ from app.routes._recurrence_form_refusals import RecurrenceFormContext
 from app.routes._redirect_target import RedirectTarget
 from app.services.balance_at import BalanceContext
 from app.services.pay_calendar import calendar_for
-from app.services.recurrence import build_transient_rule, reauthor_rule
+from app.services.recurrence import build_transient_rule
 from tests._test_helpers import transient_cadence_rule, validated_cadence
 from tests.oracles.recurrence_baseline import EVERY_N_PERIODS
 from tests.test_routes._recurrence_submission import submission_from
 
-from ._helpers import _Definition, _phase_of
+from ._helpers import _Definition, _phase_of, _update
 
 
 class TestAnEditCannotRePhaseARule:
@@ -31,8 +31,9 @@ class TestAnEditCannotRePhaseARule:
     paycheck the rule's opening bound falls in, so there is no stored value to
     ride through either.  An edit cannot re-phase a rule because an edit that
     does not move the bound has not changed the phase's only input -- which is
-    stronger than "the payload is ignored", and it is what these tests pin, on
-    both the direct-update and dispatcher paths.
+    stronger than "the payload is ignored", and it is what these tests pin,
+    through the dispatcher the update routes take (the first two drove the
+    direct-update helper until plan step R7e deleted it).
 
     A rule carrying a non-zero phase and NO bound was the shape the earlier
     version of this class built.  The write door cannot produce one: it writes
@@ -64,11 +65,7 @@ class TestAnEditCannotRePhaseARule:
                 ),
                 "starts_on": seed_periods[3].start_date,
             }
-            reauthor_rule(
-                rule,
-                submission_from(data).applied_to(rule),
-                calendar_for(seed_user["user"].id),
-            )
+            assert _update(rule, data, seed_user["user"].id) is None
             assert _phase_of(rule) == 3, (
                 "the edit re-phased a rule whose phase nothing else states"
             )
@@ -106,18 +103,14 @@ class TestAnEditCannotRePhaseARule:
                 "offset_periods": 0,
                 "starts_on": seed_periods[3].start_date,
             }
-            reauthor_rule(
-                rule,
-                submission_from(data).applied_to(rule),
-                calendar_for(seed_user["user"].id),
-            )
+            assert _update(rule, data, seed_user["user"].id) is None
             assert _phase_of(rule) == 3
             assert data == {"offset_periods": 0}
 
     def test_the_phase_survives_through_the_dispatcher(
         self, app, auth_client, seed_user, seed_periods,  # pylint: disable=unused-argument
     ):
-        """The same, through the door the update routes actually take.
+        """The same at another bound and interval, its context spelled out in full.
 
         ``resolve_recurrence_rule_for_update`` takes the in-place update
         branch when the template already owns a rule and a cadence is
@@ -209,18 +202,16 @@ class TestUpdateKeepsTheStatedStartsPhase:
             )
             assert _phase_of(rule) == 2
 
-            reauthor_rule(
+            assert _update(
                 rule,
-                submission_from(
-                    {
-                        **validated_cadence(
-                            unit=RecurrenceUnitEnum.PERIOD, interval_n=3,
-                        ),
-                        "starts_on": seed_periods[2].start_date,
-                    },
-                ).applied_to(rule),
-                calendar_for(seed_user["user"].id),
-            )
+                {
+                    **validated_cadence(
+                        unit=RecurrenceUnitEnum.PERIOD, interval_n=3,
+                    ),
+                    "starts_on": seed_periods[2].start_date,
+                },
+                seed_user["user"].id,
+            ) is None
 
             assert _phase_of(rule) == 2
             assert rule.starts_on == seed_periods[2].start_date

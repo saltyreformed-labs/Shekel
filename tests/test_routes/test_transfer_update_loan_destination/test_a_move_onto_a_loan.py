@@ -2,15 +2,24 @@
 rules (REC-521's second shape).
 """
 
+from dataclasses import replace
 from datetime import date
 from decimal import Decimal
+
+import pytest
 
 from app.enums import AcctTypeEnum
 from app.extensions import db
 from app.models.ref import RecurrenceUnit
 from app.routes._recurrence_form_refusals import LOAN_PAYMENT_BOUND_IS_DERIVED
 from app.schemas.validation import end_bound_before_start_message
-from app.services.recurrence import UNREADABLE_CADENCE_MESSAGE, stored_cadence
+from app.services.pay_calendar import calendar_for
+from app.services.recurrence import (
+    UNREADABLE_CADENCE_MESSAGE,
+    reauthor_rule,
+    recurrence_spec,
+    stored_cadence,
+)
 from tests._test_helpers import create_loan_account, make_loan_payment_template
 
 from ._helpers import (
@@ -175,6 +184,46 @@ class TestARecurringTransferMovedOntoALoan:
             _first_installment_as_stored_by_an_every_paycheck_rule(seed_user)
         )
         assert rule.end_date is None and rule.max_occurrences is None
+
+    @pytest.mark.usefixtures("seed_periods")
+    def test_a_partial_move_keeps_the_stored_per_month_ceiling(self, auth_client, seed_user):
+        """The completed cadence leaves the ceiling unmentioned, so the stored one rides through.
+
+        ``_complete_the_cadence`` completes a partial move's cadence from the
+        stored rule's unit, interval and placement and says nothing of the
+        per-month ceiling, so the merge
+        (``RecurrenceSubmission.applied_to``) keeps the stored one, as it does
+        beside any restated cadence.  An every-paycheck transfer capped at two
+        a month is moved onto the mortgage by a submission naming only the
+        destination: the rule takes the loan's start and is still capped at
+        two.
+
+        NEGATIVE CONTROL: complete the cadence with ``max_per_month=None`` (a
+        stated clear) and the move drops the cap.
+        """
+        loan = _mortgage(seed_user)
+        savings = _savings(seed_user)
+        template = _recurring_into(seed_user, savings)
+        rule = template.recurrence_rule
+        reauthor_rule(
+            rule, replace(recurrence_spec(rule), max_per_month=2),
+            calendar_for(seed_user["user"].id),
+        )
+        db.session.commit()
+        assert rule.max_per_month == 2, "precondition: the ceiling is stored"
+
+        resp = _post_update(auth_client, template, to_account_id=str(loan.id))
+
+        _assert_saved(resp, auth_client)
+        template = _reload(template)
+        assert template.to_account_id == loan.id, _flashes(auth_client)
+        rule = template.recurrence_rule
+        assert rule.starts_on == (
+            _first_installment_as_stored_by_an_every_paycheck_rule(seed_user)
+        ), "precondition: the move re-pointed the rule onto the loan's start"
+        assert rule.max_per_month == 2, (
+            f"the partial move rewrote the stored ceiling to {rule.max_per_month}"
+        )
 
     def test_a_partial_move_of_an_unreadable_cadence_is_refused(
         self, auth_client, seed_user, seed_periods,  # pylint: disable=unused-argument
@@ -397,13 +446,20 @@ class TestARecurringTransferMovedOntoALoan:
     def test_a_clamped_payment_day_reaches_the_re_pointed_rule(
         self, auth_client, seed_user, seed_periods,  # pylint: disable=unused-argument
     ):
-        """The nominal day travels through the RE-POINT branch, not only the authoring one.
+        """The rule the update door leaves carries the nominal day, not only the date.
 
         A servicer's day 31 first billing in a 30-day month: the derived pair
-        is the month's last day plus ``nominal_day = 31``, and on a move the
-        re-point branch reads ``nominal_day`` beside the STATED start the
-        settle wrote (``RecurrenceSubmission.applied_to``).  A door that
-        wrote the date alone would model every later installment a day early.
+        is the month's last day plus ``nominal_day = 31``, and a rule left with
+        the date alone would model every later installment a day early.  On
+        this move two writes carry the pair, both derived by
+        ``loan_recurrence_sync.loan_cadence_start``.  First the settle states
+        it beside the start the re-point branch writes
+        (``RecurrenceSubmission.applied_to``); then the standing payment's sync
+        after the edit (``sync_loan_payment_start_or_refuse``) derives it
+        again.  So this grades the door's end state, which the sync alone
+        would keep right: the settle's own reading is graded at the create
+        door, ``test_loan_payment_weekday_reading.py``'s
+        ``TestTheCreateIntoAPaymentLessLoan``.
         """
         loan = create_loan_account(
             seed_user, db.session, name="Day 31",

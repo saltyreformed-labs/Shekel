@@ -240,9 +240,9 @@ class BaseConfig:
     # two short ones.  The arguments this app makes about a crafted body rest
     # on this number -- ``StatementMatchSchema``'s note in
     # ``app/schemas/validation/statements.py`` prices a crafted Reconcile
-    # pass against it -- and ``tests/test_config.py``'s
-    # ``TestTheUploadCeiling`` pins the value and grades it on a form body,
-    # at the ceiling and one byte past it.
+    # pass against it -- and ``TestTheUploadCeiling`` in
+    # ``tests/test_config/test_settings_every_config_shares.py`` pins the
+    # value and grades it on a form body, at the ceiling and one byte past it.
     MAX_CONTENT_LENGTH = 512 * 1024
 
     # Budget defaults

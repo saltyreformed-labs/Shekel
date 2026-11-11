@@ -265,6 +265,50 @@ class TestARungChecksItself:
             Bracket(0.0, None, Decimal("0.1000"), 0)
 
 
+class TestALaddersRatesClimb:
+    """FederalRules refuses a rung taxing at or below the rung beneath it (finding plan#3208).
+
+    Each rung's bounds still meet end to start, so every refusal here is the
+    rate's: :func:`_federal`'s own climbing ladder loads (the controls above).
+    """
+
+    def test_a_rate_below_the_rung_beneath_is_refused(self):
+        """A slipped digit: the 22% rung written at 11% would tax its income at half the rate."""
+        with pytest.raises(
+            ValueError,
+            match=r"rates climb: rung 2 taxes at 0\.1100, not above rung 1's 0\.1200",
+        ):
+            _federal(brackets=ladder(
+                ("0.00", "10000.00", "0.1000"),
+                ("10000.00", "40000.00", "0.1200"),
+                ("40000.00", None, "0.1100"),
+            ))
+
+    def test_a_rate_equal_to_the_rung_beneath_is_refused(self):
+        """A row copied from the one below with its rate left unchanged."""
+        with pytest.raises(
+            ValueError,
+            match=r"rates climb: rung 1 taxes at 0\.1000, not above rung 0's 0\.1000",
+        ):
+            _federal(brackets=ladder(
+                ("0.00", "10000.00", "0.1000"),
+                ("10000.00", "40000.00", "0.1000"),
+                ("40000.00", None, "0.2200"),
+            ))
+
+    def test_a_top_rung_at_zero_is_refused(self):
+        """The shape the made-up test rules had until this check: a 0% rung atop 12%."""
+        with pytest.raises(ValueError, match="rung 1 taxes at 0.0000, not above"):
+            _federal(brackets=ladder(
+                ("0.00", "10000.00", "0.1200"), ("10000.00", None, "0.0000"),
+            ))
+
+    def test_a_ladder_of_one_rung_loads(self):
+        """A one-rung ladder has no rung beneath it, so any rate loads, 0% too."""
+        rules = _federal(brackets=ladder(("0.00", None, "0.0000")))
+        assert rules.brackets[0].rate == Decimal("0.0000")
+
+
 #: Which builder states each federal amount: a filing status's rules state the
 #: standard deduction, and the year's credits the three per-child figures
 #: (ruling plan#3340).
@@ -368,6 +412,34 @@ class TestWithholdingFigures:
         """The control for the refusals above: a differing figure is stated."""
         builder, _returns = self._RETURNS[field]
         assert getattr(builder(**{field: Decimal("1400.00")}), field) == Decimal("1400.00")
+
+
+class TestTheRefundableCapIsPartOfTheCredit:
+    """FederalCredits refuses a refundable cap above the child credit (finding plan#3208).
+
+    :func:`_credits` states a 2,000.00 child credit and a 1,500.00 cap.
+    """
+
+    def test_a_cap_a_cent_above_the_credit_is_refused(self):
+        """The refundable part of a credit cannot exceed the credit."""
+        with pytest.raises(
+            ValueError,
+            match=(
+                r"federal child_credit_refundable_cap 2000\.01 is above the "
+                r"child credit 2000\.00"
+            ),
+        ):
+            _credits(child_credit_refundable_cap=Decimal("2000.01"))
+
+    def test_a_credit_lowered_below_its_cap_is_refused(self):
+        """The slip from the other side: a credit transcribed below the cap beside it."""
+        with pytest.raises(ValueError, match="is above the child credit 1400.00"):
+            _credits(child_credit_amount=Decimal("1400.00"))
+
+    def test_a_cap_equal_to_the_credit_loads(self):
+        """A credit wholly refundable is lawful, so equal is not refused."""
+        whole = _credits(child_credit_refundable_cap=Decimal("2000.00"))
+        assert whole.child_credit_refundable_cap == whole.child_credit_amount
 
 
 class TestFicaRules:

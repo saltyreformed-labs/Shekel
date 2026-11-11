@@ -38,10 +38,13 @@ def made_up_federal():
 
     The same deduction and two rungs; the row's credits are
     :func:`made_up_credits`.  The rows' ladder STOPPED at $47,150, which a law
-    refuses (income above a closed top would be taxed by nothing), so a 0%
-    open rung carries it on: the tax on every income is the rows' tax, and
-    only :func:`app.services.tax_calculator.marginal_rate_for` above $47,150
-    reads 0% where the rows read 12%.
+    refuses (income above a closed top would be taxed by nothing), so an open
+    rung carries it on, and since a ladder's rates climb (finding plan#3208)
+    it taxes 22%, the rate of the rung above these two in the single filer's
+    2024 table they match.  The tax on taxable income up to $47,150 is the
+    rows' tax; above it these rules tax 22% where the rows taxed nothing, and
+    :func:`app.services.tax_calculator.marginal_rate_for` reads 22% where the
+    rows read 12%.
 
     Returns:
         FederalRules: The made-up single filer's rules.
@@ -51,7 +54,7 @@ def made_up_federal():
         brackets=ladder(
             ("0.00", "11600.00", "0.1000"),
             ("11600.00", "47150.00", "0.1200"),
-            ("47150.00", None, "0.0000"),
+            ("47150.00", None, "0.2200"),
         ),
     )
 

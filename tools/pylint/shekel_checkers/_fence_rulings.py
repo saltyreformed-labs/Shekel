@@ -856,10 +856,13 @@ _FENCED_MODULE_RULINGS = {
         # The scenario composer: replayed history rows + projected forward
         # slices (schedule ROWS and aggregate interest, no balance-at-T).
         "compute_payoff_scenarios",
-        # Rate-period machinery: the level P&I and the annual rate of the
-        # period containing a date -- contract terms, not balances.
-        "compute_monthly_payment_baseline",
-        "current_rate_baseline",
+        # Rate-period machinery: the period set and the projection's terms
+        # off it -- contract terms, not balances.  The level P&I and the
+        # annual rate of the period containing a date
+        # (``compute_monthly_payment_baseline``, ``current_rate_baseline``)
+        # were ruled here too until plan task plan#3498 deleted them
+        # (ruling plan#3496); their entries go in the same edit, for the
+        # reason the ``row_valuation`` entry gives.
         "resolve_periods",
         "engine_terms",
         # The latest anchor FACT (a user-asserted row plus its date) -- the

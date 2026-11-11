@@ -1,9 +1,12 @@
 """Loan-resolver state: the (payment, rate, schedule, interest) producer.
 
 :func:`resolve_loan` is the single-source-of-truth producer every loan-touching
-surface reads through; :func:`compute_monthly_payment_baseline` is the
-cheaper "what does the user pay each month" lookup that skips the schedule
-generation.
+surface reads through.  *Two cheaper lookups that skipped the schedule
+generation stood beside it -- ``compute_monthly_payment_baseline`` (the
+payment) and ``current_rate_baseline`` (the rate) -- until plan task plan#3498
+deleted them (ruling plan#3496): the first's one caller was the escrow floor's
+threshold, deleted at plan task plan#3388, and the second had none since plan
+step X-au-g-2b.*
 
 There is deliberately no BALANCE here (plan step D2a).  ``LoanState`` carried a
 ``current_balance`` -- a balance-at-``as_of`` -- which made every holder of the
@@ -22,10 +25,7 @@ from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
 
-from app.services.amortization_engine import (
-    AmortizationRow,
-    RateChangeRecord,
-)
+from app.services.amortization_engine import AmortizationRow
 from app.services.rate_period_engine import period_for_date
 from app.utils.money import round_money
 
@@ -99,94 +99,6 @@ class LoanState:
     current_rate: Decimal
     schedule: list[AmortizationRow]
     total_interest: Decimal
-
-
-def compute_monthly_payment_baseline(
-    loan_params,
-    rate_changes: list[RateChangeRecord] | None,
-    as_of: date,
-) -> Decimal:
-    """Return the loan's current monthly P&I -- the rate-period level payment.
-
-    Single source of truth for "what does the user pay each month"
-    for a caller that needs the payment WITHOUT the full schedule
-    generation :func:`resolve_loan` runs.  Returns the same value as
-    ``resolve_loan(...).monthly_payment`` for the same inputs.
-
-    **It has NO caller in ``app/`` since plan task plan#3388**, and this
-    paragraph named the one it had: ``loan_payment_service
-    .compute_contractual_pi``, which sized the escrow-subtraction floor's
-    threshold and went with the floor (ruling **R-R93**, finding
-    **N-409**).  What is left is a public, fence-ruled name with no
-    production reader, as :func:`current_rate_baseline` beside it has
-    been since plan step X-au-g-2b; whether the two should go is a
-    decision of its own and is NOT taken here (rule 6).
-
-    The monthly P&I is the level payment of the rate period containing
-    ``as_of`` (see :func:`build_rate_periods`): held constant within the
-    period and recast only at a rate adjustment.  It is independent of
-    the running balance, so no anchor or payment feed is taken (the
-    read-switch arc's final commit dropped the old unused
-    compatibility parameters).
-
-    Args:
-        loan_params: Loan parameter object exposing the fields
-            :func:`build_rate_periods` reads (origination, principal,
-            base rate, term, ARM cadence).
-        rate_changes: Optional ARM rate-history feeding each period's
-            rate and any recorded recast P&I.  ``None`` or empty for a
-            fixed-rate loan.
-        as_of: Evaluation date; selects the governing rate period.
-
-    Returns:
-        Rounded Decimal monthly P&I, equal to
-        ``resolve_loan(...).monthly_payment`` for the same inputs.
-    """
-    return period_for_date(
-        resolve_periods(loan_params, rate_changes), as_of,
-    ).period_pi
-
-
-def current_rate_baseline(
-    loan_params,
-    rate_changes: list[RateChangeRecord] | None,
-    as_of: date,
-) -> Decimal:
-    """Return the loan's current annual interest rate -- the rate-period rate.
-
-    Single source of truth for "what rate is in effect on ``as_of``" for callers
-    that need the rate WITHOUT the full schedule generation
-    :func:`resolve_loan` runs.
-
-    **It has NO caller in ``app/`` as of plan step X-au-g-2b**, and this
-    paragraph named the one it had: the standalone amortization-schedule route,
-    whose ARM rate column fell back to this for rows carrying no per-row rate.
-    That fallback guarded a state no ``AmortizationRow`` can be in -- every
-    construction sets ``interest_rate`` from a rate period -- so the step
-    deleted the branch and the route's ``date.today()`` call with it.  What is
-    left here is a public, fence-ruled name with no production reader; whether
-    it should go is a decision on its own and is NOT taken here (rule 6).
-    Returns the same value as
-    ``resolve_loan(...).current_rate`` for the same inputs -- the governing rate
-    period's annual rate (DH-#56: the resolver-derived rate that replaced the
-    retired ``LoanParams.interest_rate`` column) -- by the same cheap rate-period
-    lookup :func:`compute_monthly_payment_baseline` uses for the payment.
-
-    Args:
-        loan_params: Loan parameter object exposing the fields
-            :func:`build_rate_periods` reads (origination, principal,
-            base rate, term, ARM cadence).
-        rate_changes: Optional ARM rate-history feeding each period's
-            rate.  ``None`` or empty for a fixed-rate loan.
-        as_of: Evaluation date; selects the governing rate period.
-
-    Returns:
-        The Decimal annual rate (a fraction, e.g. ``Decimal("0.06000")``),
-        equal to ``resolve_loan(...).current_rate`` for the same inputs.
-    """
-    return period_for_date(
-        resolve_periods(loan_params, rate_changes), as_of,
-    ).annual_rate
 
 
 def resolve_loan(

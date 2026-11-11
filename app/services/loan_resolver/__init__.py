@@ -21,8 +21,10 @@ sub-modules; the public surface is re-exported here so
   anchor selection, the :class:`ConfirmedLedgerView` seed, and the
   :class:`LoanInputs` bundle every entry point takes.
 * :mod:`._state` -- :func:`resolve_loan` (the SSOT current-state producer)
-  and :func:`compute_monthly_payment_baseline` (the cheap level-payment
-  lookup), plus :class:`LoanState`.
+  and :class:`LoanState`.  Its two cheap lookups, the level payment
+  (``compute_monthly_payment_baseline``) and the rate
+  (``current_rate_baseline``), went at plan task plan#3498 (ruling
+  plan#3496), when the last caller of either was gone.
 * :mod:`._payoff` -- :func:`compute_payoff_scenarios` (the confirmed
   history and the contract's forward) and :class:`PayoffScenarios`.
 
@@ -99,8 +101,6 @@ from ._periods import (
 )
 from ._state import (
     LoanState,
-    compute_monthly_payment_baseline,
-    current_rate_baseline,
     resolve_loan,
 )
 
@@ -109,9 +109,7 @@ __all__ = [
     "LoanInputs",
     "LoanState",
     "PayoffScenarios",
-    "compute_monthly_payment_baseline",
     "compute_payoff_scenarios",
-    "current_rate_baseline",
     "engine_terms",
     "resolve_loan",
     "resolve_periods",

@@ -149,14 +149,15 @@ def resolve_periods(loan_params, rate_changes):
 
     One construction shared by every resolver entry point
     (:func:`._state.resolve_loan`,
-    :func:`._state.compute_monthly_payment_baseline`,
     :func:`._payoff.compute_payoff_scenarios`) so the period set they read
     cannot drift apart.  Re-exported from the package so the out-of-package
     Build-Order Step 4 split walk
     (:func:`app.services.loan_ledger.compute_loan_payment_splits`) reads the
     identical period set -- its accrued-interest rate per payment is sampled
     from these very periods, so a posted loan-payment split can never disagree
-    with the resolver's replayed balance on the rate in effect.
+    with the resolver's contract line on the rate in effect.  *It was the
+    resolver's replayed balance until plan step recurrence:R16-e deleted the
+    replay.*
 
     Args:
         loan_params: The loan's :class:`LoanParams`-shaped object.

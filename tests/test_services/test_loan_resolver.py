@@ -30,7 +30,6 @@ from app.services.loan_resolver import (
     ConfirmedLedgerView,
     LoanInputs,
     compute_payoff_scenarios,
-    current_rate_baseline,
     resolve_loan,
 )
 from app.utils.dates import add_months
@@ -269,38 +268,6 @@ def test_current_rate_is_rate_at_today_not_a_stored_scalar():
         LoanInputs(params, [anchor], feed), date(2031, 6, 1),
     )
     assert after_reset.current_rate == Decimal("0.07")
-
-
-def test_current_rate_baseline_equals_the_resolved_current_rate():
-    """``current_rate_baseline`` == ``resolve_loan(...).current_rate`` (plan C4).
-
-    The standalone schedule route reads the loan's current rate off this cheap
-    rate-period accessor rather than a full resolve (so it does not derive its
-    schedule twice).  It must return exactly the same rate the resolver would --
-    the governing rate period's annual rate -- BOTH inside an ARM's fixed-rate
-    window (the 6% origination rate) and after its first reset (the recorded 7%),
-    where a single stored scalar could not be both.  A regression that re-sourced
-    the rate from anything but the per-date rate-period series fails one clause.
-    """
-    params = _arm_400k_params()  # 2026-01-01, 6%, 5/5 ARM
-    reset = RateChangeRecord(
-        effective_date=date(2031, 1, 1),  # month 60: the first ARM reset
-        interest_rate=Decimal("0.07"),
-        monthly_pi=None,
-    )
-    feed = _rate_feed(params, [reset])
-    anchor = _origination_anchor(params)
-
-    for as_of, expected in [
-        (date(2027, 1, 1), Decimal("0.06")),   # inside the fixed-rate window
-        (date(2031, 6, 1), Decimal("0.07")),   # after the reset
-    ]:
-        baseline = current_rate_baseline(params, feed, as_of)
-        resolved = resolve_loan(
-            LoanInputs(params, [anchor], feed), as_of,
-        ).current_rate
-        assert baseline == expected
-        assert baseline == resolved
 
 
 # -- C13-7 -- rate change after window applied ------------------------------

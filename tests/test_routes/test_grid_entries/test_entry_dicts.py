@@ -217,8 +217,8 @@ class TestBuildEntryListsDict:
 
         **The control that tells the warning's two failure directions apart**
         (adversarial review of plan step C4-a-3).  Before it, the whole app had
-        ONE assertion about this set -- ``test_entries.py``'s "Date outside pay
-        period range" presence check -- and both mutations of the predicate
+        ONE assertion about this set -- ``test_entries/test_list_and_create.py``'s
+        "Date outside pay period range" presence check -- and both mutations of the predicate
         killed that same test, because its fixture held a single purchase and
         that purchase was the out-of-period one.  Identical singleton fail sets
         are not two controls; a set that is merely NON-EMPTY, or merely a

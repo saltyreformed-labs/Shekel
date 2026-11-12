@@ -71,8 +71,8 @@ class TestTheEntryListContextHasOneProducer:
 
     **These are the controls the bug had none of.**  Every test of the
     posted-purchase indicator drove ``GET /transactions/<id>/entries``
-    (``test_entries.py::TestTheDerivedPostedIndicator``) -- the ONE render
-    path that supplied its key.  The grid macro, the mobile card,
+    (``test_entries/test_update_and_delete.py::TestTheDerivedPostedIndicator``)
+    -- the ONE render path that supplied its key.  The grid macro, the mobile card,
     the companion view and the full-edit popover all render the same partial
     from :func:`build_entry_lists_dict`, which did not, and Jinja answers
     ``entry.id in Undefined`` as ``False`` silently.  So on every initial

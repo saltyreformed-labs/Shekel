@@ -356,8 +356,9 @@ class TestAReSubmittedDayDoesNotRestateItsBASIS:
     becomes the owner's own typing, with the day unchanged so nothing releases
     the clearing link and nothing tells anyone.
 
-    The entry PATCH has its own controls (``test_entries.py``) and it is where
-    the cost was measured -- **59 of 66 linked purchases, `$4,173.07`** on
+    The entry PATCH has its own controls
+    (``test_entries/test_update_and_delete.py::TestAnUntouchedSaveDoesNotLaunderTheDaysBASIS``)
+    and it is where the cost was measured -- **59 of 66 linked purchases, `$4,173.07`** on
     production.  These are the two doors that share the rule through
     ``status_seam.settle_day_for_status``: the transaction PATCH here, and the
     SHADOW branch below, which grades the transfer PATCH's copy of it.

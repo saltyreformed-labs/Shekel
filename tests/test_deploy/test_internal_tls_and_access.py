@@ -46,8 +46,9 @@ from pathlib import Path
 import pytest
 import yaml
 
+from tests._repo_root import REPO_ROOT
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
+
 DEPLOY_DIR = REPO_ROOT / "deploy"
 
 CLOUDFLARED_CONFIG = REPO_ROOT / "cloudflared" / "config.yml"

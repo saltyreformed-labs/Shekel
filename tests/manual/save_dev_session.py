@@ -10,6 +10,12 @@ gateway) to perform the login, then writes Playwright's
 ``storage_state`` -- cookies + localStorage -- to
 ``tests/manual/.dev_session_state.json``.
 
+Every account signs in with its password and then a two-factor code
+(plan#3452).  The dev copy's account has the dev key as its two-factor,
+written by ``tools/dev_two_factor.py``, and this script types that key's
+current code at ``/mfa/verify`` (``SHEKEL_DEV_TOTP_SECRET``, that module's
+docstring).
+
 Subsequent verification scripts launch Playwright with
 ``storage_state=<that file>`` and skip the login flow entirely.  The
 file is gitignored (see .gitignore "Manual verification harness").
@@ -30,11 +36,23 @@ from __future__ import annotations
 import getpass
 import pathlib
 import sys
+from urllib.parse import urlsplit
 
 from playwright.sync_api import TimeoutError as PlaywrightTimeout, sync_playwright
 
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
+# Python puts the SCRIPT's own directory on ``sys.path``, not the working
+# directory, so the repository root is added explicitly -- the same line every
+# harness in this directory carries.
+sys.path.insert(0, str(REPO_ROOT))
+
+# Pylint: ``wrong-import-position`` -- this import must FOLLOW the ``sys.path``
+# line above, which is what makes this checkout's ``tools`` the one imported.
+# pylint: disable=wrong-import-position
+from tools.dev_two_factor import type_dev_code  # noqa: E402
+# pylint: enable=wrong-import-position
+
 STATE_FILE = REPO_ROOT / "tests" / "manual" / ".dev_session_state.json"
 DEV_BASE_URL = "http://172.32.0.1:5000"
 DEFAULT_EMAIL = "josh@saltyreformed.com"
@@ -57,19 +75,26 @@ def main() -> int:
         page.fill('input[name="email"]', email)
         page.fill('input[name="password"]', password)
         page.click('button[type="submit"]')
-        # Successful login redirects to /grid (or / -> /grid).  Wait
-        # until the response settles to a non-login URL.
+        # The password sends the browser to the code form, where the dev
+        # key's code is typed; a finished sign-in redirects to /grid (or
+        # / -> /grid).  Wait until each settles past its form.
         try:
             page.wait_for_url(
-                lambda url: "/login" not in url,
+                lambda url: urlsplit(url).path != "/login",
                 timeout=10000,
             )
+            if urlsplit(page.url).path == "/mfa/verify":
+                type_dev_code(page)
+                page.wait_for_url(
+                    lambda url: urlsplit(url).path != "/mfa/verify",
+                    timeout=10000,
+                )
         except PlaywrightTimeout:
             # Re-read the page to see what came back.  Capture the
             # body so the operator can diagnose (often an MFA prompt
             # or a validation error).
             print(
-                "Login did not redirect away from /login.  "
+                f"Login did not get past {urlsplit(page.url).path}.  "
                 "Inspect the response below:",
                 file=sys.stderr,
             )
@@ -82,13 +107,13 @@ def main() -> int:
         # script will need.
         page.goto(f"{DEV_BASE_URL}/grid", wait_until="domcontentloaded")
         assert page.url.endswith("/grid"), (
-            f"Expected to land on /grid, got {page.url}.  If the login "
-            "went to /mfa/verify, the account has MFA and this script "
-            "does not answer it; on a PRODUCTION CLONE under the dev "
-            "checkout's TOTP key the secret cannot be decrypted either, "
-            "so remove MFA from the clone's copy of the user first: "
-            "DELETE FROM auth.mfa_configs WHERE user_id = <id> "
-            "(the clone only, never the shared or production database)."
+            f"Expected to land on /grid, got {page.url}.  At /mfa/verify "
+            "the code was refused: a sign-in in the same 30 seconds used "
+            "it already (retry after them), or the copy's account does not "
+            "have the dev key, as a PRODUCTION CLONE's does not (its secret "
+            "is under production's TOTP key).  At /mfa/setup the account "
+            "has no two-factor.  Either way, write the dev key onto the "
+            f"copy's account: python -m tools.dev_two_factor {email}"
         )
 
         STATE_FILE.parent.mkdir(parents=True, exist_ok=True)

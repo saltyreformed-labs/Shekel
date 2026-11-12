@@ -5,6 +5,12 @@
 # sanity check queries and the Python integrity check script, then
 # dropping the temporary database.
 #
+# The copy is made, restored into and owned by the database owner,
+# shekel_owner, over the database container's own socket, which needs no
+# password; the integrity check then runs in the stack's migrate service,
+# whose entrypoint connects as the owner, pointed at the copy (ruling
+# plan#3607).  No password leaves any container.
+#
 # The production database is never touched.
 #
 # Usage:
@@ -29,13 +35,22 @@ source "$(dirname "${BASH_SOURCE[0]}")/_backup_lib.sh"
 # ── Configuration ────────────────────────────────────────────────
 
 DB_CONTAINER="${DB_CONTAINER:-shekel-prod-db}"
-APP_CONTAINER="${APP_CONTAINER:-shekel-prod-app}"
 PGUSER="${PGUSER:-shekel_user}"
 PGDATABASE="${PGDATABASE:-shekel}"
 # Per-run suffix so two overlapping verification runs cannot drop each
 # other's temp database mid-restore (OPS/SH-27).
 VERIFY_DB="${VERIFY_DB:-shekel_verify_$$}"
 BACKUP_ENCRYPTION_PASSPHRASE="${BACKUP_ENCRYPTION_PASSPHRASE:-}"
+
+# The database owner login (deploy/postgres/provision_roles.sh), which
+# makes, fills and owns the copy, and the stack's service that connects as
+# it (scripts/owner_entrypoint.sh).
+OWNER_ROLE="shekel_owner"
+MIGRATE_SERVICE="migrate"
+
+# The docker compose command, without its subcommand, that made the
+# database container, read from its labels by check_prerequisites.
+DB_COMPOSE=()
 
 # ── Functions ────────────────────────────────────────────────────
 
@@ -47,10 +62,11 @@ Verify a Shekel backup by restoring to a temporary database and running
 sanity checks.
 
 This will:
-    1. Create a temporary database (${VERIFY_DB})
-    2. Restore the backup into it
+    1. Create a temporary database (${VERIFY_DB}), owned by ${OWNER_ROLE}
+    2. Restore the backup into it as ${OWNER_ROLE}
     3. Run sanity check queries (row counts, user check, date ranges)
-    4. Run the integrity check script
+    4. Run the integrity check script in the stack's ${MIGRATE_SERVICE}
+       service, as ${OWNER_ROLE}, against the copy
     5. Drop the temporary database
 
 The production database is never touched.
@@ -62,9 +78,12 @@ Options:
     --help          Show this help message
 
 Environment Variables:
-    DB_CONTAINER                  Docker container name for PostgreSQL
-    APP_CONTAINER                 Docker container name for the app
-    PGUSER                        PostgreSQL user
+    DB_CONTAINER                  Docker container name for PostgreSQL; its
+                                  compose labels name the stack whose
+                                  ${MIGRATE_SERVICE} service runs the check
+    PGUSER                        PostgreSQL superuser, over the database
+                                  container's socket: makes and drops the
+                                  copy, and reads the sanity checks
     PGDATABASE                    Production database name (for reference)
     VERIFY_DB                     Temporary database name for verification
     BACKUP_ENCRYPTION_PASSPHRASE  GPG passphrase (required for .gpg files)
@@ -79,42 +98,16 @@ cleanup() {
         "DROP DATABASE IF EXISTS ${VERIFY_DB};" 2>/dev/null || true
 }
 
-get_db_password() {
-    # Resolve POSTGRES_PASSWORD from the running DB container.
-    #
-    # Refuses to fall back to the historical public default
-    # ``shekel_pass`` -- audit finding F-109 / Commit C-38 follow-up
-    # Issue 3.  An empty or unreadable POSTGRES_PASSWORD is a
-    # misconfiguration that must surface as a hard failure here
-    # rather than silently constructing a leaked-credential URL for
-    # the integrity-check subprocess.
-    #
-    # check_prerequisites() has already verified that the DB
-    # container is running, so the only realistic failure modes for
-    # this function are: (a) the container was started without
-    # POSTGRES_PASSWORD in its env, (b) the env channel was scrubbed
-    # mid-run, or (c) the container died between the prerequisite
-    # check and this call.  All three are operator-actionable and
-    # are reported with the same diagnostic.
-    #
-    # Logs go to stderr so the function's stdout (which the caller
-    # captures via command substitution) carries the password and
-    # only the password.
-    local password
-    password=$(docker exec "${DB_CONTAINER}" printenv POSTGRES_PASSWORD 2>/dev/null) \
-        || password=""
-    if [[ -z "${password}" ]]; then
-        log "ERROR" "POSTGRES_PASSWORD is not discoverable from container '${DB_CONTAINER}'." >&2
-        log "ERROR" "Ensure the container is running and the env channel populates POSTGRES_PASSWORD." >&2
-        log "ERROR" "Refusing to fall back to the historical public default (audit F-109 / Commit C-38)." >&2
-        return 1
-    fi
-    printf '%s' "${password}"
-}
-
 check_prerequisites() {
     # shellcheck disable=SC2310 # require_db_container is a boolean predicate; the trailing '|| exit 1' propagates its failure explicitly, so masked errexit inside it is irrelevant
     require_db_container "${DB_CONTAINER}" || exit 1
+
+    # The integrity check runs in the migrate service of the stack the
+    # database container belongs to, read from its own labels, so the
+    # check and the copy are always in one stack.
+    # shellcheck disable=SC2310 # compose_project_of returns explicit codes (the backup library's errexit discipline); the trailing '|| exit 1' is the intended abort on failure
+    compose_project_of "Database container" "${DB_CONTAINER}" || exit 1
+    DB_COMPOSE=("${COMPOSE_COMMAND[@]}")
 }
 
 create_temp_database() {
@@ -124,12 +117,17 @@ create_temp_database() {
     docker exec "${DB_CONTAINER}" psql -U "${PGUSER}" -d postgres --quiet -c \
         "DROP DATABASE IF EXISTS ${VERIFY_DB};" 2>/dev/null || true
 
+    # The owner's, and so its schemas and every object the restore makes:
+    # the owner then reads the whole copy with no grant (ruling plan#3607).
     docker exec "${DB_CONTAINER}" psql -U "${PGUSER}" -d postgres --quiet -c \
-        "CREATE DATABASE ${VERIFY_DB} OWNER ${PGUSER};"
+        "CREATE DATABASE ${VERIFY_DB} OWNER ${OWNER_ROLE};"
 
-    # Create schemas (shared SHEKEL_APP_SCHEMAS list -- OPS/SH-06).
+    # Create schemas (shared SHEKEL_APP_SCHEMAS list -- OPS/SH-06), as the
+    # owner over the database container's socket, which asks no password
+    # (local trust: production's pg_hba.conf and the pinned image's, both
+    # read 2026-11-12).
     # shellcheck disable=SC2312 # shekel_create_schema_sql only printf's over a static array and cannot fail; its return value carries no signal worth propagating
-    docker exec "${DB_CONTAINER}" psql -U "${PGUSER}" -d "${VERIFY_DB}" --quiet -c \
+    docker exec "${DB_CONTAINER}" psql -U "${OWNER_ROLE}" -d "${VERIFY_DB}" --quiet -c \
         "$(shekel_create_schema_sql)"
 
     log "INFO" "Temporary database created"
@@ -137,12 +135,12 @@ create_temp_database() {
 
 restore_to_temp() {
     local backup_file="$1"
-    log "INFO" "Restoring backup to temporary database..."
+    log "INFO" "Restoring backup to temporary database as ${OWNER_ROLE}..."
 
     # shellcheck disable=SC2310 # require_passphrase_for is a boolean predicate; the trailing '|| return 1' propagates its failure explicitly, so masked errexit inside it is irrelevant
     require_passphrase_for "${backup_file}" "${BACKUP_ENCRYPTION_PASSPHRASE}" || return 1
     backup_stream "${backup_file}" \
-        | docker exec -i "${DB_CONTAINER}" psql -U "${PGUSER}" -d "${VERIFY_DB}" \
+        | docker exec -i "${DB_CONTAINER}" psql -U "${OWNER_ROLE}" -d "${VERIFY_DB}" \
             --quiet --single-transaction --set ON_ERROR_STOP=1 --output /dev/null
 
     log "INFO" "Restore to temporary database complete"
@@ -245,39 +243,15 @@ run_integrity_checks() {
 
     local exit_code=0
 
-    # Resolve POSTGRES_PASSWORD once, up front, with EXPLICIT failure
-    # propagation: this function is invoked as `run_integrity_checks ||
-    # integrity_code=$?`, and bash disables errexit inside a function
-    # called in a || context -- so the previous comment's claim that
-    # "set -e propagates" was false and the F-109 hard-fail never fired;
-    # the script proceeded with an empty password (OPS/SH-07, verified
-    # during the audit). `|| return 1` does not depend on errexit.
-    local db_password
-    # shellcheck disable=SC2310 # get_db_password's own '|| return 1' already makes its failure explicit; the trailing '|| return 1' here propagates it, so masked errexit inside the function is irrelevant
-    db_password=$(get_db_password) || return 1
-
-    # Determine how to run the integrity check script.
-    # If the app container exists, run inside it. Otherwise, run locally.
-    if docker inspect "${APP_CONTAINER}" &>/dev/null; then
-        # Production: run inside the app container with overridden
-        # DATABASE_URL, delivered via --env-file on a 0600 temp file so the
-        # credential never enters the docker CLI argv, where it would be
-        # world-readable via /proc/<pid>/cmdline for the duration of the
-        # integrity run (OPS/SH-08 -- the same channel the F-022 scrub and
-        # the docker-secrets migration exist to close).
-        local env_file
-        env_file=$(umask 077 && mktemp)
-        printf 'DATABASE_URL=postgresql://%s:%s@db:5432/%s\n' \
-            "${PGUSER}" "${db_password}" "${VERIFY_DB}" >"${env_file}"
-        docker exec --env-file "${env_file}" \
-            "${APP_CONTAINER}" python scripts/integrity_check.py --verbose || exit_code=$?
-        rm -f "${env_file}"
-    else
-        # Development: run locally with the verify database URL.
-        # The DB is exposed on localhost via docker-compose.dev.yml port mapping.
-        local verify_url="postgresql://${PGUSER}:${db_password}@localhost:5432/${VERIFY_DB}"
-        DATABASE_URL="${verify_url}" python scripts/integrity_check.py --verbose || exit_code=$?
-    fi
+    # In the migrate service, as the owner: its entrypoint loads the
+    # owner's password inside that container and builds the owner's URL to
+    # DB_NAME, here the copy, so no password leaves any container (ruling
+    # plan#3607).  --no-deps: the database is already up.  --pull never:
+    # the check runs the image the stack runs, never a newer one a moving
+    # tag names.  The script's exit code is the check's.
+    "${DB_COMPOSE[@]}" run --rm --no-deps --pull never \
+        --env "DB_NAME=${VERIFY_DB}" "${MIGRATE_SERVICE}" \
+        python scripts/integrity_check.py --verbose || exit_code=$?
 
     if [[ ${exit_code} -eq 0 ]]; then
         log "INFO" "Integrity checks: ALL PASSED"

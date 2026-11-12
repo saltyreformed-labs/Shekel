@@ -87,8 +87,10 @@ rm /tmp/shekel_backup_20260315_020000.sql.gz
 ./scripts/verify_backup.sh $(ls -t /var/backups/shekel/shekel_backup_*.sql.gz* | head -1)
 ```
 
-This restores the backup to a temporary database (`shekel_verify`), runs sanity queries and
-integrity checks, then drops the temporary database. The production database is never touched.
+This restores the backup to a temporary database (`shekel_verify_<pid>`), owned and restored by the
+owner login, `shekel_owner`, runs sanity queries, runs the integrity check in the stack's migrate
+service as the owner against the copy, then drops the temporary database. The production database is
+never touched, and no password leaves any container.
 
 ### 3.5 Retention Policy
 

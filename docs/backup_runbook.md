@@ -252,9 +252,12 @@ rm /tmp/shekel_backup_20260315_020000.sql.gz
 
 ## 7. Backup Verification
 
-The verification script restores a backup to a temporary database (`shekel_verify`), runs sanity
-queries and integrity checks, then drops the temporary database. The production database is never
-touched.
+The verification script restores a backup to a temporary database (`shekel_verify_<pid>`, a name per
+run), runs sanity queries and integrity checks, then drops the temporary database. The production
+database is never touched, and no password leaves any container: the copy is made, restored into and
+owned by the owner login, `shekel_owner`, over the database container's own socket, and the
+integrity check runs in the migrate service of the stack the database container belongs to, read
+from its compose labels, as the owner, pointed at the copy.
 
 ```bash
 # Verify the most recent backup.
@@ -273,7 +276,8 @@ touched.
 - `system.audit_log` table exists
 - `public.alembic_version` has a value
 
-**Integrity checks** (via `integrity_check.py`):
+**Integrity checks** (via `integrity_check.py`, run as
+`docker compose run --rm --no-deps --pull never --env DB_NAME=<copy> migrate`):
 
 - 15 referential integrity checks (FK violations)
 - 5 orphan detection checks
@@ -352,7 +356,7 @@ DATABASE_URL=postgresql://shekel_user:shekel_pass@localhost:5432/shekel \
 | "Encrypted backup but no passphrase" | `BACKUP_ENCRYPTION_PASSPHRASE` not set | `export BACKUP_ENCRYPTION_PASSPHRASE="..."` |
 | "Restore failed: permission denied" | `PGUSER` lacks CREATEDB privilege | Run: `docker exec shekel-prod-db psql -U postgres -c "ALTER USER shekel_user CREATEDB;"` |
 | "Integrity CRITICAL failures after restore" | Corrupt or partial backup | Try restoring from an older backup |
-| "verify_backup.sh: shekel_verify not cleaned up" | Previous run crashed before trap | Script auto-cleans on next run; or manually: `docker exec shekel-prod-db psql -U shekel_user -d postgres -c "DROP DATABASE IF EXISTS shekel_verify;"` |
+| "verify_backup.sh: a `shekel_verify_<pid>` database left behind" | A run killed before its exit trap dropped its copy (each run names its own, so the next run does not drop it) | List them: `docker exec shekel-prod-db psql -U shekel_user -d postgres -c '\l shekel_verify_*'`, then drop each: `docker exec shekel-prod-db psql -U shekel_user -d postgres -c "DROP DATABASE shekel_verify_<pid>;"` |
 
 ### Log Files
 
@@ -372,10 +376,10 @@ DATABASE_URL=postgresql://shekel_user:shekel_pass@localhost:5432/shekel \
 | `BACKUP_NAS_DIR` | `/mnt/nas/backups/shekel` | backup.sh, retention.sh | NAS backup storage directory |
 | `BACKUP_ENCRYPTION_PASSPHRASE` | *(none)* | backup.sh, restore.sh, verify.sh | GPG encryption passphrase (optional) |
 | `DB_CONTAINER` | `shekel-prod-db` | backup.sh, restore.sh, verify_backup.sh | PostgreSQL Docker container name. No other script reads this name: `deploy/shekel-deploy.sh` reads `SHEKEL_DB_CONTAINER`, and `scripts/test.sh` takes no container name, naming its own throwaway cluster. Pointing it at a non-production container is still the documented purpose of the override -- what it can no longer do is reach the deploy pipeline or the test runner |
-| `APP_CONTAINER` | `shekel-prod-app` | restore.sh, verify.sh | Application Docker container name. restore.sh starts it again with the compose project, directory, files and service the container's own labels name, so no setting names the stack |
+| `APP_CONTAINER` | `shekel-prod-app` | restore.sh | Application Docker container name. restore.sh starts it again with the compose project, directory, files and service the container's own labels name, so no setting names the stack |
 | `PGUSER` | `shekel_user` | all scripts | PostgreSQL user |
 | `PGDATABASE` | `shekel` | all scripts | PostgreSQL database name |
-| `VERIFY_DB` | `shekel_verify` | verify.sh | Temporary database name for verification |
+| `VERIFY_DB` | `shekel_verify_<pid>` | verify.sh | Temporary database name for verification; the default holds the run's process id, so two runs never share one |
 | `RETENTION_DAILY_DAYS` | `7` | retention.sh | Days to keep daily backups |
 | `RETENTION_WEEKLY_WEEKS` | `4` | retention.sh | Weeks to keep Sunday backups |
 | `RETENTION_MONTHLY_MONTHS` | `6` | retention.sh | Months to keep 1st-of-month backups |

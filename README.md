@@ -115,9 +115,9 @@ grid) to calibrate projections against your real checking account balance.
 ### Updating
 
 These steps update the bundled install the Quick Start makes. Shared mode updates by
-[`deploy/README.md`](deploy/README.md), with the host steps a release needs in `docs/runbook.md`
-2.6. A release changes the image and the configuration files together, so an update takes both. From
-your `shekel` directory:
+[`deploy/README.md`](deploy/README.md), with the host steps a release needs in
+`docs/runbook/2_deployment.md` 2.6. A release changes the image and the configuration files
+together, so an update takes both. From your `shekel` directory:
 
 1. Run the block of [step 2](#2-download-configuration-files) that pulls the image and downloads the
    files again.

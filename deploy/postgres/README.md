@@ -85,7 +85,8 @@ cert rotation: the db restart closes the app's pooled connections, and `ProdConf
 `pool_pre_ping` tests each one at checkout and replaces a closed one, so the first request after the
 restart reconnects under the new cert.
 
-See `docs/runbook.md` §4.13 for the full rotation procedure including the failure-mode walkthrough.
+See `docs/runbook/4_security_operations.md` §4.13 for the full rotation procedure including the
+failure-mode walkthrough.
 
 ## Why a self-signed cert
 
@@ -100,7 +101,7 @@ every client.
 
 ## See Also
 
-- `docs/runbook.md` §4.13 -- Postgres TLS cert rotation.
+- `docs/runbook/4_security_operations.md` §4.13 -- Postgres TLS cert rotation.
 - `scripts/generate_pg_cert.sh` -- the canonical generator + verifier.
 - `deploy/docker-compose.prod.yml` -- the bind-mount declarations and the matching `ssl_cert_file` /
   `ssl_key_file` postgres flags.

@@ -30,7 +30,7 @@ from fido2.webauthn import (
     PublicKeyCredentialType,
     UserVerificationRequirement,
 )
-from sqlalchemy import select
+from sqlalchemy import ColumnElement, select
 
 from app.extensions import db
 from app.models.passkey import Passkey
@@ -190,18 +190,24 @@ def refuse_unless_named(
     return state
 
 
-def expired(issued_at: datetime, moment: datetime) -> bool:
+def expired(
+    issued_at: datetime | ColumnElement[datetime], moment: datetime,
+) -> bool | ColumnElement[bool]:
     """Return whether a challenge issued at *issued_at* is dead at *moment*.
 
     The one statement of the challenge's lifetime: it is dead at exactly
-    :data:`CHALLENGE_LIFETIME`.
+    :data:`CHALLENGE_LIFETIME`.  Given the column a table holds the moment
+    in, the same comparison is SQL (SQLAlchemy's operators), so the clean-up
+    of dead adds (:mod:`._adding`) deletes by the rule every completion
+    refuses by, one statement of it and not two (CLAUDE.md rule 14).
 
     Args:
-        issued_at: When the challenge was issued.
-        moment: The completion's moment.
+        issued_at: When the challenge was issued, or the column holding it.
+        moment: The moment to judge at.
 
     Returns:
-        True once it is :data:`CHALLENGE_LIFETIME` old or older.
+        True once it is :data:`CHALLENGE_LIFETIME` old or older; given a
+        column, that test as a boolean clause.
     """
     return moment >= issued_at + CHALLENGE_LIFETIME
 

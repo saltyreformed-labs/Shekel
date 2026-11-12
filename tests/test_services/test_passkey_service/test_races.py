@@ -1,4 +1,4 @@
-"""Two acts at once: one answer completed twice, the cap counted past a held account, an add replaced.
+"""Two acts at once: an answer completed twice, the cap past a held account, an add replaced.
 
 The owner's lock serialises an account's requests, but a companion whose
 owner is gone has none to take, so the decisions that must not race take
@@ -8,6 +8,10 @@ act in a thread with its own session, and commits the first once the second
 waits on it (:func:`tests._lock_waits.act_past_a_held_row`).  A second act
 that took no lock would not wait at its read, and would decide on the row as
 it stood before the first committed.
+
+The last case is the converse: a dead add another transaction holds is
+skipped by the clean-up of an add begun, never waited on (ruling plan#3578),
+which a lock timeout grades.
 """
 
 import json
@@ -21,6 +25,7 @@ from app.services import passkey_service
 from app.services.passkey_service import PasskeyRefusal, PasskeyRefused
 from tests._lock_waits import act_past_a_held_row
 from tests._passkeys import ADDED_AT, ORIGIN, T0, Clock, SoftwareAuthenticator, add
+from tests.test_services.test_passkey_service._helpers import add_row
 
 
 def test_one_answer_completed_twice_at_once_signs_in_once(app, bare_user, monkeypatch):
@@ -285,3 +290,35 @@ def test_a_keeping_holds_up_no_row_that_names_the_account(bare_user, monkeypatch
     finally:
         other.close()
         db.session.rollback()
+
+
+def test_an_add_begun_skips_a_dead_add_another_transaction_holds(
+    bare_user, second_user, monkeypatch,
+):
+    """Another account's dead add, its row held mid-transaction, is left for a later add.
+
+    The holder stands for a completion of that add in flight, which reads its
+    row ``FOR UPDATE`` (ruling plan#3578's clean-up skips such a row rather
+    than waiting on it, so two adds' clean-ups never wait on each other).
+    The add begun meanwhile runs under a two-second lock timeout: were the
+    clean-up to wait on the held row, it would meet the timeout and raise.
+    """
+    clock = Clock(monkeypatch)
+    user, other = bare_user["user"], second_user["user"]
+    _, theirs = passkey_service.registration_options(other, origin=ORIGIN)
+    db.session.commit()
+    clock.at(T0 + timedelta(minutes=5))
+    holder = db.engine.connect()
+    try:
+        holder.execute(
+            text("SELECT id FROM auth.passkey_adds WHERE id = :id FOR UPDATE"),
+            {"id": theirs["add"]},
+        )
+        db.session.execute(text("SET LOCAL lock_timeout = '2s'"))
+        _, mine = passkey_service.registration_options(user, origin=ORIGIN)
+        db.session.commit()
+    finally:
+        holder.rollback()
+        holder.close()
+    assert add_row(other).id == theirs["add"]
+    assert add_row(user).id == mine["add"]

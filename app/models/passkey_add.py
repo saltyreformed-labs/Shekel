@@ -29,9 +29,9 @@ across as they are.
 transaction that keeps the passkey, so its answer and state replayed later,
 even after that passkey is removed, keep nothing.  A row whose challenge is
 five minutes old is refused, and deleted, when a completion reads it.  One
-never read again, an add abandoned, can complete nothing either, and stays
-until the account's next add replaces it or the account is deleted: one row
-per account at most.
+never read again, an add abandoned, can complete nothing either, and is
+deleted by the next add any account begins (ruling plan#3578), its own
+account's replacing it, or with its account: one row per account at most.
 
 **Nothing here is secret.**  A challenge is sent to the browser in the clear,
 and a public key and credential id sign nobody in without the private key,

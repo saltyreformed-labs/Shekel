@@ -35,7 +35,9 @@ registration's moves the row on to the sign-in, and the keeping deletes the
 row in the transaction of the ``INSERT`` that keeps the passkey.  So an add's
 answer and state replayed later keep nothing, even once that passkey is
 removed.  A row whose challenge is :data:`._ceremony.CHALLENGE_LIFETIME` old
-is refused and deleted when a completion reads it.
+is refused and deleted when a completion reads it, and every account's dead
+row is deleted by the next add any account begins (:func:`_delete_dead_adds`,
+ruling plan#3578), so a dead add lasts only until anyone's next add.
 
 **The key is trimmed** (ruling plan#3543) before it is held or kept
 (:func:`_kept_key`): re-encoded with its key type, its algorithm and that key
@@ -74,7 +76,7 @@ from fido2.webauthn import (
     ResidentKeyRequirement,
     UserVerificationRequirement,
 )
-from sqlalchemy import exists, func, select
+from sqlalchemy import delete, exists, func, select
 from sqlalchemy.dialects.postgresql import insert
 
 from app.exceptions import ValidationError
@@ -190,6 +192,44 @@ def _begin_add(user_id: int, challenge: bytes, moment: datetime) -> int:
     ).scalar_one()
 
 
+def _delete_dead_adds(moment: datetime) -> None:
+    """Delete every account's add whose challenge is dead at *moment* (ruling plan#3578).
+
+    In the same write as the add begun, as the strangers' guess records
+    clean up after themselves
+    (:func:`app.services.guess_record_service._delete_quiet_records`), so a
+    dead add lasts only until anyone's next add.  Dead by the one statement
+    of the lifetime every completion refuses by (:func:`._ceremony.expired`),
+    counted from the challenge of the act in flight: an add whose
+    registration has completed is dead five minutes after that, when its
+    keeping would refuse it too.  So no add alive at *moment* is deleted, and
+    the add just begun, issued at *moment*, is never among them.  A
+    completion reads its clock before it reads its row, so one that read it
+    just before the add died and reaches the row after this clean-up finds
+    it gone and is refused as expired, as it would be a moment later.  The
+    audit trail keeps each row deleted.
+
+    Rows another transaction holds are skipped rather than waited for, and
+    left for a later add: the holder is a completion of the add (perhaps one
+    refused, as a completion locks the row before it asks whose it is), a
+    newer add of its account, or a deletion, and two adds' clean-ups never
+    wait on each other.
+
+    Args:
+        moment: The moment of the add begun.
+    """
+    dead = (
+        select(PasskeyAdd.id)
+        .where(_ceremony.expired(PasskeyAdd.issued_at, moment))
+        .with_for_update(skip_locked=True)
+    )
+    db.session.execute(
+        delete(PasskeyAdd)
+        .where(PasskeyAdd.id.in_(dead))
+        .execution_options(synchronize_session="fetch")
+    )
+
+
 def _add_in_flight(
     user: User, state: Mapping[str, str | int] | None,
     ceremony: Ceremony, moment: datetime,
@@ -201,8 +241,9 @@ def _add_in_flight(
     one act, or a newer add replacing the row, waits until the first's
     transaction ends, and then reads what it left.  The refusals keep
     plan#3533's order, the add's age before its account; an expired row is
-    deleted only when it is the account's own, so a request never deletes
-    another account's row.
+    deleted only when it is the account's own, so a completion never deletes
+    another account's add (an add begun deletes every dead one,
+    :func:`_delete_dead_adds`).
 
     Args:
         user: The signed-in account completing it.
@@ -448,8 +489,9 @@ def registration_options(
     passkey the account holds is excluded, so a device that holds one says so.
     The cap is counted under the account's row lock
     (:func:`_lock_the_account`), and the add is written to the account's row
-    (:func:`_begin_add`), replacing any older add in flight, so a write: the
-    route's request is a command.
+    (:func:`_begin_add`), replacing any older add in flight, and every
+    account's dead add is deleted (:func:`_delete_dead_adds`), so a write:
+    the route's request is a command.
 
     Args:
         user: The signed-in account adding a passkey.
@@ -478,6 +520,7 @@ def registration_options(
         user_verification=UserVerificationRequirement.REQUIRED,
     )
     add_id = _begin_add(user.id, websafe_decode(begun["challenge"]), moment)
+    _delete_dead_adds(moment)
     return dict(options), _ceremony.make_state(
         Ceremony.REGISTRATION, **{_STATE_ADD: add_id},
     )

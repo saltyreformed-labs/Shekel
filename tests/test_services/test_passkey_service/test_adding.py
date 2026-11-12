@@ -1,4 +1,4 @@
-"""Adding a passkey: the options the device is asked with, and every refusal of its registration.
+"""Adding a passkey: its options, every refusal of its registration, the dead adds it deletes.
 
 The registration's completion keeps nothing (ruling plan#3525): it ends by
 asking the device to sign in with the new passkey, and only that sign-in
@@ -272,6 +272,61 @@ class TestTheAddInFlight:
         refusal = _refusal(user, SoftwareAuthenticator().create(options), state=state)
         assert refusal.refusal is PasskeyRefusal.EXPIRED
         assert add_row(other).id == state["add"]
+
+
+class TestTheCleanUp:
+    """Ruling plan#3578: every add begun deletes every account's dead add, in the same write."""
+
+    def test_another_accounts_dead_add_is_deleted_by_an_add_begun(
+        self, user, second_user, clock,
+    ):
+        """Abandoned at T0 and dead at T0 + 5 minutes, when this account begins an add."""
+        other = second_user["user"]
+        passkey_service.registration_options(other, origin=ORIGIN)
+        clock.at(T0 + timedelta(minutes=5))
+        _, mine = passkey_service.registration_options(user, origin=ORIGIN)
+        assert add_row(other) is None
+        assert add_row(user).id == mine["add"]
+
+    def test_every_other_accounts_dead_add_is_deleted_at_once(
+        self, user, second_user, seed_user, clock,
+    ):
+        """Two accounts' adds abandoned, both dead when a third begins one: both are gone."""
+        others = (second_user["user"], seed_user["user"])
+        for other in others:
+            passkey_service.registration_options(other, origin=ORIGIN)
+        clock.at(T0 + timedelta(minutes=5))
+        passkey_service.registration_options(user, origin=ORIGIN)
+        assert [add_row(other) for other in others] == [None, None]
+
+    def test_an_add_a_microsecond_short_of_five_minutes_stays(
+        self, user, second_user, clock,
+    ):
+        """The control: still alive, so the add begun leaves it as it was."""
+        other = second_user["user"]
+        _, theirs = passkey_service.registration_options(other, origin=ORIGIN)
+        clock.at(T0 + timedelta(minutes=5) - timedelta(microseconds=1))
+        passkey_service.registration_options(user, origin=ORIGIN)
+        assert add_row(other).id == theirs["add"]
+
+    def test_an_add_signing_in_dies_five_minutes_after_its_registration(
+        self, user, second_user, clock,
+    ):
+        """Begun at T0, registered at T0 + 4 minutes: alive at T0 + 5, dead at T0 + 9.
+
+        Its sign-in's challenge was issued when the registration completed,
+        so that is the moment the clean-up counts from, as the keeping does.
+        """
+        other = second_user["user"]
+        options, state = passkey_service.registration_options(other, origin=ORIGIN)
+        clock.at(T0 + timedelta(minutes=4))
+        _completed(other, SoftwareAuthenticator().create(options), state=state)
+        clock.at(T0 + timedelta(minutes=5))
+        passkey_service.registration_options(user, origin=ORIGIN)
+        assert add_row(other).id == state["add"]
+        clock.at(T0 + timedelta(minutes=9))
+        passkey_service.registration_options(user, origin=ORIGIN)
+        assert add_row(other) is None
 
 
 class TestTheCeremony:

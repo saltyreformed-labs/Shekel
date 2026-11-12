@@ -227,7 +227,7 @@ class TestUnresolvableAccountOrScenario:
     different answers now.  The baseline half raises
     :class:`~app.exceptions.BaselineMissingError` from the seam, which one
     application-level handler answers with the repair card -- asserted below,
-    and end-to-end in ``tests/test_routes/test_no_baseline_policy.py``.
+    and end-to-end in ``tests/test_routes/test_no_baseline_policy/``.
     """
 
     def test_month_detail_raises_when_account_unresolvable(

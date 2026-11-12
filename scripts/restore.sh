@@ -15,11 +15,21 @@
 #     4. Terminate existing database connections
 #     5. Drop and recreate the database with schemas
 #     6. Restore from the backup file (via psql --single-transaction)
-#     7. Restart the application container (entrypoint runs Alembic migrations)
-#     8. Verify the restore with basic sanity checks
+#     7. Hand every restored object to the owner login, shekel_owner, with
+#        the database container's provisioning script: the dump is taken
+#        --no-owner --no-privileges (backup.sh), so the restore makes each
+#        object the superuser's, which the owner's deploy cannot change
+#     8. Start the app the way docker compose made it, read from the app
+#        container's own labels: the start runs the deploy in the migrate
+#        service first (the migrations, the web login's grants), while the
+#        app is still stopped (ruling plan#3534)
+#     9. Verify the restore with basic sanity checks
 #
-# If anything fails between the drop and a completed restore, the script
-# prints recovery guidance naming the safety dump.
+# The app's compose project and the provisioning script are both checked
+# before anything is changed.  If anything fails once the database is
+# dropped, the script prints the state it left and how to recover from it
+# or finish: the safety dump while the restore is incomplete, the step to
+# run once it is restored.
 #
 # Usage:
 #     ./scripts/restore.sh <backup_file>
@@ -48,9 +58,31 @@ PGDATABASE="${PGDATABASE:-shekel}"
 BACKUP_ENCRYPTION_PASSPHRASE="${BACKUP_ENCRYPTION_PASSPHRASE:-}"
 BACKUP_LOCAL_DIR="${BACKUP_LOCAL_DIR:-/var/backups/shekel}"
 
-# Set once the DROP DATABASE has run; drives the recovery-guidance trap.
-DESTRUCTIVE_WINDOW=false
+# The database container's provisioning script (deploy/postgres/
+# provision_roles.sh, which the compose files mount as the postgres image's
+# first-boot hook): the one place a login is made, and the hand-over of
+# every object to the owner.  A path of the stack, not a setting.
+PROVISION_ROLES="/docker-entrypoint-initdb.d/10-provision-roles.sh"
+# The hand-over: that script, run in the database container.  POSTGRES_DB
+# names the database it hands over, the one this script restores.
+HAND_OVER=(docker exec --env "POSTGRES_DB=${PGDATABASE}" "${DB_CONTAINER}" "${PROVISION_ROLES}")
+
+# How far the restore has gone, which the exit trap's guidance reads:
+# empty until the DROP DATABASE runs, then dropped, restored, handed-over
+# and started.
+RESTORE_STAGE=""
 SAFETY_DUMP_PATH=""
+
+# The docker compose command that made the app container, without its
+# subcommand, and the start this script runs with it, both built from the
+# container's own labels by read_app_stack.  Empty when there is no app
+# container.
+APP_COMPOSE=()
+APP_START=()
+
+# With no app container there is no compose start, and so no deploy:
+# pending migrations are a host run, as the owner (ruling plan#3608).
+HOST_MIGRATION_ADVICE="Run 'flask db upgrade' from the checkout, with .env's DATABASE_URL naming the owner login, shekel_owner (ruling plan#3608), to apply any pending migrations"
 
 # ── Functions ────────────────────────────────────────────────────
 
@@ -67,8 +99,10 @@ This will:
     3. Stop the application container (if running)
     4. Drop and recreate the database
     5. Restore from the backup file
-    6. Run pending Alembic migrations (via app container restart)
-    7. Verify the restore
+    6. Hand every restored object to the owner login, shekel_owner
+    7. Start the app the way docker compose made it, which runs the
+       deploy (the migrations, the web login's grants) first
+    8. Verify the restore
 
 Arguments:
     backup_file     Path to a .sql.gz or .sql.gz.gpg backup file
@@ -80,7 +114,9 @@ Options:
 
 Environment Variables:
     DB_CONTAINER                  Docker container name for PostgreSQL
-    APP_CONTAINER                 Docker container name for the app
+    APP_CONTAINER                 Docker container name for the app; its
+                                  compose labels name the stack it is
+                                  started from
     PGUSER                        PostgreSQL user
     PGDATABASE                    PostgreSQL database name
     BACKUP_ENCRYPTION_PASSPHRASE  GPG passphrase (required for .gpg files)
@@ -88,42 +124,159 @@ Environment Variables:
 EOF
 }
 
-recovery_guidance() {
-    # ERR/EXIT-path guidance once the database has been dropped: the operator
-    # must know the state and the way back (OPS/SH-01: the previous script
-    # died under set -e leaving an empty database and no instructions).
-    if [[ "${DESTRUCTIVE_WINDOW}" == true ]]; then
-        {
-            echo ""
-            echo "============================================================"
-            echo "  RESTORE FAILED INSIDE THE DESTRUCTIVE WINDOW"
-            echo "============================================================"
-            echo "  The database '${PGDATABASE}' was dropped and may be empty"
-            echo "  or partially restored."
-            if [[ -n "${SAFETY_DUMP_PATH}" ]]; then
-                echo "  A pre-restore safety dump of the PREVIOUS state exists:"
-                echo "      ${SAFETY_DUMP_PATH}"
-                echo "  Recover it with:"
-                echo "      ./scripts/restore.sh --skip-safety-dump ${SAFETY_DUMP_PATH}"
-            else
-                echo "  No safety dump was taken (--skip-safety-dump was set)."
-                echo "  Recover from the most recent nightly backup."
-            fi
-            echo "  The app container was left STOPPED on purpose."
-            echo "============================================================"
-        } >&2
-    fi
+print_command() {
+    # One command for the operator to paste, each word shell-quoted.
+    local quoted
+    printf -v quoted '%q ' "$@"
+    echo "      ${quoted% }"
 }
-trap recovery_guidance ERR
+
+recovery_guidance() {
+    # The exit trap.  Once the database has been dropped, a failure leaves a
+    # state the operator must be told, with the way back or forward
+    # (OPS/SH-01: the script once died under set -e leaving an empty
+    # database and no instructions).  An EXIT trap, because bash runs no ERR
+    # trap inside a function without errtrace, and every step here runs
+    # inside main: the ERR trap this replaced never ran.  With errtrace it
+    # would run again for each pipeline subshell a failure passes through,
+    # as in restore_backup's (both measured 2026-11-12).  The exit trap runs
+    # once, in this shell, and the script still exits with its own status.
+    local status=$?
+    local headline
+    if [[ ${status} -eq 0 ]]; then
+        return 0
+    fi
+    case "${RESTORE_STAGE}" in
+        dropped) headline="RESTORE FAILED INSIDE THE DESTRUCTIVE WINDOW" ;;
+        restored) headline="RESTORED, BUT NOT HANDED TO THE OWNER" ;;
+        handed-over) headline="RESTORED, BUT THE APP DID NOT START" ;;
+        *) return 0 ;;
+    esac
+    {
+        echo ""
+        echo "============================================================"
+        echo "  ${headline}"
+        echo "============================================================"
+        case "${RESTORE_STAGE}" in
+            dropped)
+                echo "  The database '${PGDATABASE}' was dropped and may be empty"
+                echo "  or partially restored."
+                if [[ -n "${SAFETY_DUMP_PATH}" ]]; then
+                    echo "  A pre-restore safety dump of the PREVIOUS state exists:"
+                    echo "      ${SAFETY_DUMP_PATH}"
+                    echo "  Recover it with:"
+                    echo "      ./scripts/restore.sh --skip-safety-dump ${SAFETY_DUMP_PATH}"
+                else
+                    echo "  No safety dump was taken (--skip-safety-dump was set)."
+                    echo "  Recover from the most recent nightly backup."
+                fi
+                echo "  The app container was left STOPPED on purpose."
+                ;;
+            restored)
+                echo "  The backup is restored into '${PGDATABASE}', but every object"
+                echo "  in it is still the superuser's and the web login holds no"
+                echo "  grant on any: the owner's deploy cannot change them, and the"
+                echo "  app cannot read them.  The app was not started.  Finish with"
+                echo "  the hand-over, then the start:"
+                print_command "${HAND_OVER[@]}"
+                if [[ ${#APP_START[@]} -gt 0 ]]; then
+                    print_command "${APP_START[@]}"
+                else
+                    echo "  ${HOST_MIGRATION_ADVICE}."
+                fi
+                ;;
+            handed-over)
+                echo "  The backup is restored into '${PGDATABASE}' and handed to the"
+                echo "  owner, but the start failed: the deploy it runs first, in the"
+                echo "  migrate service, or the app itself.  Read why, then start it"
+                echo "  again:"
+                print_command "${APP_COMPOSE[@]}" logs
+                print_command "${APP_START[@]}"
+                ;;
+        esac
+        echo "============================================================"
+    } >&2
+}
+trap recovery_guidance EXIT
 
 check_prerequisites() {
+    # Everything the restore needs after its drop is checked here, before
+    # the artifact's validation and the safety dump, so a restore never
+    # drops a database it then cannot hand over or bring the app back to.
     # shellcheck disable=SC2310 # require_db_container is a boolean predicate (explicit if-not/return 1, no internal set -e reliance); the trailing || exit 1 is the intended abort on failure
     require_db_container "${DB_CONTAINER}" || exit 1
+
+    # A stack from before plan#2166 has no provisioning script to hand the
+    # restored objects over with.  A file, as well as executable: a
+    # directory passes -x.
+    # shellcheck disable=SC2016 # the single quotes are deliberate: $1 is the container shell's parameter, expanded there
+    if ! docker exec "${DB_CONTAINER}" sh -c 'test -f "$1" && test -x "$1"' sh "${PROVISION_ROLES}"; then
+        log "ERROR" "Database container '${DB_CONTAINER}' holds no executable ${PROVISION_ROLES}."
+        log "ERROR" "Its compose files predate the database owner login (plan#2166), so a restore"
+        log "ERROR" "could not hand the restored objects to it.  Restore with the scripts/restore.sh"
+        log "ERROR" "of the release those files came from.  Nothing has been changed."
+        exit 1
+    fi
+
+    read_app_stack
 }
 
 app_container_exists() {
     # Check if the app container exists (may or may not be running).
     docker inspect "${APP_CONTAINER}" &>/dev/null
+}
+
+read_app_stack() {
+    # Fill APP_COMPOSE and APP_START from the labels docker compose stamps on
+    # every container it makes: its project, its directory, its files and
+    # its service.  The start then brings back the stack this script
+    # stopped, and no setting of its own can name another.  Nor can the
+    # compose file of whatever directory the script runs from: the
+    # repository's bare docker-compose.yml is project shekel-prod, and an up
+    # of it would recreate production's containers from the base file
+    # alone.  So an empty label is refused (docker prints a missing one as
+    # empty), as is a project that no longer parses, before anything is
+    # changed.
+    # shellcheck disable=SC2310 # app_container_exists is a boolean predicate (docker inspect &>/dev/null); the container-absent non-zero status IS its intended return, not an error to abort on
+    if ! app_container_exists; then
+        return 0
+    fi
+    local -a keys=(project project.working_dir project.config_files service)
+    local -a values files
+    local template="" key file labels index
+    for key in "${keys[@]}"; do
+        template+="{{println (index .Config.Labels \"com.docker.compose.${key}\")}}"
+    done
+    labels=$(docker inspect --format "${template}" "${APP_CONTAINER}")
+    mapfile -t values <<<"${labels}"
+    for index in "${!keys[@]}"; do
+        if [[ -z "${values[index]:-}" ]]; then
+            log "ERROR" "App container '${APP_CONTAINER}' has no com.docker.compose.${keys[index]} label, so this"
+            log "ERROR" "script cannot start it the way docker compose made it.  Make it with"
+            log "ERROR" "'docker compose up -d app' in its stack's directory, then run this again."
+            log "ERROR" "Nothing has been changed."
+            exit 1
+        fi
+    done
+
+    APP_COMPOSE=(docker compose --project-name "${values[0]}" --project-directory "${values[1]}")
+    IFS=, read -r -a files <<<"${values[2]}"
+    for file in "${files[@]}"; do
+        APP_COMPOSE+=(--file "${file}")
+    done
+    # --pull never: the restore brings back the image it stopped, never a
+    # newer one a moving tag names (the base file's :latest is
+    # pull_policy: always), and needs no registry to do it.
+    APP_START=("${APP_COMPOSE[@]}" up --pull never -d "${values[3]}")
+
+    if ! "${APP_COMPOSE[@]}" config --quiet; then
+        log "ERROR" "App container '${APP_CONTAINER}': the compose project that made it does not parse"
+        log "ERROR" "(its error is above), so the start after the restore would fail.  The check"
+        log "ERROR" "that failed:"
+        print_command "${APP_COMPOSE[@]}" config --quiet
+        log "ERROR" "Nothing has been changed."
+        exit 1
+    fi
 }
 
 confirm_restore() {
@@ -196,14 +349,16 @@ stop_app() {
 
 drop_and_recreate_database() {
     log "INFO" "Dropping and recreating database: ${PGDATABASE}"
-    DESTRUCTIVE_WINDOW=true
+    RESTORE_STAGE=dropped
 
     # Terminate existing connections to the target database.
     docker exec "${DB_CONTAINER}" psql -U "${PGUSER}" -d postgres -c \
         "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '${PGDATABASE}' AND pid <> pg_backend_pid();" \
         >/dev/null 2>&1 || true
 
-    # Drop and recreate the database.
+    # Drop and recreate the database: the superuser's, like every object the
+    # restore then makes in it, until hand_over_to_owner gives it all to the
+    # owner.
     docker exec "${DB_CONTAINER}" psql -U "${PGUSER}" -d postgres --quiet -c \
         "DROP DATABASE IF EXISTS ${PGDATABASE};"
     docker exec "${DB_CONTAINER}" psql -U "${PGUSER}" -d postgres --quiet -c \
@@ -231,21 +386,39 @@ restore_backup() {
             --quiet --single-transaction --set ON_ERROR_STOP=1 --output /dev/null
 
     log "INFO" "Database restore complete"
-    DESTRUCTIVE_WINDOW=false
+    RESTORE_STAGE=restored
+}
+
+hand_over_to_owner() {
+    # The dump is taken --no-owner --no-privileges (backup.sh), so every
+    # object the restore made is the superuser's and holds no grant.  The
+    # database container's provisioning script, the caller its header names
+    # for this case, hands each one to the owner, shekel_owner, whose deploy
+    # (the start below) then grants the web login.
+    log "INFO" "Handing the restored database to the owner login: ${PROVISION_ROLES}"
+    "${HAND_OVER[@]}"
+    RESTORE_STAGE=handed-over
+    log "INFO" "Restored database handed to the owner login"
 }
 
 start_app() {
-    # Restart the app container. The entrypoint runs init_database.py which
-    # detects the existing database and applies any pending Alembic migrations.
-    # shellcheck disable=SC2310 # app_container_exists is a boolean predicate (docker inspect &>/dev/null); the container-absent non-zero status IS its intended return, not an error to abort on
-    if ! app_container_exists; then
+    # Bring the app back the way docker compose made it (read_app_stack).
+    # The up runs the deploy in the migrate service first, the migrations
+    # and then the web login's grants on the restored objects, and starts
+    # the app only once that exits 0 (ruling plan#3534), so the app never
+    # serves a database its code is ahead of.  A plain docker start runs no
+    # deploy (plan#3421).
+    if [[ ${#APP_START[@]} -eq 0 ]]; then
         log "INFO" "Application container '${APP_CONTAINER}' not found (dev mode)"
-        log "INFO" "Run 'flask db upgrade' manually to apply any pending migrations"
+        log "INFO" "${HOST_MIGRATION_ADVICE}"
+        RESTORE_STAGE=started
         return 0
     fi
 
-    log "INFO" "Starting application container: ${APP_CONTAINER}"
-    docker start "${APP_CONTAINER}"
+    log "INFO" "Starting the application through docker compose (the deploy runs first):"
+    print_command "${APP_START[@]}"
+    "${APP_START[@]}"
+    RESTORE_STAGE=started
 
     # Wait for the container to be ready.
     local retries=30
@@ -384,6 +557,7 @@ main() {
     stop_app
     drop_and_recreate_database
     restore_backup "${backup_file}"
+    hand_over_to_owner
     start_app
     verify_restore
 

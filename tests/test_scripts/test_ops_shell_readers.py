@@ -16,10 +16,21 @@ a test until now:
 * ``scripts/reconcile_prod_to_canonical.sh``'s ``extract_env_value`` and
   ``compose_image_digest``.
 
+The restore script is graded further here, for task plan#3609 (ruling
+plan#3534): it hands the restored database to the owner login with the
+database container's provisioning script, and starts the app the way docker
+compose made it, read from the app container's own labels, so the deploy
+runs before the app serves; its exit trap says where a failure left the
+restore.
+
 **Neither the reconcile script nor the restore script is run here.**  One
 writes production's ``/opt/docker/shekel`` (a hardcoded ``PROD_ROOT``), the
-other drops a database, so each test reads ONE function's text out of its
-script and runs that, against a temporary tree or a stub ``docker``.  The
+other drops a database, so each test reads functions' text out of its script
+and runs that, against a temporary tree or a stub ``docker``.  The restore's
+whole sequence is graded the same way: its configuration block, every
+function and its exit trap, read from its text, run ``main`` with probe
+container names, and a stubbed run's ``DOCKER_HOST`` names a socket that
+does not exist, so a ``docker`` that is not the stub reaches no daemon.  The
 expected values are worked by hand from what the old spellings printed.  The
 reconcile pipelines keep grep, now ending in a reader that drains, and both
 carried ``|| true``, so their race only ever cost a status nobody read: these
@@ -27,6 +38,7 @@ tests grade the meaning, not a race.
 """
 from __future__ import annotations
 
+import gzip
 import re
 import subprocess
 import textwrap
@@ -69,6 +81,65 @@ def _function_text(script: Path, name: str) -> str:
     return found[0]
 
 
+def _every_function_text(script: Path) -> str:
+    """Return every top-level function definition in *script*, verbatim, in order.
+
+    Each is matched as :func:`_function_text` matches one.
+
+    Args:
+        script: The script holding the functions.
+
+    Returns:
+        The definitions, concatenated.
+    """
+    found = re.findall(
+        r"^\w+\(\) \{\n.*?^\}\n",
+        script.read_text(encoding="utf-8"), flags=re.S | re.M,
+    )
+    assert found, f"found no function definitions in {script}"
+    return "".join(found)
+
+
+def _section_text(script: Path, start: str, end: str) -> str:
+    """Return *script*'s lines from the one opening with *start* to the one opening with *end*.
+
+    Args:
+        script: The script holding the section.
+        start: How the section's first line opens.
+        end: How the line after its last opens.
+
+    Returns:
+        The section, *end*'s line excluded.
+    """
+    found = re.findall(
+        rf"^{re.escape(start)}.*?(?=^{re.escape(end)})",
+        script.read_text(encoding="utf-8"), flags=re.S | re.M,
+    )
+    assert len(found) == 1, (
+        f"expected one section from {start!r} to {end!r} in {script}, "
+        f"found {len(found)}"
+    )
+    return found[0]
+
+
+def _trap_line(script: Path) -> str:
+    """Return *script*'s one top-level ``trap`` statement, verbatim.
+
+    Args:
+        script: The script holding it.
+
+    Returns:
+        The line.
+    """
+    found = re.findall(
+        r"^trap .*$", script.read_text(encoding="utf-8"), flags=re.M,
+    )
+    assert len(found) == 1, (
+        f"expected one top-level trap in {script}, found {len(found)}"
+    )
+    return found[0]
+
+
 def _fake_docker(bin_dir: Path, *, stdout: str, status: int) -> Path:
     """Install a ``docker`` stub that prints *stdout* and exits *status*.
 
@@ -105,6 +176,9 @@ def _bash(program: str, *args: str, path_prefix: Path | None = None,
     same way here, since bash runs that subshell WITHOUT errexit: grading it
     bare under ``set -e`` would grade a context its callers never give it.
 
+    With stubs, ``DOCKER_HOST`` names a socket that does not exist, so a
+    ``docker`` that is not the stub reaches no daemon.
+
     Args:
         program: Bash source, reading its inputs from ``$1``, ``$2`` ...
         args: The positional parameters.
@@ -115,7 +189,10 @@ def _bash(program: str, *args: str, path_prefix: Path | None = None,
     """
     env = None
     if path_prefix is not None:
-        env = {"PATH": f"{path_prefix}:/usr/bin:/bin"}
+        env = {
+            "PATH": f"{path_prefix}:/usr/bin:/bin",
+            "DOCKER_HOST": f"unix://{path_prefix}/no-daemon.sock",
+        }
     return subprocess.run(
         ["bash", "-c", f"set -euo pipefail\n{program}", "_", *args],
         capture_output=True, text=True, timeout=30, check=False, env=env,
@@ -169,37 +246,107 @@ class TestTheRunningCheckHasOneHome:
         assert result.stdout == ""
 
 
-def _restore_stub(bin_dir: Path, *, health: str | None, running: str,
-                  status: int) -> Path:
-    """Install the ``docker`` and ``sleep`` stubs ``start_app`` meets.
+#: The compose labels the stub's app container carries, as ``docker compose``
+#: stamps them: its project, directory, files and service.
+_LABELS = {
+    "project": "probe-project",
+    "project.working_dir": "/stacks/probe",
+    "project.config_files": (
+        "/stacks/probe/docker-compose.yml,"
+        "/stacks/probe/docker-compose.override.yml"
+    ),
+    "service": "app",
+}
 
-    The app container exists and starts.  Its healthcheck reports *health*,
-    or, for ``None``, it has none (that inspect fails, so ``start_app``
-    reads ``none``).  The running-check is answered with *running* and
-    *status*.  ``sleep`` returns at once, so thirty retries cost nothing.
+#: The start ``restore.sh`` runs for :data:`_LABELS`, as the stub logs it.
+_START = (
+    "compose --project-name probe-project --project-directory /stacks/probe"
+    " --file /stacks/probe/docker-compose.yml"
+    " --file /stacks/probe/docker-compose.override.yml up --pull never -d app"
+)
+
+#: The database container's provisioning script, where the compose files
+#: mount it (``deploy/postgres/provision_roles.sh``).
+_PROVISION_ROLES = "/docker-entrypoint-initdb.d/10-provision-roles.sh"
+
+#: The prerequisite check of that script, as the stub logs it.
+_HOOK_CHECK = (
+    'exec probe-db sh -c test -f "$1" && test -x "$1" sh ' + _PROVISION_ROLES
+)
+
+#: The hand-over, as the stub logs it, for the default database name.
+_HAND_OVER = f"exec --env POSTGRES_DB=shekel probe-db {_PROVISION_ROLES}"
+
+
+def _restore_stub(bin_dir: Path, *, health: str | None = None,
+                  running: str = "true\n", status: int = 0,
+                  app_exists: bool = True,
+                  labels: dict[str, str] | None = None,
+                  failing: frozenset[str] = frozenset()) -> Path:
+    """Install the ``docker`` and ``sleep`` stubs the restore meets.
+
+    The app container exists (or, for ``app_exists=False``, docker cannot
+    find it) and carries *labels* (:data:`_LABELS` by default; a key left
+    out is a label it lacks, which docker prints as empty).  Its healthcheck
+    reports *health*, or, for ``None``, it has none (that inspect fails, so
+    ``start_app`` reads ``none``).  The running-check is answered with
+    *running* and *status*.  Each step named in *failing* exits 1:
+    ``hook-check`` (the provisioning script's prerequisite check),
+    ``config`` (the compose project's parse), ``restore`` (the restore's
+    ``psql``), ``hand-over`` and ``up``.  Every other call exits 0 and
+    prints nothing.  ``sleep`` returns at once, so thirty retries cost
+    nothing.  Each call's arguments are logged twice: joined by spaces in
+    ``docker.log``, and each in brackets in ``argv.log``, which keeps the
+    word boundaries the first loses.
 
     Args:
         bin_dir: Directory placed first on ``PATH``.
         health: What the ``{{.State.Health.Status}}`` inspect prints.
         running: What the ``{{.State.Running}}`` inspect prints.
         status: That inspect's exit status.
+        app_exists: Whether docker finds the app container.
+        labels: The app container's compose labels, by key.
+        failing: The steps whose call exits 1.
 
     Returns:
         The invocation log's path.
     """
     bin_dir.mkdir()
     log = bin_dir / "docker.log"
+    argv_log = bin_dir / "argv.log"
     (bin_dir / "health.out").write_text(health or "", encoding="utf-8")
     (bin_dir / "running.out").write_text(running, encoding="utf-8")
+    for key, value in (_LABELS if labels is None else labels).items():
+        (bin_dir / f"label.{key}").write_text(value, encoding="utf-8")
     health_arm = (
         "exit 1" if health is None else f"cat '{bin_dir}/health.out'; exit 0"
     )
+
+    def outcome(step: str) -> str:
+        """The stub's exit for *step*'s call."""
+        return "exit 1" if step in failing else "exit 0"
+
     (bin_dir / "docker").write_text(textwrap.dedent(f"""\
         #!/usr/bin/env bash
         printf '%s\\n' "$*" >>'{log}'
+        printf '[%s]' "$@" >>'{argv_log}'
+        echo >>'{argv_log}'
         case "$*" in
+            *com.docker.compose.*)
+                for key in $(printf '%s' "$*" | grep -o 'com\\.docker\\.compose\\.[a-z_.]*'); do
+                    file='{bin_dir}/label.'"${{key#com.docker.compose.}}"
+                    if [ -f "$file" ]; then cat "$file"; fi
+                    echo
+                done
+                exit 0 ;;
             *State.Health.Status*) {health_arm} ;;
             *State.Running*) cat '{bin_dir}/running.out'; exit {status} ;;
+            "inspect probe-app") {"exit 0" if app_exists else "exit 1"} ;;
+            "exec probe-db sh -c "*) {outcome("hook-check")} ;;
+            "exec --env "*) {outcome("hand-over")} ;;
+            "exec -i "*) cat >/dev/null; {outcome("restore")} ;;
+            "compose "*" config --quiet") {outcome("config")} ;;
+            "compose "*" up "*) {outcome("up")} ;;
         esac
         exit 0
         """), encoding="utf-8")
@@ -208,6 +355,40 @@ def _restore_stub(bin_dir: Path, *, health: str | None, running: str,
     for name in ("docker", "sleep"):
         (bin_dir / name).chmod(0o755)
     return log
+
+
+#: The restore's configuration block, read from its text: the probe names a
+#: program sets before it keep their values, as an exported one would.
+_RESTORE_CONFIG = _section_text(
+    _RESTORE, "# ── Configuration", "# ── Functions",
+)
+
+
+def _restore_functions(tmp_path: Path, program: str, *args: str,
+                       **stub) -> tuple[subprocess.CompletedProcess, list[str]]:
+    """Run *program* with the restore's configuration and functions defined.
+
+    The probe containers are ``probe-db`` and ``probe-app``; the stub is
+    :func:`_restore_stub`'s, given *stub*.
+
+    Args:
+        tmp_path: pytest's per-test temporary directory.
+        program: Bash source run after the definitions, its inputs ``$1`` ...
+        args: Its positional parameters.
+        **stub: :func:`_restore_stub`'s keyword arguments.
+
+    Returns:
+        The completed process and the docker stub's invocation log, a line
+        per call.
+    """
+    log = _restore_stub(tmp_path / "bin", **stub)
+    result = _bash(
+        'source "$1"; DB_CONTAINER=probe-db; APP_CONTAINER=probe-app; '
+        'eval "$2"; eval "$3"; shift 3\n' + program,
+        str(_BACKUP_LIB), _RESTORE_CONFIG, _every_function_text(_RESTORE),
+        *args, path_prefix=tmp_path / "bin",
+    )
+    return result, log.read_text(encoding="utf-8").splitlines()
 
 
 class TestRestoreWaitsForTheAppThroughTheSharedCheck:
@@ -236,6 +417,9 @@ class TestRestoreWaitsForTheAppThroughTheSharedCheck:
                    ) -> tuple[subprocess.CompletedProcess, str, str]:
         """Run ``start_app`` from its own text, as ``main`` calls it.
 
+        ``read_app_stack`` runs first, as ``check_prerequisites`` runs it,
+        and reads the stub's labels.
+
         Args:
             tmp_path: pytest's per-test temporary directory.
             health: The healthcheck's report; ``None`` for no healthcheck.
@@ -256,11 +440,14 @@ class TestRestoreWaitsForTheAppThroughTheSharedCheck:
         recorder = "" if recorded_answer is None else self._RECORDER
         result = _bash(
             'source "$1"; eval "$2"; APP_CONTAINER=probe-app; '
-            'RECORDER_LOG="$3"; RECORDED_ANSWER="$4"; '
-            'eval "$5"; eval "$6"; start_app',
+            'RECORDER_LOG="$3"; RECORDED_ANSWER="$4"; eval "$5"; '
+            'eval "$6"; eval "$7"; eval "$8"; eval "$9"; '
+            'read_app_stack; start_app',
             str(_BACKUP_LIB), recorder, str(recorder_log),
-            str(recorded_answer or 0),
+            str(recorded_answer or 0), _RESTORE_CONFIG,
+            _function_text(_RESTORE, "print_command"),
             _function_text(_RESTORE, "app_container_exists"),
+            _function_text(_RESTORE, "read_app_stack"),
             _function_text(_RESTORE, "start_app"),
             path_prefix=tmp_path / "bin",
         )
@@ -317,6 +504,299 @@ class TestRestoreWaitsForTheAppThroughTheSharedCheck:
             "inspect --format {{.State.Running}} probe-app"
         )
         assert asked == (1 if ready else 30), calls
+
+
+class TestRestoreStartsTheAppTheWayComposeMadeIt:
+    """Ruling plan#3534: the start is a ``docker compose up``, which deploys first.
+
+    A ``docker start`` runs no deploy since plan#3421, so the app would serve
+    a restored database its code is ahead of, holding no grant on it.  The
+    compose command is read from the app container's own labels, so it
+    names the stack the restore stopped and never a compose file of the
+    directory the script runs from.
+    """
+
+    @pytest.mark.parametrize(
+        ("labels", "argv"),
+        [
+            (_LABELS, _START.split(" ")),
+            (
+                {
+                    "project": "other",
+                    "project.working_dir": "/srv/other stack",
+                    "project.config_files": "/srv/other stack/compose.yml",
+                    "service": "web",
+                },
+                [
+                    "compose", "--project-name", "other",
+                    "--project-directory", "/srv/other stack",
+                    "--file", "/srv/other stack/compose.yml",
+                    "up", "--pull", "never", "-d", "web",
+                ],
+            ),
+        ],
+        ids=["two-files", "one-file-another-service"],
+    )
+    def test_the_start_is_the_compose_up_its_labels_name(
+        self, tmp_path, labels, argv,
+    ):
+        """Every word of the start comes from a label, each label one word;
+        the project is parsed first, and a ``docker start`` is never run.
+
+        The second case's directory holds a space, which only the bracketed
+        log can show is one word.
+        """
+        result, calls = _restore_functions(
+            tmp_path, "read_app_stack; start_app", labels=labels,
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        argvs = (tmp_path / "bin" / "argv.log").read_text(
+            encoding="utf-8").splitlines()
+        config = argv[:argv.index("up")] + ["config", "--quiet"]
+        assert argvs.count("".join(f"[{word}]" for word in config)) == 1, argvs
+        assert argvs.count("".join(f"[{word}]" for word in argv)) == 1, argvs
+        assert calls.index(" ".join(config)) < calls.index(" ".join(argv)), calls
+        assert not [call for call in calls if call.startswith("start ")], calls
+        assert "Application container is running" in result.stdout
+
+    @pytest.mark.parametrize("missing", list(_LABELS))
+    def test_a_missing_label_is_refused_before_anything_is_changed(
+        self, tmp_path, missing,
+    ):
+        """No label, no start: the refusal names it, and compose is never run.
+
+        Without the check an empty project, directory or file list would
+        let compose fall back to the current directory's compose file.
+        """
+        labels = {key: value for key, value in _LABELS.items() if key != missing}
+        result, calls = _restore_functions(
+            tmp_path, "read_app_stack", labels=labels,
+        )
+        assert result.returncode == 1, result.stdout + result.stderr
+        assert (
+            f"App container 'probe-app' has no com.docker.compose.{missing} label"
+            in result.stdout
+        )
+        assert "Nothing has been changed." in result.stdout
+        assert not [call for call in calls if call.startswith("compose ")], calls
+
+    def test_a_project_that_does_not_parse_is_refused(self, tmp_path):
+        """A file gone or a value unset: refused, naming the check that failed."""
+        result, calls = _restore_functions(
+            tmp_path, "read_app_stack", failing=frozenset({"config"}),
+        )
+        assert result.returncode == 1, result.stdout + result.stderr
+        assert "does not parse" in result.stdout
+        assert (
+            "      docker compose --project-name probe-project"
+            " --project-directory /stacks/probe"
+            " --file /stacks/probe/docker-compose.yml"
+            " --file /stacks/probe/docker-compose.override.yml config --quiet"
+        ) in result.stdout.splitlines()
+        assert "Nothing has been changed." in result.stdout
+        assert not [call for call in calls if " up " in call], calls
+
+    def test_with_no_app_container_it_advises_a_host_migration_as_the_owner(
+        self, tmp_path,
+    ):
+        """Nothing to start: no label is read, compose is never run, and the
+        advice names the owner login a host migration must run as (ruling
+        plan#3608)."""
+        result, calls = _restore_functions(
+            tmp_path, "read_app_stack; start_app", app_exists=False,
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert calls == ["inspect probe-app"], calls
+        assert "Application container 'probe-app' not found" in result.stdout
+        assert (
+            "Run 'flask db upgrade' from the checkout, with .env's DATABASE_URL"
+            " naming the owner login, shekel_owner (ruling plan#3608)"
+        ) in result.stdout
+
+    def test_a_failed_start_stops_the_script(self, tmp_path):
+        """The deploy the start runs failed: the script exits 1 and waits for
+        nothing."""
+        result, calls = _restore_functions(
+            tmp_path, "read_app_stack; start_app", failing=frozenset({"up"}),
+        )
+        assert result.returncode == 1, result.stdout + result.stderr
+        assert calls.count(_START) == 1, calls
+        assert not [call for call in calls if "State." in call], calls
+
+
+class TestRestoreHandsTheDatabaseToTheOwner:
+    """The restored objects are the superuser's until the provisioning script runs.
+
+    ``scripts/backup.sh`` dumps ``--no-owner --no-privileges``, so the
+    restore makes every object the superuser's, holding no grant: the
+    owner's deploy could not change one and the web login could read none.
+    """
+
+    def test_a_db_container_without_the_script_is_refused_first(self, tmp_path):
+        """A stack from before plan#2166: refused, and nothing else is asked."""
+        result, calls = _restore_functions(
+            tmp_path, "check_prerequisites",
+            failing=frozenset({"hook-check"}),
+        )
+        assert result.returncode == 1, result.stdout + result.stderr
+        assert (
+            f"Database container 'probe-db' holds no executable {_PROVISION_ROLES}."
+            in result.stdout
+        )
+        assert "Nothing has been changed." in result.stdout
+        assert calls == [
+            "inspect --format {{.State.Running}} probe-db", _HOOK_CHECK,
+        ], calls
+
+    def test_the_prerequisites_check_the_script_then_read_the_app_stack(
+        self, tmp_path,
+    ):
+        """The script is checked as a file and executable, then the app's
+        project is read and parsed."""
+        result, calls = _restore_functions(tmp_path, "check_prerequisites")
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert calls[:3] == [
+            "inspect --format {{.State.Running}} probe-db", _HOOK_CHECK,
+            "inspect probe-app",
+        ], calls
+        assert calls[-1].endswith(" config --quiet"), calls
+
+    @pytest.mark.parametrize(
+        ("database", "call"),
+        [
+            (None, _HAND_OVER),
+            ("probe_data",
+             f"exec --env POSTGRES_DB=probe_data probe-db {_PROVISION_ROLES}"),
+        ],
+        ids=["default-database", "the-database-it-restored"],
+    )
+    def test_the_hand_over_runs_the_script_on_the_restored_database(
+        self, tmp_path, database, call,
+    ):
+        """The provisioning script, in the database container, told which
+        database: the one ``PGDATABASE`` names."""
+        prefix = "" if database is None else f"PGDATABASE={database}; "
+        result, calls = _restore_functions(
+            tmp_path, prefix + 'eval "$1"; hand_over_to_owner', _RESTORE_CONFIG,
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert calls == [call], calls
+
+
+def _restore_main(tmp_path: Path, *, safety_dump: bool = False, **stub,
+                  ) -> tuple[subprocess.CompletedProcess, list[str]]:
+    """Run the restore's ``main`` from its text, with its exit trap armed.
+
+    The backup is a real ``.sql.gz``, so the artifact's validation runs for
+    real; ``--skip-confirm`` answers the prompt.  The safety dump is skipped
+    unless *safety_dump*, and is then written under *tmp_path*.
+
+    Args:
+        tmp_path: pytest's per-test temporary directory.
+        safety_dump: Whether the safety dump is taken.
+        **stub: :func:`_restore_stub`'s keyword arguments.
+
+    Returns:
+        The completed process and the docker stub's log, a line per call.
+    """
+    backup = tmp_path / "shekel_backup_20261112_020000.sql.gz"
+    backup.write_bytes(gzip.compress(b"SELECT 1;\n"))
+    flags = ["--skip-confirm"] + ([] if safety_dump else ["--skip-safety-dump"])
+    return _restore_functions(
+        tmp_path, 'BACKUP_LOCAL_DIR="$1"; eval "$2"; shift 2; main "$@"',
+        str(tmp_path / "dumps"), _trap_line(_RESTORE), *flags, str(backup),
+        **stub,
+    )
+
+
+class TestRestoreSaysWhereAFailureLeftIt:
+    """The exit trap names the state a failure left, and the way on from it.
+
+    The ERR trap it replaced never ran: bash runs no ERR trap inside a
+    function without errtrace, and every step runs inside ``main``.  The
+    first test is the one that fails on it.
+    """
+
+    _BANNER = "============================================================"
+
+    def test_a_failed_restore_names_the_safety_dump(self, tmp_path):
+        """The restore's ``psql`` failed inside the destructive window: the
+        guidance says the database may be empty and names the dump to
+        recover; nothing is handed over or started."""
+        result, calls = _restore_main(
+            tmp_path, safety_dump=True, failing=frozenset({"restore"}),
+        )
+        assert result.returncode == 1, result.stdout + result.stderr
+        assert "RESTORE FAILED INSIDE THE DESTRUCTIVE WINDOW" in result.stderr
+        dumps = list((tmp_path / "dumps").glob("pre_restore_safety_*.sql.gz"))
+        assert len(dumps) == 1, dumps
+        assert (
+            f"      ./scripts/restore.sh --skip-safety-dump {dumps[0]}"
+            in result.stderr.splitlines()
+        ), result.stderr
+        assert "The app container was left STOPPED on purpose." in result.stderr
+        assert _HAND_OVER not in calls, calls
+        assert _START not in calls, calls
+
+    def test_a_failed_hand_over_says_how_to_finish(self, tmp_path):
+        """Restored, not handed over: the guidance gives the hand-over and the
+        start to run, and the script keeps its own exit status."""
+        result, calls = _restore_main(
+            tmp_path, failing=frozenset({"hand-over"}),
+        )
+        assert result.returncode == 1, result.stdout + result.stderr
+        assert "RESTORED, BUT NOT HANDED TO THE OWNER" in result.stderr
+        lines = result.stderr.splitlines()
+        assert (
+            "      docker exec --env POSTGRES_DB=shekel probe-db " + _PROVISION_ROLES
+        ) in lines, result.stderr
+        assert "      docker " + _START in lines, result.stderr
+        assert "RESTORE FAILED INSIDE" not in result.stderr
+        assert _START not in calls, calls
+
+    def test_a_failed_start_says_where_to_read_why(self, tmp_path):
+        """Restored and handed over, the start failed: the guidance gives the
+        logs to read and the start to run again."""
+        result, calls = _restore_main(tmp_path, failing=frozenset({"up"}))
+        assert result.returncode == 1, result.stdout + result.stderr
+        assert "RESTORED, BUT THE APP DID NOT START" in result.stderr
+        lines = result.stderr.splitlines()
+        logs = _START.replace("up --pull never -d app", "logs")
+        assert "      docker " + logs in lines, result.stderr
+        assert "      docker " + _START in lines, result.stderr
+        assert calls.index(_HAND_OVER) < calls.index(_START), calls
+
+    def test_a_refusal_before_the_drop_prints_no_guidance(self, tmp_path):
+        """Nothing was changed, so there is no state to report: no banner, and
+        the app is never stopped."""
+        result, calls = _restore_main(
+            tmp_path, failing=frozenset({"hook-check"}),
+        )
+        assert result.returncode == 1, result.stdout + result.stderr
+        assert self._BANNER not in result.stderr
+        assert "stop probe-app" not in calls, calls
+
+    def test_a_restore_runs_its_steps_in_order_and_prints_no_guidance(
+        self, tmp_path,
+    ):
+        """Checked, dumped, stopped, dropped, restored, handed over, started:
+        each step's docker call in that order, and a clean exit."""
+        result, calls = _restore_main(tmp_path, safety_dump=True)
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert self._BANNER not in result.stderr
+        config = _START.replace("up --pull never -d app", "config --quiet")
+
+        def first(prefix: str) -> int:
+            """The index of the first call opening with *prefix*."""
+            return next(i for i, call in enumerate(calls) if call.startswith(prefix))
+
+        order = [
+            first(_HOOK_CHECK), first(config), first("exec probe-db pg_dump"),
+            first("stop probe-app"),
+            first("exec probe-db psql -U shekel_user -d postgres --quiet -c DROP"),
+            first("exec -i probe-db psql"), first(_HAND_OVER), first(_START),
+        ]
+        assert order == sorted(order), calls
 
 
 def _extract_env_value(env_file_text: str | None, key: str, tmp_path: Path,

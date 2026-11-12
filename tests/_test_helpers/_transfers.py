@@ -548,7 +548,7 @@ def set_default_grid_account(db_session, user_id, account_id):
     ``account_resolver.resolve_grid_account``'s tier-1 picks this account --
     the way a test makes the dashboard / grid render a NON-checking account.
     Re-queries the live ``UserSettings`` row rather than mutating the
-    ``seed_user["settings"]`` object directly: the account factories above
+    ``seed_user["settings"]`` object directly: the account factories
     (:func:`create_hysa_account`, :func:`make_investment_account`, ...) commit
     internally, which detaches the fixture's settings instance, so a write to
     it would be silently dropped.  Flushes so the change is visible to the
@@ -563,7 +563,7 @@ def set_default_grid_account(db_session, user_id, account_id):
         The live :class:`~app.models.user.UserSettings` row, updated.
     """
     # pylint: disable=import-outside-toplevel  -- same lazy-app-import
-    # convention the factory helpers above follow.
+    # convention the account factories in ``_accounts.py`` follow.
     from app.models.user import UserSettings
 
     settings = (

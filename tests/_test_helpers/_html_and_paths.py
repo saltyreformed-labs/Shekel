@@ -12,8 +12,9 @@ import re
 #: route module).  A read under ``app/`` never counts up from a test file's own
 #: ``__file__``, this module's included: a test module moves (a split puts each
 #: part one directory deeper), and a path counted from where it sat then names
-#: another directory.  This module's two reads OUTSIDE ``app/`` (``migrations/``
-#: and ``scripts/``, below) start from :data:`tests._repo_root.REPO_ROOT`.
+#: another directory.  The package's two reads OUTSIDE ``app/`` (``migrations/``
+#: and ``scripts/``, in ``_migrations.py``) start from
+#: :data:`tests._repo_root.REPO_ROOT`.
 APP_PACKAGE_DIR = pathlib.Path(importlib.util.find_spec("app").origin).parent
 
 

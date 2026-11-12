@@ -65,7 +65,7 @@ def _inject_pass_a_kind(frozen_sql, name_expr_tail, kind_name):
     )
     assert _KIND_INJECTED_COUNTER_COLUMNS in injected and subquery in injected, (
         "kind_id injection did not fire -- the frozen 7d63 Pass-A SQL changed; "
-        "update the anchors in tests/_test_helpers.py"
+        "update the anchors in tests/_test_helpers/_sql_and_locks.py"
     )
     return injected
 
@@ -117,7 +117,7 @@ def inject_cash_backfill_kind_id(monkeypatch, migration_module):
     )
     assert _FROZEN_FALLBACK_CONFLICT in fallback_sql, (
         "the frozen 7d63 fallback ON CONFLICT changed; update the anchor in "
-        "tests/_test_helpers.py"
+        "tests/_test_helpers/_sql_and_locks.py"
     )
     monkeypatch.setattr(
         migration_module, "_CREATE_FALLBACK_LEDGER_ACCOUNTS_SQL",
@@ -126,7 +126,7 @@ def inject_cash_backfill_kind_id(monkeypatch, migration_module):
     backfill_sql = migration_module._SETTLED_TRANSACTION_BACKFILL_SQL
     assert _FROZEN_FALLBACK_JOIN in backfill_sql, (
         "the frozen 7d63 Pass-B fallback join changed; update the anchor in "
-        "tests/_test_helpers.py"
+        "tests/_test_helpers/_sql_and_locks.py"
     )
     monkeypatch.setattr(
         migration_module, "_SETTLED_TRANSACTION_BACKFILL_SQL",

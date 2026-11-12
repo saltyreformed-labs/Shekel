@@ -28,7 +28,7 @@ def start_test_pay_list(profile, pay, payday=None):
         The flushed :class:`~app.models.salary_pay_entry.SalaryPayEntry`.
     """
     # pylint: disable=import-outside-toplevel  -- same circular-dep
-    # avoidance as the loan helpers above.
+    # avoidance as the loan helpers in ``_loans.py``.
     from app.extensions import db
     from app.services import pay_list_service
     from app.services.balance_at import BalanceContext
@@ -75,7 +75,7 @@ def make_salary_profile(
         The added :class:`~app.models.salary_profile.SalaryProfile`.
     """
     # pylint: disable=import-outside-toplevel  -- same circular-dep
-    # avoidance as the loan helpers above.
+    # avoidance as the loan helpers in ``_loans.py``.
     from app.models.ref import FilingStatus
     from app.models.salary_profile import SalaryProfile
 
@@ -120,7 +120,7 @@ def make_recurring_raise(
         The added :class:`~app.models.salary_raise.SalaryRaise`.
     """
     # pylint: disable=import-outside-toplevel  -- same circular-dep
-    # avoidance as the loan helpers above.
+    # avoidance as the loan helpers in ``_loans.py``.
     from app import ref_cache
     from app.enums import RaiseTypeEnum
     from app.models.salary_raise import SalaryRaise
@@ -184,7 +184,7 @@ def add_entry(  # pylint: disable=too-many-arguments,too-many-positional-argumen
             does not assert on it.
     """
     # pylint: disable=import-outside-toplevel  -- same circular-dep
-    # avoidance as the loan helpers above.
+    # avoidance as the loan helpers in ``_loans.py``.
     from app.models.transaction_entry import TransactionEntry
 
     db_session.add(TransactionEntry(
@@ -302,7 +302,7 @@ def mark_purchase_settled(db_session, account, entry, settled_on=None):
             something production cannot produce.
     """
     # pylint: disable=import-outside-toplevel  -- same circular-dep
-    # avoidance as the loan helpers above.
+    # avoidance as the loan helpers in ``_loans.py``.
     from app.services.cash_ledger import reconciled_through
     from app.utils.dates import display_today
 

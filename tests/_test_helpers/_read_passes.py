@@ -49,7 +49,7 @@ def current_pay_period(user_id, as_of=None):
         one three routes still branch on.
     """
     # pylint: disable=import-outside-toplevel  -- same circular-dependency
-    # avoidance as the factories above.
+    # avoidance as the factories in ``_accounts.py`` and ``_loans.py``.
     from app.extensions import db as _db
     from app.models.pay_period import PayPeriod as _PayPeriod
     from app.services.pay_calendar import calendar_for

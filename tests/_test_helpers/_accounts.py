@@ -39,7 +39,7 @@ def create_savings_account(
         The created Savings :class:`~app.models.account.Account`.
     """
     # pylint: disable=import-outside-toplevel  -- same circular-dep
-    # avoidance as the loan helpers above.
+    # avoidance as the loan helpers in ``_loans.py``.
     from app.models.ref import AccountType
     from app.services import account_service
 

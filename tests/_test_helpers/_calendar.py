@@ -75,8 +75,8 @@ def record_paydays_across_a_hole(user_id, first_payday, num_periods, rhythm):
     says where such a state is built: here, by hand, in one shared helper.
 
     **Who needs it.**  ``seed_user`` opens its calendar at
-    :data:`~tests.conftest.SEED_USER_BOOTSTRAP_START` (2024-01-05) so the
-    seeded account has a paycheck to open in, and a case that then wants a
+    :data:`~tests._seed_owner_fixtures.SEED_USER_BOOTSTRAP_START` (2024-01-05)
+    so the seeded account has a paycheck to open in, and a case that then wants a
     2026 block beside it -- two years of planned paychecks skipped -- was
     writing it through the writer until this step.  Every such case is about
     the 2026 rows, not the hole, and this keeps the rows, the ordinals and
@@ -268,8 +268,8 @@ def rebuild_calendar_on(user_id, first_payday, num_periods, rhythm):
     # day -- so it is refused here, loudly, rather than built and left for
     # whichever balance case notices.  **On this door rather than on one of its
     # callers**: a second adversarial review found the first placement was on
-    # ``conftest._reset_seed_calendar``, which is one of three callers, and the
-    # one a new case is least likely to use --
+    # ``tests._seed_owner_fixtures._reset_seed_calendar``, which is one of three
+    # callers, and the one a new case is least likely to use --
     # ``rebuild_calendar_from_spans`` reaches this directly and already types
     # arbitrary years.
     #

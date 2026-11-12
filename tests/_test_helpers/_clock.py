@@ -64,8 +64,10 @@ def freeze_today(monkeypatch, target_date, modules=None, at_time=None):
             loaded module that has a top-level ``date`` or ``datetime``
             symbol bound to the real class is patched -- this covers
             production services (``app.services.*``), test modules
-            that imported ``date`` inline, and ``tests.conftest``
-            itself, ensuring all layers see the same frozen "today".
+            that imported ``date`` inline, and the modules
+            ``tests/conftest.py`` registers its fixtures from that
+            import ``date``, ensuring all layers see the same frozen
+            "today".
             Pass an explicit tuple to patch only specific modules.
         at_time:
             Optional wall time on ``target_date`` for the frozen ``now``,

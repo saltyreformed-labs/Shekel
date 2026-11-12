@@ -85,7 +85,7 @@ def add_txn(  # pylint: disable=too-many-arguments,too-many-positional-arguments
         The created :class:`~app.models.transaction.Transaction` (flushed).
     """
     # pylint: disable=import-outside-toplevel  -- same circular-dep
-    # avoidance as the loan helpers above.
+    # avoidance as the loan helpers in ``_loans.py``.
     from app import ref_cache
     from app.enums import StatusEnum, TxnTypeEnum
     if status_enum is None:

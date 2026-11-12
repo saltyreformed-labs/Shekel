@@ -47,9 +47,9 @@ def amount_basis_for(row):
     """Return the :class:`AmountBasis` that prices ONE row, for a test.
 
     **Named for the thing it builds, because ``basis_for`` was already taken**
-    by the ``ProjectedBasis`` helper above -- appending a second definition of
-    that name silently shadowed it and took 63 tests down with a
-    ``TypeError``.  Two different "bases" live in this suite and neither may
+    by the ``ProjectedBasis`` helper in ``_read_passes.py`` -- appending a
+    second definition of that name silently shadowed it and took 63 tests down
+    with a ``TypeError``.  Two different "bases" live in this suite and neither may
     answer to the bare word.
 
     **The single-row form of what a read pass holds** (plan step X-au-j).  Both
@@ -246,7 +246,7 @@ def match_two_lines(db_session, account, owner_id, early, late):
         late: The later one's.
     """
     # pylint: disable=import-outside-toplevel  -- same circular-dep avoidance
-    # as the loan helpers above.
+    # as the loan helpers in ``_loans.py``.
     import sqlalchemy as _sa
 
     db_session.execute(_sa.text(_A_MATCHED_GROUP), {
@@ -405,7 +405,7 @@ def make_flat_paycheck_line(profile, name, amount, kind):
         The flushed :class:`~app.models.paycheck_line.PaycheckLine`.
     """
     # pylint: disable=import-outside-toplevel  -- same circular-dep
-    # avoidance as the loan helpers above.
+    # avoidance as the loan helpers in ``_loans.py``.
     from app import ref_cache
     from app.enums import CalcMethodEnum
     from app.extensions import db
@@ -441,7 +441,7 @@ def build_pay_stub_world(owner):
         ``(profile, {"health", "vision", "dental", "roth", "phone": line})``.
     """
     # pylint: disable=import-outside-toplevel  -- same circular-dep
-    # avoidance as the loan helpers above.
+    # avoidance as the loan helpers in ``_loans.py``.
     from app.enums import PaycheckLineKindEnum
     from app.extensions import db
 
@@ -488,7 +488,8 @@ def add_test_pay_stub(profile, payday, base_pay, taxes, lines=()):
         profile's ``pay_stubs`` is expired, so the next read sees it.
     """
     # Pylint: ``import-outside-toplevel`` -- the circular-dependency avoidance
-    # the loan helpers above state: this module loads before the app's models.
+    # the loan helpers in ``_loans.py`` state: this module loads before the
+    # app's models.
     # pylint: disable=import-outside-toplevel
     from app import ref_cache
     from app.extensions import db

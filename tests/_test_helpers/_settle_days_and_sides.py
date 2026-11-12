@@ -56,7 +56,7 @@ def default_settle_day(period, status_id):
         ``period.start_date`` for a settled status, ``None`` for any other.
     """
     # pylint: disable=import-outside-toplevel  -- same circular-dep
-    # avoidance as the loan helpers above.
+    # avoidance as the loan helpers in ``_loans.py``.
     from app.utils.balance_predicates import settled_status_ids
 
     return period.start_date if status_id in settled_status_ids() else None

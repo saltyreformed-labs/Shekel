@@ -77,7 +77,7 @@ def observed_day_of(instant):
         The :class:`datetime.date` the assertion is the closing balance for.
     """
     # pylint: disable=import-outside-toplevel  -- same circular-dep
-    # avoidance as the loan helpers above.
+    # avoidance as the loan helpers in ``_loans.py``.
     from app.utils.dates import to_display_date
 
     return to_display_date(instant)
@@ -105,7 +105,7 @@ def add_anchor_history(db_session, account, balance, days_ago=0):
         The created :class:`AccountAnchorHistory` row (flushed).
     """
     # pylint: disable=import-outside-toplevel  -- same circular-dep
-    # avoidance as the loan helpers above.
+    # avoidance as the loan helpers in ``_loans.py``.
     from datetime import datetime, timedelta, timezone
     from app.models.account import AccountAnchorHistory
 
@@ -258,7 +258,7 @@ def reassert_balance_on(db_session, account, at):
     has :func:`append_balance_assertion`, which takes one and always did.
     """
     # pylint: disable=import-outside-toplevel  -- same circular-dep
-    # avoidance as the loan helpers above.
+    # avoidance as the loan helpers in ``_loans.py``.
     from app.models.account import AccountAnchorHistory
 
     require_assertion_instant(at)
@@ -346,7 +346,7 @@ def append_only_guard_lifted(db_session, table):
         ``None``.
     """
     # pylint: disable=import-outside-toplevel  -- same circular-dep
-    # avoidance as the loan helpers above.
+    # avoidance as the loan helpers in ``_loans.py``.
     from app.append_only_infrastructure import (
         APPEND_ONLY_TABLES,
         APPEND_ONLY_TRIGGERS,
@@ -437,7 +437,7 @@ def account_never_asserted(
         The created :class:`~app.models.account.Account`, flushed.
     """
     # pylint: disable=import-outside-toplevel  -- same circular-dep
-    # avoidance as the loan helpers above.
+    # avoidance as the loan helpers in ``_loans.py``.
     from datetime import timedelta as _td
 
     from app import ref_cache
@@ -524,11 +524,12 @@ def open_books_before_the_first_assertion(
     **BACKWARD only, and that is a rule rather than an accident.**  The books
     never move forward here, so calling this twice, or calling it on an account
     some other helper already opened earlier, cannot strand a row that was
-    legal a moment ago.  ``tests/conftest``'s own calendar reset learned the
-    same rule the same way one table over, and plan step
+    legal a moment ago.  The seed owner's calendar reset
+    (``_reset_seed_calendar``, in ``tests/_seed_owner_fixtures.py``) learned
+    the same rule the same way one table over, and plan step
     ``pay_calendar:C4-b-1`` then measured that its backward-only restatement
-    could not move a day in any world that file builds and deleted it; what
-    enforces the rule there now is a refusal, not a restatement.
+    could not move a day in any world the suite's fixtures build and deleted
+    it; what enforces the rule there now is a refusal, not a restatement.
 
     A no-op for an account carrying no assertion, and equally for one carrying
     no opening ROW -- both production-unreachable, both states a raw-model
@@ -544,7 +545,7 @@ def open_books_before_the_first_assertion(
         carries no assertion to place them before.
     """
     # pylint: disable=import-outside-toplevel  -- same circular-dep avoidance
-    # as the loan helpers above.
+    # as the loan helpers in ``_loans.py``.
     from app.extensions import db
     from app.models.account import Account, AccountAnchorHistory
     from app.models.pay_period import PayPeriod
@@ -596,7 +597,8 @@ def open_books_before_the_first_assertion(
     # ``create_account`` has already booked the ``account_opening`` journal
     # entry keyed on the day it asserted, so a restatement afterwards leaves
     # that entry on a day the books no longer open -- the stale-key-plus-
-    # reversal shape ``tests/conftest.py``'s own factory comment warns about.
+    # reversal shape ``build_seed_user``'s own comment warns about
+    # (``tests/_seed_owner_fixtures.py``).
     # The reconcile is idempotent and self-healing, and re-running it is what
     # PRODUCTION does after the same restatement (the deploy's
     # ``backfill_all_account_anchor_postings``), so the fixture takes the same
@@ -634,7 +636,7 @@ def governing_opening_row(db_session, account):
         ``None`` when the account carries none.
     """
     # pylint: disable=import-outside-toplevel  -- same circular-dep avoidance
-    # as the loan helpers above.
+    # as the loan helpers in ``_loans.py``.
     from app.models.account_opening import AccountOpening
 
     return (
@@ -686,7 +688,7 @@ def restate_account_opening(db_session, account, opened_on):
         opened_on: The civil day the books now open on.
     """
     # pylint: disable=import-outside-toplevel  -- same circular-dep avoidance
-    # as the loan helpers above.
+    # as the loan helpers in ``_loans.py``.
     from app.models.account_opening import AccountOpening
 
     governing = governing_opening_row(db_session, account)
@@ -751,7 +753,7 @@ def append_balance_assertion(
         The inserted :class:`AccountAnchorHistory` row (flushed).
     """
     # pylint: disable=import-outside-toplevel  -- same circular-dep
-    # avoidance as the loan helpers above.
+    # avoidance as the loan helpers in ``_loans.py``.
     from app.models.account import AccountAnchorHistory
 
     require_assertion_instant(at)

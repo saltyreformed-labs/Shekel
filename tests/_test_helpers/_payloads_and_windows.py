@@ -526,7 +526,7 @@ def dashboard_section(user_id, as_of=None):
         ``None`` the route passes straight through to the producers.
     """
     # pylint: disable=import-outside-toplevel  -- same circular-dependency
-    # avoidance as the factories above.
+    # avoidance as the factories in ``_accounts.py`` and ``_loans.py``.
     from app.services import dashboard_service
     from app.services.balance_at import BalanceContext
 

@@ -383,10 +383,10 @@ class TestStampLoginSession:
 
         Reusing one value across the three writes is required so a
         later audit comparison cannot falsely flag the keys as
-        clock-skewed.  This test is the unit-level enforcement of
-        that contract; the integration test in
-        ``tests/test_adversarial/test_step_up/test_fresh_login_and_reauth.py`` exercises the
-        same property via /login.
+        clock-skewed.  This test is the one enforcement of that
+        contract: no integration test compares the three keys, and
+        ``tests/test_adversarial/test_step_up/test_fresh_login_and_reauth.py``
+        checks only that /login stamps ``_fresh_login_at``.
         """
         with app.test_request_context("/") as ctx:
             now = datetime.now(timezone.utc)

@@ -32,7 +32,7 @@ of the 2026-04-15 security remediation plan:
     without a matching benefit for this single-owner, low-sensitivity
     app.  Those routes remain owner-only via ``@require_owner``.
 
-The tests in this file run against the full Flask app via
+The tests in this package run against the full Flask app via
 ``test_client`` so that load_user, the before_request hook, the
 decorator, the /reauth route, and the lifecycle stamping all
 exercise together.  A regression in any one piece would break a
@@ -41,7 +41,7 @@ test here even if the unit tests pass individually.
 Why adversarial, not unit:  the C-10 contract is a composition of
 five cooperating pieces (config, loader, hook, decorator, route).
 The unit tests in ``tests/test_utils/`` and ``tests/test_routes/
-test_auth.py`` cover each piece in isolation; this file catches the
+test_auth/`` cover each piece in isolation; this package catches the
 "each piece works alone but they are wired together wrong" class of
 bug.
 """

@@ -199,7 +199,7 @@ def test_nothing_after_the_settle_moves_what_a_loan_payment_paid(
     of it: the calendar draws the checking side's leg, and a swap at its
     call site (``calendar_service._contributions`` asking
     ``amounts_by_key``) shows the paid payment there at 1,599.10 with
-    this case green.  ``test_calendar_service``'s
+    this case green.  ``test_calendar_service/test_edge_cases_and_transfers.py``'s
     ``test_a_settled_leg_is_a_paid_cell_worth_its_record`` catches that
     swap.  The dashboard's bills load only transfers still projected, so a
     payment marked paid is not among them.

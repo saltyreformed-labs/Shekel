@@ -37,7 +37,7 @@ def default_settle_day(period, status_id):
     """Return the settle day a BARE-built fixture row takes for *status_id*.
 
     **One statement of the rule, for the two bare ``Transaction`` builders that
-    need it** (:func:`add_txn` and ``test_calendar_service``'s module-local
+    need it** (:func:`add_txn` and ``test_calendar_service/_helpers.py``'s module-local
     twin).  A row built in a settled status must carry a settle day -- a settled
     row without one is the state
     :func:`app.utils.balance_predicates.settled_day` refuses -- and the day is

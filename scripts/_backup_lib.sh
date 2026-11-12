@@ -8,7 +8,10 @@
 # the application schema set (three divergent copies meant a new schema
 # missed in backup.sh would silently drop that schema from every backup,
 # discovered only at restore time), the log() function, the docker
-# prerequisite stanza, and the decrypt/decompress pipeline.
+# prerequisite stanza, and the decrypt/decompress pipeline.  Since card
+# plan#2166 also the compose project a container was made from, which
+# restore.sh starts the app with and verify_backup.sh runs the integrity
+# check in.
 #
 # errexit discipline: every helper uses explicit `if ! cmd; return 1`
 # control flow instead of relying on set -e, because callers routinely
@@ -70,6 +73,68 @@ require_db_container() {
     # shellcheck disable=SC2310 # container_running is a boolean predicate (one captured docker inspect); its 0/1 is exactly what this if tests.
     if ! container_running "${container}"; then
         log "ERROR" "Database container '${container}' is not running"
+        return 1
+    fi
+    return 0
+}
+
+# ── The compose project a container was made from ────────────────
+# Print one command for the operator to paste, each word shell-quoted.
+print_command() {
+    local quoted
+    printf -v quoted '%q ' "$@"
+    echo "      ${quoted% }"
+}
+
+# compose_project_of KIND CONTAINER: fill COMPOSE_COMMAND with the docker
+# compose command, without its subcommand, that made CONTAINER, and
+# COMPOSE_SERVICE with its service.  Both are read from the labels docker
+# compose stamps on every container it makes: its project, its directory,
+# its files and its service.  A command built from them reaches the stack
+# the container belongs to and no other: never a setting of the script's
+# own that could name another, and never the compose file of whatever
+# directory the script runs from (the repository's bare docker-compose.yml
+# is project shekel-prod, and an up of it would recreate production's
+# containers from the base file alone).  So an empty label is refused
+# (docker prints a missing one as empty), as is a project that no longer
+# parses.  KIND names the container in a refusal ("App container").
+# Usage: compose_project_of "App container" "$APP_CONTAINER" || exit 1
+COMPOSE_COMMAND=()
+COMPOSE_SERVICE=""
+compose_project_of() {
+    local kind="$1" container="$2"
+    local -a keys=(project project.working_dir project.config_files service)
+    local -a values files
+    local template="" key file labels index
+    for key in "${keys[@]}"; do
+        template+="{{println (index .Config.Labels \"com.docker.compose.${key}\")}}"
+    done
+    if ! labels=$(docker inspect --format "${template}" "${container}"); then
+        log "ERROR" "${kind} '${container}': docker cannot read its labels (above)"
+        return 1
+    fi
+    mapfile -t values <<<"${labels}"
+    for index in "${!keys[@]}"; do
+        if [[ -z "${values[index]:-}" ]]; then
+            log "ERROR" "${kind} '${container}' has no com.docker.compose.${keys[index]} label, so this"
+            log "ERROR" "script cannot reach its stack the way docker compose made it.  Make the"
+            log "ERROR" "container with docker compose in its stack's directory, then run this again."
+            return 1
+        fi
+    done
+
+    COMPOSE_COMMAND=(docker compose --project-name "${values[0]}" --project-directory "${values[1]}")
+    IFS=, read -r -a files <<<"${values[2]}"
+    for file in "${files[@]}"; do
+        COMPOSE_COMMAND+=(--file "${file}")
+    done
+    # shellcheck disable=SC2034 # an output of this function, read by the scripts that source this library (restore.sh starts the app's service with it)
+    COMPOSE_SERVICE="${values[3]}"
+
+    if ! "${COMPOSE_COMMAND[@]}" config --quiet; then
+        log "ERROR" "${kind} '${container}': the compose project that made it does not parse"
+        log "ERROR" "(its error is above).  The check that failed:"
+        print_command "${COMPOSE_COMMAND[@]}" config --quiet
         return 1
     fi
     return 0

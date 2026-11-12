@@ -39,12 +39,20 @@ tests grade the meaning, not a race.
 from __future__ import annotations
 
 import gzip
-import re
 import subprocess
 import textwrap
 from pathlib import Path
 
 import pytest
+
+from tests.test_scripts._shell import (
+    docker_stub,
+    every_function_text,
+    function_text,
+    run_bash,
+    section_text,
+    trap_line,
+)
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _CONTAINER_LIB = _REPO_ROOT / "scripts" / "_container_lib.sh"
@@ -55,89 +63,6 @@ _RESTORE = _REPO_ROOT / "scripts" / "restore.sh"
 _DIGEST_A = "sha256:" + "a" * 64
 _DIGEST_B = "sha256:" + "b" * 64
 _DIGEST_C = "sha256:" + "c" * 64
-
-
-def _function_text(script: Path, name: str) -> str:
-    """Return shell function *name*'s definition from *script*, verbatim.
-
-    A definition opens with ``name() {`` at the start of a line and closes
-    with the first ``}`` alone at the start of a line, which is how every
-    top-level function in these scripts is written (shfmt enforces it).
-
-    Args:
-        script: The script holding the function.
-        name: The function's name.
-
-    Returns:
-        The definition, from its first line through its closing brace.
-    """
-    found = re.findall(
-        rf"^{re.escape(name)}\(\) \{{\n.*?^\}}\n",
-        script.read_text(encoding="utf-8"), flags=re.S | re.M,
-    )
-    assert len(found) == 1, (
-        f"expected one definition of {name}() in {script}, found {len(found)}"
-    )
-    return found[0]
-
-
-def _every_function_text(script: Path) -> str:
-    """Return every top-level function definition in *script*, verbatim, in order.
-
-    Each is matched as :func:`_function_text` matches one.
-
-    Args:
-        script: The script holding the functions.
-
-    Returns:
-        The definitions, concatenated.
-    """
-    found = re.findall(
-        r"^\w+\(\) \{\n.*?^\}\n",
-        script.read_text(encoding="utf-8"), flags=re.S | re.M,
-    )
-    assert found, f"found no function definitions in {script}"
-    return "".join(found)
-
-
-def _section_text(script: Path, start: str, end: str) -> str:
-    """Return *script*'s lines from the one opening with *start* to the one opening with *end*.
-
-    Args:
-        script: The script holding the section.
-        start: How the section's first line opens.
-        end: How the line after its last opens.
-
-    Returns:
-        The section, *end*'s line excluded.
-    """
-    found = re.findall(
-        rf"^{re.escape(start)}.*?(?=^{re.escape(end)})",
-        script.read_text(encoding="utf-8"), flags=re.S | re.M,
-    )
-    assert len(found) == 1, (
-        f"expected one section from {start!r} to {end!r} in {script}, "
-        f"found {len(found)}"
-    )
-    return found[0]
-
-
-def _trap_line(script: Path) -> str:
-    """Return *script*'s one top-level ``trap`` statement, verbatim.
-
-    Args:
-        script: The script holding it.
-
-    Returns:
-        The line.
-    """
-    found = re.findall(
-        r"^trap .*$", script.read_text(encoding="utf-8"), flags=re.M,
-    )
-    assert len(found) == 1, (
-        f"expected one top-level trap in {script}, found {len(found)}"
-    )
-    return found[0]
 
 
 def _fake_docker(bin_dir: Path, *, stdout: str, status: int) -> Path:
@@ -168,37 +93,6 @@ def _fake_docker(bin_dir: Path, *, stdout: str, status: int) -> Path:
     return log
 
 
-def _bash(program: str, *args: str, path_prefix: Path | None = None,
-          ) -> subprocess.CompletedProcess:
-    """Run *program* under the swept scripts' own ``set -euo pipefail``.
-
-    A function its script calls inside a command substitution is called the
-    same way here, since bash runs that subshell WITHOUT errexit: grading it
-    bare under ``set -e`` would grade a context its callers never give it.
-
-    With stubs, ``DOCKER_HOST`` names a socket that does not exist, so a
-    ``docker`` that is not the stub reaches no daemon.
-
-    Args:
-        program: Bash source, reading its inputs from ``$1``, ``$2`` ...
-        args: The positional parameters.
-        path_prefix: A directory to put first on ``PATH`` (the stubs).
-
-    Returns:
-        The completed process, stdout and stderr captured.
-    """
-    env = None
-    if path_prefix is not None:
-        env = {
-            "PATH": f"{path_prefix}:/usr/bin:/bin",
-            "DOCKER_HOST": f"unix://{path_prefix}/no-daemon.sock",
-        }
-    return subprocess.run(
-        ["bash", "-c", f"set -euo pipefail\n{program}", "_", *args],
-        capture_output=True, text=True, timeout=30, check=False, env=env,
-    )
-
-
 class TestTheRunningCheckHasOneHome:
     """Ruling R-BAL254: ``container_running`` answers for every caller."""
 
@@ -216,7 +110,7 @@ class TestTheRunningCheckHasOneHome:
     ):
         """Running is 0; stopped, or unknown to docker, is 1."""
         log = _fake_docker(tmp_path / "bin", stdout=answer, status=status)
-        result = _bash(
+        result = run_bash(
             'source "$1"; container_running "$2" || exit "$?"',
             str(_CONTAINER_LIB), "probe-db", path_prefix=tmp_path / "bin",
         )
@@ -228,7 +122,7 @@ class TestTheRunningCheckHasOneHome:
     def test_the_backup_helper_asks_through_it(self, tmp_path):
         """``require_db_container`` refuses a stopped container, by name."""
         _fake_docker(tmp_path / "bin", stdout="false\n", status=0)
-        result = _bash(
+        result = run_bash(
             'source "$1"; require_db_container "$2" || exit "$?"',
             str(_BACKUP_LIB), "probe-db", path_prefix=tmp_path / "bin",
         )
@@ -238,7 +132,7 @@ class TestTheRunningCheckHasOneHome:
     def test_the_backup_helper_passes_a_running_container(self, tmp_path):
         """And lets a running one through, saying nothing."""
         _fake_docker(tmp_path / "bin", stdout="true\n", status=0)
-        result = _bash(
+        result = run_bash(
             'source "$1"; require_db_container "$2" || exit "$?"',
             str(_BACKUP_LIB), "probe-db", path_prefix=tmp_path / "bin",
         )
@@ -295,9 +189,7 @@ def _restore_stub(bin_dir: Path, *, health: str | None = None,
     ``config`` (the compose project's parse), ``restore`` (the restore's
     ``psql``), ``hand-over`` and ``up``.  Every other call exits 0 and
     prints nothing.  ``sleep`` returns at once, so thirty retries cost
-    nothing.  Each call's arguments are logged twice: joined by spaces in
-    ``docker.log``, and each in brackets in ``argv.log``, which keeps the
-    word boundaries the first loses.
+    nothing.  The logs and the labels are :func:`docker_stub`'s.
 
     Args:
         bin_dir: Directory placed first on ``PATH``.
@@ -311,55 +203,32 @@ def _restore_stub(bin_dir: Path, *, health: str | None = None,
     Returns:
         The invocation log's path.
     """
-    bin_dir.mkdir()
-    log = bin_dir / "docker.log"
-    argv_log = bin_dir / "argv.log"
-    (bin_dir / "health.out").write_text(health or "", encoding="utf-8")
-    (bin_dir / "running.out").write_text(running, encoding="utf-8")
-    for key, value in (_LABELS if labels is None else labels).items():
-        (bin_dir / f"label.{key}").write_text(value, encoding="utf-8")
+    (bin_dir.parent / "health.out").write_text(health or "", encoding="utf-8")
+    (bin_dir.parent / "running.out").write_text(running, encoding="utf-8")
     health_arm = (
-        "exit 1" if health is None else f"cat '{bin_dir}/health.out'; exit 0"
+        "exit 1" if health is None
+        else f"cat '{bin_dir.parent}/health.out'; exit 0"
     )
 
     def outcome(step: str) -> str:
         """The stub's exit for *step*'s call."""
         return "exit 1" if step in failing else "exit 0"
 
-    (bin_dir / "docker").write_text(textwrap.dedent(f"""\
-        #!/usr/bin/env bash
-        printf '%s\\n' "$*" >>'{log}'
-        printf '[%s]' "$@" >>'{argv_log}'
-        echo >>'{argv_log}'
-        case "$*" in
-            *com.docker.compose.*)
-                for key in $(printf '%s' "$*" | grep -o 'com\\.docker\\.compose\\.[a-z_.]*'); do
-                    file='{bin_dir}/label.'"${{key#com.docker.compose.}}"
-                    if [ -f "$file" ]; then cat "$file"; fi
-                    echo
-                done
-                exit 0 ;;
-            *State.Health.Status*) {health_arm} ;;
-            *State.Running*) cat '{bin_dir}/running.out'; exit {status} ;;
-            "inspect probe-app") {"exit 0" if app_exists else "exit 1"} ;;
-            "exec probe-db sh -c "*) {outcome("hook-check")} ;;
-            "exec --env "*) {outcome("hand-over")} ;;
-            "exec -i "*) cat >/dev/null; {outcome("restore")} ;;
-            "compose "*" config --quiet") {outcome("config")} ;;
-            "compose "*" up "*) {outcome("up")} ;;
-        esac
-        exit 0
-        """), encoding="utf-8")
-    (bin_dir / "sleep").write_text("#!/usr/bin/env bash\nexit 0\n",
-                                   encoding="utf-8")
-    for name in ("docker", "sleep"):
-        (bin_dir / name).chmod(0o755)
-    return log
+    return docker_stub(bin_dir, labels=_LABELS if labels is None else labels, arms=f"""
+        *State.Health.Status*) {health_arm} ;;
+        *State.Running*) cat '{bin_dir.parent}/running.out'; exit {status} ;;
+        "inspect probe-app") {"exit 0" if app_exists else "exit 1"} ;;
+        "exec probe-db sh -c "*) {outcome("hook-check")} ;;
+        "exec --env "*) {outcome("hand-over")} ;;
+        "exec -i "*) cat >/dev/null; {outcome("restore")} ;;
+        "compose "*" config --quiet") {outcome("config")} ;;
+        "compose "*" up "*) {outcome("up")} ;;
+        """)
 
 
 #: The restore's configuration block, read from its text: the probe names a
 #: program sets before it keep their values, as an exported one would.
-_RESTORE_CONFIG = _section_text(
+_RESTORE_CONFIG = section_text(
     _RESTORE, "# ── Configuration", "# ── Functions",
 )
 
@@ -382,10 +251,10 @@ def _restore_functions(tmp_path: Path, program: str, *args: str,
         per call.
     """
     log = _restore_stub(tmp_path / "bin", **stub)
-    result = _bash(
+    result = run_bash(
         'source "$1"; DB_CONTAINER=probe-db; APP_CONTAINER=probe-app; '
         'eval "$2"; eval "$3"; shift 3\n' + program,
-        str(_BACKUP_LIB), _RESTORE_CONFIG, _every_function_text(_RESTORE),
+        str(_BACKUP_LIB), _RESTORE_CONFIG, every_function_text(_RESTORE),
         *args, path_prefix=tmp_path / "bin",
     )
     return result, log.read_text(encoding="utf-8").splitlines()
@@ -438,17 +307,16 @@ class TestRestoreWaitsForTheAppThroughTheSharedCheck:
         recorder_log = tmp_path / "asked.log"
         recorder_log.write_text("", encoding="utf-8")
         recorder = "" if recorded_answer is None else self._RECORDER
-        result = _bash(
+        result = run_bash(
             'source "$1"; eval "$2"; APP_CONTAINER=probe-app; '
             'RECORDER_LOG="$3"; RECORDED_ANSWER="$4"; eval "$5"; '
-            'eval "$6"; eval "$7"; eval "$8"; eval "$9"; '
+            'eval "$6"; eval "$7"; eval "$8"; '
             'read_app_stack; start_app',
             str(_BACKUP_LIB), recorder, str(recorder_log),
             str(recorded_answer or 0), _RESTORE_CONFIG,
-            _function_text(_RESTORE, "print_command"),
-            _function_text(_RESTORE, "app_container_exists"),
-            _function_text(_RESTORE, "read_app_stack"),
-            _function_text(_RESTORE, "start_app"),
+            function_text(_RESTORE, "app_container_exists"),
+            function_text(_RESTORE, "read_app_stack"),
+            function_text(_RESTORE, "start_app"),
             path_prefix=tmp_path / "bin",
         )
         return (
@@ -704,7 +572,7 @@ def _restore_main(tmp_path: Path, *, safety_dump: bool = False, **stub,
     flags = ["--skip-confirm"] + ([] if safety_dump else ["--skip-safety-dump"])
     return _restore_functions(
         tmp_path, 'BACKUP_LOCAL_DIR="$1"; eval "$2"; shift 2; main "$@"',
-        str(tmp_path / "dumps"), _trap_line(_RESTORE), *flags, str(backup),
+        str(tmp_path / "dumps"), trap_line(_RESTORE), *flags, str(backup),
         **stub,
     )
 
@@ -813,10 +681,10 @@ def _extract_env_value(env_file_text: str | None, key: str, tmp_path: Path,
     """
     if env_file_text is not None:
         (tmp_path / ".env").write_text(env_file_text, encoding="utf-8")
-    return _bash(
+    return run_bash(
         'PROD_ROOT="$1"; eval "$2"; value=$(extract_env_value "$3"); '
         'printf "%s" "$value"',
-        str(tmp_path), _function_text(_RECONCILE, "extract_env_value"), key,
+        str(tmp_path), function_text(_RECONCILE, "extract_env_value"), key,
     )
 
 
@@ -875,10 +743,10 @@ def _compose_image_digest(compose_text: str | None, tmp_path: Path,
         (tmp_path / "docker-compose.yml").write_text(
             compose_text, encoding="utf-8",
         )
-    return _bash(
+    return run_bash(
         'PROD_ROOT="$1"; eval "$2"; digest=$(compose_image_digest); '
         'printf "%s" "$digest"',
-        str(tmp_path), _function_text(_RECONCILE, "compose_image_digest"),
+        str(tmp_path), function_text(_RECONCILE, "compose_image_digest"),
     )
 
 

@@ -124,13 +124,6 @@ Environment Variables:
 EOF
 }
 
-print_command() {
-    # One command for the operator to paste, each word shell-quoted.
-    local quoted
-    printf -v quoted '%q ' "$@"
-    echo "      ${quoted% }"
-}
-
 recovery_guidance() {
     # The exit trap.  Once the database has been dropped, a failure leaves a
     # state the operator must be told, with the way back or forward
@@ -227,56 +220,25 @@ app_container_exists() {
 }
 
 read_app_stack() {
-    # Fill APP_COMPOSE and APP_START from the labels docker compose stamps on
-    # every container it makes: its project, its directory, its files and
-    # its service.  The start then brings back the stack this script
-    # stopped, and no setting of its own can name another.  Nor can the
-    # compose file of whatever directory the script runs from: the
-    # repository's bare docker-compose.yml is project shekel-prod, and an up
-    # of it would recreate production's containers from the base file
-    # alone.  So an empty label is refused (docker prints a missing one as
-    # empty), as is a project that no longer parses, before anything is
-    # changed.
+    # Fill APP_COMPOSE and APP_START from the app container's own compose
+    # labels (compose_project_of, _backup_lib.sh), so the start brings back
+    # the stack this script stopped.  A label missing, or a project that no
+    # longer parses, would fail the start after the restore: refused now,
+    # before anything is changed.
     # shellcheck disable=SC2310 # app_container_exists is a boolean predicate (docker inspect &>/dev/null); the container-absent non-zero status IS its intended return, not an error to abort on
     if ! app_container_exists; then
         return 0
     fi
-    local -a keys=(project project.working_dir project.config_files service)
-    local -a values files
-    local template="" key file labels index
-    for key in "${keys[@]}"; do
-        template+="{{println (index .Config.Labels \"com.docker.compose.${key}\")}}"
-    done
-    labels=$(docker inspect --format "${template}" "${APP_CONTAINER}")
-    mapfile -t values <<<"${labels}"
-    for index in "${!keys[@]}"; do
-        if [[ -z "${values[index]:-}" ]]; then
-            log "ERROR" "App container '${APP_CONTAINER}' has no com.docker.compose.${keys[index]} label, so this"
-            log "ERROR" "script cannot start it the way docker compose made it.  Make it with"
-            log "ERROR" "'docker compose up -d app' in its stack's directory, then run this again."
-            log "ERROR" "Nothing has been changed."
-            exit 1
-        fi
-    done
-
-    APP_COMPOSE=(docker compose --project-name "${values[0]}" --project-directory "${values[1]}")
-    IFS=, read -r -a files <<<"${values[2]}"
-    for file in "${files[@]}"; do
-        APP_COMPOSE+=(--file "${file}")
-    done
-    # --pull never: the restore brings back the image it stopped, never a
-    # newer one a moving tag names (the base file's :latest is
-    # pull_policy: always), and needs no registry to do it.
-    APP_START=("${APP_COMPOSE[@]}" up --pull never -d "${values[3]}")
-
-    if ! "${APP_COMPOSE[@]}" config --quiet; then
-        log "ERROR" "App container '${APP_CONTAINER}': the compose project that made it does not parse"
-        log "ERROR" "(its error is above), so the start after the restore would fail.  The check"
-        log "ERROR" "that failed:"
-        print_command "${APP_COMPOSE[@]}" config --quiet
+    # shellcheck disable=SC2310 # compose_project_of returns explicit codes (the backup library's errexit discipline); this if IS its refusal
+    if ! compose_project_of "App container" "${APP_CONTAINER}"; then
         log "ERROR" "Nothing has been changed."
         exit 1
     fi
+    APP_COMPOSE=("${COMPOSE_COMMAND[@]}")
+    # --pull never: the restore brings back the image it stopped, never a
+    # newer one a moving tag names (the base file's :latest is
+    # pull_policy: always), and needs no registry to do it.
+    APP_START=("${APP_COMPOSE[@]}" up --pull never -d "${COMPOSE_SERVICE}")
 }
 
 confirm_restore() {

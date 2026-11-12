@@ -385,7 +385,7 @@ class TestStampLoginSession:
         later audit comparison cannot falsely flag the keys as
         clock-skewed.  This test is the unit-level enforcement of
         that contract; the integration test in
-        ``tests/test_adversarial/test_step_up.py`` exercises the
+        ``tests/test_adversarial/test_step_up/test_fresh_login_and_reauth.py`` exercises the
         same property via /login.
         """
         with app.test_request_context("/") as ctx:

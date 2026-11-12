@@ -213,7 +213,7 @@ def test_nothing_after_the_settle_moves_what_a_loan_payment_paid(
     question of its own, not settled here; and the first guard itself
     (``enters_settled_band`` skipped, so a repeat click runs the settle act
     again), which alone changes nothing this case reads and is graded by
-    ``test_transfer_settle_freeze``'s
+    ``test_transfer_settle_freeze/test_the_named_verb.py``'s
     ``test_settling_an_ALREADY_settled_transfer_writes_nothing``.
 
     The payments are the TRANSFERS due 2026-02-01 and 2026-03-01, each read

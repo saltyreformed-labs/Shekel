@@ -205,11 +205,24 @@ export BACKUP_ENCRYPTION_PASSPHRASE="your-passphrase"
 
 The restore script will:
 
-1. Stop the application container (if it exists)
-2. Drop and recreate the database
-3. Restore from the backup file
-4. Start the application container (which runs Alembic migrations via the entrypoint)
-5. Run basic verification checks
+1. Check, before it changes anything, that the database container holds its provisioning script and
+   that the compose project the app container was made from still parses, read from the container's
+   own labels
+2. Validate the backup file, then take a safety dump of the current database
+3. Stop the application container (if it exists)
+4. Drop and recreate the database
+5. Restore from the backup file
+6. Hand every restored object to the owner login, `shekel_owner`, with the database container's
+   provisioning script: the backup is taken `--no-owner --no-privileges`, so the restore makes every
+   object the superuser's
+7. Start the application the way docker compose made it, which runs the deploy in the migrate
+   service first (the migrations, then the web login's grants). With no application container, it
+   says to run `flask db upgrade` on the host instead, with `.env`'s `DATABASE_URL` naming the owner
+   login
+8. Run basic verification checks
+
+If a step fails once the database has been dropped, the script prints the state it left and what to
+run next.
 
 ### 6.3 Verify the Restore
 
@@ -358,8 +371,8 @@ DATABASE_URL=postgresql://shekel_user:shekel_pass@localhost:5432/shekel \
 | `BACKUP_LOCAL_DIR` | `/var/backups/shekel` | backup.sh, retention.sh | Local backup storage directory |
 | `BACKUP_NAS_DIR` | `/mnt/nas/backups/shekel` | backup.sh, retention.sh | NAS backup storage directory |
 | `BACKUP_ENCRYPTION_PASSPHRASE` | *(none)* | backup.sh, restore.sh, verify.sh | GPG encryption passphrase (optional) |
-| `DB_CONTAINER` | `shekel-prod-db` | backup.sh, restore.sh, verify_backup.sh | PostgreSQL Docker container name. No other script reads this name: `deploy/shekel-deploy.sh` reads `SHEKEL_DB_CONTAINER` and `scripts/test.sh` reads `TEST_DB_CONTAINER`. Pointing it at a non-production container is still the documented purpose of the override -- what it can no longer do is reach the deploy pipeline or the test runner |
-| `APP_CONTAINER` | `shekel-prod-app` | restore.sh, verify.sh | Application Docker container name |
+| `DB_CONTAINER` | `shekel-prod-db` | backup.sh, restore.sh, verify_backup.sh | PostgreSQL Docker container name. No other script reads this name: `deploy/shekel-deploy.sh` reads `SHEKEL_DB_CONTAINER`, and `scripts/test.sh` takes no container name, naming its own throwaway cluster. Pointing it at a non-production container is still the documented purpose of the override -- what it can no longer do is reach the deploy pipeline or the test runner |
+| `APP_CONTAINER` | `shekel-prod-app` | restore.sh, verify.sh | Application Docker container name. restore.sh starts it again with the compose project, directory, files and service the container's own labels name, so no setting names the stack |
 | `PGUSER` | `shekel_user` | all scripts | PostgreSQL user |
 | `PGDATABASE` | `shekel` | all scripts | PostgreSQL database name |
 | `VERIFY_DB` | `shekel_verify` | verify.sh | Temporary database name for verification |

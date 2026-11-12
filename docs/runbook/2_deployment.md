@@ -189,9 +189,9 @@ budgeting app. Capture the failed state first so that window stays recoverable.
 ```bash
 cd /opt/docker/shekel
 
-# 1. STOP THE APP FIRST.  It runs `restart: unless-stopped` and re-runs
-#    `alembic upgrade head` on every start, so restoring underneath a
-#    crash-looping container means restoring while it migrates.
+# 1. STOP THE APP FIRST.  A live app writes during the restore, and under
+#    `restart: unless-stopped` a crash-looping one comes back up until it
+#    is stopped.
 docker compose stop app
 
 # 2. Keep the failed state before overwriting it.
@@ -205,6 +205,11 @@ docker exec shekel-prod-db pg_dump -U shekel_user -d shekel -Fc \
 docker exec -i shekel-prod-db pg_restore -U shekel_user \
     -d shekel --clean --if-exists --single-transaction --exit-on-error \
     <'/home/josh/shekel-backups/shekel_prod_predeploy_<digest>_<ts>.dump'
+
+#    Then hand every object to the owner login.  A dump from before the
+#    cutover names the superuser as each one's owner, which the owner's
+#    deploy cannot change; on a later dump this changes nothing.
+docker exec shekel-prod-db /docker-entrypoint-initdb.d/10-provision-roles.sh
 
 # 4. --clean drops only what the archive knows about, so a table the failed
 #    migration created survives and will collide when it is retried.

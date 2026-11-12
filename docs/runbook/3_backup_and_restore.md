@@ -42,12 +42,26 @@ export BACKUP_ENCRYPTION_PASSPHRASE="your-passphrase"
 
 The restore script will:
 
-1. Display a confirmation prompt (skip with `--skip-confirm`)
-2. Stop the application container
-3. Drop and recreate the database with schemas
-4. Restore from the backup file
-5. Restart the application container (entrypoint runs Alembic migrations)
-6. Run basic sanity checks
+1. Check, before it changes anything, that the database container holds its provisioning script and
+   that the compose project the app container was made from still parses, read from the container's
+   own labels
+2. Validate the backup file: it decrypts, its gzip stream is whole, and it is not empty
+3. Display a confirmation prompt (skip with `--skip-confirm`)
+4. Take a safety dump of the current database (skip with `--skip-safety-dump`)
+5. Stop the application container
+6. Drop and recreate the database with schemas
+7. Restore from the backup file
+8. Hand every restored object to the owner login, `shekel_owner`, with the database container's
+   provisioning script: a backup holds no owners or grants, so the restore makes every object the
+   superuser's
+9. Start the app the way docker compose made it (`docker compose up --pull never -d app`, in the
+   project, directory and files its labels name), which runs the deploy in the migrate service
+   first: the migrations, then the web login's grants
+10. Run basic sanity checks
+
+If a step fails once the database has been dropped, the script prints the state it left and what to
+run next: the safety dump to restore while the restore is incomplete, or the hand-over or the start
+once the data is back.
 
 **Post-restore verification:**
 

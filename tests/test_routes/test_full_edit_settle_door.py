@@ -29,9 +29,6 @@ What these pin, in the order the request runs them:
   * the settle-DAY box beside it is rendered exactly when there is a day to
     state, which is what makes a settled row's day correctable in place.
 """
-# pylint: disable=redefined-outer-name
-# Rationale: ``redefined-outer-name`` is the canonical pytest fixture pattern;
-# test bodies bind fixtures (``auth_client``, ``seed_user``, ...) by name.
 from datetime import timedelta
 from decimal import Decimal
 
@@ -39,7 +36,9 @@ from app import ref_cache
 from app.enums import MovementFigureSourceEnum, StatusEnum
 from app.extensions import db
 from app.models.transaction import Transaction
-from app.services import transaction_service
+from app.services import entry_service, status_seam, transaction_service
+from app.services.cash_ledger import contribution_of, resolve_transaction_amount
+from app.services.row_valuation import settled_contribution, settled_figure
 from app.services.settle_day import record_settle_day, recorded_settle_day
 from app.services.state_machine import allowed_transitions
 from app.utils.dates import display_today
@@ -58,9 +57,6 @@ from tests._test_helpers import (
     generate_row_of,
     typed,
 )
-from app.services import entry_service, status_seam, transaction_service
-from app.services.cash_ledger import contribution_of, resolve_transaction_amount
-from app.services.row_valuation import settled_contribution, settled_figure
 
 
 def _plan_worth(txn):
@@ -170,7 +166,7 @@ class TestTheDropdownBooksWhatTheRowCost:
     """The money control: production row 2231's $31.02."""
 
     def test_the_dropdown_settles_at_the_entry_sum(
-        self, app, db, auth_client, seed_user, seed_periods_today,
+        self, app, auth_client, seed_user, seed_periods_today,
     ):
         """Picking Paid in the popover records $48.98, not the $80.00 budget.
 
@@ -222,7 +218,7 @@ class TestTheDropdownBooksWhatTheRowCost:
             )
 
     def test_the_dropdown_and_mark_paid_book_the_same_figure(
-        self, app, db, auth_client, seed_user, seed_periods_today,
+        self, app, auth_client, seed_user, seed_periods_today,
     ):
         """Two controls, one card, one answer -- the whole point of the step.
 
@@ -266,7 +262,7 @@ class TestTheDropdownBooksWhatTheRowCost:
             assert booked == Decimal("-48.98")
 
     def test_an_entry_less_envelope_still_books_its_budget(
-        self, app, db, auth_client, seed_user, seed_periods_today,
+        self, app, auth_client, seed_user, seed_periods_today,
     ):
         """Ruling **R-FJ** at the door: no purchases means the budget is spent.
 
@@ -297,7 +293,7 @@ class TestTheDropdownBooksWhatTheRowCost:
             )
 
     def test_re_saving_a_paid_row_does_not_re_settle_it(
-        self, app, db, auth_client, seed_user, seed_periods_today,
+        self, app, auth_client, seed_user, seed_periods_today,
     ):
         """Staying inside the band is not a settle.
 
@@ -360,7 +356,7 @@ class TestTheFieldWritesFlushInsideTheExceptionNet:
     """
 
     def test_a_period_move_carrying_an_actual_does_not_500(
-        self, app, db, auth_client, seed_user, seed_periods_today,
+        self, app, auth_client, seed_user, seed_periods_today,
     ):
         """Moving a generated row into an already-populated period still works.
 
@@ -473,7 +469,7 @@ class TestARevertTakesBackWhatTheSettleDerived:
     """
 
     def test_reverting_an_envelope_releases_its_derived_actual(
-        self, app, db, auth_client, seed_user, seed_periods_today,
+        self, app, auth_client, seed_user, seed_periods_today,
     ):
         """Settle, then revert: the row is back to projecting its budget.
 
@@ -508,7 +504,7 @@ class TestARevertTakesBackWhatTheSettleDerived:
             assert _cash_leg(txn_id, seed_user["account"].id) == Decimal("0.00")
 
     def test_a_BILLs_hand_typed_figure_SURVIVES_the_revert_round_trip(
-        self, app, db, auth_client, seed_user, seed_periods_today,
+        self, app, auth_client, seed_user, seed_periods_today,
     ):
         """A human's figure outlives the settle that recorded it (ruling R-FB).
 
@@ -587,7 +583,7 @@ class TestASettledStatusMustMatchTheRowsType:
     """Income settles as Received, an expense as Paid -- never the other one."""
 
     def test_an_expense_asked_to_settle_as_received_is_refused(
-        self, app, db, auth_client, seed_user, seed_periods_today,
+        self, app, auth_client, seed_user, seed_periods_today,
     ):
         """The state machine admits it; the type rule does not.
 
@@ -616,7 +612,7 @@ class TestASettledStatusMustMatchTheRowsType:
             assert status_seam.recorded_settlement(reloaded) is None
 
     def test_the_narrowing_removes_EXACTLY_the_type_mismatch(
-        self, app, db, auth_client, seed_user, seed_periods_today,
+        self, app, auth_client, seed_user, seed_periods_today,
     ):
         """The offer set is the state machine's answer minus ONE status.
 
@@ -662,7 +658,7 @@ class TestASettledStatusMustMatchTheRowsType:
             }, shown
 
     def test_the_dropdown_does_not_offer_the_mismatched_status(
-        self, app, db, auth_client, seed_user, seed_periods_today,
+        self, app, auth_client, seed_user, seed_periods_today,
     ):
         """The pre-hint disables what the refusal would reject.
 
@@ -684,7 +680,7 @@ class TestTheActualBoxExistsOnlyWhereTheSettleHonoursIt:
     """Ruling **R-FF** on the popover: correctable iff the MANUAL branch."""
 
     def test_an_envelope_with_purchases_renders_no_actual_input(
-        self, app, db, auth_client, seed_user, seed_periods_today,
+        self, app, auth_client, seed_user, seed_periods_today,
     ):
         """The box the settle would ignore is not drawn.
 
@@ -703,7 +699,7 @@ class TestTheActualBoxExistsOnlyWhereTheSettleHonoursIt:
             assert b"Actual comes from the purchases below" in resp.data
 
     def test_the_box_appears_ONLY_once_there_is_a_figure_to_correct(
-        self, app, db, auth_client, seed_user, seed_periods_today,
+        self, app, auth_client, seed_user, seed_periods_today,
     ):
         """Before the settle there is nothing to state; after it, there is.
 
@@ -756,7 +752,7 @@ class TestTheActualBoxExistsOnlyWhereTheSettleHonoursIt:
             )
 
     def test_the_settle_DAY_box_appears_only_once_the_money_has_moved(
-        self, app, db, auth_client, seed_user, seed_periods_today,
+        self, app, auth_client, seed_user, seed_periods_today,
     ):
         """"Money moved on" renders exactly when there is a day to state.
 
@@ -812,7 +808,7 @@ class TestTheActualBoxExistsOnlyWhereTheSettleHonoursIt:
             )
 
     def test_correcting_the_actual_records_it_without_reverting(
-        self, app, db, auth_client, seed_user, seed_periods_today,
+        self, app, auth_client, seed_user, seed_periods_today,
     ):
         """The ruling's whole point: no revert needed to fix what moved.
 
@@ -874,7 +870,7 @@ class TestTheActualBoxExistsOnlyWhereTheSettleHonoursIt:
             )
 
     def test_a_submitted_actual_on_a_derived_row_is_refused(
-        self, app, db, auth_client, seed_user, seed_periods_today,
+        self, app, auth_client, seed_user, seed_periods_today,
     ):
         """The stale-form and crafted-request backstop, and it books nothing.
 
@@ -901,7 +897,7 @@ class TestTheActualBoxExistsOnlyWhereTheSettleHonoursIt:
             assert status_seam.recorded_settlement(reloaded) is None
 
     def test_an_empty_actual_box_is_not_a_figure(
-        self, app, db, auth_client, seed_user, seed_periods_today,
+        self, app, auth_client, seed_user, seed_periods_today,
     ):
         """An empty input states no amount, so it is not refused.
 
@@ -963,7 +959,7 @@ class TestWhatAReSettleBooksIsWhatTheOfferSHOWED:
         return txn
 
     def test_an_untouched_tick_books_the_figure_the_panel_offered(
-        self, app, db, seed_user, seed_periods_today,
+        self, app, seed_user, seed_periods_today,
     ):
         """The drift control: offer and booking must be the same number.
 
@@ -988,7 +984,7 @@ class TestWhatAReSettleBooksIsWhatTheOfferSHOWED:
             assert booked == Decimal("245.32")
 
     def test_typing_the_plan_DISPLACES_the_retained_correction(
-        self, app, db, seed_user, seed_periods_today,
+        self, app, seed_user, seed_periods_today,
     ):
         """The user can still say "no, it really was the $500.00".
 
@@ -1358,7 +1354,7 @@ class TestAReSubmittedDayDoesNotRestateItsBASIS:
     """
 
     @staticmethod
-    def _settled_on_a_bound(auth_client, db, seed_user, period):
+    def _settled_on_a_bound(auth_client, seed_user, period):
         """Return a Paid row whose day is an ``asserted`` BOUND, as the panel leaves it."""
         txn = _gas_envelope(seed_user, period)
         txn_id = txn.id
@@ -1372,7 +1368,7 @@ class TestAReSubmittedDayDoesNotRestateItsBASIS:
         return db.session.get(Transaction, txn_id)
 
     def test_an_untouched_save_keeps_the_asserted_basis(
-        self, app, db, auth_client, seed_user, seed_periods_today,
+        self, app, auth_client, seed_user, seed_periods_today,
     ):
         """The defect, at the transaction PATCH.
 
@@ -1383,7 +1379,7 @@ class TestAReSubmittedDayDoesNotRestateItsBASIS:
         """
         with app.app_context():
             paid = self._settled_on_a_bound(
-                auth_client, db, seed_user, seed_periods_today[3],
+                auth_client, seed_user, seed_periods_today[3],
             )
             txn_id, day = paid.id, paid.settled_on
 
@@ -1399,7 +1395,7 @@ class TestAReSubmittedDayDoesNotRestateItsBASIS:
             assert recorded_settle_day(saved) == an_asserted_day(day)
 
     def test_a_day_the_owner_really_MOVED_is_their_own(
-        self, app, db, auth_client, seed_user, seed_periods_today,
+        self, app, auth_client, seed_user, seed_periods_today,
     ):
         """The firing half: a genuine correction still records ``entered``.
 
@@ -1409,7 +1405,7 @@ class TestAReSubmittedDayDoesNotRestateItsBASIS:
         """
         with app.app_context():
             paid = self._settled_on_a_bound(
-                auth_client, db, seed_user, seed_periods_today[3],
+                auth_client, seed_user, seed_periods_today[3],
             )
             txn_id = paid.id
             corrected = paid.settled_on - timedelta(days=2)

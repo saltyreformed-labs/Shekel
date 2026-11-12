@@ -301,7 +301,7 @@ class TestATransfersOfferIsWhatItsReSettleBOOKS:
     settle fold deleted ``transfer_service.leg_settle_amount``) a transfer, so
     the reconcile panel's PREFILL equals what a tick BOOKS on either kind of
     row.  The transaction half is pinned by
-    ``test_full_edit_settle_door.TestWhatAReSettleBooksIsWhatTheOfferSHOWED``;
+    ``test_full_edit_settle_door.test_the_actual_box.TestWhatAReSettleBooksIsWhatTheOfferSHOWED``;
     the transfer half was pinned by nothing.
 
     **Measured 2026-08-17 by an adversarial mutation pass**: deleting the

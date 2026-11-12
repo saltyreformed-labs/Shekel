@@ -1,5 +1,6 @@
 """The helpers and constants every part of this package shares: the module-level helpers of
-``tests/test_deploy/test_internal_tls_and_access.py``, moved verbatim by ``tools/split``.
+``tests/test_deploy/test_internal_tls_and_access.py``, moved verbatim by ``tools/split``, and
+:data:`RUNBOOK_PARTS`, added after it.
 """
 
 from __future__ import annotations
@@ -38,6 +39,8 @@ GITIGNORE = REPO_ROOT / ".gitignore"
 
 
 RUNBOOK = REPO_ROOT / "docs" / "runbook.md"
+#: Every file under ``docs/runbook/``: with :data:`RUNBOOK`, its front page, the one runbook.
+RUNBOOK_PARTS = tuple(sorted((REPO_ROOT / "docs" / "runbook").glob("*.md")))
 
 
 DOCKER_SUBPROCESS_TIMEOUT_S = 60

@@ -217,11 +217,12 @@ _APP_ROLE = "shekel_app"
 _LEDGER_TABLES = "budget.journal_entries, budget.account_postings"
 
 # Both statements are wrapped in a role-existence guard (the same pattern the
-# audit rebuild migration a5be2a99ea14 uses) so they succeed on a database
-# where the production app role has never been provisioned -- a developer
-# laptop, CI, or the per-worker test clones, where the role exists only for
-# the duration of a role-privilege test.  REVOKE and GRANT are idempotent, so
-# re-running either is indistinguishable from running it once.
+# audit rebuild migration a5be2a99ea14 uses) so they succeed on a cluster
+# where the production app role has never been provisioned.  The test cluster
+# is not one: ``scripts/build_test_db_image.py`` creates the role before the
+# template is built, as the entrypoint does before it migrates.  REVOKE and
+# GRANT are idempotent, so re-running either is indistinguishable from running
+# it once.
 _REVOKE_LEDGER_WRITE_SQL = f"""
 DO $$
 BEGIN

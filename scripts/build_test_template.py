@@ -375,8 +375,10 @@ def _populate_template(app) -> None:
         against the rules the app has.
     11. ``apply_ledger_append_only_privileges``: idempotent
         re-application of the ledger append-only posture (review
-        M1/R4) -- a no-op unless the cluster-scoped ``shekel_app``
-        role happens to exist at rebuild time.
+        M1/R4) on the cluster-scoped ``shekel_app`` role, which the
+        bake creates before this build runs
+        (``scripts/build_test_db_image.py``'s ``_APP_ROLE``); a no-op
+        on a cluster without it.
     12. ``seed_reference_data``: populates ``ref.account_types`` (the
         :data:`_EXPECTED_ACCOUNT_TYPE_COUNT` built-in rows) and the other
         ref tables.  The INSERTs on ``ref.account_types`` fire the audit
@@ -500,10 +502,8 @@ def _populate_template(app) -> None:
 
         # Ledger append-only posture (review M1/R4): idempotent
         # re-application for the same latest-definition-wins contract as
-        # steps 3-4.  Almost always a no-op here -- the cluster-scoped
-        # shekel_app role exists only while a role-privilege test is
-        # running -- but keeps the template correct on a developer
-        # cluster where the role is provisioned.
+        # steps 3-4, on the shekel_app role the bake created before this
+        # build ran (scripts/build_test_db_image.py's _APP_ROLE).
         apply_ledger_append_only_privileges(
             lambda statement: db.session.execute(db.text(statement))
         )

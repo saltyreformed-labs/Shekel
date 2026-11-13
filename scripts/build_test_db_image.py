@@ -13,6 +13,12 @@ This script builds the artifact that makes that affordable: an image whose
 PGDATA already contains the template, so starting a run costs a container
 boot rather than a migration replay.
 
+The cluster holds one thing beside the template: the ``shekel_app`` role,
+created BEFORE the template is built (:data:`_APP_ROLE`, plan#3636), as
+production's entrypoint creates it before it migrates.  A role belongs to the
+cluster rather than to a database, so every run's cluster holds it from its
+start and no test creates or drops it.
+
 THREE THINGS HERE WERE MEASURED, NOT ASSUMED, and each would have produced a
 silently wrong image:
 
@@ -108,14 +114,19 @@ _TEMPLATE_DATABASE = "shekel_test_template"
 # Inputs the key covers no matter what the builder imports.  These shape the
 # template without being reachable by reading its import block: the migration
 # chain itself, alembic's own configuration (``migrations/env.py`` sets
-# ``version_table_schema``), the ORM classes ``ref_seeds`` seeds THROUGH, and
-# the builder script.
+# ``version_table_schema``), the ORM classes ``ref_seeds`` seeds THROUGH, the
+# builder script, and THIS file, whose bake makes the cluster the template is
+# built in -- the role the template's grants name among it (:data:`_APP_ROLE`).
+# Without it, two trees whose bakes differ derive one tag and share one image:
+# a tree whose role fixture still drops the role would then meet a template
+# holding grants to it, which refuse the drop.
 _FIXED_KEY_INPUTS = (
     "migrations/versions",
     "migrations/env.py",
     "alembic.ini",
     "app/models",
     "scripts/build_test_template.py",
+    "scripts/build_test_db_image.py",
 )
 
 _TEMPLATE_BUILDER = "scripts/build_test_template.py"
@@ -189,6 +200,19 @@ KEY_INPUTS = key_inputs()
 _READY_TIMEOUT_SECONDS = 60
 _BUILD_USER = "shekel_user"
 _BUILD_PASSWORD = "shekel_pass"
+
+# The least-privilege runtime role, created in the bake cluster before the
+# template exists (:func:`build`), as ``entrypoint.sh`` creates it at step 2b
+# (``scripts/init_db_role.sql``) before step 3 migrates.  Created first, the
+# migration replay and the template's re-applied grants take their
+# role-present branch as a deploy's do, so the template ships the audit log's
+# grants to it.  Each test grants it anything more only inside its own clone,
+# which goes with that clone.  ``WITH LOGIN PASSWORD`` is ``init_db_role.sql``'s
+# form; no test signs in with it, as each reaches the role by ``SET ROLE``.
+_APP_ROLE = "shekel_app"
+_CREATE_APP_ROLE_SQL = (
+    f"CREATE ROLE {_APP_ROLE} WITH LOGIN PASSWORD 'test-shekel-app-password'"
+)
 # How much of the template builder's own log a failure report quotes: enough to
 # show the last migration revision it ran and whatever it logged after that.
 _FAILED_BUILD_LOG_LINES = 40
@@ -718,6 +742,15 @@ def build(tag: str) -> None:
                 f"different port.  docker said: {exc}"
             ) from exc
         _wait_ready(container)
+        # The role before the template: see :data:`_APP_ROLE`.  Through
+        # `docker exec`, as every question `_verify_image` asks goes.
+        _run(
+            [
+                "docker", "exec", container, "psql", "-U", _BUILD_USER,
+                "-d", "postgres", "-v", "ON_ERROR_STOP=1",
+                "-c", _CREATE_APP_ROLE_SQL,
+            ]
+        )
         # Asked back from docker rather than reused from ``host_port``: the
         # point is to confirm the publish actually happened, and a value this
         # process already holds cannot confirm anything.

@@ -53,6 +53,7 @@ from app.routes.accounts.opening import books_opening_context
 from app.services import (
     account_posting_service,
     account_service,
+    card_payoff,
     definition_delete,
     ledger_account_service,
     liability_sign,
@@ -60,7 +61,13 @@ from app.services import (
     transfer_service,
 )
 from app.services.account_params import ensure_type_params
-from app.services.account_projection import AccountProjectionKind, classify_account
+from app.services.account_projection import (
+    AccountProjectionKind,
+    classify_account,
+    is_revolving_type,
+)
+from app.services.account_resolver import resolve_grid_account
+from app.services.balance_at import BalanceContext
 from app.utils import archive_helpers
 from app.utils.account_validation import (
     _create_schema,
@@ -141,6 +148,35 @@ def new_account():
         observed_on_min=pay_period_service.earliest_recordable_day(
             current_user.id,
         ),
+    )
+
+
+def _settle_card_payoff(account_type, name):
+    """Return a new card's payment as settled before the card is written.
+
+    Every card has one payment (task plan#2933), and the refusals that
+    payment can meet are asked here, before any write, so a card nothing can
+    pay is refused with nothing left behind.  The payer is the owner's
+    primary, resolved before the card exists so the resolver can never answer
+    the card itself.
+
+    Args:
+        account_type: The type the owner picked, owner-checked.
+        name: The new account's name.
+
+    Returns:
+        The :class:`~app.services.card_payoff.Payoff` to make once the card
+        exists, or ``None`` for a type that is not a card.
+
+    Raises:
+        ValidationError: From :func:`app.services.card_payoff.plan_payoff`,
+            with the sentence the owner reads.
+    """
+    if not is_revolving_type(account_type):
+        return None
+    return card_payoff.plan_payoff(
+        current_user.id, name,
+        resolve_grid_account(current_user.id, current_user.settings),
     )
 
 
@@ -257,6 +293,7 @@ def create_account():
     # non-route callers get the same default.
     observed_on = data.pop("observed_on", None)
     try:
+        payoff = _settle_card_payoff(account_type, name)
         account = account_service.create_account(
             account_service.AccountSpec(
                 user_id=current_user.id,
@@ -268,10 +305,10 @@ def create_account():
             **data,
         )
     except ValidationError as exc:
-        # Two shapes reach here and they need different destinations: the user
-        # has NO pay periods (send them to generate some), or the "balance as
-        # of" day is out of bounds (send them back to the form with the
-        # service's own message, which names the day and the bound it broke).
+        # Two destinations: the user has NO pay periods (send them to generate
+        # some), or every other refusal -- the "balance as of" day out of
+        # bounds, or a card nothing can pay (task plan#2933) -- goes back to
+        # the form with the service's own sentence.
         #
         # Discriminated by asking the database, not by re-deriving the
         # service's own predicate: re-evaluating "is this date in the future"
@@ -305,6 +342,12 @@ def create_account():
     # and not has_interest and not has_amortization`` predicate introduces.
     kind = classify_account(account)
     ensure_type_params(account, kind)
+    # The card's one payment, settled above; its read pass is built now that
+    # the card exists.
+    if payoff is not None:
+        card_payoff.make_payoff(
+            account, payoff, BalanceContext.build(current_user.id),
+        )
     db.session.commit()
 
     logger.info("Created account: %s (id=%d)", account.name, account.id)

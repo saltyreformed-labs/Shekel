@@ -162,7 +162,24 @@ def is_revolving(account) -> bool:
         (degenerate / partially loaded -- the same PLAIN default the classifier
         takes, so a half-loaded account is never mistaken for a card).
     """
-    acct_type = account.account_type
+    return is_revolving_type(account.account_type)
+
+
+def is_revolving_type(acct_type) -> bool:
+    """Return True iff *acct_type* makes its accounts revolving credit lines.
+
+    :func:`is_revolving` asked of a TYPE, for a door that holds the type before
+    the account exists: account creation settles a new card's payment before
+    the card's own row is written (``card_payoff.plan_payoff``, task plan#2933).
+    :func:`is_revolving` delegates here, so the flag is read in one place.
+
+    Args:
+        acct_type: An :class:`~app.models.ref.AccountType`, or ``None``.
+
+    Returns:
+        True when the type carries ``has_revolving_credit``; False for every
+        other type and for ``None``.
+    """
     if acct_type is None:
         return False
     return acct_type.has_revolving_credit

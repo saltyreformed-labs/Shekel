@@ -410,6 +410,10 @@ _FENCED_MODULE_RULINGS = {
         # nothing -- the same metadata question as the two above, on a flag
         # the seed alone sets.
         "is_revolving",
+        # The same flag asked of a type, for a door holding the type before
+        # the account exists (plan task plan#2933); ``is_revolving``
+        # delegates to it.
+        "is_revolving_type",
         # Whether a transfer or its definition pays into a card (plan task
         # plan#3530): ``is_revolving`` of the account its money goes to, a
         # yes or no that dates and sums nothing.

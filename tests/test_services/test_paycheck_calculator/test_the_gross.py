@@ -295,8 +295,8 @@ class TestTheGrossIsARateAndNotAShareOfAYear:
     # wiring, because the two sides' INPUTS still differed by any applicable
     # raise (finding **D45**), and that "a case asserting these two equal on a
     # raise-BEARING profile would fail, and should".  There is one input now,
-    # and ``test_income_service.TestThePerPeriodGrossIsTheENGINES`` grades a
-    # raise-bearing profile end to end.
+    # and ``test_income_service.test_the_engines_gross.TestThePerPeriodGrossIsTheENGINES``
+    # grades a raise-bearing profile end to end.
 
 
 class TestGrossPerPaycheck:

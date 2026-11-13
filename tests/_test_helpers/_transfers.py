@@ -8,7 +8,6 @@ from app.models.amount_ownership import AmountOwnership
 
 from ._settle_days_and_sides import _UNSET_SETTLED_ON, typed, settlement_if_settling
 from ._rows import one_off_row_of
-from ._amount_bases_and_stubs import amount_basis_for_scenario
 
 
 def seam_confirmed_view(loan_account_id, scenario_id, as_of):
@@ -61,8 +60,9 @@ def contract_forward_references(loan_params, scenario_id, as_of, extra):
     balance seam's forward fold against.  ``scenarios`` is the composer's
     :class:`~app.services.loan_resolver.PayoffScenarios` -- the ledger-derived
     confirmed history and ``project_forward`` over the CONTRACT from the
-    replayed starting state, a walk that amortizes month by month and reads no
-    payment record.  ``with_extra`` is that same engine walk with *extra* a
+    record's standing (the first installment after its last event, ruling
+    plan#3382), a walk that amortizes month by month and reads no payment
+    record.  ``with_extra`` is that same engine walk with *extra* a
     month on top (``project_forward``'s own what-if ``extra_monthly``), over
     the same starting state: the seam's confirmed view for the balance and the
     contractual slice for the starting date and the remaining month count, so
@@ -75,8 +75,8 @@ def contract_forward_references(loan_params, scenario_id, as_of, extra):
 
     Args:
         loan_params: The loan's :class:`LoanParams`.
-        scenario_id: The scenario to scope the feed and the confirmed view to.
-        as_of: The evaluation date (the replay / projection boundary).
+        scenario_id: The scenario to scope the confirmed view to.
+        as_of: The evaluation date the confirmed view folds the record to.
         extra: The what-if extra per month; ``0.00`` makes ``with_extra`` the
             contract's own rows.
 
@@ -93,17 +93,13 @@ def contract_forward_references(loan_params, scenario_id, as_of, extra):
         ProjectionInputs, project_forward,
     )
 
-    ctx_loan = loan_payment_service.load_loan_context(
-        loan_params.account_id, amount_basis_for_scenario(scenario_id),
-        loan_params,
-    )
+    ctx_loan = loan_payment_service.load_loan_context(loan_params.account_id)
     confirmed = seam_confirmed_view(loan_params.account_id, scenario_id, as_of)
     scenarios = loan_resolver.compute_payoff_scenarios(
         loan_inputs=loan_resolver.LoanInputs(
             loan_params, loan_loaders.load_loan_anchor_facts(loan_params),
-            ctx_loan.payments, ctx_loan.rate_changes,
+            ctx_loan.rate_changes,
         ),
-        as_of=as_of,
         confirmed_view=confirmed,
     )
     contract = scenarios.original_forward

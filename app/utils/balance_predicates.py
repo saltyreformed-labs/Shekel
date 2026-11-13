@@ -388,10 +388,10 @@ def settled_day(transaction_id: int, settled_on: date | None) -> date:
     invariant is held structurally at the write door rather than declared at the
     storage tier.
 
-    Its companion question -- "had this row's cash moved YET, at date D" -- is
-    :func:`app.utils.dates.has_settled_by`, which lives one module over on a
-    purity argument its callers force (see that function).  The two take
-    opposite positions on a missing day, and each is right for its own caller.
+    Its companion question -- "had this row's cash moved YET, at date D" -- was
+    ``app.utils.dates.has_settled_by``, which answered ``False`` for a missing
+    day where this refuses one.  Its one caller was the loan resolver's replay,
+    and both went at plan step recurrence:R16-e.
 
     **A missing day is REFUSED, not defaulted, and that is the point of the
     function.**  The derivation this replaced fell back to the pay period's

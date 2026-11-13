@@ -432,21 +432,6 @@ def cross_page_loan_unpaid_ctx(db, seed_user):
     }
 
 
-def _unseeded_replay_balance(loan_id, scenario_id, as_of):
-    """Return a loan's un-seeded schedule-replay balance (the pre-switch value).
-
-    :func:`tests._test_helpers.unseeded_replay_balance`, the suite's ONE
-    assembly of that replay (plan step **balance:X-bl-2b**).  Kept as a name
-    here because the cross-page fixtures below read like prose with it.
-    """
-    # Pylint: ``import-outside-toplevel`` -- the app services are loaded lazily,
-    # the convention every helper in this module follows.
-    # pylint: disable=import-outside-toplevel
-    from tests._test_helpers import unseeded_replay_balance
-
-    return unseeded_replay_balance(loan_id, scenario_id, as_of)
-
-
 @pytest.fixture()
 def cross_page_loan_off_schedule_ctx(db, seed_user):
     """A GENESIS loan with an OFF-SCHEDULE confirmed payment (the read switch).
@@ -461,9 +446,14 @@ def cross_page_loan_off_schedule_ctx(db, seed_user):
     seam scalar since plan C4) -- read that real ledger balance, NOT the replay.
 
     Returns the reader-shaped ctx plus ``ledger`` (the genesis reader's balance,
-    what the surfaces must now show) and ``replay`` (the un-seeded resolver's
-    schedule balance, what they showed BEFORE the switch); the test asserts the
-    two DIVERGE so the "surfaces == ledger" equality is non-vacuous.  Since the
+    what the surfaces must now show).  By hand: the $200,000 true-up at 6%
+    charges round(200000.00 * 0.005) = 1,000.00 of interest on the one
+    installment the payment pays, so its $5,000 books 4,000.00 of principal and
+    the loan owes 196,000.00 -- a figure only the actual cash produces, where a
+    replay of the contract's $1,498.88 would owe 199,501.12.  The fixture also
+    returned that replay's balance (``replay``) for the test to diverge from
+    until plan task plan#3393 deleted the replay's suite assembly (ruling
+    plan#3383); the test asserts the literal now.  Since the
     Section 9 per-period read switch, the year-end and net-worth-trend MAP
     surfaces ALSO read the confirmed ledger off-schedule, so the whole
     four-surface set agrees on the real balance (see
@@ -517,12 +507,10 @@ def cross_page_loan_off_schedule_ctx(db, seed_user):
     )
     db.session.commit()
 
-    # The genesis reader (what the surfaces now read) vs the un-seeded schedule
-    # replay (what they read before the switch): off-schedule they DIVERGE.
+    # The genesis reader: what the surfaces now read.
     ledger = posted_loan_balance_at(
         loan.id, scenario.id, today,
     )
-    replay = _unseeded_replay_balance(loan.id, scenario.id, today)
 
     return {
         "user_id": user.id,
@@ -535,7 +523,6 @@ def cross_page_loan_off_schedule_ctx(db, seed_user):
         "year": anchor_period.start_date.year,
         "month": anchor_period.start_date.month,
         "ledger": ledger,
-        "replay": replay,
     }
 
 

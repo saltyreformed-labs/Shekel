@@ -101,15 +101,6 @@ class ContributionRecord:
                 a Decimal, or is_confirmed is not a bool.
             ValueError: If amount is negative.
         """
-        # Pylint: ``duplicate-code`` -- this field-validation body mirrors
-        # ``amortization_engine.PaymentRecord.__post_init__`` -- both
-        # reject a non-date date field, a non-Decimal/negative amount, and
-        # a non-bool ``is_confirmed``.  The two are independent engine
-        # dataclasses (savings contribution vs loan payment); a shared
-        # validator parameterised on the date-field name would add
-        # indirection without removing logic (coding-standards rule 13).
-        # One-sided ``duplicate-code`` disable (see plan.md Phase 2 notes).
-        # pylint: disable=duplicate-code
         if not isinstance(self.contribution_date, date):
             raise TypeError(
                 f"contribution_date must be a date, "
@@ -128,7 +119,6 @@ class ContributionRecord:
                 f"is_confirmed must be a bool, "
                 f"got {type(self.is_confirmed).__name__}"
             )
-        # pylint: enable=duplicate-code
 
 
 def cap_contribution_at_limit(

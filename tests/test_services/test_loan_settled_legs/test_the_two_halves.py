@@ -97,8 +97,8 @@ class TestTheSettledHalfComplementsThePlanHalf:
         one".  A soft delete through the door takes a Paid payment's records
         off and returns it as a plan (ruling **R-BAL246**), so the PLAN
         half's filter is what drops a deleted Projected or Paid payment,
-        graded by ``test_loan_payment_service/test_the_payment_history.py``'s
-        ``test_excludes_deleted_transactions`` (both its cases); a ``$0.00``
+        graded by ``test_what_neither_half_holds.py``'s
+        ``test_a_soft_deleted_payment_is_in_neither_half`` (both its cases); a ``$0.00``
         close held nothing and stays Paid (measured 2026-10-15), so the
         SETTLED half's filter is what drops that one, graded by
         :meth:`test_a_soft_deleted_zero_dollar_close_is_in_neither_half`.
@@ -256,8 +256,8 @@ class TestTheSettledHalfComplementsThePlanHalf:
         The door's soft delete takes a Paid payment's records off and returns
         it as a plan (ruling **R-BAL246**), so a deleted payment that held
         records is the PLAN half's filter's to drop
-        (``test_loan_payment_service/test_the_payment_history.py``'s
-        ``test_excludes_deleted_transactions``).  A ``$0.00`` close holds no
+        (``test_what_neither_half_holds.py``'s
+        ``test_a_soft_deleted_payment_is_in_neither_half``).  A ``$0.00`` close holds no
         record (ruling **R-BAL141**: ``$0.00`` is the absence of one), so the
         delete takes nothing off and keeps it Paid
         (:func:`~app.utils.balance_predicates.delete_returns_to_plan`), and
@@ -291,8 +291,8 @@ class TestTheSettledHalfComplementsThePlanHalf:
         clauses drops it alone: it survived each dropped by itself, and
         failed first with both dropped at once (measured 2026-10-15).  Each
         clause is graded where it fails first -- ``Transfer.is_deleted`` by
-        ``test_loan_payment_service/test_the_payment_history.py``'s
-        ``test_excludes_deleted_transactions``, the Projected test by
+        ``test_what_neither_half_holds.py``'s
+        ``test_a_soft_deleted_payment_is_in_neither_half``, the Projected test by
         :meth:`test_every_transfer_state_lands_in_exactly_one_half` and by the
         two ``$0.00``-close dating cases in ``test_the_zero_dollar_close.py``,
         ``test_the_close_is_visible_from_its_installment_not_its_settle_day``

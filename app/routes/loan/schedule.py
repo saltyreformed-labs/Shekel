@@ -42,7 +42,8 @@ def schedule(account_id):
 
     **It reads no clock, and plan step X-au-g-2b is what removed the two reads
     it had** (ruling **R-IJ**).  It resolved
-    ``current_rate_baseline(..., date.today())`` for the ARM rate column's
+    ``loan_resolver.current_rate_baseline(..., date.today())`` (deleted at
+    plan task plan#3498) for the ARM rate column's
     per-row fallback -- a branch no rendered row could reach, since every
     ``AmortizationRow`` carries its period's rate -- and passed
     ``loan.monthly_escrow``, one escrow resolved at ``date.today()``, for every
@@ -51,7 +52,7 @@ def schedule(account_id):
     renders: the loan's escrow LINES go in, not one figure off them.
     """
     account, params, account_type = _require_configured_loan(account_id)
-    ctx = _load_route_context(account, params)
+    ctx = _load_route_context(account)
     scenarios = build_baseline_scenarios(
         _loan_inputs(params, ctx.loan), account, ctx.balance_ctx,
     )

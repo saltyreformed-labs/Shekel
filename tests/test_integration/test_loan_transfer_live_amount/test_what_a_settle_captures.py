@@ -406,8 +406,9 @@ def test_each_payments_cash_is_its_own_installments_pi(
     its one figure).
 
     Finding **N-40**, closed structurally at plan step X-au-g-2b.  The
-    derivation resolved ONE ``compute_monthly_payment_baseline(..., as_of)``
-    per loan per read pass and added it to every shadow alike, while the escrow
+    derivation resolved ONE ``loan_resolver.compute_monthly_payment_baseline(...,
+    as_of)`` (deleted at plan task plan#3498) per loan per read pass and added
+    it to every shadow alike, while the escrow
     in the same sum already resolved on each shadow's own due date.  So a loan
     whose payment recasts mid-horizon priced every projected installment at the
     payment in force on the day the page was rendered.

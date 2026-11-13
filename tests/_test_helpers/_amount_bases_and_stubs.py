@@ -1,5 +1,5 @@
 """Amounts and pay stubs: a rendered transfer amount, a row's amount basis, matched bank lines, a
-write past the amount seam, an un-seeded loan replay, and paycheck lines and pay stubs.
+write past the amount seam, and paycheck lines and pay stubs.
 """
 
 from decimal import Decimal
@@ -80,64 +80,6 @@ def amount_basis_for(row):
     from app.services.cash_ledger import derived_amount_basis
 
     return derived_amount_basis(row.account.user_id, row.scenario_id)
-
-
-def amount_basis_for_scenario(scenario_id):
-    """Return the amount basis for *scenario_id*, deriving its owner from the scenario.
-
-    **The ONE spelling for a test helper that holds a scenario id and no
-    owner** (plan step balance:X-au-g-2c).  Routing
-    ``loan_payment_service.get_payment_history`` through the amount model gave
-    ``load_loan_context`` an :class:`~app.services.cash_ledger.AmountBasis`
-    where it took a bare ``scenario_id``, and a dozen replay helpers in this
-    suite hold exactly that id: they are built from a loan and a scenario,
-    never from a request with a ``current_user``.
-
-    A scenario belongs to exactly one owner (``budget.scenarios.user_id``), so
-    the owner is DERIVED here rather than taken beside the id.  Spelling both
-    at a dozen call sites would invite a pair naming one owner and another's
-    scenario, which is the mismatch
-    :func:`~app.services.cash_ledger.resolve_transaction_amount` refuses a row
-    for -- and a test is exactly where such a pair would be written by hand.
-
-    **The sibling of :func:`amount_basis_for` above, keyed differently.**  That
-    one takes a ROW and reads its account's owner and its own scenario; this
-    takes the SCENARIO because its callers are replay helpers built from a loan
-    id and a scenario id, with no row in hand at all.  Two keys, one
-    derivation, and neither may answer to the other's name.
-
-    Ruling **P54** is why this is a shared helper here rather than a
-    convenience on the production constructor: a production API with only test
-    callers is the speculative shape ``CLAUDE.md`` rule 13 forbids.
-    **Production has the same asymmetry and it is filed, not fixed here**
-    (finding **N-432**): ``derived_amount_basis`` takes an owner AND a
-    scenario and nothing checks they agree, where the scenario already states
-    its owner.  (``amount_basis`` itself reads the owner off the pass's pricer
-    since plan step salary:C12, so the pass-side door no longer has the pair.)
-
-    Args:
-        scenario_id: The scenario the rows being priced belong to.
-
-    Returns:
-        The unresolved :class:`~app.services.cash_ledger.AmountBasis` for that
-        scenario's owner and that scenario.
-
-    Raises:
-        NoResultFound: When no scenario carries that id -- loud, because a
-            basis built for a scenario that does not exist would price every
-            row it is handed as belonging to another.
-    """
-    # Pylint: ``import-outside-toplevel`` -- this module imports no app or ORM
-    # symbols at top level (its collection-time-safety convention).
-    # pylint: disable=import-outside-toplevel
-    from app.extensions import db
-    from app.models.scenario import Scenario
-    from app.services.cash_ledger import derived_amount_basis
-
-    scenario = db.session.query(Scenario).filter(
-        Scenario.id == scenario_id,
-    ).one()
-    return derived_amount_basis(scenario.user_id, scenario_id)
 
 
 def count_amount_bases(monkeypatch):
@@ -319,77 +261,6 @@ def _figure_column_of(row) -> str:
         if column in type(row).__table__.c:
             return column
     raise AttributeError(f"{type(row).__name__} carries no figure column")
-
-
-def unseeded_replay_balance(loan_id, scenario_id, as_of):
-    """Return a loan's UN-SEEDED schedule-replay balance -- the pre-switch value.
-
-    **The suite's ONE assembly of the anchor replay** (plan step
-    **balance:X-bl-2b**).  The balance the resolver derives from its anchor
-    replay ALONE -- no genesis seed, no ledger -- which is what a loan's scalar
-    surfaces showed BEFORE the read switch, and what five controls across four
-    files pin so they can assert the ledger DIVERGES from it off-schedule.
-
-    Each of those five spelled the four-step assembly itself, and this step made
-    the block longer rather than shorter, so they are one call now.  What that
-    removes is not lines but a CONTRACT stated five times: the replay's feed must
-    carry its schedule SLOT
-    (:func:`~app.services.amortization_engine.slotted_dates`), because the
-    forward override plans by that same slot and a feed the two disagree on
-    drops a planned payment.  Stated once, a caller cannot forget it.
-
-    **The reconciliation oracle deliberately does NOT call this**, and that is
-    the one duplication left standing.  ``test_posting_ledger_loan_reconciliation
-    ._helpers._resolver_balance`` keeps its own body because
-    ``test_the_roots_cover_what_the_reference_calls`` reads the modules the
-    reference depends on off THAT FUNCTION'S OWN AST -- a delegation to a helper
-    in this file would make the closure check grade an empty root set, which is
-    the vacuity that control exists to prevent.  The reason is written at that
-    function too.
-
-    **It is AMOUNT-FREE.**  The replay reads three dates per payment and no
-    figure, so the feed is ``loan_ledger.payment_installments`` and not the
-    priced ``load_loan_context``: a pricing refusal cannot break a control that
-    reads no amount, and the import closure is 46 modules rather than 102
-    (measured 2026-09-09; the metric is stated in
-    ``app.services.loan_ledger._installments``).
-
-    Args:
-        loan_id: The loan account to replay.
-        scenario_id: The budget scenario scoping its payment feed.
-        as_of: The evaluation date; the replay stops at the latest payment whose
-            CASH had moved by it.
-
-    Returns:
-        The replayed balance owed, rounded to the cent exactly as the deleted
-        ``LoanState.current_balance`` was.
-    """
-    # Pylint: ``import-outside-toplevel`` -- this module imports no app or ORM
-    # symbols at top level (its collection-time-safety convention).
-    # pylint: disable=import-outside-toplevel
-    from app.services import loan_ledger, loan_loaders, loan_resolver
-    from app.services.amortization_engine import slotted_dates
-    from app.services.loan_resolver._periods import _replay_from_anchor
-    from app.utils.money import round_money
-
-    params = loan_loaders.load_loan_params(loan_id)
-    installments = loan_ledger.payment_installments(
-        loan_id, scenario_id, params, options=(), leg_options=(),
-    )
-    return round_money(
-        _replay_from_anchor(
-            anchor_events=loan_loaders.load_loan_anchor_facts(params),
-            periods=loan_resolver.resolve_periods(
-                params, loan_loaders.load_rate_changes(loan_id),
-            ),
-            payments=slotted_dates(
-                [installment.dates for installment in installments],
-                params.payment_day,
-            ),
-            payment_day=params.payment_day,
-            as_of=as_of,
-        ).balance_as_of
-    )
 
 
 def make_flat_paycheck_line(profile, name, amount, kind):

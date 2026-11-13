@@ -84,6 +84,7 @@ from app.services.pay_calendar import (
     PayCalendar,
     saved_paydays_in_month_through,
 )
+from tests._made_up_federal import made_up_credits, made_up_federal
 from tests._test_helpers import (
     rhythm_of,
     counting_calls,
@@ -96,7 +97,6 @@ from tests._test_helpers import (
     make_transfer_template,
     payroll_basis,
     populate_in_a_fresh_pass,
-    made_up_federal,
     made_up_fica,
     made_up_state,
     made_up_year,
@@ -626,7 +626,8 @@ class TestThePaycheckSeesTheWholeSchedule:
         make_line_cadence_rule(db.session, deduction, 24)
         # The made-up federal, FICA and NC rules the three row seeders wrote.
         tax_law(TaxLaw(years=(made_up_year(
-            federal=made_up_federal(), fica=made_up_fica(),
+            federal=made_up_federal(), federal_credits=made_up_credits(),
+            fica=made_up_fica(),
             states={"NC": made_up_state(Decimal("0.0399"))},
         ),)))
         db.session.flush()
@@ -743,15 +744,16 @@ class TestThePaycheckSeesTheWholeSchedule:
             # The DEDUCTION is asserted, not the net gap, and an adversarial
             # review is why.  The gap was a $480.05 literal with a stated
             # derivation of "$500 less the 3.99% state rate, because federal
-            # does not move" -- and federal does not move here for the opposite
+            # does not move" -- and federal did not move here for the opposite
             # of the stated reason: the SHARED made-up federal rules
-            # (``made_up_federal``, the old ``seed_tax_bracket_set`` rows) tax
-            # nothing above $47,150, so both annualised bases sit in that top
-            # rung and the federal lines match by accident of the fixture.  The
-            # first person to give that helper a realistic top bracket would
-            # have broken a financial assertion and been sent to the wrong
-            # cause.  The pre-tax total is the fact this defect is ABOUT, and
-            # it is exact on any bracket table.
+            # (``made_up_federal``, the old ``seed_tax_bracket_set`` rows) taxed
+            # nothing above $47,150, so both annualised bases sat in that top
+            # rung and the federal lines matched by accident of the fixture.
+            # That rung taxes 22% since a ladder's rates must climb (finding
+            # plan#3208), the realistic top bracket the review warned would
+            # break a literal gap and send its reader to the wrong cause.  The
+            # pre-tax total is the fact this defect is ABOUT, and it is exact
+            # on any bracket table.
             assert (
                 windowed_break.deductions.total_pre_tax
                 - whole_break.deductions.total_pre_tax

@@ -166,8 +166,9 @@ def create_params(account_id):
     # NO origination LoanAnchorEvent is written (the read switch's final
     # commit retired it): the origination anchor is a verbatim copy of the
     # immutable LoanParams fields, so every consumer -- the genesis posting
-    # walk and the resolver's replay fallback -- SYNTHESIZES it from the
-    # params via ``loan_loaders.load_loan_anchor_facts``.  The balance the
+    # walk and the resolver's latest-assertion start of a view-less contract
+    # line -- SYNTHESIZES it from the params via
+    # ``loan_loaders.load_loan_anchor_facts``.  The balance the
     # owner states at setup is a different fact with no other home (plan
     # step R20): a ``tracking_start`` assertion, staged in this same
     # transaction whenever the loan originated BEFORE the day it is stated

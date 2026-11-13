@@ -674,8 +674,10 @@ class TestTheSettledWalkChargesOncePerInstallment:
     on the cutover -- ``test_confirmed_view`` 's
     ``test_two_payments_in_one_due_month_show_as_two_rows_in_that_month`` and
     ``test_a_late_settled_payment_is_dated_at_its_installment_but_visible_late``,
-    and ``test_posting_ledger_loan_reconciliation.test_the_reader_runs_beside_the_resolver`` 's
-    ``test_biweekly_due_month_collision_reconciles_and_only_row_dates_differ``.
+    and ``test_posting_ledger_loan_reconciliation.test_the_reader_against_hand_worked_figures`` 's
+    ``test_biweekly_due_month_collision_charges_the_month_once`` (named
+    ``test_biweekly_due_month_collision_reconciles_and_only_row_dates_differ`` in
+    ``test_the_reader_runs_beside_the_resolver`` until plan task plan#3384).
     All four are re-anchored on the one-charge rule (developer, 2026-09-02).
     *The false sentence is recorded rather than deleted because of what it was:
     a claim a fix wrote about ITSELF, which its own tests could not grade, and a

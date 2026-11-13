@@ -211,8 +211,6 @@ from ._sql_and_locks import (
 from ._tax_law import (
     MADE_UP_SOURCES,
     EMPTY_TAX_LAW,
-    zero_federal,
-    made_up_federal,
     zero_fica,
     made_up_fica,
     made_up_state,
@@ -262,13 +260,11 @@ from ._calendar import (
 from ._amount_bases_and_stubs import (
     rendered_transfer_amount,
     amount_basis_for,
-    amount_basis_for_scenario,
     count_amount_bases,
     _A_MATCHED_GROUP,
     match_two_lines,
     write_past_the_amount_seam,
     _figure_column_of,
-    unseeded_replay_balance,
     make_flat_paycheck_line,
     build_pay_stub_world,
     add_test_pay_stub,

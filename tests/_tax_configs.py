@@ -24,12 +24,13 @@ is a faithful stand-in for the resolver's only when it carries one.
 """
 
 from app.services.tax_config_service import (
+    FederalTaxRules,
     StateTaxRules,
     TaxLawBasis,
     configs_by_year,
     profile_tax_series,
 )
-from app.tax_law import FederalRules, FicaRules
+from app.tax_law import FicaRules
 
 
 def tax_configs_for(profile, tax_year: int) -> dict[str, object]:
@@ -72,7 +73,7 @@ def own_year_rules(tax_year: int) -> TaxLawBasis:
 
 def hand_built_law(
     tax_year: int, *,
-    bracket_set: FederalRules | None,
+    bracket_set: FederalTaxRules | None,
     state_config: StateTaxRules | None,
     fica_config: FicaRules | None,
 ) -> dict[str, object]:

@@ -1,7 +1,7 @@
 """The daily update queue (:mod:`tools.update.queue`, ruling plan#2449): each bot's pull request
 put in the merge queue only when its trial merge moves pinned versions alone, at the head judged;
-and the developer mentioned once on each that cannot be (rulings plan#2450, plan#2467,
-plan#2468).
+and a comment, mentioning no one, written once on each that cannot be for each thing it tells
+(rulings plan#2450, plan#2467, plan#2468, plan#3622).
 
 GitHub's API is faked (:class:`_GitHub`) over recorded pull requests, answering as GitHub did
 when read on 2026-10-31 (#626, #628) and 2026-11-01: a bot named by its slug, a comment's
@@ -201,7 +201,7 @@ def _node(number, head, merge, **fields):
     } | fields
 
 
-def _mentions(fake, number):
+def _written(fake, number):
     """The bodies of the comments written on pull request ``number``, in order."""
     return [body for kind, at, body in fake.writes if (kind, at) == ("comment", number)]
 
@@ -272,16 +272,14 @@ def test_a_version_only_pull_request_whose_checks_passed_is_queued_at_the_head_j
 def test_a_change_that_does_more_than_move_versions_is_left_saying_why(world, capsys, files,
                                                                       why):
     """A trial merge the landing check's walk finds a reason in is never enqueued, green or
-    not: the developer is mentioned that it waits for a card, and its line names the walk's
-    reason."""
+    not: a comment says it waits for a card, and its line names the walk's reason."""
     head, merge = world.pull(7, files)
     fake = _GitHub([_node(7, head, merge)])
     assert _run(world, fake) == (0, [])
     assert [kind for kind, *_ in fake.writes] == ["comment"]
-    assert _mentions(fake, 7)[0].startswith(
-        f"@SaltyReformed This pull request waits for a card: {why}. ")
-    assert (f"#7 (update/7): left: it does more than move pinned versions: {why}; the "
-            "developer mentioned\n") in capsys.readouterr().out
+    assert _written(fake, 7)[0].startswith(f"This pull request waits for a card: {why}. ")
+    assert (f"#7 (update/7): left: it does more than move pinned versions: {why}; told in a "
+            "comment\n") in capsys.readouterr().out
 
 
 @pytest.mark.parametrize(("checks", "checked", "said"), [
@@ -293,8 +291,8 @@ def test_a_change_that_does_more_than_move_versions_is_left_saying_why(world, ca
 def test_a_version_only_change_whose_checks_have_not_all_passed_at_its_head_is_left(
         world, capsys, checks, checked, said):
     """Version-only but not green at the head judged, and not red there either: left for the
-    next day's run, its checks' state said, no one mentioned; a read at any commit but its
-    head is no read at it."""
+    next day's run, its checks' state said, nothing told; a read at any commit but its head
+    is no read at it."""
     head, merge = world.pull(7, {LOCK: _lock("12.4.1")})
     fake = _GitHub([_node(7, head, merge, commits=_checks(checks, checked or head))])
     assert _run(world, fake) == (0, [])
@@ -514,39 +512,38 @@ def test_the_queue_starts_only_with_each_of_its_variables(monkeypatch, capsys, w
         "update queue: UPDATE_TOKEN, GITHUB_REPOSITORY unset, so nothing was read\n")
 
 
-# -- what reaches the developer (rulings plan#2450, plan#2467, plan#2468) ------------------
+# -- what is told on each pull request (rulings plan#2450, plan#2467, plan#2468, plan#3622) --
 
 @pytest.mark.parametrize("checks", ["FAILURE", "ERROR"])
-def test_a_red_version_only_change_is_left_and_mentioned_once_for_its_head(world, capsys,
-                                                                           checks):
-    """Version-only, a check failed or errored at its head: left, the developer mentioned in
-    a comment marked for that head; the next day's run at that head mentions no one again,
-    and a new head, red too, is mentioned afresh."""
+def test_a_red_version_only_change_is_left_and_told_once_for_its_head(world, capsys, checks):
+    """Version-only, a check failed or errored at its head: left, told in a comment marked
+    for that head, which mentions no one (ruling plan#3622); the next day's run at that head
+    writes nothing again, and a new head, red too, is told afresh."""
     head, merge = world.pull(7, {LOCK: _lock("12.4.1")})
     fake = _GitHub([_node(7, head, merge, commits=_checks(checks, head))])
     assert _run(world, fake) == (0, [])
-    (body,) = _mentions(fake, 7)
+    (body,) = _written(fake, 7)
     assert body == (
-        f"@SaltyReformed This pull request moves pinned versions alone, but its checks at "
-        f"{head[:12]} are {checks}. The daily update queue puts it in the merge queue once "
-        f"every check at that commit passes, and judges it afresh at a new one (ruling "
-        f"plan#2351).\n\n{_marked(f'red {head}')}\n")
+        f"This pull request moves pinned versions alone, but its checks at {head[:12]} are "
+        f"{checks}. The daily update queue puts it in the merge queue once every check at that "
+        f"commit passes, and judges it afresh at a new one (ruling plan#2351).\n\n"
+        f"{_marked(f'red {head}')}\n")
     assert _run(world, fake) == (0, [])
-    assert len(_mentions(fake, 7)) == 1
+    assert len(_written(fake, 7)) == 1
     later, later_merge = world.pull(17, {LOCK: _lock("12.4.2")})
     fake.pulls = [_node(7, later, later_merge, commits=_checks(checks, later))]
     assert _run(world, fake) == (0, [])
     assert [kind for kind, *_ in fake.writes] == ["comment", "comment"]
     out = capsys.readouterr().out
     left = f"left: it moves pinned versions alone, but its checks at {{}} are {checks}; "
-    assert out.count(left.format(head[:12]) + "the developer mentioned\n") == 1
-    assert out.count(left.format(head[:12]) + "the developer was mentioned already\n") == 1
-    assert out.count(left.format(later[:12]) + "the developer mentioned\n") == 1
+    assert out.count(left.format(head[:12]) + "told in a comment\n") == 1
+    assert out.count(left.format(head[:12]) + "told in a comment already\n") == 1
+    assert out.count(left.format(later[:12]) + "told in a comment\n") == 1
 
 
-def test_a_red_change_that_turns_green_at_its_head_is_queued_with_no_more_mention(world):
-    """A re-run passes at the head mentioned: the next day's run queues it there, and reads
-    no comment, as nothing is to be told."""
+def test_a_red_change_that_turns_green_at_its_head_is_queued_with_nothing_more_told(world):
+    """A re-run passes at the head told of: the next day's run queues it there, and reads no
+    comment, as nothing is to be told."""
     head, merge = world.pull(7, {LOCK: _lock("12.4.1")})
     fake = _GitHub([_node(7, head, merge, commits=_checks("FAILURE", head))])
     _run(world, fake)
@@ -560,20 +557,20 @@ def test_a_pull_request_removed_from_the_merge_queue_at_its_head_waits_for_a_new
         world, capsys):
     """GitHub removed it from the queue after testing the head it has now: left with no trial
     merge read (each names a commit no repository holds) though its own checks passed, and
-    mentioned once for that head, GitHub's reason said; the next day's run writes nothing."""
+    told once for that head, GitHub's reason said; the next day's run writes nothing."""
     fake = _GitHub([_node(7, _NOWHERE, _NOWHERE,
                           timelineItems=_removal("failed_checks", _NOWHERE))])
     assert _run(world, fake) == (0, [])
     assert _run(world, fake) == (0, [])
-    (body,) = _mentions(fake, 7)
+    (body,) = _written(fake, 7)
     assert body == (
-        "@SaltyReformed GitHub removed this pull request from the merge queue at ffffffffffff "
+        "GitHub removed this pull request from the merge queue at ffffffffffff "
         "(failed_checks). The daily update queue leaves it until its commit changes (a "
         "Dependabot rebase, or the next Monday's update); `gh pr merge 7 --merge` puts it back "
         f"by hand (ruling plan#2468).\n\n{_marked(f'removed {_NOWHERE}')}\n")
     assert [kind for kind, *_ in fake.writes] == ["comment"]
     left = ("#7 (update/7): left: GitHub removed it from the merge queue at ffffffffffff "
-            "(failed_checks), so it waits for a new commit; the developer ")
+            "(failed_checks), so it waits for a new commit; told in a comment")
     assert capsys.readouterr().out.count(left) == 2
 
 
@@ -584,15 +581,14 @@ def test_a_pull_request_whose_removal_tested_another_head_is_judged_again(world,
     """A removal that tested an older head, as one a push causes does (the publish moving a
     queued ``update/lock``, whichever of the two GitHub records first), or names no merge, is
     no removal at the head it has now: judged, and queued when it moves pinned versions alone
-    and its checks passed, no one mentioned."""
+    and its checks passed, nothing told."""
     head, merge = world.pull(7, {LOCK: _lock("12.4.1")})
     fake = _GitHub([_node(7, head, merge, timelineItems=removal)])
     assert _run(world, fake) == (0, [])
     assert fake.writes == [("enqueue", "PR_7", head)]
 
 
-def test_a_change_waiting_for_a_card_is_mentioned_once_for_each_major_it_enters(world,
-                                                                                capsys):
+def test_a_change_waiting_for_a_card_is_told_once_for_each_major_it_enters(world, capsys):
     """A new major is told once: not again when the branch is made again at a new head moving
     the same major further, and afresh when a later major arrives on the same pull request,
     each comment naming every reason, marked for each thing it waits on."""
@@ -601,15 +597,15 @@ def test_a_change_waiting_for_a_card_is_mentioned_once_for_each_major_it_enters(
         head, merge = world.pull(number, {LOCK: _lock(version)})
         fake.pulls = [_node(7, head, merge)]
         assert _run(world, fake) == (0, [])
-    first, later = _mentions(fake, 7)
+    first, later = _written(fake, 7)
     assert first.endswith(f"\n\n{_marked('card pillow 13')}\n")
     assert later == (
-        "@SaltyReformed This pull request waits for a card: uv.lock moves pillow from 12.3.0 "
-        "to 14.0.0, a new major version. A session reads the changelog, claims a card and "
-        "takes its change; until then the daily update queue leaves it (rulings plan#2351, "
-        f"plan#2450).\n\n{_marked('card pillow 14')}\n")
-    assert ("pillow from 12.3.0 to 13.1.0, a new major version; the developer was mentioned "
-            "already\n") in capsys.readouterr().out
+        "This pull request waits for a card: uv.lock moves pillow from 12.3.0 to 14.0.0, a new "
+        "major version. A session reads the changelog, claims a card and takes its change; "
+        "until then the daily update queue leaves it (rulings plan#2351, plan#2450).\n\n"
+        f"{_marked('card pillow 14')}\n")
+    assert ("pillow from 12.3.0 to 13.1.0, a new major version; told in a comment already\n"
+            in capsys.readouterr().out)
 
 
 #: A package the lock did not hold, which a lock change adds.
@@ -619,7 +615,7 @@ _OLEFILE = ('\n[[package]]\nname = "olefile"\nversion = "0.47"\n'
             f'hash = "sha256:{"0" * 64}" }}\n')
 
 
-def test_a_major_beside_a_package_added_is_mentioned_once_for_each_major(world):
+def test_a_major_beside_a_package_added_is_told_once_for_each_major(world):
     """The lock adds olefile and moves pillow to 13; made again, it moves pillow to 14 and
     still adds olefile: the second major is told, though the refusal beside it is the same,
     since each major is a thing it waits on beside the refusal (rulings plan#2450,
@@ -630,19 +626,19 @@ def test_a_major_beside_a_package_added_is_mentioned_once_for_each_major(world):
         fake.pulls = [_node(7, head, merge)]
         assert _run(world, fake) == (0, [])
     added = "uv.lock adds olefile, a package of no version before"
-    first, later = _mentions(fake, 7)
+    first, later = _written(fake, 7)
     assert (first.partition("\n\n")[2], later) == (
         f"{_marked('card pillow 13')}\n{_marked(f'card {added}')}\n",
-        f"@SaltyReformed This pull request waits for a card: {added}; uv.lock moves pillow "
-        "from 12.3.0 to 14.0.0, a new major version. A session reads the changelog, claims a "
-        "card and takes its change; until then the daily update queue leaves it (rulings "
-        f"plan#2351, plan#2450).\n\n{_marked('card pillow 14')}\n{_marked(f'card {added}')}\n")
+        f"This pull request waits for a card: {added}; uv.lock moves pillow from 12.3.0 to "
+        "14.0.0, a new major version. A session reads the changelog, claims a card and takes "
+        "its change; until then the daily update queue leaves it (rulings plan#2351, "
+        f"plan#2450).\n\n{_marked('card pillow 14')}\n{_marked(f'card {added}')}\n")
 
 
-def test_only_the_app_s_own_comments_record_a_mention(world):
+def test_only_the_app_s_own_comments_record_what_was_told(world):
     """The marker for the head, in a comment by a person and by Dependabot, counts for
-    nothing: the App mentions the developer; its own comment, on the second page of the
-    comments, is found."""
+    nothing: the App tells it; its own comment, on the second page of the comments, is
+    found."""
     head, merge = world.pull(7, {LOCK: _lock("12.4.1")})
     marked = _marked(f"red {head}")
     fake = _GitHub([_node(7, head, merge, commits=_checks("FAILURE", head))], page=2)
@@ -650,14 +646,14 @@ def test_only_the_app_s_own_comments_record_a_mention(world):
                         {"author": None, "body": marked},
                         {"author": {"login": DEPENDABOT}, "body": marked}]
     assert _run(world, fake) == (0, [])
-    assert len(_mentions(fake, 7)) == 1
+    assert len(_written(fake, 7)) == 1
     assert _run(world, fake) == (0, [])
-    assert len(_mentions(fake, 7)) == 1
+    assert len(_written(fake, 7)) == 1
     assert [read for read in fake.reads if read[0] == "comments"][-2:] == [
         ("comments", 7, None), ("comments", 7, "2")]
 
 
-def test_a_refused_mention_fails_the_run_once_every_other_pull_request_is_tried(world,
+def test_a_refused_comment_fails_the_run_once_every_other_pull_request_is_tried(world,
                                                                                 capsys):
     """GitHub refuses #7's comment: its line says so, #8 is still queued, and the run fails,
     which the workflow's alert reports."""

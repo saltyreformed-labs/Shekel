@@ -54,9 +54,9 @@ from app.services.statement_match._submission import ReviewedDifference
 from tests.test_services.test_outstanding_difference import _opened_on, _settle
 from tests.test_services.test_statement_import.test_anchor import _seed_import
 
-from .test_reads_lineless import _planted_lineless
+from tests.test_services.test_statement_match.test_reads_lineless import _planted_lineless
 
-from ._builders import (
+from tests.test_services.test_statement_match._builders import (
     a_bank_line,
     a_purchase,
     a_rule,

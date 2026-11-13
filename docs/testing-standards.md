@@ -300,7 +300,11 @@ every world the run declares in one pass, ruling plan#3767).
 
 The suite once kept such tests on one worker with `@pytest.mark.xdist_group` and `--dist=loadgroup`.
 pytest 9.2.0 with pytest-xdist 3.8.0 silently stopped honouring them, and the suite failed whenever
-the scheduler split a group whose tests collided. The groups are gone.
+the scheduler split a group whose tests collided. The groups are gone, and collection refuses a test
+that carries one (rulings plan#3768, plan#3814): `tests/conftest.py`'s `pytest_make_collect_report`
+fails the file or class holding it, with an error naming each such test and saying where its state
+belongs. With no `--dist=loadgroup` the marker would keep nothing together, silently. The refusal is
+a tripwire, not a guarantee: nothing structural stops a new test sharing state.
 
 ## Zero Tolerance for Failing Tests
 

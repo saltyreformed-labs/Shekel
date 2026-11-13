@@ -12,7 +12,7 @@ other users in ``tests/_other_user_fixtures.py``, the rich datasets in
 ``tests/_cross_page_fixtures.py``.  Under them sit the per-worker
 database (``tests/_worker_database.py``), the seeded start states
 (``tests/_seeded_start_states.py``) and the profile harness
-(``tests/_fixture_profile.py``).  The suite's three hooks stay here.
+(``tests/_fixture_profile.py``).  The suite's four hooks stay here.
 
 Strategy: each test gets a brand-new database cloned from
 ``shekel_test_template`` via ``CREATE DATABASE ... TEMPLATE ...``
@@ -36,6 +36,9 @@ and the failures that decision produced; do not restore
 ``FILE_COPY`` without re-measuring against a durable cluster.
 """
 
+# Pylint: wrong-import-position, wrong-import-order -- SECRET_KEY must be set,
+# and the per-worker database cloned, before any ``app`` module is imported;
+# the comment below says why.
 # pylint: disable=wrong-import-position,wrong-import-order
 # Imports below are intentionally ordered so the SECRET_KEY env var
 # is set AND the per-pytest-worker database is cloned from
@@ -58,6 +61,7 @@ and the failures that decision produced; do not restore
 import os
 
 import psycopg
+import pytest
 from psycopg import sql
 
 # IMPORTANT: SECRET_KEY must be set in the environment BEFORE the
@@ -138,6 +142,62 @@ from tests._dataset_fixtures import (
 # pylint: enable=unused-import
 
 
+@pytest.hookimpl(wrapper=True)
+def pytest_make_collect_report():
+    """Fail a collector whose tests or classes carry ``@pytest.mark.xdist_group``.
+
+    The suite has no groups and runs under xdist's default scheduling
+    (plan#2954), so the marker would keep nothing together: a test that relied
+    on it would fail only when the scheduler split it from its partner, which
+    is the failure pytest 9.2.0 caused (ruling plan#3768).  It is a tripwire,
+    not a guarantee: nothing structural stops a new test sharing state, so the
+    message says where each kind of state belongs instead.
+
+    **A collection error, not a usage error** (ruling plan#3814).  A
+    ``pytest.UsageError`` raised from ``pytest_collection_modifyitems`` says
+    nothing under xdist, measured 2026-11-13 on throwaway test files: pytest
+    calls ``pytest_collection_finish`` in a ``finally``, so the worker reports
+    its whole collection, then dies on the error, and the controller crashes on
+    xdist's own assertion naming one test.  A failed collection report is what
+    xdist forwards from a worker by design.  Measured the same day, this
+    wrapper's error printed under ``-n 0`` and ``-n 2`` and in shards 0/6 and
+    3/6, since collection comes before the shard narrows anything.  Under
+    xdist the other files' tests still run and the run ends red (exit 1), as for
+    any file that fails to collect; without it the run stops (exit 2).
+
+    Each node is read through ``get_closest_marker``, which finds a mark set on
+    it, its class, its module or one of its parameters.  pytest reads a class's
+    own marks only when it collects that class, so a class marked by its own
+    decorator fails its own report, naming its tests; inside a file whose other
+    tests are refused it shows on the run after those are fixed, since pytest
+    collects nothing under a collector that failed.
+
+    Yields:
+        To pytest's own report of the collector, which comes back as the result.
+
+    Returns:
+        pytest.CollectReport: That report, or a failed one naming each test or
+        class it collected that carries the marker.
+    """
+    report = yield
+    grouped = [node.nodeid for node in report.result if node.get_closest_marker("xdist_group")]
+    if not grouped:
+        return report
+    return pytest.CollectReport(
+        report.nodeid,
+        "failed",
+        "The suite has no xdist_group (plan#2954), so the marker on these "
+        "tests would keep nothing on one worker:\n  "
+        + "\n  ".join(grouped)
+        + "\nA test must hold no state another test reads: its rows in its "
+        "own clone of the database, and its process-wide state in a "
+        "session-scoped fixture (docs/testing-standards.md, Cluster-state "
+        "and process-wide state).",
+        [],
+        report.sections,
+    )
+
+
 def pytest_collection_modifyitems(config, items):
     """Narrow the collection to one CI shard when ``SHEKEL_TEST_SHARD`` is set.
 
@@ -168,7 +228,7 @@ def pytest_report_header():
     )
 
 
-def pytest_sessionfinish(session, exitstatus):  # pylint: disable=unused-argument
+def pytest_sessionfinish():
     """Drop the per-pytest-worker database AND emit the profile summary.
 
     Pytest invokes this hook at the end of every session -- including
@@ -216,13 +276,10 @@ def pytest_sessionfinish(session, exitstatus):  # pylint: disable=unused-argumen
         the DB drop so a flaky summary path cannot leave per-
         session databases behind.
 
-    Args:
-        session (pytest.Session): pytest Session object (required
-            by the hook signature; unused here -- the cleanup keys
-            off the module-level ``_BOOTSTRAP_RESULT`` instead).
-        exitstatus (int): Session exit code.  Unused: we drop the
-            per-session DB regardless of pass / fail because it is
-            throwaway.
+    It takes neither of the hook's arguments, since pluggy passes a hook
+    only the ones it names: the cleanup keys off the module-level
+    ``_BOOTSTRAP_RESULT``, not the session, and the DB is dropped
+    whatever the exit status, because it is throwaway.
     """
     if _BOOTSTRAP_RESULT is not None:
         db_name, admin_url = _BOOTSTRAP_RESULT

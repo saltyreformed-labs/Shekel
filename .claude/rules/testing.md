@@ -69,9 +69,10 @@ Must-knows for the test suite. Full standards: `docs/testing-standards.md`
 - **Check for existing coverage** before writing a new test.
 - Tests are **independent** -- each sets up its own preconditions, no ordering or shared mutable
   state. **No test depends on running in the same worker, process or session as another**
-  (plan#2954): there is no `xdist_group`, any test can run on any worker and in any of CI's six
-  shards (`tests/_shard.py`), and no test changes cluster state (the `shekel_app` role is the baked
-  image's, for the whole run). A cost paid once per process is a session-scoped fixture.
+  (plan#2954): there is no `xdist_group` (collection refuses one), any test can run on any worker
+  and in any of CI's six shards (`tests/_shard.py`), and no test changes cluster state (the
+  `shekel_app` role is the baked image's, for the whole run). A cost paid once per process is a
+  session-scoped fixture.
   `docs/testing-standards.md`, Cluster-state and process-wide state.
 
 ## The ambient clock and calendar (a test that fails on some days is BROKEN, not flaky)

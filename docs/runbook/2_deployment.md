@@ -377,33 +377,47 @@ The script:
 
 1. Generates the Postgres TLS cert if not present (`deploy/postgres/server.{crt,key}`)
 2. Creates `/opt/docker/shekel/{secrets,deploy/postgres}` directories
-3. Migrates the four high-sensitivity secrets from the current `.env` into per-file entries under
-   `secrets/` (mode 0600), and writes Valkey's password file `secrets/valkey_password` (mode 0640,
-   for the valkey container's gid) from `.env`'s `SHEKEL_VALKEY_PASSWORD`
-4. Rewrites `/opt/docker/shekel/.env` with `replaced_by_docker_secret` placeholders for the four
-   secrets and `SHEKEL_VALKEY_PASSWORD`, plus `SHEKEL_IMAGE_DIGEST` and
-   `REGISTRATION_ENABLED=false`. Backs up the old `.env` to `.env.bak.<timestamp>`.
+3. Writes each secret from the current `.env` to its file under `secrets/` when the file is missing
+   or empty: `secret_key`, `totp_encryption_key`, `postgres_password`, `app_role_password` and
+   `valkey_password` (from `SHEKEL_VALKEY_PASSWORD`). It refuses one whose `.env` value is absent,
+   empty or the placeholder a previous run left, since it must be the value in use. It also makes
+   `owner_role_password`, the database owner's: `.env`'s `OWNER_ROLE_PASSWORD` when that holds a
+   real value, else a new URL-safe password, never printed. On every run, a file already there
+   included, it sets each file's mode for the container user that reads it (the gotcha below)
+4. Rewrites `/opt/docker/shekel/.env` with `replaced_by_docker_secret` placeholders for the five
+   secrets, `OWNER_ROLE_PASSWORD` among them, and `SHEKEL_VALKEY_PASSWORD`, plus
+   `SHEKEL_IMAGE_DIGEST` and `REGISTRATION_ENABLED=false`. Backs up the old `.env` to
+   `.env.bak.<timestamp>`.
 5. Creates the `shekel-frontend` bridge with the pinned subnet (172.32.0.0/24) if missing
 6. Snapshots `/opt/docker/nginx/nginx.conf` and prints critical- directive presence (limit_req_zone,
    set_real_ip_from, timeouts) before overwriting from `deploy/nginx-shared/`. The pre-overwrite
    diff is saved to `/opt/docker/nginx/.reconcile-snapshot-<ts>/`.
 7. Copies the repo's `docker-compose.yml` and `deploy/docker-compose.prod.yml` to
-   `/opt/docker/shekel/`, and `deploy/valkey/` to `/opt/docker/shekel/deploy/valkey/`. Snapshots the
-   old files for rollback.
+   `/opt/docker/shekel/`, `deploy/valkey/` to `/opt/docker/shekel/deploy/valkey/`, and the database
+   container's provisioning script `deploy/postgres/provision_roles.sh` to
+   `/opt/docker/shekel/deploy/postgres/` at 0755 (the postgres image sources a non-executable hook
+   instead of running it). Snapshots the old files for rollback, of `deploy/postgres/` the script
+   alone: the TLS key beside it is uid 70's and unreadable to the operating user.
 
-The script STOPS short of `docker compose down && up -d` so you can review the merged config before
-pulling the trigger. Its trailing output prints the exact post-script commands.
+The script STOPS short of recreating the stack so you can review the merged config before pulling
+the trigger. Its trailing output prints the exact post-script commands: the database comes up first
+and runs its provisioning script, which makes the owner's login on a database made before the script
+existed and changes nothing on one it already ran on, and only then the rest of the stack, whose
+migrate service logs in as the owner.
 
 ##### Gotchas that triggered hotfixes in this session
 
 - **Docker secrets `uid`/`gid`/`mode` are ignored in non-Swarm Compose v2.** The default secret
-  mount inherits the host file's ownership and mode. The `postgres_password` file must be readable
-  by uid 70 (postgres) inside the db container; since the host file is josh:josh, the script writes
-  it world-readable (`chmod 0644 /opt/docker/shekel/secrets/postgres_password`) so the postgres user
-  can read via the "other" bits. Directory containment (`/opt/docker/shekel/secrets/` is mode 0700
-  josh-only) keeps the value protected from host-side enumeration. The other three secrets
-  (`secret_key`, `app_role_password`, `totp_encryption_key`) are read by uid 1000 (shekel) inside
-  the app container, which matches the host file owner, so 0600 works for those.
+  mount inherits the host file's ownership and mode. The db container reads three files as uid 70
+  (postgres): `postgres_password`, and the two logins' passwords its provisioning script sets,
+  `app_role_password` and `owner_role_password`. Since the host files are josh:josh, the script
+  makes those three 0644, so the postgres user reads them through the "other" bits. Directory
+  containment (`/opt/docker/shekel/secrets/` is mode 0700 josh-only) keeps the values protected from
+  host-side enumeration. `secret_key` and `totp_encryption_key` are read by uid 1000 (shekel) inside
+  the app container alone, which matches the host file owner, so they are 0600, and
+  `valkey_password` is 0640 for the valkey container's gid 1000. The script sets each mode on every
+  run, so a file left at another mode is put right: an `app_role_password` an earlier run wrote
+  0600, when the app alone read it, becomes 0644.
 
 - **Repo `deploy/nginx-shared/nginx.conf` drift.** The audit B7 hardening (`limit_req_zone`,
   `client_*_timeout`, `client_max_body_size`, narrowed `set_real_ip_from`) was applied to the
@@ -445,7 +459,9 @@ docker compose config | less
 # When ready to recreate:
 cd /opt/docker && docker compose up -d nginx cloudflared  # attach to shekel-frontend
 docker exec nginx nginx -t && docker exec nginx nginx -s reload
-cd /opt/docker/shekel && docker compose down && docker compose up -d
+cd /opt/docker/shekel && docker compose down && docker compose up -d --wait db
+docker exec shekel-prod-db /docker-entrypoint-initdb.d/10-provision-roles.sh
+docker compose up -d
 
 # Health checks:
 docker compose ps                                            # all four healthy

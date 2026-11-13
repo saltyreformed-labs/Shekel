@@ -19,12 +19,13 @@
 # Step-list:
 #   1. Generate Postgres TLS cert (sudo for chown)
 #   2. Create /opt/docker/shekel/{secrets,deploy/postgres} dirs
-#   3. Migrate four high-sensitivity secrets from .env to files, and write
-#      Valkey's password file from .env
+#   3. Migrate the secrets from .env to files, and make the database
+#      owner's password file; set each file's mode for its readers
 #   4. Rewrite /opt/docker/shekel/.env (placeholders + new vars)
 #   5. Create shekel-frontend network if missing
 #   6. Update shared Nginx vhost (deploy/nginx-shared/conf.d/shekel.conf)
-#   7. Copy repo compose files and deploy/valkey/ to /opt/docker/shekel/
+#   7. Copy repo compose files, deploy/valkey/ and
+#      deploy/postgres/provision_roles.sh to /opt/docker/shekel/
 #
 # Exit codes:
 #   0 -- all steps succeeded; operator may proceed with recreate.
@@ -36,6 +37,10 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 PROD_ROOT=/opt/docker/shekel
 SHARED_NGINX_CONF_D=/opt/docker/nginx/conf.d
+# What step 4 leaves in .env for each secret it moves to a file, which the
+# base docker-compose.yml's ${VAR:?...} interpolation needs; step 3 reads it
+# as no value, so it is never written to a file as the secret.
+SECRET_PLACEHOLDER=replaced_by_docker_secret
 
 log() { printf '\n\033[1;36m== %s ==\033[0m\n' "$*"; }
 warn() { printf '\033[1;33mWARN: %s\033[0m\n' "$*" >&2; }
@@ -70,7 +75,7 @@ fi
 [[ -d "$PROD_ROOT/secrets" ]] || die "could not create $PROD_ROOT/secrets"
 chmod 0700 "$PROD_ROOT/secrets"
 
-# ── 3. Migrate four secrets from .env to files ────────────────────
+# ── 3. Migrate secrets from .env to files ─────────────────────────
 log "Step 3: migrate secrets to files"
 extract_env_value() {
     # Echo the key's value, or EMPTY when the line is absent -- never a
@@ -87,56 +92,77 @@ extract_env_value() {
     grep -E "^${key}=" "$PROD_ROOT/.env" | sed -n '1p' | cut -d= -f2- || true
 }
 
-for pair in \
-    "SECRET_KEY:secret_key" \
-    "POSTGRES_PASSWORD:postgres_password" \
-    "APP_ROLE_PASSWORD:app_role_password" \
-    "TOTP_ENCRYPTION_KEY:totp_encryption_key"; do
-    env_key=${pair%%:*}
-    file_name=${pair##*:}
-    target="$PROD_ROOT/secrets/$file_name"
-    if [[ -s "$target" ]]; then
-        warn "$target already non-empty -- skipping"
-        continue
+secret_from_env() {
+    # Echo the key's value in .env when it is a real one, else EMPTY: the
+    # placeholder a previous run's step 4 left is no secret, and writing it
+    # to a file would make a published string the password.
+    local value
+    value=$(extract_env_value "$1")
+    if [[ "$value" == "$SECRET_PLACEHOLDER" ]]; then
+        value=""
     fi
-    value=$(extract_env_value "$env_key")
-    if [[ -z "$value" ]]; then
-        die "$env_key missing or empty in $PROD_ROOT/.env -- cannot migrate to file"
-    fi
-    # ``printf '%s'`` writes the exact bytes with no trailing newline.
-    # The entrypoint's _load_secret helper strips a trailing newline
-    # for forgiveness, but printf-style is the documented form.
-    # umask-first so the file is NEVER world-readable, even for the
-    # instant before chmod (OPS/SH-22).
-    (
-        umask 077
-        printf '%s' "$value" >"$target"
-    )
-    chmod 0600 "$target"
-    # shellcheck disable=SC2312 # wc -c is a display-only byte count for the wrote message; the file was just written (the preceding chmod would have aborted on a missing file)
-    echo "wrote $target ($(wc -c <"$target") bytes)"
-done
+    printf '%s' "$value"
+}
 
-# Valkey's password file, which the override's valkey service and app
-# both read (ruling plan#2633), so step 4 leaves a placeholder in .env
-# for it as for the four above.  0640, not 0600: the valkey container
-# reads it as uid 999 gid 1000, gid 1000 is the operating user's group,
-# and compose v2 ignores the secret reference's mode; the app reads it
-# as uid 1000, its owner.
-valkey_target="$PROD_ROOT/secrets/valkey_password"
-if [[ -s "$valkey_target" ]]; then
-    warn "$valkey_target already non-empty -- skipping"
-else
-    value=$(extract_env_value SHEKEL_VALKEY_PASSWORD)
-    [[ -n "$value" ]] || die "SHEKEL_VALKEY_PASSWORD missing or empty in $PROD_ROOT/.env -- cannot write $valkey_target"
-    (
-        umask 027
-        printf '%s' "$value" >"$valkey_target"
-    )
-    chmod 0640 "$valkey_target"
-    # shellcheck disable=SC2312 # wc -c is a display-only byte count for the wrote message, as in the loop above
-    echo "wrote $valkey_target ($(wc -c <"$valkey_target") bytes)"
-fi
+make_secret() {
+    # make_secret FILE MODE ENV_KEY [generate]: make secrets/FILE when it is
+    # missing or empty, then set its MODE, a file already there included.
+    #
+    # Its value is .env's ENV_KEY.  With no real value there, a migrated
+    # secret is refused, since it must be the one already in use (a session
+    # key, the key the TOTP secrets are encrypted with, a password the
+    # database holds), and one marked ``generate`` is made new: the
+    # database owner's, which the provisioning script sets from this file.
+    # A new one is the documented generator's (docs/runbook_secrets.md),
+    # URL-safe because _database_url puts it in the migrate service's URL
+    # unencoded (scripts/_entrypoint_lib.sh).
+    #
+    # ``printf '%s'`` writes the exact bytes with no trailing newline: the
+    # loaders strip one for forgiveness, but printf-style is the documented
+    # form.  umask-first so the file is never more open than owner-only,
+    # even for the instant before chmod (OPS/SH-22).  Only the byte count
+    # and the value's origin are printed, never the value.
+    local file=$1 mode=$2 env_key=$3 if_absent=${4:-refuse}
+    local target="$PROD_ROOT/secrets/$file" value origin
+    if [[ -s "$target" ]]; then
+        warn "$target already non-empty -- keeping its value"
+    else
+        value=$(secret_from_env "$env_key")
+        origin="from .env's $env_key"
+        if [[ -z "$value" && "$if_absent" == generate ]]; then
+            value=$(python3 -I -c 'import secrets; print(secrets.token_urlsafe(32), end="")') \
+                || die "python3 could not generate a password for $target"
+            origin="a new password"
+        fi
+        [[ -n "$value" ]] || die "$target is missing, and $PROD_ROOT/.env holds no value for $env_key: it is absent, empty, or the placeholder a previous run left (that run's .env.bak.* holds the value it replaced)"
+        (
+            umask 077
+            printf '%s' "$value" >"$target"
+        )
+        # shellcheck disable=SC2312 # wc -c is a display-only byte count for the wrote message; the file was just written (the redirection above would have aborted on a failed write)
+        echo "wrote $target ($(wc -c <"$target") bytes, $origin)"
+    fi
+    chmod "$mode" "$target"
+}
+
+# Each file, its mode and where its value comes from.  Compose v2 ignores
+# a secret reference's uid, gid and mode, so the container sees the HOST
+# file, and the mode follows the container user that reads it:
+#   0600  read by the app alone, as uid 1000, the operating user, the
+#         file's owner.
+#   0644  read by the db container too, as uid 70 (postgres), which gets
+#         only the "other" bits: the superuser's password, and the two
+#         logins' passwords that deploy/postgres/provision_roles.sh sets
+#         (ruling plan#3413).  The 0700 secrets/ directory contains them.
+#   0640  Valkey's, which the valkey service and the app both read (ruling
+#         plan#2633): the valkey image runs as uid 999 gid 1000, and gid
+#         1000 is the operating user's group on this host.
+make_secret secret_key 0600 SECRET_KEY
+make_secret totp_encryption_key 0600 TOTP_ENCRYPTION_KEY
+make_secret postgres_password 0644 POSTGRES_PASSWORD
+make_secret app_role_password 0644 APP_ROLE_PASSWORD
+make_secret owner_role_password 0644 OWNER_ROLE_PASSWORD generate
+make_secret valkey_password 0640 SHEKEL_VALKEY_PASSWORD
 
 # ── 4. Rewrite /opt/docker/shekel/.env ────────────────────────────
 log "Step 4: rewrite $PROD_ROOT/.env"
@@ -188,16 +214,18 @@ echo "backed up to $backup"
 cat >"$PROD_ROOT/.env" <<ENVEOF
 # Shekel Budget App -- shared-mode production environment.
 # Rewritten by scripts/reconcile_prod_to_canonical.sh on $(date -u +%Y-%m-%dT%H:%M:%SZ).
-# Real secret values for SECRET_KEY, POSTGRES_PASSWORD,
-# APP_ROLE_PASSWORD, and TOTP_ENCRYPTION_KEY are now in
-# /opt/docker/shekel/secrets/<name>; the placeholders below satisfy
-# the base docker-compose.yml's \${VAR:?...} interpolation.
+# The real values of the five secrets below are files under
+# /opt/docker/shekel/secrets/: secret_key, postgres_password,
+# app_role_password, owner_role_password and totp_encryption_key.
+# The placeholders satisfy the base docker-compose.yml's \${VAR:?...}
+# interpolation.
 # Audit findings F-022, F-109, F-148 / Commits C-34, C-38.
 
-SECRET_KEY=replaced_by_docker_secret
-POSTGRES_PASSWORD=replaced_by_docker_secret
-APP_ROLE_PASSWORD=replaced_by_docker_secret
-TOTP_ENCRYPTION_KEY=replaced_by_docker_secret
+SECRET_KEY=$SECRET_PLACEHOLDER
+POSTGRES_PASSWORD=$SECRET_PLACEHOLDER
+APP_ROLE_PASSWORD=$SECRET_PLACEHOLDER
+OWNER_ROLE_PASSWORD=$SECRET_PLACEHOLDER
+TOTP_ENCRYPTION_KEY=$SECRET_PLACEHOLDER
 
 # Retired TOTP keys for non-destructive rotation.  Empty in steady
 # state.  When set, also write the value to
@@ -206,13 +234,13 @@ TOTP_ENCRYPTION_KEY=replaced_by_docker_secret
 # window.  See docs/runbook_secrets.md "Rotating TOTP_ENCRYPTION_KEY".
 TOTP_ENCRYPTION_KEY_OLD=
 
-# Per-app Valkey ACL user password.  Lower sensitivity than the four
+# Per-app Valkey ACL user password.  Lower sensitivity than the five
 # secrets above (gates a Valkey user restricted to the limiter's own
 # commands on the LIMITS:* keys, reached only over a socket file the app
 # shares).  The valkey service and the app both read it from
 # /opt/docker/shekel/secrets/valkey_password; the placeholder satisfies
-# the base docker-compose.yml's interpolation, as the four above do.
-SHEKEL_VALKEY_PASSWORD=replaced_by_docker_secret
+# the base docker-compose.yml's interpolation, as the five above do.
+SHEKEL_VALKEY_PASSWORD=$SECRET_PLACEHOLDER
 
 # Image digest pin.  Carried forward from the previous .env unchanged
 # so this reconciliation does not double as an image bump.  Rotate
@@ -315,6 +343,18 @@ if [[ -d "$PROD_ROOT/deploy/valkey" ]]; then
 fi
 install -d -m 0755 "$PROD_ROOT/deploy/valkey"
 cp -v "$REPO_ROOT/deploy/valkey/users.acl" "$REPO_ROOT/deploy/valkey/start.sh" "$PROD_ROOT/deploy/valkey/"
+# The database container's provisioning script, which the base file mounts
+# from ./deploy/postgres/provision_roles.sh as the image's first-boot hook
+# (create_host_path: false refuses a start without it), into step 1's
+# directory.  0755: the image runs an executable hook and SOURCES any other
+# into its own shell.  The script alone is snapshotted, never the directory:
+# that also holds the TLS key, which is uid 70's at 0600, unreadable here.
+provision_roles="$PROD_ROOT/deploy/postgres/provision_roles.sh"
+if [[ -f "$provision_roles" ]]; then
+    cp -a "$provision_roles" "$snap_dir/provision_roles.sh.pre-reconcile"
+fi
+cp -v "$REPO_ROOT/deploy/postgres/provision_roles.sh" "$provision_roles"
+chmod 0755 "$provision_roles"
 
 # Validate the merged config before exiting.  The rendered merge
 # INTERPOLATES .env values -- any credential that is not yet a docker
@@ -350,9 +390,15 @@ When ready to recreate the stack:
     docker exec nginx nginx -t
     docker exec nginx nginx -s reload
 
-    # (c) Recreate the Shekel stack.
+    # (c) Recreate the Shekel stack, the database first, so its
+    #     provisioning script can make the owner's and the web server's
+    #     logins and hand the owner every object before the migrate
+    #     service logs in as the owner.  A database made before the
+    #     script existed has no owner login; run again, it changes nothing.
     cd $PROD_ROOT
     docker compose down
+    docker compose up -d --wait db
+    docker exec shekel-prod-db /docker-entrypoint-initdb.d/10-provision-roles.sh
     docker compose up -d
 
     # (d) Confirm health.
@@ -367,6 +413,8 @@ Rollback (if anything goes wrong):
     sudo cp $snap_dir/docker-compose.yml.pre-reconcile $PROD_ROOT/docker-compose.yml
     sudo cp $snap_dir/docker-compose.override.yml.pre-reconcile $PROD_ROOT/docker-compose.override.yml
     # and, if it existed before, deploy/valkey from $snap_dir/valkey.pre-reconcile
+    # and deploy/postgres/provision_roles.sh from $snap_dir/provision_roles.sh.pre-reconcile
+    # (with none there before, the previous compose files mount none)
     sudo cp $backup $PROD_ROOT/.env
     cd $PROD_ROOT && docker compose up -d
 ────────────────────────────────────────────────────────────────────

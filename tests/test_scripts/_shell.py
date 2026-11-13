@@ -57,19 +57,21 @@ def every_function_text(script: Path) -> str:
     return "".join(found)
 
 
-def section_text(script: Path, start: str, end: str) -> str:
+def section_text(script: Path, start: str, end: str | None) -> str:
     """Return *script*'s lines from the one opening with *start* to the one opening with *end*.
 
     Args:
         script: The script holding the section.
         start: How the section's first line opens.
-        end: How the line after its last opens.
+        end: How the line after its last opens, or ``None`` for a section
+            that runs to the end of the script.
 
     Returns:
         The section, *end*'s line excluded.
     """
+    stop = r"\Z" if end is None else rf"^{re.escape(end)}"
     found = re.findall(
-        rf"^{re.escape(start)}.*?(?=^{re.escape(end)})",
+        rf"^{re.escape(start)}.*?(?={stop})",
         script.read_text(encoding="utf-8"), flags=re.S | re.M,
     )
     assert len(found) == 1, (

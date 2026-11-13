@@ -29,7 +29,8 @@ the entry figures reach the dashboard response.
 The service-level entry-field computation (``txn_to_bill_dict`` /
 ``_entry_progress_fields``) is covered by
 ``tests/test_services/test_dashboard_service.py::TestBillRowSingleBase``
-and ``tests/test_services/test_dashboard_pulse.py::TestPulseDueSoon``;
+and
+``tests/test_services/test_dashboard_pulse/test_the_street_and_due_soon.py::TestPulseDueSoon``;
 the retired ``compute_dashboard_data`` service tests that lived here were
 removed with that producer (a sanctioned removal, not test-gaming).
 """

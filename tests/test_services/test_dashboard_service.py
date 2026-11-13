@@ -12,7 +12,7 @@ cards) and their tests were removed in the same pass -- a sanctioned
 removal of features ruled out by the developer, not test-gaming (see
 ``docs/design/dashboard_card_audit.md`` "Retirements").  The pulse / tracks
 producers that replaced them are tested in
-``tests/test_services/test_dashboard_pulse.py``.
+``tests/test_services/test_dashboard_pulse/``.
 """
 
 from datetime import date

@@ -4,8 +4,9 @@ Shekel Budget App -- The Pinned Process Locale
 Tests that the application factory refuses to start under any ``LC_ALL`` but
 the pinned one, and that the production image sets that one (plan step
 ``recurrence:R12``, ruling ``R-R92``).  A module of its own because the refusal
-is the factory's, not a configuration class's, and ``tests/test_config.py``
-sits at pylint's module-length ceiling.
+is the factory's, not a configuration class's (whose tests are the package
+``tests/test_config/``), and that package's one module sat at pylint's
+module-length ceiling when this one was written.
 """
 
 from pathlib import Path

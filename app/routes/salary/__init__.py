@@ -29,8 +29,9 @@ Module map:
   (``new_profile``, ``create_profile``, ``edit_profile``,
   ``update_profile``, ``delete_profile``, ``reactivate_profile``).
 * :mod:`app.routes.salary.pay_list` -- the pay list's doors (plan steps
-  salary:X-av-3a and X-av-3b): Record a pay change (``record_pay_entry``)
-  and Fix (``fix_pay_entry``, here from ``profiles`` since X-av-3b).
+  salary:X-av-3a and X-av-3b): Record a pay change (``record_pay_entry``),
+  Fix (``fix_pay_entry``, here from ``profiles`` since X-av-3b) and Remove
+  (``remove_pay_entry``).
 * :mod:`app.routes.salary.items` -- raise and deduction add/edit/delete
   (the two parallel salary line-item families, co-located).
 * :mod:`app.routes.salary.views` -- projection view + retired-breakdown

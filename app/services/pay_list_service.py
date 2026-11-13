@@ -27,7 +27,8 @@ entry but the only one (ruling **R-SAL68**, "Remove, except the last one").
 * a Record on, or a Fix moving an entry onto, a payday another of the
   profile's entries holds: one entry per payday
   (``uq_pay_entries_profile_payday``), and neither door overwrites an entry
-  unseen.  One sentence for both, :func:`_refuse_held_payday`;
+  unseen.  One sentence for both, :func:`held_payday_refusal`, which the
+  routes read too when a race lands on the key past this check;
 * a Remove of a profile's only entry: every paycheck is priced from the pay
   list, so a profile holds at least one entry (**R-SAL68**).
 
@@ -131,15 +132,36 @@ def _refuse_payday(ctx: "BalanceContext", payday: date, today: date) -> None:
         raise ValidationError(refusal)
 
 
+def held_payday_refusal(payday: date) -> str:
+    """Return the one sentence a pay door refuses a payday another entry holds in.
+
+    One entry per payday (``uq_pay_entries_profile_payday``): a Record on a
+    held payday, or a Fix moving an entry onto one, would replace pay the
+    owner can see with pay typed unseen, and the remedy is to Fix that entry,
+    which is what the words say.  Its one home, so the refusal before the
+    write (:func:`_refuse_held_payday`) and the report of a Record or a Fix
+    that met the key in a race past it (the routes' guarded flush) word one
+    state alike.
+
+    Args:
+        payday: The payday the door would have written an entry on.
+
+    Returns:
+        The sentence, naming *payday*.
+    """
+    return (
+        f"Your pay from {payday.isoformat()} is already recorded; "
+        f"fix that entry instead."
+    )
+
+
 def _refuse_held_payday(
     profile_id: int, payday: date, moving_entry_id: int | None,
 ) -> None:
     """Raise when another of the profile's entries already holds *payday*.
 
     One entry per payday (``uq_pay_entries_profile_payday``), refused in words
-    before the key could refuse it: a Record on a held payday, or a Fix moving
-    an entry onto one, would replace pay the owner can see with pay typed
-    unseen.  The fix is to Fix that entry, which is what the words say.
+    before the key could refuse it, in :func:`held_payday_refusal`'s.
 
     Args:
         profile_id: The pay list's profile.
@@ -157,10 +179,7 @@ def _refuse_held_payday(
     if moving_entry_id is not None:
         query = query.filter(SalaryPayEntry.id != moving_entry_id)
     if query.first() is not None:
-        raise ValidationError(
-            f"Your pay from {payday.isoformat()} is already recorded; "
-            f"fix that entry instead."
-        )
+        raise ValidationError(held_payday_refusal(payday))
 
 
 def record_entry(
@@ -306,6 +325,6 @@ def remove_entry(entry: SalaryPayEntry) -> None:
 
 
 __all__ = [
-    "PayRow", "fix_entry", "pay_rows", "record_entry", "remove_entry",
-    "start_pay_list",
+    "PayRow", "fix_entry", "held_payday_refusal", "pay_rows", "record_entry",
+    "remove_entry", "start_pay_list",
 ]

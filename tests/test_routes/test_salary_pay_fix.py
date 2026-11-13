@@ -11,7 +11,8 @@ about a mistake as readily as about the truth.  Every figure is made up.
 * create: the form's pay a paycheck and its payday become the first entry;
 * Fix: the amount, the payday, both; a payday that is not one, or that another
   entry holds, is refused and nothing moves; an unchanged payday is not asked
-  again (R-SAL53's shape); a stale form is refused;
+  again (R-SAL53's shape); a stale form is refused; a Fix racing another onto
+  one payday is reported, never a 500, in the held-payday refusal's words;
 * ownership: another owner's entry is a 404, paired with the owner's own POST
   to the same URL shape resolving, so the 404 is the gate's and not the URL
   map's;
@@ -362,6 +363,65 @@ class TestFix:
             assert response.status_code == 200
             assert b"changed by another action" in response.data
             assert _state(entry_id)[1] == Decimal("2000.00")
+
+    def test_a_fix_racing_another_onto_the_payday_says_what_the_check_says(
+        self, app, auth_client, seed_user, seed_periods,
+    ):
+        """Another tab records 01-16 between the check and the move: the held-payday sentence.
+
+        The race the service's own check cannot see: it finds 01-16 free, then
+        another request's entry lands there before this Fix's UPDATE, which
+        meets ``uq_pay_entries_profile_payday`` at the flush, inside the
+        route's guard.  What the owner reads is what a Fix onto a payday
+        already held is refused with before any race (task plan#3579), so
+        the two words of one state cannot drift apart.  Planted by inserting
+        the other entry with autoflush held off, right after the service
+        stages the move.
+        """
+        with app.app_context():
+            profile = create_through_the_form(
+                auth_client, seed_user, "2000.00", seed_periods[0].start_date.isoformat(),
+            )
+            profile_id = profile.id
+            entry = profile.pay_entries[0]
+            entry_id = entry.id
+            before = _state(entry_id)
+            target = seed_periods[1].start_date
+            controls = _fix_form(auth_client, entry)
+            controls.update({"payday": target.isoformat(), "amount": "2070.00"})
+            real_fix = pay_list_service.fix_entry
+
+            def fix_then_lose_the_race(*args, **kwargs):
+                staged = real_fix(*args, **kwargs)
+                with db.session.no_autoflush:
+                    db.session.execute(sqlalchemy.text(
+                        "INSERT INTO salary.pay_entries "
+                        "(salary_profile_id, payday, amount) "
+                        "VALUES (:profile, :payday, 2050.00)"
+                    ), {"profile": profile_id, "payday": target})
+                return staged
+
+            with patch.object(
+                pay_list_service, "fix_entry", side_effect=fix_then_lose_the_race,
+            ):
+                response = auth_client.post(
+                    _fix_url(entry), data=controls, follow_redirects=True,
+                )
+
+            assert response.status_code == 200
+            assert (
+                f"Your pay from {target.isoformat()} is already recorded; "
+                "fix that entry instead."
+            ).encode() in response.data
+            # This request moved nothing.  The planted entry shares its
+            # transaction, so the guard's rollback takes it too; another
+            # tab's would be its own, committed.
+            assert _state(entry_id) == before
+            assert [
+                (row.payday, row.amount)
+                for row in db.session.query(SalaryPayEntry)
+                .filter_by(salary_profile_id=profile_id).all()
+            ] == [(seed_periods[0].start_date, Decimal("2000.00"))]
 
     def test_an_amount_not_above_zero_is_refused(
         self, app, auth_client, seed_user, seed_periods,

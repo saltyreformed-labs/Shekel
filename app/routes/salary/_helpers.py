@@ -42,6 +42,7 @@ from app.services import (
 from app.services.balance_at import BalanceContext
 from app.services.pay_calendar import PayCalendar, calendar_for
 from app.services.payroll_basis import PayrollBasis
+from app.services.raise_in_pay import RaiseInPay
 from app.services.salary_raises import RAISE_YEAR_MAX, RAISE_YEAR_MIN, RaiseTerms
 from app.services.recurrence import (
     NEVER_ENDS,
@@ -261,7 +262,7 @@ class RefusedRaise:
 
 def _raise_card_context(
     profile: SalaryProfile, basis_source: "Callable[[], PayrollBasis]",
-) -> dict:
+) -> dict[str, dict[int, RaiseInPay] | int]:
     """The context both renders of the Raises card draw from (task plan#3169).
 
     ONE producer for the edit page and the HTMX fragment, as

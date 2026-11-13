@@ -28,9 +28,8 @@ from app.routes._commit_helpers import (
     regenerate_commit_or_report,
 )
 from app.routes._form_errors import load_form_or_redirect
-from app.routes._redirect_target import RedirectTarget
 from app.routes.salary._bp import salary_bp
-from app.routes.salary._helpers import _regenerate_salary_transactions
+from app.routes.salary._helpers import _edit_page, _regenerate_salary_transactions
 from app.schemas.validation import (
     SalaryPayEntryFixSchema,
     SalaryPayEntryRecordSchema,
@@ -52,11 +51,6 @@ _pay_entry_remove_schema = SalaryPayEntryRemoveSchema()
 _PAY_ENTRIES_UNIQUE_CONSTRAINT = "uq_pay_entries_profile_payday"
 
 
-def _edit_page(profile: SalaryProfile) -> RedirectTarget:
-    """The salary page every pay-list door answers on."""
-    return RedirectTarget("salary.edit_profile", {"profile_id": profile.id})
-
-
 @salary_bp.route("/salary/<int:profile_id>/pay", methods=["POST"])
 @require_owner
 def record_pay_entry(profile_id):
@@ -72,7 +66,7 @@ def record_pay_entry(profile_id):
     profile = get_or_404(SalaryProfile, profile_id)
     if profile is None:
         abort(404)
-    edit_page = _edit_page(profile)
+    edit_page = _edit_page(profile.id)
 
     data = load_form_or_redirect(_pay_entry_record_schema, edit_page)
     if isinstance(data, Response):
@@ -120,10 +114,7 @@ def record_pay_entry(profile_id):
                 "(another entry already holds that payday)"
             ),
             log_args=(profile.id,),
-            flash_message=(
-                f"Your pay from {payday} is already recorded; fix that "
-                f"entry instead."
-            ),
+            flash_message=pay_list_service.held_payday_refusal(entry.payday),
             redirect=edit_page,
         ),
     )
@@ -149,7 +140,9 @@ def fix_pay_entry(entry_id):
     the entry's ``version_id``; a stale one short-circuits with a flash, and a
     flush-time ``StaleDataError`` is caught by the same guard.  A Fix racing
     another onto one payday lands on ``uq_pay_entries_profile_payday`` and is
-    reported as the recoverable warning it is.
+    reported as the recoverable warning it is, in the words the service
+    refuses a held payday in before the race
+    (:func:`~app.services.pay_list_service.held_payday_refusal`).
 
     The form is LOADED once, through the shared loader, since it moved here
     at plan step salary:X-av-3b: it validated and then loaded, the double pass
@@ -159,7 +152,7 @@ def fix_pay_entry(entry_id):
     if entry is None:
         abort(404)
     profile = entry.salary_profile
-    edit_page = _edit_page(profile)
+    edit_page = _edit_page(profile.id)
 
     data = load_form_or_redirect(_pay_entry_fix_schema, edit_page)
     if isinstance(data, Response):
@@ -216,10 +209,9 @@ def fix_pay_entry(entry_id):
                 "(another entry already holds that payday)"
             ),
             log_args=(entry_id,),
-            flash_message=(
-                "Another pay entry already starts on that payday.  Fix that "
-                "entry instead."
-            ),
+            # Only a CHANGED payday can meet the key (the entry holds its
+            # own), and the payday the Fix moved onto is the posted one.
+            flash_message=pay_list_service.held_payday_refusal(data["payday"]),
             redirect=edit_page,
         ),
     )
@@ -251,7 +243,7 @@ def remove_pay_entry(entry_id):
     if entry is None:
         abort(404)
     profile = entry.salary_profile
-    edit_page = _edit_page(profile)
+    edit_page = _edit_page(profile.id)
 
     data = load_form_or_redirect(_pay_entry_remove_schema, edit_page)
     if isinstance(data, Response):

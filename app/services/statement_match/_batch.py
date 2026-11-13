@@ -66,7 +66,7 @@ run first, so the match settles the envelope on a covering movement, and a
 settled row holding a payment takes no purchase (ruling **R-BAL78**): the
 creation is refused by the destination re-ask
 (:func:`~._destinations.current_destinations`), which asks the envelope as
-the match left it (``test_batch``'s
+the match left it (``test_batch/test_one_derivation_per_pass.py``'s
 ``test_a_creation_cannot_target_an_envelope_a_match_claimed`` grades it).
 Measured on the developer's own statement, 4 envelopes are
 both named by a proposal and offered as a destination, and **15 of the 91

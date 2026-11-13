@@ -29,9 +29,10 @@ a pay-period delete still cascades its 18 entries + 37 postings; a
 transaction delete still SET-NULLs the entry back-link.
 
 **Role guard.**  The REVOKE is wrapped in a ``pg_roles`` existence check
-(the ``a5be2a99ea14`` pattern) so the migration succeeds on databases where
-the production app role is not provisioned (developer laptops, CI, the test
-template).  The SQL lives in
+(the ``a5be2a99ea14`` pattern) so the migration succeeds on a cluster where
+the production app role is not provisioned, such as a developer's own.  The
+test cluster is not one: ``scripts/build_test_db_image.py`` creates the role
+before the template is built (plan#2954).  The SQL lives in
 ``app.posting_infrastructure.apply_ledger_append_only_privileges`` -- shared
 with ``scripts/init_database.py`` (the fresh-DB path stamps past this
 migration) and ``scripts/build_test_template.py``.  ``scripts/init_db_role.sql``

@@ -618,7 +618,7 @@ def governing_opening_row(db_session, account):
     the same order :func:`app.services.cash_ledger.account_opening_fact` reads
     in Python and ``budget.account_books_opened_on`` reads in SQL, and
     ``TestTheTwoGoverningLookupsElectTheSameRow`` in
-    ``tests/test_services/test_books_boundary.py`` is what holds all three to
+    ``tests/test_services/test_books_boundary/`` is what holds all three to
     it.
 
     It answers with the ROW rather than through

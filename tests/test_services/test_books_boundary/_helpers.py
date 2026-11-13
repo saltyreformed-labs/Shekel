@@ -116,11 +116,11 @@ def _an_account_with_no_movement(seed_user, name, opened_on):
 def _match_a_group(account, owner_id, early, late):
     """Match two bank lines on *account*, posted *early* and *late*.
 
-    **The SQL lives in ``tests/_test_helpers.py``, once.**  It was copied
-    byte-identically into three test modules until an adversarial
-    test-quality review counted them -- and the query must agree with
-    :data:`app.opening_infrastructure.MATCHED_LINE_DAYS_SQL`'s row set, so
-    three copies were three places for that to drift silently.
+    **The SQL lives in ``tests/_test_helpers/_amount_bases_and_stubs.py``,
+    once.**  It was copied byte-identically into three test modules until
+    an adversarial test-quality review counted them -- and the query must
+    agree with :data:`app.opening_infrastructure.MATCHED_LINE_DAYS_SQL`'s
+    row set, so three copies were three places for that to drift silently.
 
     Args:
         account: The :class:`~app.models.account.Account` to match on.

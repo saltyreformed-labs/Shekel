@@ -31,7 +31,20 @@
 # nothing the rulings exclude.  Each entry also states an explicit
 # ``cooldown`` (zizmor's dependabot-cooldown rule): a release is proposed
 # only once it has been public for a week, which is the window in which a
-# hijacked or broken release is usually pulled upstream.
+# hijacked or broken release is usually pulled upstream.  For an image,
+# Dependabot dates that week from Docker Hub's record of the tag's newest
+# push (``tag_last_pushed``, in dependabot-core's docker update checker,
+# read 2026-11-13 at plan#3692), so the week holds only for a Docker Hub
+# tag that is not pushed again within it.  An image on another registry is
+# dated by nothing and waits no week: uv's, on ghcr.io, is logged "No
+# verified registry publication date source ... skipping cooldown".  An
+# official image's tag is pushed again on every upstream update and as
+# each architecture's build lands, so its week ends only when a whole week
+# passes with no push before a run.  Where that held an image back at
+# nearly every run, the image is excluded from the cooldown by name below,
+# a stopgap until plan#3824 proposes the newest digest its tag named a
+# week before, read from docker-library/repo-info's record of every digest
+# each official tag has named (rulings plan#3818 and plan#3821).
 version: 2
 updates:
   # The application image's base (Dockerfile FROM ... @sha256).  A digest
@@ -52,6 +65,17 @@ updates:
     target-branch: dev
     cooldown:
       default-days: 7
+      # The python base image waits no week until plan#3824 lands (ruling
+      # plan#3821).  At every run from 2026-10-26 to 2026-11-09 Dependabot
+      # logged "Skipping tag 3.14-slim due to cooldown period" and proposed
+      # no digest, though 3.14.10 was in the tag from the evening of
+      # 2026-10-26: repo-info records 15 changes to ``3.14-slim`` from
+      # 2026-10-21 to 2026-11-08, never more than 5 days apart.  What CI
+      # checks of a moved digest before the daily queue lands it: the image
+      # builds, and Python runs in it (psycopg's C implementation, the
+      # lock's package set); the suite runs on uv's own Python 3.14, not
+      # the image's.  Production takes the digest only at a release.
+      exclude: ["python"]
     ignore:
       # The Python version moves only in its own deliberate change: the
       # Dockerfile's FROM tags and .python-version, which every CI job and
@@ -79,6 +103,21 @@ updates:
     target-branch: dev
     cooldown:
       default-days: 7
+      # nginx waits no week until plan#3824 lands, for the base image's
+      # reason above (ruling plan#3821): from 2026-10-16 to 2026-11-09 the
+      # cooldown skipped its tag, ``1.31-alpine``, at 8 of the 10 runs that
+      # read it, and on 2026-11-13 its pin was not the digest the tag named.
+      # A moved digest runs in the deploy tests' ``nginx -t`` and proxy
+      # checks before the daily queue lands it.  The exclusion covers its
+      # version moves too, so a new nginx minor lands with no wait:
+      # Dependabot sets a wait per kind of update only for a whole entry.
+      # postgres keeps the week (ruling plan#3821): the cooldown skipped it
+      # at 3 of the same 10 runs, and no CI job runs compose's postgres
+      # image (the test database boots its own pin), so a move would land
+      # checked by a compose parse alone.  valkey keeps it too: nothing
+      # measured holds it back, the digest its tag named on 2026-11-13
+      # being the one pinned.
+      exclude: ["nginx"]
     commit-message:
       prefix: "chore(deps)"
 

@@ -26,7 +26,19 @@
         {% for r in profile.raises %}
         <tr>
           <td>{{ r.raise_type.name|title if r.raise_type else '--' }}</td>
-          <td>{{ r.effective_date.strftime('%b %-d, %Y') }}</td>
+          <td>
+            {{ r.effective_date.strftime('%b %-d, %Y') }}
+            {# What recorded pay already holds of the raise (ruling R-SAL95,
+               worded by plan#3375): "In your pay from <payday>", or for a
+               yearly raise each run of years with the entry holding it.  The
+               route's words (raises_in_pay, PayrollBasis.raise_in_pay), the
+               producer the add and edit doors refuse by (task plan#3169). #}
+            {% for label in raises_in_pay[r.id].labels %}
+            <small class="d-block text-muted">
+              <i class="bi bi-check2-circle" aria-hidden="true"></i> {{ label }}
+            </small>
+            {% endfor %}
+          </td>
           <td class="text-end font-mono">
             {% if r.percentage %}
               {{ "%.2f"|format((r.percentage|to_percent)) }}%

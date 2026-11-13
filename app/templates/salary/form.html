@@ -38,12 +38,12 @@
                    placeholder="e.g. Primary Job">
           </div>
 
+          {# The FIRST pay entry, typed per paycheck (plan step
+             salary:X-av-3a, rulings R-SAL59 and R-SAL61: "Pay is only ever
+             typed per paycheck").  An existing profile's pay is its pay
+             list, the card below this form. #}
+          {% if not profile %}
           <div class="row mb-3">
-            {# The FIRST pay entry, typed per paycheck (plan step
-               salary:X-av-3a, rulings R-SAL59 and R-SAL61: "Pay is only ever
-               typed per paycheck").  An existing profile's pay is its pay
-               list, the card below this form. #}
-            {% if not profile %}
             <div class="col-md-6">
               <label for="pay_amount" class="form-label">Pay a paycheck</label>
               <div class="input-group">
@@ -53,18 +53,18 @@
               </div>
               <div class="form-text">Gross base pay, before deductions, as your stub prints it.</div>
             </div>
-            {% endif %}
-            {# Paychecks a year is DERIVED from the pay schedule's cadence and
+            {# Paychecks a year is DERIVED from the pay schedule's rhythm and
                is not a second control here (plan step R-F16).  It was a
                12/24/26/52 dropdown, and it was the divisor the paycheck engine
                turned a yearly salary into one paycheck with -- so a profile
                saying 26 beside a 7-day cadence modelled double the owner's
-               income.  It is the LATEST rhythm's count; a yearly figure is a
-               pay times the count in force on its own payday (R-SAL59,
-               R-SAL66), which the pay list states per entry. #}
+               income.  It is the count in force on the payday the pay below
+               defaults to (ruling R-SAL97), the count a pay from that payday
+               is multiplied by (R-SAL59, R-SAL66).  The edit page shows none:
+               each pay-list row states its own. #}
             <div class="col-md-6">
               <span class="form-label d-block">Paychecks / Year</span>
-              {% if paychecks_per_year %}
+              {% if paychecks_per_year is not none %}
               <p class="form-control-plaintext py-0 mb-0">
                 <span class="fw-semibold">{{ paychecks_per_year }}</span>
                 <a href="{{ url_for('settings.show', section='pay-periods') }}"
@@ -84,7 +84,6 @@
             </div>
           </div>
 
-          {% if not profile %}
           <div class="row mb-3">
             <div class="col-md-6">
               <label for="pay_payday" class="form-label">From payday</label>

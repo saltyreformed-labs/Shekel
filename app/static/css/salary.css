@@ -53,6 +53,13 @@
   color: var(--shekel-done);
 }
 
+/* A pay cut the "Next raise" chip names (R-SAL85): the caution token, beside
+   a down arrow and the words "Next pay cut", so a raise named in the same
+   chip keeps its own done color. */
+.sal-chip-cut {
+  color: var(--shekel-warning);
+}
+
 /* The done-color marker of a pay stub used for pricing (stub_form.html). */
 .sal-cal {
   color: var(--shekel-done);

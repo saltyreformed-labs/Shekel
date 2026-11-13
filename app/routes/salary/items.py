@@ -55,6 +55,8 @@ from app.routes._recurrence_form_refusals import RecurrenceFormContext
 from app.schemas.validation import RECURRENCE_SUBMISSION_KEY
 from app.services import paycheck_line_kinds, pay_stub_service, payroll_line_cadence
 from app.services.balance_at import BalanceContext
+from app.services.payroll_basis import PayrollBasis
+from app.services.salary_raises import RaiseTerms
 from app.services.recurrence import (
     UNSET,
     MonthReading,
@@ -92,6 +94,50 @@ _RAISE_STALE_MESSAGE = (
 # ── Raises ─────────────────────────────────────────────────────────
 
 
+def _refuse_unreached_raise(
+    ctx: BalanceContext, salary_raise: SalaryRaise, refuse: RaiseRefusal,
+) -> Response | None:
+    """Refuse a raise no paycheck would get, un-staging the door's write (ruling R-SAL95).
+
+    Task plan#3169: the add and edit doors refuse a raise every application
+    of which recorded pay already holds, in ruling **plan#3374**'s words,
+    which :meth:`~app.services.payroll_basis.PayrollBasis.raise_in_pay`
+    answers, the producer the Raises card labels a held raise by.  A raise a
+    paycheck still gets is saved, whatever part of it an entry holds (ruling
+    **plan#3375**); the card labels that part.
+
+    **It reads the row as the door staged it**, the row the regeneration
+    would price, so the refusal and the save judge one raise.  It reads it
+    under ``no_autoflush``: the basis loads the pay list and the pass derives
+    the calendar, and a flush there would write the staged raise outside the
+    commit guard each door's write runs inside, where a duplicate type and
+    date is reported in its own words rather than as a 500.  A refused raise
+    is rolled back, so neither its INSERT nor its edit reaches the database.
+
+    Args:
+        ctx: The door's read pass, built before the write was staged.
+        salary_raise: The raise as the door staged it: a new row joined to
+            its profile, or an edited one.
+        refuse: The door's :class:`~app.routes.salary._helpers.RaiseRefusal`.
+
+    Returns:
+        The refusal's response, or ``None`` when a paycheck gets the raise.
+    """
+    profile = salary_raise.salary_profile
+    with db.session.no_autoflush:
+        refusal = PayrollBasis(profile, ctx.calendar()).raise_in_pay(
+            RaiseTerms.of(salary_raise),
+        ).refusal
+    if refusal is None:
+        return None
+    logger.info(
+        "user_id=%d refused a raise on profile %d: no paycheck gets it",
+        ctx.user_id, profile.id,
+    )
+    db.session.rollback()
+    return refuse(refusal)
+
+
 @salary_bp.route("/salary/<int:profile_id>/raises", methods=["POST"])
 @require_owner
 def add_raise(profile_id):
@@ -104,13 +150,24 @@ def add_raise(profile_id):
     of a percentage and a flat amount -- rather than the generic prompt.
     On an htmx request the Raises card is redrawn with the reason and the
     form as typed (:class:`~app.routes.salary._helpers.RaiseRefusal`, task
-    plan#3136); a plain post flashes it.
+    plan#3136); a plain post flashes it.  A raise no paycheck would get is
+    refused the same way (:func:`_refuse_unreached_raise`, task plan#3169).
     """
     profile = get_or_404(SalaryProfile, profile_id)
     if profile is None:
         abort(404)
 
-    payload = load_form_or_refuse(_raise_schema, RaiseRefusal(profile))
+    # Capture the requester id on the clean session up front; the failure
+    # path builds its DbErrorContext after a failed flush, where reading the
+    # expired current_user attribute would hit the rolled-back session.
+    user_id = current_user.id
+    # The door's ONE read pass, built before anything is staged: its
+    # calendar is what the refusal below reads, the card it redraws, and the
+    # regeneration after the write (which prices nothing, plan step X-bp).
+    ctx = BalanceContext.build(user_id)
+    refuse = RaiseRefusal(profile, ctx.calendar)
+
+    payload = load_form_or_refuse(_raise_schema, refuse)
     if isinstance(payload, Response):
         return payload
     data = payload
@@ -119,16 +176,18 @@ def add_raise(profile_id):
     if data.get("percentage") is not None:
         data["percentage"] = Decimal(str(data["percentage"])) / Decimal("100")
 
-    salary_raise = SalaryRaise(salary_profile_id=profile.id, **data)
+    # Through the RELATIONSHIP to the row this door loaded, not its id
+    # (finding SAL-560, ruling R-SAL109), as the line add has since plan step
+    # salary:R15-c: a raise built by id joins ``profile.raises`` only if
+    # nothing in this session had loaded that collection yet.
+    salary_raise = SalaryRaise(salary_profile=profile, **data)
     db.session.add(salary_raise)
-
-    # Capture the requester id on the clean session up front; the failure
-    # path builds its DbErrorContext after a failed flush, where reading the
-    # expired current_user attribute would hit the rolled-back session.
-    user_id = current_user.id
+    refused = _refuse_unreached_raise(ctx, salary_raise, refuse)
+    if refused is not None:
+        return refused
 
     try:
-        _regenerate_salary_transactions(BalanceContext.build(user_id), profile)
+        _regenerate_salary_transactions(ctx, profile)
         db.session.commit()
     except IntegrityError as exc:
         # Duplicate-raise double-submit (F-051 / C-23): the composite
@@ -158,7 +217,7 @@ def add_raise(profile_id):
             "exists on this profile.",
             "info",
         )
-        return _respond_after_raise_change(profile)
+        return _respond_after_raise_change(profile, ctx.calendar)
     except SQLAlchemyError:
         # Narrow catch (C-46 / F-145): the IntegrityError branch
         # above covers unique-constraint and other constraint
@@ -177,7 +236,7 @@ def add_raise(profile_id):
     logger.info("user_id=%d added raise to profile %d", current_user.id, profile_id)
     flash("Raise added.", "success")
 
-    return _respond_after_raise_change(profile)
+    return _respond_after_raise_change(profile, ctx.calendar)
 
 
 @salary_bp.route("/salary/raises/<int:raise_id>/delete", methods=["POST"])
@@ -197,6 +256,9 @@ def delete_raise(raise_id):
         abort(404)
 
     profile = salary_raise.salary_profile
+    # The door's one read pass, built before the delete is staged, so its
+    # scenario lookup cannot flush the DELETE outside the guard below.
+    ctx = BalanceContext.build(current_user.id)
 
     # Stage the deletion (no DB I/O yet); the flush + commit happen inside
     # the stale guard below, so a concurrent-edit StaleDataError raised by
@@ -204,7 +266,7 @@ def delete_raise(raise_id):
     db.session.delete(salary_raise)
 
     response = regenerate_commit_or_report(
-        lambda: _regenerate_salary_transactions(BalanceContext.build(current_user.id), profile),
+        lambda: _regenerate_salary_transactions(ctx, profile),
         stale_ctx=StaleConflictContext(
             logger=logger,
             log_label="delete_raise",
@@ -232,7 +294,7 @@ def delete_raise(raise_id):
     )
     flash("Raise removed.", "info")
 
-    return _respond_after_raise_change(profile)
+    return _respond_after_raise_change(profile, ctx.calendar)
 
 
 @salary_bp.route("/salary/raises/<int:raise_id>/edit", methods=["POST"])
@@ -258,7 +320,9 @@ def update_raise(raise_id):
     plan#3136): on an htmx request the card is redrawn with the reason and
     the form reopened in edit mode as typed, its posted version included, so
     a stale form saved again is refused again rather than written over the
-    other action; a plain post flashes and redirects.
+    other action; a plain post flashes and redirects.  An edit leaving a
+    raise no paycheck would get is refused the same way
+    (:func:`_refuse_unreached_raise`, task plan#3169).
     """
     salary_raise = get_owned_via_parent(
         SalaryRaise, raise_id, "salary_profile",
@@ -267,8 +331,12 @@ def update_raise(raise_id):
         abort(404)
 
     profile = salary_raise.salary_profile
+    # The door's ONE read pass, built before the edit is staged (see
+    # :func:`add_raise`).
+    ctx = BalanceContext.build(current_user.id)
     refuse = RaiseRefusal(
-        profile, edit_url=url_for("salary.update_raise", raise_id=raise_id),
+        profile, ctx.calendar,
+        edit_url=url_for("salary.update_raise", raise_id=raise_id),
     )
 
     payload = load_form_or_refuse(_raise_update_schema, refuse)
@@ -293,9 +361,12 @@ def update_raise(raise_id):
     for field_name, value in data.items():
         if field_name in _RAISE_UPDATE_FIELDS:
             setattr(salary_raise, field_name, value)
+    refused = _refuse_unreached_raise(ctx, salary_raise, refuse)
+    if refused is not None:
+        return refused
 
     response = regenerate_commit_or_report(
-        lambda: _regenerate_salary_transactions(BalanceContext.build(current_user.id), profile),
+        lambda: _regenerate_salary_transactions(ctx, profile),
         stale_ctx=StaleConflictContext(
             logger=logger,
             log_label="update_raise",
@@ -336,7 +407,7 @@ def update_raise(raise_id):
     logger.info("user_id=%d updated raise %d on profile %d", current_user.id, raise_id, profile.id)
     flash("Raise updated.", "success")
 
-    return _respond_after_raise_change(profile)
+    return _respond_after_raise_change(profile, ctx.calendar)
 
 
 # ── Payroll lines (deductions and earnings) ────────────────────────

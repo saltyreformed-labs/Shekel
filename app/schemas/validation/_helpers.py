@@ -98,8 +98,32 @@ _DAY_OF_MONTH_RANGE = validate.Range(min=1, max=31)
 # because a sweep across loans, templates, entries, settings and salary is a
 # large unrelated diff and this step's own pull request moves money (ruling
 # **R-EY**).
+#
+# The ceiling is named once (plan step salary:X-av-3b, finding SAL-586) because
+# more than one bound takes it: ``_NON_NEGATIVE_MONETARY`` just below, and so
+# every field it validates and ``cards._POSITIVE_MONETARY``, built from its
+# ``max``; the one-paycheck bound below; and the raise form's flat raise
+# (``salary.RaiseCreateSchema.flat_amount``, task plan#3577).  The last two
+# read this name.  A comment saying two bounds share a ceiling is an
+# agreement, and a name is one value.  It is not every monetary input's
+# ceiling: some fields state their own, from $100K to $100M (in
+# ``investments``, ``retirement``, ``debt_strategy`` and ``salary``'s payroll
+# lines), and the 50 above state none.
+_MONETARY_INPUT_CEILING = Decimal("10000000")
 _NON_NEGATIVE_MONETARY = validate.Range(
-    min=Decimal("0"), max=Decimal("10000000"),
+    min=Decimal("0"), max=_MONETARY_INPUT_CEILING,
+)
+
+# What ONE paycheck's base pays, wherever it is typed: a pay entry on the
+# salary's pay list (plan step salary:X-av-3a) and the base a pay stub prints
+# (plan step salary:S11-b).  Above zero like both columns
+# (``ck_pay_entries_positive_amount``, ``ck_pay_stubs_positive_base_pay``),
+# under the named ceiling above.  One home since plan step
+# salary:X-av-3b (finding **SAL-586**): the salary and pay-stub schemas each
+# spelled it, so the pay list and the stub door could come to accept different
+# pay for one fact.
+_PAY_AMOUNT_RANGE = validate.Range(
+    min=Decimal("0"), min_inclusive=False, max=_MONETARY_INPUT_CEILING,
 )
 
 # The window a recurring definition's amount may be stated to take effect in
@@ -126,6 +150,18 @@ EFFECTIVE_DATE_MAX: date = CALENDAR_DATE_MAX
 _EFFECTIVE_DATE_RANGE = validate.Range(
     min=EFFECTIVE_DATE_MIN, max=EFFECTIVE_DATE_MAX,
 )
+
+# The window a PAYDAY may be typed in, wherever one is: a pay entry's, a pay
+# stub's, the stub dates a job learns its pay period from, and the four
+# pay-period doors' through ``pay_periods.payday_field`` (registration's last
+# payday, generate's start date, regenerate's and reset's corrected first
+# payday; task plan#3577).  It is the calendar's own reach
+# (``app.utils.dates``, which owns the numbers): an HTML date input accepts a
+# five-digit-year typo, and ``9999-12-31`` overflows the calendar's forward
+# projection.  One home since plan step salary:X-av-3b (finding **SAL-586**),
+# for the reason the pay bound above has one.  A stated pay-history opening is
+# not a payday, and keeps its own window, ``pay_periods._HISTORY_OPENS_RANGE``.
+_PAYDAY_RANGE = validate.Range(min=CALENDAR_DATE_MIN, max=CALENDAR_DATE_MAX)
 
 # The window a salary raise's YEAR -- effective or terminal -- may fall in, as
 # the per-control validator: the owner gets a message on the control instead

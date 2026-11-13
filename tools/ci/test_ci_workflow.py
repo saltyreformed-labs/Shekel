@@ -74,8 +74,8 @@ INSTALL_STEP = "Install the lock"
 
 #: What each job installs from the lock: every job but the two that build the app image
 #: (ci.yml's ``image`` and the release's), which run no Python on the runner, and the update
-#: alert, which installs nothing so a failed install cannot stop it (plan#2481).  None restores
-#: a cache, as no workflow does (ruling plan#2471).
+#: alerts (:data:`RUNNER_PYTHON`), which install nothing so a failed install cannot stop them
+#: (plan#2481).  None restores a cache, as no workflow does (ruling plan#2471).
 INSTALLS = {
     ("ci.yml", "landing"): {"install": "landing"},
     ("ci.yml", "tools"): {"install": "all"},
@@ -98,12 +98,13 @@ INSTALLS = {
 #: run on one (ruling plan#2376).
 DANGEROUS_TRIGGERS = frozenset({"pull_request_target", "workflow_run"})
 
-#: The one job that runs Python with no install, so the runner's own: the update alert, which
-#: installs nothing so a failed install cannot stop it, and runs on the standard library alone
+#: The jobs that run Python with no install, so the runner's own: the update alerts, the
+#: dependency update's and the weekly rebuild's (ruling plan#3724), each of which installs
+#: nothing so a failed install cannot stop it, and runs on the standard library alone
 #: (plan#2481);
-#: :class:`tools.ci.test_updates_workflow.TestTheUpdateWorkflowKeepsItsKeyFromPackageCode`
-#: holds its ``run`` line.
-RUNNER_PYTHON = frozenset({("updates.yml", "alert")})
+#: :class:`tools.ci.test_updates_workflow.TestTheUpdateWorkflowKeepsItsKeyFromPackageCode` and
+#: :class:`tools.ci.test_release_image_workflow.TestTheWeeklyRebuild` hold their ``run`` lines.
+RUNNER_PYTHON = frozenset({("updates.yml", "alert"), ("docker-publish.yml", "alert")})
 
 #: Where a step's shell starts a command, as the checks below read it: a line's start, after
 #: ``;``, ``&``, ``|``, ``(`` or a backtick (so ``&&``, ``||`` and ``$(`` too), a ``-c``
@@ -384,7 +385,9 @@ class TestTheWorkflowIsWiredToTheAnswer:
         when the image is built.  It is a separate job holding read-only
         permissions (its install runs third-party code, and the build job can
         sign and push), the build NEEDS it, and nothing lets it skip or fail
-        green.
+        green.  The one job that does not wait for it is the alert, which runs
+        only after a failure and can publish nothing (ruling plan#3724): it holds
+        neither ``packages`` nor ``id-token``.
         """
         text = (arcs.REPO / ".github/workflows/docker-publish.yml").read_text(
             encoding="utf-8",
@@ -397,9 +400,14 @@ class TestTheWorkflowIsWiredToTheAnswer:
         assert "python scripts/check_tax_law.py refuse" in runs
         for step in check["steps"]:
             assert "continue-on-error" not in step and "if" not in step, step.get("name")
-        # EVERY other job waits for the check: a second publishing job added
-        # beside the build would otherwise escape it.
+        # EVERY other job but the alert waits for the check: a second publishing
+        # job added beside the build would otherwise escape it.  The alert runs
+        # after the check fails, so it must be unable to publish: its token
+        # reads the code and writes issues, and nothing else.
         for name, job in jobs.items():
+            if name == "alert":
+                assert job["permissions"] == {"contents": "read", "issues": "write"}
+                continue
             if name != "tax-law":
                 assert job.get("needs") == "tax-law", name
                 assert "if" not in job, f"an if: could run {name!r} after the check failed"
@@ -730,7 +738,7 @@ class TestTheRequiredCheckJudgesEveryGrader:
 
 class TestEveryJobInstallsTheLock:
     """Every job that runs Python installs it through ``.github/actions/install-lock``, but
-    the update alert (:data:`RUNNER_PYTHON`).
+    the update alerts (:data:`RUNNER_PYTHON`).
 
     Ruling balance:R-BAL294 (plan#1027) as X-em's plan#2327 builds it: the job's Python is
     ``.python-version``'s and its packages ``uv.lock``'s, installed by one recipe, so no
@@ -766,10 +774,10 @@ class TestEveryJobInstallsTheLock:
         assert len(uses) == len(INSTALLS)
         assert set(uses) == {INSTALL_LOCK}
 
-    def test_no_job_runs_python_with_no_install_but_the_update_alert(self):
+    def test_no_job_runs_python_with_no_install_but_the_update_alerts(self):
         """A job that runs Python before any install runs the runner's own, at whatever
-        version the runner holds and with none of the lock's packages: the update alert
-        alone does.  The check sees each spelling it reads in a job with no install and
+        version the runner holds and with none of the lock's packages: the update alerts
+        alone do.  The check sees each spelling it reads in a job with no install and
         before one, and none after one, nor Python run inside a container, nor the word as
         an argument."""
         assert _runner_python(_workflows()) == RUNNER_PYTHON

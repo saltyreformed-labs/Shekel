@@ -259,8 +259,8 @@ class TestASettleBooksTheFreshestFigure:
     The setup is the sibling suite's, so the expected net is not invented here:
     a ``$104,000`` profile over 26 periods with no tax configs seeded nets
     ``$4,000.00`` a period, which
-    ``test_income_service.TestSalaryNetFor.test_recomputes_live_ignoring_stored_amount``
-    pins independently.
+    ``test_income_service.test_the_salary_net.TestSalaryNetFor``'s
+    ``test_recomputes_live_ignoring_stored_amount`` pins independently.
     """
 
     @staticmethod

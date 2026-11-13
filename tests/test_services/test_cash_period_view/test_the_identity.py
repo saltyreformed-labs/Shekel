@@ -530,8 +530,9 @@ class TestTheViewCarriesTheBasisItWasValuedOn:
     recompute to be laid over: both sides ask ``cash_ledger.amounts_by_key``
     over the pass's own basis and cannot come to hold two answers.  The field
     went with the producer -- and an AST and grep census found NOTHING had read
-    ``CashPeriodView.amount_overrides`` since X-c2b2 anyway, while the case
-    below asserted, in its own docstring, that "the grid reads
+    ``CashPeriodView.amount_overrides`` since X-c2b2 anyway, while
+    ``test_an_account_with_no_plan_carries_an_empty_map``, deleted with the
+    field, asserted in its own docstring that "the grid reads
     ``view.amount_overrides.get(...)`` per row".  That claim had been false for
     two plan steps.
     """
@@ -549,7 +550,7 @@ class TestTheViewCarriesTheBasisItWasValuedOn:
         """
         # pylint: disable=import-outside-toplevel
         tax_law(NO_TAX_LAW)
-        from tests.test_services.test_income_service import (
+        from tests.test_services.test_income_service._helpers import (
             _create_profile,
             _make_salary_template,
             _make_txn,

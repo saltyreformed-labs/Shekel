@@ -345,9 +345,9 @@ from ._secured_debt import (
 # The seam's public surface, re-exported so every consumer's existing
 # ``balance_at.<entry>`` attribute access keeps working unchanged after the
 # module -> package split.  The underscore-prefixed names are
-# internal-but-tested: ``tests/test_services/test_income_service.py`` reaches
-# ``balance_at._contribution_inputs_for_account`` to pin the raise-aware gross at the
-# seam's own loading point.  It is the ONLY private name here with an outside
+# internal-but-tested: ``tests/test_services/test_income_service/test_the_engines_gross.py``
+# reaches ``balance_at._contribution_inputs_for_account`` to pin the raise-aware gross at
+# the seam's own loading point.  It is the ONLY private name here with an outside
 # reader.
 # They are listed here so the re-export is explicit rather than an unused
 # import.

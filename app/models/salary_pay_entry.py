@@ -33,8 +33,16 @@ class SalaryPayEntry(OptimisticLockMixin, TimestampMixin, db.Model):
     rounded by :func:`~app.services.salary_raises.raise_pay`).
 
     A profile holds at least one entry, and every door keeps it so: the
-    create form writes the first, and no door removes the last (**R-SAL68**;
-    the Remove door is plan step salary:X-av-3b's).
+    create form writes the first, and Remove (plan step salary:X-av-3b) takes
+    any entry but the only one (**R-SAL68**,
+    :func:`~app.services.pay_list_service.remove_entry`).  The database
+    refuses the state for every other ROUTINE writer, at commit
+    (:mod:`app.pay_entry_infrastructure`, task plan#3167), a profile's own
+    delete taking its entries with it.  That module names the three writers
+    it does not stop: two at ``REPEATABLE READ`` each removing one of a
+    profile's last two entries, a ``TRUNCATE``, and a session firing no
+    trigger (``session_replication_role = replica``) or the tables' owner or
+    a superuser dropping the triggers.
 
     Optimistic locking: see :class:`Transaction` for the ``version_id_col``
     contract.  Two tabs fixing one entry race for the bump; the loser raises

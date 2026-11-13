@@ -74,7 +74,8 @@ def _trigger_family_check(module: str, attribute: str) -> tuple[str, int]:
     One attachment per entry in the named ``(trigger name, table)`` constant:
     ``app.level_infrastructure.LEVEL_TRIGGERS`` (plan step ``balance:X-bj-1``),
     ``app.sighting_infrastructure.SIGHTING_TRIGGERS`` (plan step ``bank_import:X-f6b-1``),
-    ``app.pay_stub_infrastructure.PAY_STUB_TRIGGERS`` (plan step ``salary:S11-a``) and
+    ``app.pay_stub_infrastructure.PAY_STUB_TRIGGERS`` (plan step ``salary:S11-a``),
+    ``app.pay_entry_infrastructure.PAY_ENTRY_TRIGGERS`` (task plan#3167) and
     ``app.deleted_row_infrastructure.DELETED_ROW_TRIGGERS`` (plan step ``credit_card:CC-5-4a-4``)
     and ``app.side_band_infrastructure.SIDE_BAND_TRIGGERS`` (plan step ``balance:X-bi-6-4d-2``).
     BOTH halves come from that one constant -- the names the query looks for and the number it must
@@ -166,6 +167,8 @@ def template_checks() -> tuple[tuple[str, str, int], ...]:
          *_trigger_family_check("app.sighting_infrastructure", "SIGHTING_TRIGGERS")),
         ("pay-stub refusal triggers",
          *_trigger_family_check("app.pay_stub_infrastructure", "PAY_STUB_TRIGGERS")),
+        ("pay-entry rule triggers",
+         *_trigger_family_check("app.pay_entry_infrastructure", "PAY_ENTRY_TRIGGERS")),
         ("deleted-row triggers",
          *_trigger_family_check("app.deleted_row_infrastructure", "DELETED_ROW_TRIGGERS")),
         ("side-record band triggers",

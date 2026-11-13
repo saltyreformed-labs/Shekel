@@ -12,18 +12,18 @@ from tests._test_helpers import period_window, read_pass
 _ONE_DAY = timedelta(days=1)
 
 
-#: The day the books open for the two shapes below that carry a record dated
+#: The day the books open for the two shapes in this package that carry a record dated
 #: before their opening ASSERTION.  Ruling **R-HG** (plan step X-f3c-2b) makes
 #: a movement on or before the books unstorable, so the record has to sit
 #: BETWEEN the books and the first assertion -- which is the production shape
 #: after that step's migration, and is what leaves the assertion's correction
-#: non-zero.  Every other shape in this file inherits the seeded account's own
+#: non-zero.  Every other shape in this package inherits the seeded account's own
 #: origination assertion, whose books
 #: already precede its records.
 _BOOKS_OPEN_ON = date(2025, 12, 31)
 
 
-# An as-of before every fixture date below, so ruling R-G's clamp is a no-op
+# An as-of before every fixture date in this package, so ruling R-G's clamp is a no-op
 # except in the tests that exist for it.  The tiers are graded separately on
 # purpose: a test that mixed them could pass with either one wrong.
 _EARLY_AS_OF = date(2026, 1, 20)

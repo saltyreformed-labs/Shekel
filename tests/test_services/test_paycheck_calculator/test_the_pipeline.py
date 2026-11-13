@@ -482,7 +482,7 @@ class TestTheEngineRefusesAPaycheckItCannotPlace:
         This is the shape a form value or another owner's period has.
         """
         profile = FakeProfile(
-            pay=Decimal("3525.96"), pay_from=date(2026, 3, 26),  # $91,675.00 a year / 26
+            pay=Decimal("3019.23"), pay_from=date(2026, 3, 26),  # $78,500.00 a year / 26
             created_at=date(2026, 1, 1),
             lines=[FakeDeduction(
                 name="Health", amount="500",
@@ -508,7 +508,7 @@ class TestTheEngineRefusesAPaycheckItCannotPlace:
         never happened.
         """
         profile = FakeProfile(
-            pay=Decimal("3525.96"), pay_from=date(2026, 3, 26),  # $91,675.00 a year / 26
+            pay=Decimal("3019.23"), pay_from=date(2026, 3, 26),  # $78,500.00 a year / 26
             created_at=date(2026, 1, 1),
         )
         schedule = self._biweekly_from_march()
@@ -529,7 +529,7 @@ class TestTheEngineRefusesAPaycheckItCannotPlace:
         is what the message this asserts exists to prevent.
         """
         profile = FakeProfile(
-            pay=Decimal("3525.96"), pay_from=date(2026, 3, 26),  # $91,675.00 a year / 26
+            pay=Decimal("3019.23"), pay_from=date(2026, 3, 26),  # $78,500.00 a year / 26
             created_at=date(2026, 1, 1),
         )
         basis = payroll_basis(profile, self._biweekly_from_march())
@@ -551,7 +551,7 @@ class TestTheEngineRefusesAPaycheckItCannotPlace:
         refused everything.
         """
         profile = FakeProfile(
-            pay=Decimal("3525.96"), pay_from=date(2026, 3, 26),  # $91,675.00 a year / 26
+            pay=Decimal("3019.23"), pay_from=date(2026, 3, 26),  # $78,500.00 a year / 26
             created_at=date(2026, 1, 1),
         )
         schedule = self._biweekly_from_march()
@@ -559,8 +559,8 @@ class TestTheEngineRefusesAPaycheckItCannotPlace:
 
         result = calculate_paycheck(basis, schedule[0], simple_tax_configs)
 
-        # $91,675 / 26 = $3,525.96, the rate ruling balance:R-HW fixed.
-        assert result.earnings.gross_biweekly == Decimal("3525.96")
+        # $78,500 / 26 = $3,019.23 (made up), the rate ruling balance:R-HW fixed.
+        assert result.earnings.gross_biweekly == Decimal("3019.23")
 
     def test_the_owners_real_unrecorded_payday_is_PRICED_once_he_STATES_it(
         self, simple_tax_configs,
@@ -580,7 +580,7 @@ class TestTheEngineRefusesAPaycheckItCannotPlace:
         prices and 03-13 raises.
         """
         profile = FakeProfile(
-            pay=Decimal("3525.96"), pay_from=date(2026, 3, 26),  # $91,675.00 a year / 26
+            pay=Decimal("3019.23"), pay_from=date(2026, 3, 26),  # $78,500.00 a year / 26
             created_at=date(2026, 1, 1),
         )
         schedule = self._biweekly_from_march()
@@ -591,7 +591,7 @@ class TestTheEngineRefusesAPaycheckItCannotPlace:
 
         result = calculate_paycheck(basis, unrecorded, simple_tax_configs)
 
-        assert result.earnings.gross_biweekly == Decimal("3525.96")
+        assert result.earnings.gross_biweekly == Decimal("3019.23")
         assert _month_ordinal(basis.calendar, unrecorded.start_date) == 1
 
     def test_the_same_day_still_RAISES_for_an_owner_who_stated_nothing(
@@ -607,7 +607,7 @@ class TestTheEngineRefusesAPaycheckItCannotPlace:
         the STATED fact rather than about the day.
         """
         profile = FakeProfile(
-            pay=Decimal("3525.96"), pay_from=date(2026, 3, 26),  # $91,675.00 a year / 26
+            pay=Decimal("3019.23"), pay_from=date(2026, 3, 26),  # $78,500.00 a year / 26
             created_at=date(2026, 1, 1),
         )
         basis = payroll_basis(profile, self._biweekly_from_march())

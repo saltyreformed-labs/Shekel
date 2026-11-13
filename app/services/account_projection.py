@@ -197,10 +197,10 @@ def pays_a_card(transfer: Transfer | TransferTemplate) -> bool:
     (``spending_analysis._pays_a_card``, plan task plan#2932, ruling
     plan#2926), the Recurring page, of a definition
     (``recurring_view``, plan task plan#3530, ruling plan#3527), and the
-    emergency-fund floor on ``/savings``, which counts the bills on each card
-    it finds checking paying this way
-    (``savings_dashboard_service._metrics._committed_expense_floor``, plan task
-    plan#3700).  A fixed amount sent to the card is such a payment too, which
+    emergency-fund floor on ``/savings``, which counts instead the bills of
+    each card whose one payment leaves checking
+    (``savings_dashboard_service._metrics._committed_expense_floor``, ruling
+    plan#3896).  A fixed amount sent to the card is such a payment too, which
     is the cost ruling plan#3527 states.
 
     Args:

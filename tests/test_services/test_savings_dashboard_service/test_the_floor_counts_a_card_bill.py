@@ -1,9 +1,9 @@
 """
 Shekel Budget App -- the emergency-fund floor counts a bill on the card, not its payment
 
-Plan task plan#3700, decided under R-BAL207 and recorded on that task: the
-committed floor on ``/savings`` counts a bill on a card that checking pays, and
-no payment into a card, which is the Recurring page's rule (ruling plan#3527).
+Ruling plan#3896 (plan tasks plan#3700 and plan#3898): the committed floor on
+``/savings`` counts a bill on a card whose one payment leaves checking, and no
+payment into a card, which is the Recurring page's rule (ruling plan#3527).
 It counted the card's payment, at its next row times its repeats, and none of the
 card's bills, so one purchase on the card read as a monthly commitment and a
 paid-up card's bills as none.
@@ -85,29 +85,66 @@ def test_a_bill_on_the_card_counts_and_its_payment_does_not(
 
 
 @pytest.mark.usefixtures("seed_periods")
-def test_a_card_checking_does_not_pay_counts_none_of_its_bills(seed_user, monkeypatch):
-    """The phone on a card with no payment from checking: the water's $108.33 alone.
+def test_a_card_paid_from_savings_counts_none_of_its_bills(seed_user, monkeypatch):
+    """The card's payment from savings: the water's $108.33 alone, extra or not.
 
-    Its bills do not leave checking, as no definition from checking pays it.
+    Its bills leave savings through its one payment, not checking (ruling
+    plan#3896, plan task plan#3898).  $100 a month more sent to it from checking
+    is a payment into a card, which counts nothing, and does not bring the bills
+    in: any transfer from checking into the card counted them all until plan#3898.
+    """
+    freeze_today(monkeypatch, _JAN_5)
+    card = _card(seed_user)
+    savings = create_savings_account(
+        seed_user, db.session, "Savings", Decimal("500.00"),
+    )
+    _water_from_checking(seed_user)
+    _phone_on_the_card(seed_user, card)
+    _works_out(seed_user, card, CardPaymentModeEnum.CARD_BALANCE, paid_from=savings)
+
+    assert _floor(seed_user) == _FIFTY_A_PAYCHECK
+
+    _plain_transfer(
+        seed_user, card, "100.00", MONTHLY, "Extra to the Visa", fires_on_day=15,
+    )
+
+    assert _floor(seed_user) == _FIFTY_A_PAYCHECK
+
+
+@pytest.mark.usefixtures("seed_periods")
+def test_an_archived_cards_bills_are_not_counted(seed_user, monkeypatch):
+    """The card archived, its payment with it: the water's $108.33 alone.
+
+    The account archive door archives the card's payment with the card (plan
+    task plan#3697), so this plants that state: the payment inactive.  The
+    control, the same card active: 108.33 + 216.67 = $325.00.
     """
     freeze_today(monkeypatch, _JAN_5)
     card = _card(seed_user)
     _water_from_checking(seed_user)
     _phone_on_the_card(seed_user, card)
+    payment = _works_out(seed_user, card, CardPaymentModeEnum.CARD_BALANCE)
+
+    assert _floor(seed_user) == _FIFTY_A_PAYCHECK + _HUNDRED_A_PAYCHECK
+
+    payment.is_active = False
+    db.session.commit()
 
     assert _floor(seed_user) == _FIFTY_A_PAYCHECK
 
 
 @pytest.mark.usefixtures("seed_periods")
 def test_a_fixed_amount_sent_to_the_card_is_not_counted(seed_user, monkeypatch):
-    """$500 a month on the 15th into the card beside the phone: $216.67, not $716.67.
+    """$500 a month on the 15th into the card beside its payoff: $216.67, not $716.67.
 
-    The ruling's stated cost: only the card's bills count.  The control, $50 a
+    Ruling plan#3896's example and its stated cost: only the card's bills count,
+    the phone's $216.67, and the extra counts nothing.  The control, $50 a
     paycheck to savings from checking, still counts: 216.67 + 108.33 = $325.00.
     """
     freeze_today(monkeypatch, _JAN_5)
     card = _card(seed_user)
     _phone_on_the_card(seed_user, card)
+    _works_out(seed_user, card, CardPaymentModeEnum.CARD_BALANCE)
     _plain_transfer(
         seed_user, card, "500.00", MONTHLY, "Extra to the Visa", fires_on_day=15,
     )

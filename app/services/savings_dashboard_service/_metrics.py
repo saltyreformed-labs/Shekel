@@ -29,6 +29,7 @@ from app.services import (
 from app.services.account_projection import pays_a_card
 from app.services.balance_at import BalanceContext
 from app.services.cash_ledger import (
+    is_card_payment_definition,
     template_pricing_load_options,
     transfer_template_pricing_load_options,
 )
@@ -406,9 +407,12 @@ def _committed_expense_floor(
     Recurring surface applies governs the emergency-fund baseline.
 
     **A bill on a card that checking pays counts, and no payment into a card**
-    (plan task plan#3700, the Recurring page's rule, ruling plan#3527): the
-    card's bills leave checking through its payment, one paycheck later, and
-    the payment carries nothing else that commits.  It read the payment
+    (ruling plan#3896, plan tasks plan#3700 and plan#3898; the Recurring
+    page's rule, ruling plan#3527): the card's bills leave checking through
+    the card's one payment, later than they are bought, and the payment
+    carries nothing else that commits.  The ruling's cost: a card paid at its
+    minimum still counts its bills in full, and a statement payment pays them
+    on its due date.  It read the payment
     instead, at its next row times its repeats, which made one purchase a
     monthly commitment and an unmarked $0.00 row none.  $1,500 rent from
     checking and a $100 phone each paycheck on the card read 1,500 + 100 x 26 /
@@ -417,11 +421,17 @@ def _committed_expense_floor(
     while that row was next, and $1,500 while an unmarked $0.00 row before it
     was, the phone counting in neither.
     A purchase on a card counts no more than one from checking: neither
-    repeats.  A card checking pays is the destination of an active transfer
-    definition from checking (:func:`~app.services.account_projection.pays_a_card`),
-    so an archived card's bills, whose payment is archived with it, are not
-    counted.  The cost is the ruling's: a fixed amount sent to the card, or a
-    balance carried and paid down, is not in this floor, while the operand
+    repeats.  **A card checking pays is one whose payment leaves checking**:
+    its one worked-out payment, the payoff or a scheduled one
+    (:func:`~app.services.cash_ledger.is_card_payment_definition`, at most one
+    per card), active and from a checking account.  An extra sent from
+    checking does not bring a card's bills in, as no payment into a card is
+    counted: a card paid off from savings with $100 a month more from checking
+    counts none of its bills here, where any transfer from checking into it
+    counted them all until plan#3898.  An archived card's bills, whose payment
+    is archived with it, are not counted.  The cost is the ruling's: a fixed
+    amount sent to the card, or a balance carried and paid down, is not in
+    this floor, while the operand
     :func:`_compute_avg_monthly_expenses` sets it beside still counts every
     payment that left checking.
 
@@ -460,7 +470,9 @@ def _committed_expense_floor(
     # (``obligations_aggregator.todays_price``, ruling plan#2693), so each
     # query loads what pricing reads with the definitions: without it the
     # page's statements grew with every definition (plan#2733).  The
-    # destination ``pays_a_card`` reads is a joined load on the definition.
+    # destination ``pays_a_card`` reads is a joined load on the definition, and
+    # the card-payment settings ``is_card_payment_definition`` reads are among
+    # the pricing loads.
     active_transfer_templates = (
         db.session.query(TransferTemplate)
         .options(*transfer_template_pricing_load_options())
@@ -473,7 +485,7 @@ def _committed_expense_floor(
     )
     cards_checking_pays = sorted({
         template.to_account_id for template in active_transfer_templates
-        if pays_a_card(template)
+        if is_card_payment_definition(template)
     })
     expense_type_id = ref_cache.txn_type_id(TxnTypeEnum.EXPENSE)
     active_expense_templates = (

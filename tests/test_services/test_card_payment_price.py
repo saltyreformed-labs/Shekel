@@ -84,18 +84,22 @@ def _card(seed_user, *, close_day=5, due_day=27):
     return card
 
 
-def _works_out(seed_user, card, mode, *, on_due_dates=False):
+def _works_out(seed_user, card, mode, *, on_due_dates=False, paid_from=None):
     """A worked-out payment from checking into *card*, its rows generated.
 
     Built as the doors build a definition: the template and its settings, no
-    price stated (ruling plan#2667), then its rule.
+    price stated (ruling plan#2667), then its rule.  *paid_from* names another
+    account it leaves from, as a payoff made from a primary that is not
+    checking would (plan#2933).
 
     Returns:
         The committed template.
     """
     template = TransferTemplate(
         user_id=seed_user["user"].id,
-        from_account_id=seed_user["account"].id,
+        from_account_id=(
+            seed_user["account"] if paid_from is None else paid_from
+        ).id,
         to_account_id=card.id,
         name="Pay the Visa",
     )

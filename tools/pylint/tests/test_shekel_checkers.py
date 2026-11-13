@@ -48,8 +48,7 @@ from shekel_checkers import (
 )
 from shekel_checkers.package_privacy import _importer_file_inside
 
-# repo root: this file is <root>/tools/pylint/tests/test_*.py
-_REPO_ROOT = Path(__file__).resolve().parents[3]
+from _repo_root import REPO_ROOT
 
 
 def _fenced_module_sources(module_name: str) -> list[Path]:
@@ -66,10 +65,10 @@ def _fenced_module_sources(module_name: str) -> list[Path]:
     checker's unit tests free of the Flask/SQLAlchemy import graph.
     """
     relative = Path(*module_name.split("."))
-    flat = _REPO_ROOT / relative.with_suffix(".py")
+    flat = REPO_ROOT / relative.with_suffix(".py")
     if flat.is_file():
         return [flat]
-    package = _REPO_ROOT / relative
+    package = REPO_ROOT / relative
     assert package.is_dir(), (
         f"fenced module {module_name} is neither a module nor a package -- the "
         f"scope names something that does not exist"

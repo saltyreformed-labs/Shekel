@@ -532,8 +532,10 @@ class TestARuleNamesTheDestinationTheCardChose:
         since leaf 7b-3 of balance:X-bi-7b** -- the shape the app writes --
         where it was a legacy link-less row: such a row has no definition
         for a rule to name, so the round trip does not hold for it and the
-        family's cutover is what gives it one (the legacy case is graded in
-        ``test_rules`` as NOT reused).
+        family's cutover is what gives it one.  The legacy case is graded in
+        ``test_rules.test_what_a_rule_places``, where a new-envelope answer
+        records into such a row of its name
+        (``test_a_LEGACY_link_less_envelope_of_that_name_HERE_is_recorded_into``).
         """
         envelope = a_one_off_envelope(seed_user, name="Amazon")
         a_merchant(seed_user, "Amazon")

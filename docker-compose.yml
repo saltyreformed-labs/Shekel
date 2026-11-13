@@ -306,15 +306,18 @@ services:
     # workflow.
     #
     # End users running the bundled-mode quickstart inherit the
-    # ``:latest`` reference below; they are explicitly out of scope
-    # for the audit's production hardening but should still pin a
-    # digest by adding a sibling ``docker-compose.override.yml``
-    # (see deploy/README.md) before any non-trivial deployment.
+    # ``:latest`` default below; they are explicitly out of scope for
+    # the audit's production hardening but should still pin a digest
+    # before any non-trivial deployment, by ``SHEKEL_IMAGE`` in their
+    # ``.env`` (README, Updating; ruling plan#3753).  Not by an override
+    # of this service's ``image:``: an override's pin reaches the app
+    # alone, and the migrate service, the deploy, would keep ``:latest``
+    # (finding plan#3747; ``extends`` would not carry it either).
     #
     # The anchor is this image's one home in this file: the migrate
     # service below runs it too, so the deploy and the web server it
     # prepares the database for are one build.
-    image: &shekel-image ghcr.io/saltyreformed-labs/shekel:latest
+    image: &shekel-image ${SHEKEL_IMAGE:-ghcr.io/saltyreformed-labs/shekel:latest}
     # Always pull the latest image -- prevents stale cached :latest tags
     # from causing port mismatches or missing fixes.  When the prod
     # override pins a digest, this is a no-op for that pull because

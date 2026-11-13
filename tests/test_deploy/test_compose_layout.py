@@ -19,10 +19,16 @@ from pathlib import Path
 import pytest
 import yaml
 
-from tests.test_deploy._compose import (BASE_COMPOSE, DEV_COMPOSE, PROD_OVERRIDE, REPO_ROOT,
-                                        rendered)
+from tests.test_deploy._compose import (BASE_COMPOSE, CONFIG_ENV, DEV_COMPOSE, PROD_OVERRIDE,
+                                        REPO_ROOT, config, rendered)
 
 ENV_EXAMPLE = REPO_ROOT / ".env.example"
+#: The image the base file runs when nothing pins one: the newest release.
+_LATEST = "ghcr.io/saltyreformed-labs/shekel:latest"
+#: A bundled install's pin of one release (``SHEKEL_IMAGE``, ruling plan#3753); never pulled.
+_PINNED = "ghcr.io/saltyreformed-labs/shekel@sha256:" + "1" * 64
+#: The image production's override names, from the render's placeholder digest.
+_PRODUCTION = "ghcr.io/saltyreformed-labs/shekel@" + CONFIG_ENV["SHEKEL_IMAGE_DIGEST"]
 
 #: Each credential, as the variables that carry it and the secret files that hold it.
 _SUPERUSER = "the superuser's password"
@@ -212,6 +218,28 @@ class TestTheDeployRunsInTheMigrateService:
         """The deploy and the web server it prepares the database for are one build."""
         services = image_stack["services"]
         assert services["migrate"]["image"] == services["app"]["image"]
+
+    @pytest.mark.docker
+    @pytest.mark.parametrize(("files", "pin", "expected"), [
+        pytest.param((BASE_COMPOSE,), None, _LATEST, id="bundled, no pin"),
+        pytest.param((BASE_COMPOSE,), _PINNED, _PINNED, id="bundled, pinned"),
+        pytest.param((BASE_COMPOSE, PROD_OVERRIDE), _PINNED, _PRODUCTION,
+                     id="production, a pin set by mistake"),
+    ])
+    def test_one_setting_names_the_image_of_the_app_and_the_deploy(
+        self, files: tuple[Path, ...], pin: str | None, expected: str,
+    ) -> None:
+        """A bundled install's ``SHEKEL_IMAGE`` names the image of the app and of migrate
+        alike, and the newest release when it is unset; production's digest replaces it for
+        both, so a pin in production's ``.env`` changes nothing there (finding plan#3747,
+        ruling plan#3753).  An override of the app's ``image:`` alone would reach the app
+        and leave migrate on ``:latest``, which is why the pin is one setting."""
+        env = dict(CONFIG_ENV) if pin is None else {**CONFIG_ENV, "SHEKEL_IMAGE": pin}
+        result = config(*files, env=env)
+        assert result.returncode == 0, result.stderr
+        services = yaml.safe_load(result.stdout)["services"]
+        assert (services["app"]["image"], services["migrate"]["image"]) == (
+            expected, expected)
 
     def test_the_dev_migrate_service_builds_the_app_s_image(self) -> None:
         """The dev stack builds both from this checkout, and both run its code."""

@@ -79,6 +79,7 @@ Edit `.env` and set these values:
 | `SEED_USER_LAST_PAYDAY` | With `SEED_USER_EMAIL` | The day the seeded owner was last paid, ISO `YYYY-MM-DD`. No default -- Shekel budgets by paycheck and will not invent one. Must fall within one pay cadence of the first boot. |
 | `SEED_USER_CADENCE_DAYS` | No | Days between the seeded owner's paydays. Default: `14`. |
 | `SEED_USER_NUM_PERIODS` | No | How many pay periods to generate ahead. Default: `52`. |
+| `SHEKEL_IMAGE` | No | The image the app and the deploy run. Default: `ghcr.io/saltyreformed-labs/shekel:latest`, the newest release. To stay on one release, set it to that release's `ghcr.io/saltyreformed-labs/shekel@sha256:<digest>` (see [Updating](#updating)). |
 
 ### 4. Create the Database Volume and Start
 
@@ -153,9 +154,12 @@ together, so an update takes both. From your `shekel` directory:
    docker compose pull && docker compose up -d --remove-orphans
    ```
 
-If a `docker-compose.override.yml` of yours pins the app image by digest, put the new release's
-digest there first (`deploy/README.md`, "Updating the digest") and name that pinned image in step
-1's block in place of `ghcr.io/saltyreformed-labs/shekel:latest`. `--remove-orphans` removes each
+If `.env` pins the image by digest (`SHEKEL_IMAGE`, step 3's table), put the new release's digest
+there first (`deploy/README.md`, "Updating the digest") and name that pinned image in step 1's block
+in place of `ghcr.io/saltyreformed-labs/shekel:latest`. A `docker-compose.override.yml` that pins
+the app's `image:` pins the app alone: the `migrate` service, which runs the deploy, keeps `latest`,
+so the deploy could migrate the database for another release than the app serves. Move such a pin
+into `SHEKEL_IMAGE` and delete the override's `image:` line. `--remove-orphans` removes each
 container whose service the new `docker-compose.yml` no longer names, as it removes
 `shekel-prod-redis` once Valkey replaces it. Database migrations run in the deploy, in the `migrate`
 service, which every `docker compose up` runs before it starts the app.
@@ -192,7 +196,7 @@ docker volume rm shekel-prod-pgdata
 | `curl` not found inside the container | The slim image does not include curl. Use Python instead: `docker compose exec app python -c "import urllib.request; print(urllib.request.urlopen('http://localhost:8000/health').read().decode())"` |
 | `Can't locate revision identified by ...` in `docker compose logs migrate` | The GHCR image may be older than your database. Update to the latest release ([Updating](#updating)). |
 | `VALKEY_PASSWORD is not set` in `docker compose logs app` | Your `docker-compose.yml` is older than the image, so it does not hand the app the rate limiter's password. Follow [Updating](#updating) from step 1. |
-| Signing in fails, and `docker compose logs app` names `redis:6379` | Your configuration files are newer than the image, as when a `docker-compose.override.yml` pins an older digest: an image from before the switch to Valkey looks for a Redis the files no longer start. Follow [Updating](#updating) from step 1. |
+| Signing in fails, and `docker compose logs app` names `redis:6379` | Your configuration files are newer than the image, as when `SHEKEL_IMAGE` pins an older digest: an image from before the switch to Valkey looks for a Redis the files no longer start. Follow [Updating](#updating) from step 1. |
 
 ### Deployment Architecture
 

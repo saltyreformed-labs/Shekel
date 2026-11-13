@@ -188,8 +188,9 @@ immutable `@sha256:<digest>` reference and verifying the signature before deploy
 
 ### Where the pin lives
 
-`deploy/docker-compose.prod.yml` overrides the base file's
-`image: ghcr.io/saltyreformed-labs/shekel:latest` with:
+`deploy/docker-compose.prod.yml` overrides the base file's image,
+`${SHEKEL_IMAGE:-ghcr.io/saltyreformed-labs/shekel:latest}` (a bundled install's pin, README
+"Updating"), for both the app and the migrate service, with:
 
 ```yaml
 image: ghcr.io/saltyreformed-labs/shekel@${SHEKEL_IMAGE_DIGEST:?...}

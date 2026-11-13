@@ -769,7 +769,7 @@ class TestProdComposeOverridePinsByDigest:
         """The app service in the override declares an ``image:`` key.
 
         Without an override on this key, the merged compose would
-        inherit the base file's ``ghcr.io/saltyreformed-labs/shekel:latest``
+        inherit the base file's ``${SHEKEL_IMAGE:-ghcr.io/saltyreformed-labs/shekel:latest}``
         and the digest pin never takes effect.
         """
         app = parsed["services"]["app"]
@@ -850,15 +850,19 @@ class TestBaseComposeDocumentsOverride:
         app_match = re.search(r"^  app:\s*$", text, re.MULTILINE)
         assert app_match is not None, "no ``app:`` service in base compose"
         # Find the image line after the app service marker; it may carry
-        # the YAML anchor the migrate service runs the same image by.
+        # the YAML anchor the migrate service runs the same image by, and
+        # reads a bundled install's pin, SHEKEL_IMAGE, with ``:latest`` as
+        # its default (ruling plan#3753).
         image_match = re.search(
-            r"^    image:\s*(?:&[\w-]+\s+)?ghcr\.io/saltyreformed-labs/shekel:latest\b",
+            r"^    image:\s*(?:&[\w-]+\s+)?"
+            r"\$\{SHEKEL_IMAGE:-ghcr\.io/saltyreformed-labs/shekel:latest\}",
             text[app_match.start():],
             re.MULTILINE,
         )
         assert image_match is not None, (
             "base docker-compose.yml's app service lost the "
-            "``image: ghcr.io/saltyreformed-labs/shekel:latest`` line.  If "
+            "``image: ${SHEKEL_IMAGE:-ghcr.io/saltyreformed-labs/shekel:latest}`` "
+            "line.  If "
             "the image was moved entirely to the prod override, this "
             "test must be updated to assert on the override instead."
         )

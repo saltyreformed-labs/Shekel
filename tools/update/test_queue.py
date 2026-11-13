@@ -27,7 +27,8 @@ from tools.quill.door import LOCK, GitHub
 from tools.update import app, queue
 from tools.update.queue import DEPENDABOT, REREAD_SECONDS, REREADS
 
-#: The update App's slug, as its token's mint gives it.
+#: The update App's slug, as GraphQL names its bot: :data:`tools.update.app.APP`, spelled here
+#: apart so a test pins it (``test_the_queue_runs_as_the_app``).
 _APP = "shekel-updates"
 #: The repository the queue reads.
 _REPOSITORY = "owner/shekel"

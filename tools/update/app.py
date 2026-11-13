@@ -32,7 +32,9 @@ INTO = DEV.partition("/")[2]
 DEVELOPER = "SaltyReformed"
 #: The update App's slug, the login GraphQL names the bot it acts as by, which opens its pull
 #: requests and writes its comments (measured 2026-11-12 on PR 668; REST names it
-#: ``shekel-updates[bot]``).
+#: ``shekel-updates[bot]``).  Should a rename of the App change that login (unmeasured), this
+#: changes with it in the same release: else the queue, reading no comment as its own, tells
+#: every waiting pull request again each day, and ``quill sync`` reads none of what it told.
 APP = "shekel-updates"
 #: The login GraphQL names the bot of the workflow's own token by, which opens the alert's
 #: and the release-due job's issues (measured 2026-11-13 on #676; REST names it

@@ -55,10 +55,11 @@ quill files does, and is filed by ``quill file``'s own writes (:func:`_filing._w
 marked, its mark removed last (R-BAL202).  A card holding a told thing's lines whose filing
 has not finished is finished, found by them (R-BAL186), and none is filed beside it.  Its text,
 and each comment putting a later thing on it, names where the thing was told in a code span,
-which links nothing, so no reference to the private tracker is written into the public
-repository's timeline, and quotes the told words in a code block, which mentions no one: the
-queue's comments mentioned the developer until plan#3627, and a mention copied into a card
-would reach him from the tracker.
+which links nothing, so that the private tracker writes no reference into the public
+repository's timeline, as a link there might (unmeasured: the reason, not a measured cost).
+It quotes the title there and the told words in a code block, which mentions no one: the
+queue's comments mentioned the developer until plan#3627, and a title can hold a mention as
+words can, which copied into a card would reach its person from the tracker.
 
 Its own module: the command module stands within ten lines of the 1,000 ``too-many-lines``
 allows, and the tracker's within two.
@@ -275,13 +276,13 @@ def _title(item: Told) -> str:
     return head + kept.rstrip() + "..."
 
 
-def _quoted(item: Told) -> list[str]:
-    """``item``'s words but its markers, as lines of a code block, which mentions no one,
-    fenced by more backticks than any run in them."""
+def _quoted(item: Told, *above: str) -> list[str]:
+    """``item``'s words but its markers, each line of ``above`` before them, as lines of a code
+    block, which mentions no one, fenced by more backticks than any run in them."""
     words = item.said
     for mark in item.marks:
         words = words.replace(mark, "")
-    words = "\n".join(line.rstrip() for line in words.strip().splitlines())
+    words = "\n".join(line.rstrip() for line in "\n".join([*above, words.strip()]).splitlines())
     fence = "`" * max(3, 1 + max((len(run) for run in re.findall("`+", words)), default=0))
     return [f"{fence}text", words, fence]
 
@@ -292,11 +293,12 @@ def _lines(item: Told) -> list[str]:
 
 
 def _body(item: Told) -> str:
-    """The card's text: where ``item`` was told, in a code span, which links nothing; its words
-    in a code block (:func:`_quoted`); what filed the card and why; and its lines last."""
+    """The card's text: where ``item`` was told, in a code span, which links nothing; the title
+    there and its words, in a code block (:func:`_quoted`); what filed the card and why; and
+    its lines last."""
     return "\n".join([
-        f"The weekly update told this on Shekel's {item.where}, \"{item.title}\", at "
-        f"{item.when}: `{item.link}`", "", *_quoted(item), "",
+        f"The weekly update told this on Shekel's {item.where} at {item.when}: `{item.link}`. "
+        "The title there, then what was told:", "", *_quoted(item, item.title.strip(), ""), "",
         "`quill sync` filed this card for it (ruling plan#3619), holding Priority High at the "
         "top of the board (ruling plan#3620). The words above say what waits; the session "
         "that claims this card takes it, and sets the card's Effort.", "", *_lines(item)])
@@ -388,7 +390,10 @@ def file_waits(tracker: Tracker, dry_run: bool) -> int:
     or one an earlier pass began finished (:func:`_file`).  Each card for where a thing was
     told is read by its number, for whether it is open and its filing finished, as a listing
     may lag a write, and its comments with it.  The number of REPORT lines, each a card
-    :func:`check.violations` refuses, which makes ``sync`` exit 1.
+    :func:`check.violations` refuses, which makes ``sync`` exit 1.  A pass finishing a filing
+    an earlier one began leaves ``sync`` exiting 1 too: its own REPORT of that card, unfinished
+    as it read it, is printed before the pass runs, and the next ``sync``, reading it
+    finished, makes none.
 
     Raises:
         GitHubError, requests.RequestException, TrackerError: as the reads and the writes

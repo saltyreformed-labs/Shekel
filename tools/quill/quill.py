@@ -778,7 +778,7 @@ def cmd_sync(args, tracker: Tracker, root: Path) -> int:
     put each card's arc labels back to display its Arc, over a read of every card (R-BAL354,
     :func:`_relabel.put_back`), reporting each card whose Arc no label can fix; put on the
     board each task whose step is on it and that is not (ruling plan#1842,
-    :func:`_tasks.put_on_board`); and last write the board's Status of every card it holds
+    :func:`_tasks.put_on_board`); and then write the board's Status of every card it holds
     from git (rulings plan#1873, plan#1905, :func:`_status.sync_statuses`).  Each is display
     of the plan, so a failed write in one costs nothing above it; run again, it makes the
     writes still owed.  Last, file a card for each pull request or issue the weekly update
@@ -791,8 +791,8 @@ def cmd_sync(args, tracker: Tracker, root: Path) -> int:
     about the cards it decides, and each entry under ``plan/ships`` or ``plan/tasks`` there
     that is no card's (:attr:`_git.Shipped.history`).
 
-    What it reads: :func:`_sync.every_card`.  ``quill watch`` runs the same producer over
-    the cards a moved branch names (:mod:`_watch`).
+    What it reads: :func:`_sync.every_card`, and the waits pass its own (:mod:`_waits`).
+    ``quill watch`` runs the same producer over the cards a moved branch names (:mod:`_watch`).
     """
     reads = _git.read(root)
     shipped = reads.shipped.cards

@@ -143,9 +143,10 @@ def test_a_comment_no_card_holds_is_filed_once_high_at_the_top(code, capsys):
     assert tracker.board.items == [2, 1]
     words = _TWO.split("\n\n<!--", maxsplit=1)[0]
     assert tracker.bodies[2] == "\n".join([
-        f"The weekly update told this on Shekel's PR 669, \"chore(deps): rumdl from 0.2.78 to "
-        f"0.3.2, waiting for a card\", at 2026-11-06T20:05:54Z: "
-        f"`{_PULL.format(669)}#issuecomment-6694294810`", "", "```text", words, "```", "",
+        f"The weekly update told this on Shekel's PR 669 at 2026-11-06T20:05:54Z: "
+        f"`{_PULL.format(669)}#issuecomment-6694294810`. The title there, then what was told:",
+        "", "```text", "chore(deps): rumdl from 0.2.78 to 0.3.2, waiting for a card", "", words,
+        "```", "",
         "`quill sync` filed this card for it (ruling plan#3619), holding Priority High at the "
         "top of the board (ruling plan#3620). The words above say what waits; the session that "
         "claims this card takes it, and sets the card's Effort.", "", *_TWO_LINES])
@@ -217,7 +218,8 @@ def test_nothing_told_reads_no_card_and_files_nothing(code, capsys):
 def test_an_unfinished_filing_is_finished_not_filed_again(code, capsys):
     """A card an earlier pass created for the comment, still marked: its Priority dropped and
     off the board, the pass cut short.  The pass finishes it, writing what it lacks, and files
-    no other; ``sync``'s own REPORT of the unfinished filing, made before the pass, exits 1."""
+    no other; ``sync``'s own REPORT of the unfinished filing, made before the pass, exits 1,
+    and the next ``sync``, reading it finished, exits 0 and writes nothing."""
     tracker = FakeTracker()
     tracker.add(9, body="\n".join(_TWO_LINES), on_board=False, labels=("filing", "tooling"),
                 arc="tooling", title="Shekel PR 669: earlier")
@@ -235,6 +237,9 @@ def test_an_unfinished_filing_is_finished_not_filed_again(code, capsys):
         ("set_field", 9, "Priority", "High"), ("board_add", 9), ("board_place", 9, None),
         ("unmark", 9)]
     assert 10 not in tracker.cards_by_number
+    _todo(tracker, 9)
+    assert run(tracker, code, "sync") == 0
+    assert capsys.readouterr().out == ""
 
 
 def test_the_alerts_open_issue_is_filed_once_and_no_other_issue(code, capsys):
@@ -303,11 +308,15 @@ def test_a_title_is_cut_at_a_word_to_the_cap(title, cut):
 
 def test_the_words_are_fenced_by_more_backticks_than_they_hold():
     """Words holding a fence of their own are quoted in a longer one, so the code block holds
-    them whole and mentions no one."""
+    them whole and mentions no one; the title there is quoted in it too, above them, as a
+    title can hold a mention or a fence as words can (finding 9 of plan#3613's review)."""
     said = "@SaltyReformed ```\nrun `gh pr merge 7 --merge`\n````\n\n" + app.marker("red x")
-    told = _waits.Told("PR 7", "t", "link", said, "at", (app.marker("red x"),))
+    told = _waits.Told("PR 7", "fix: ``````` for @someone", "link", said, "at",
+                       (app.marker("red x"),))
     body = _waits.card_draft(told).body
-    assert "\n`````text\n@SaltyReformed ```\nrun `gh pr merge 7 --merge`\n````\n`````\n" in body
+    assert ("\n````````text\nfix: ``````` for @someone\n\n@SaltyReformed ```\n"
+            "run `gh pr merge 7 --merge`\n````\n````````\n") in body
+    assert body.count("@someone") == 1
     assert body.count(app.marker("red x")) == 1
 
 

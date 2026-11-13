@@ -73,7 +73,10 @@ so two keepings at once cannot both pass the cap or both keep one add.  A
 reset's removal of every passkey (:func:`remove_every_passkey`) locks the
 account's row first too, so a keeping in flight either keeps before it, and
 is removed by it, or keeps nothing after it; ``scripts/reset_mfa.py`` takes
-no owner's lock, so that order is the row lock's alone.
+no owner's lock, so that order is the row lock's alone.  A Remove of one
+passkey (:func:`remove_passkey`) locks the account's row first as well: its
+banner writes that row after its delete, so a Remove that held its passkey's
+row before the account's would deadlock with a reset holding the account.
 
 **The clock is the process's**, read by :func:`._ceremony.now` alone, once per
 act, and a challenge an act issues is issued at that same reading.
@@ -382,7 +385,19 @@ def list_passkeys(user_id: int) -> list[Passkey]:
 
 
 def remove_passkey(user_id: int, passkey_id: int) -> None:
-    """Remove one of *user_id*'s passkeys.
+    """Remove one of *user_id*'s passkeys, the account's row locked first.
+
+    The account's own row is locked before the passkey is looked up
+    (:func:`._adding.lock_the_account`), as a reset's removal of every
+    passkey locks it before it deletes them (:func:`remove_every_passkey`).
+    A Remove raises the "was this you?" banner, a write of the account's row,
+    after this delete (``app.routes._passkeys.remove_passkey_or_404``), and
+    ``scripts/reset_mfa.py`` takes no owner's lock: a Remove that deleted its
+    passkey first would hold the row a reset holding the account waits on,
+    and then wait on the account, and PostgreSQL would abort one of them.
+    And the lookup is made under the lock, so a Remove that waited on a reset
+    reads what the reset left, and is refused for a passkey the reset
+    removed.
 
     Args:
         user_id: The ``auth.users.id`` whose passkey it is.
@@ -393,6 +408,7 @@ def remove_passkey(user_id: int, passkey_id: int) -> None:
             refusal for "no such passkey" and "another user's passkey", so
             the answer is no oracle for which ids exist.
     """
+    lock_the_account(user_id)
     passkey = db.session.execute(
         select(Passkey).where(
             Passkey.id == passkey_id, Passkey.user_id == user_id,

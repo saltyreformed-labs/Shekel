@@ -1,14 +1,16 @@
 """Two acts at once: an answer completed twice, the cap past a held account, an add replaced.
 
-And a reset's removal of every passkey past a keeping that holds the account.
-The owner's lock serialises an account's requests, but a companion whose
-owner is gone has none to take, so the decisions that must not race take
+And a reset's removal of every passkey past a keeping that holds the account,
+and a Remove and a reset each past the other.  The owner's lock serialises an
+account's requests, but a companion whose owner is gone has none to take, and
+``scripts/reset_mfa.py`` takes none, so the decisions that must not race take
 row locks of their own (the service's module docstring).  Each case holds the
-first act's row on a connection of its own, mid-transaction, runs the second
-act in a thread with its own session, and commits the first once the second
-waits on it (:func:`tests._lock_waits.act_past_a_held_row`).  A second act
-that took no lock would not wait at its read, and would decide on the row as
-it stood before the first committed.
+first act's row mid-transaction, on a connection of its own or, where the
+first act is the service's own, on the case's session, runs the second act in
+a thread with its own session, and commits the first once the second waits
+on it (:func:`tests._lock_waits.act_past_a_held_row`).  A second act that took
+no lock would not wait at its read, and would decide on the row as it stood
+before the first committed.
 
 The last case is the converse: a dead add another transaction holds is
 skipped by the clean-up of an add begun, never waited on (ruling plan#3578),
@@ -20,17 +22,19 @@ from datetime import timedelta
 
 from sqlalchemy import text
 
+from app.exceptions import NotFoundError
 from app.extensions import db
 from app.models.user import User
-from app.services import passkey_service
+from app.services import mfa_service, passkey_service
 from app.services.passkey_service import PasskeyRefusal, PasskeyRefused
+from app.utils.security_events import SecurityEventKind, record_security_event
 from tests._lock_waits import act_past_a_held_row
 from tests._passkeys import ADDED_AT, ORIGIN, T0, Clock, SoftwareAuthenticator, add
 from tests.test_services.test_passkey_service._helpers import add_row
 
 
 def test_one_answer_completed_twice_at_once_signs_in_once(app, bare_user, monkeypatch):
-    """The first completion holds the passkey and has moved its last use; the second waits, then is refused."""
+    """One completion holds the passkey, its last use moved; the second waits, then is refused."""
     clock = Clock(monkeypatch)
     user = bare_user["user"]
     passkey, authenticator = add(clock, user)
@@ -67,7 +71,7 @@ def test_one_answer_completed_twice_at_once_signs_in_once(app, bare_user, monkey
 
 
 def test_a_keeping_counts_what_the_accounts_lock_holder_wrote(app, bare_user, monkeypatch):
-    """A writer holds the account's row and has written the tenth; the keeping waits, then is refused.
+    """A writer holds the account and has written the tenth; the keeping waits, then is refused.
 
     No add of the account can be that writer while this one is in flight (a
     newer add replaces it, ruling plan#3543), so the holder writes the tenth
@@ -167,13 +171,83 @@ def test_a_reset_while_a_keeping_holds_the_account_removes_what_it_kept(
         holder.close()
     assert removed is True
     db.session.expire_all()
-    assert passkey_service.list_passkeys(user_id) == []
+    assert not passkey_service.list_passkeys(user_id)
+
+
+def test_a_reset_while_a_remove_holds_the_account_waits_then_removes_the_rest(
+    app, bare_user, monkeypatch,
+):
+    """A Remove has removed a passkey, banner unwritten; the reset waits, then removes the rest.
+
+    The Remove's writes are :func:`app.routes._passkeys.remove_passkey_or_404`'s,
+    in its order: the service's removal, then the "was this you?" banner, an
+    update of the account's row that the commit writes.  The reset is
+    ``scripts/reset_mfa.py``'s act, which takes no owner's lock, so only the
+    row locks order the two.  A Remove that deleted its passkey before it
+    locked the account would deadlock here: the reset would lock the account
+    and wait on that passkey, and the Remove's commit would wait on the
+    account, until PostgreSQL aborted one of them.
+    """
+    clock = Clock(monkeypatch)
+    user = bare_user["user"]
+    removed, _ = add(clock, user)
+    add(clock, user, name="iPad")
+    user_id, removed_id = user.id, removed.id
+    assert user.session_invalidated_at is None
+    db.session.commit()
+
+    def reset():
+        """``scripts/reset_mfa.py``'s act, in a session of its own, committed."""
+        reset_done = mfa_service.reset_two_factor(db.session.get(User, user_id))
+        db.session.commit()
+        return reset_done
+
+    passkey_service.remove_passkey(user_id, removed_id)
+    record_security_event(user, SecurityEventKind.PASSKEY_REMOVED)
+    assert act_past_a_held_row(app, db.session, reset) is True
+    db.session.expire_all()
+    assert not passkey_service.list_passkeys(user_id)
+    user = db.session.get(User, user_id)
+    assert user.last_security_event_kind == SecurityEventKind.PASSKEY_REMOVED.value
+    assert user.session_invalidated_at is not None
+
+
+def test_a_remove_while_a_reset_holds_the_account_finds_its_passkey_gone(
+    app, bare_user, monkeypatch,
+):
+    """A reset holds the account and has removed its passkeys; the Remove waits, then is refused.
+
+    The Remove locks the account before it looks its passkey up, so it reads
+    what the reset left: no passkey, the one refusal for a passkey that is not
+    there.  A Remove that looked first would find the passkey whose removal
+    the reset had not committed, wait at its own delete, delete nothing, and
+    return as though it had removed it, so the route would raise the
+    "was this you?" banner for a passkey the reset removed.
+    """
+    clock = Clock(monkeypatch)
+    user = bare_user["user"]
+    passkey, _ = add(clock, user)
+    user_id, passkey_id = user.id, passkey.id
+    db.session.commit()
+
+    def remove():
+        """The Remove's service act, in a session of its own; whether it removed."""
+        try:
+            passkey_service.remove_passkey(user_id, passkey_id)
+        except NotFoundError:
+            return False
+        return True
+
+    assert mfa_service.reset_two_factor(user) is True
+    assert act_past_a_held_row(app, db.session, remove) is False
+    db.session.expire_all()
+    assert not passkey_service.list_passkeys(user_id)
 
 
 def test_a_registration_completed_while_a_newer_add_replaces_it_completes_nothing(
     app, bare_user, monkeypatch,
 ):
-    """A newer add holds the account's add row, replacing it; the registration waits, then is refused.
+    """A newer add holds the account's add, replacing it; the registration waits, then is refused.
 
     The holder writes what :func:`_begin_add`'s conflict arm writes: a new
     id, a new challenge, the passkey made emptied.  The registration's read
@@ -222,7 +296,7 @@ def test_a_registration_completed_while_a_newer_add_replaces_it_completes_nothin
 def test_an_add_begun_while_a_keeping_holds_the_account_counts_what_it_kept(
     app, bare_user, monkeypatch,
 ):
-    """A keeping holds the account's row and has written the tenth; a newer add's options wait, then refuse.
+    """A keeping holds the account, the tenth written; a newer add's options wait, then refuse.
 
     So the device is never asked to make an eleventh: the options count
     under the account's lock, after the keeping that held it.

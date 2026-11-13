@@ -301,7 +301,11 @@ def lock_the_account(user_id: int) -> None:
     flight takes it first too
     (:func:`app.services.passkey_service.remove_every_passkey`), for the
     same reason: it deletes the add's row, which the keeping locks after
-    this one.
+    this one.  And so does a Remove of one passkey
+    (:func:`app.services.passkey_service.remove_passkey`), whose banner
+    writes the account's row after its delete: a reset holding this lock
+    deletes the account's passkeys, so a Remove that held its passkey's row
+    first would deadlock with it.
 
     Args:
         user_id: The account whose row to lock.

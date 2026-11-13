@@ -15,6 +15,7 @@ from typing import TypeVar
 
 from flask import Flask
 from sqlalchemy import Connection, text
+from sqlalchemy.orm import scoped_session
 
 from app.extensions import db
 
@@ -61,7 +62,7 @@ def _wait_until_a_statement_waits_on_a_lock(pending):
 
 
 def act_past_a_held_row(
-    app: Flask, holder: Connection, act: Callable[[], _Result],
+    app: Flask, holder: Connection | scoped_session, act: Callable[[], _Result],
 ) -> _Result:
     """Run *act* while *holder* holds a row it waits on; commit *holder* once it waits.
 
@@ -70,9 +71,10 @@ def act_past_a_held_row(
 
     Args:
         app: The application.
-        holder: A connection whose open transaction holds the row; committed
-            here once *act* waits, and rolled back on every exit, which is a
-            no-op after the commit.
+        holder: A connection whose open transaction holds the row, or the
+            case's own session, where the act holding it is the service's;
+            committed here once *act* waits, and rolled back on every exit,
+            which is a no-op after the commit.
         act: What to run, with no arguments.
 
     Returns:

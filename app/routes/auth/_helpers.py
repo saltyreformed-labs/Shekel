@@ -116,7 +116,7 @@ def _clear_mfa_pending_state():
     """Pop every MFA pending key from the request session.
 
     Used by every exit branch in :func:`~app.routes.auth.mfa.mfa_verify`
-    -- the timeout rejection, the missing-user branch, the disabled-MFA
+    -- the timeout rejection, the missing-user-or-reset-two-factor
     branch, the encryption-key-failure branch, and the
     successful-verification branch.  Centralising the cleanup means a
     future addition to ``_MFA_PENDING_KEYS`` is automatically picked up

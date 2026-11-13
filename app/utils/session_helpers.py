@@ -142,8 +142,8 @@ Caller contract for :func:`invalidate_other_sessions`
 -----------------------------------------------------
 
   * The caller must have already committed any state change that
-    motivates the invalidation (password hash update, MFA disable,
-    backup-code list mutation).  The helper commits its own write
+    motivates the invalidation (its one caller's: the backup-code list
+    a consumed code shortened).  The helper commits its own write
     of ``session_invalidated_at`` and would inadvertently flush any
     in-flight session state with it.
 

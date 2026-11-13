@@ -241,12 +241,14 @@ def mfa_verify():  # pylint: disable=too-many-return-statements
             .first()
         )
     if not user or not mfa_config:
-        # Either the user was deleted between login steps or MFA was
-        # disabled out from under the pending session.  Both are race
-        # conditions that resolve the same way: clear pending state
-        # and silently bounce to /login.  No flash because a fresh
-        # password entry will explain itself (invalid credentials if
-        # the user is gone, no MFA prompt if MFA is disabled).
+        # Either the user was deleted between login steps or their
+        # two-factor was reset out from under the pending session
+        # (scripts/reset_mfa.py, or the owner's Reset of a companion).
+        # Both are race conditions that resolve the same way: clear
+        # pending state and silently bounce to /login.  No flash because
+        # a fresh password entry will explain itself (invalid credentials
+        # if the user is gone, the hold at two-factor setup if it was
+        # reset).
         _clear_mfa_pending_state()
         return redirect(url_for("auth.login"))
 

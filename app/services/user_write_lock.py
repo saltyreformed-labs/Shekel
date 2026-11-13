@@ -31,7 +31,9 @@ covers and take none -- ``scripts/rotate_totp_key.py`` (every
 ``users.session_invalidated_at``) and ``scripts/seed_companion.py``'s
 existing-user branch (``role_id`` and ``linked_owner_id``, the lock's key) --
 so each can race a sign-in or an MFA door that holds the lock (reported at
-plan step ``balance:X-bn``'s checkpoint 4 review, 2026-09-29; plan#1675).  *It was
+plan step ``balance:X-bn``'s checkpoint 4 review, 2026-09-29; plan#1675).
+``tools/dev_two_factor.py`` writes ``mfa_configs`` and takes none either; it
+writes only a dev copy, on this host's loopback.  *It was
 taken by sixteen calls in nine modules inside the write paths that needed it
 most, plus three that plan step ``credit_card:CC-5-4a-4`` put inside
 ``row_write_lock`` (the row locks' module, deleted with them at plan step
@@ -214,12 +216,13 @@ def lock_every_user_writes() -> list[int]:
     its loan twin, and
     :func:`app.services.posting_service.resync_all_cash_postings`.  Those are
     the only transactions in the app that reconcile more than one owner's
-    ledger.  And for ``scripts/reset_mfa.py``, which resets one account's
-    two-factor but takes every account's lock before it reads anything
-    (ruling plan#3823), so no key is read unlocked to find the one: a
-    companion's is her owner's.  Without it they would take their per-user locks in whatever order
-    their id-ordered enumeration happens to visit owners, and two such
-    transactions running at once could deadlock on that alone.
+    ledger.  Without it those three would take their per-user locks in
+    whatever order their id-ordered enumeration happens to visit owners, and
+    two such transactions running at once could deadlock on that alone.  And
+    for ``scripts/reset_mfa.py``, which resets one account's two-factor but
+    takes every account's lock before it reads that account (ruling
+    plan#3823), so no key is read unlocked to find the one: a companion's is
+    her owner's.
 
     *An earlier version of this docstring said "the two backfills" and missed
     ``resync_all_cash_postings``, which is the FIRST of the three to run at

@@ -54,8 +54,8 @@ docker exec shekel-prod-app python scripts/reset_mfa.py admin@shekel.local
 
 Output: `MFA has been disabled for admin@shekel.local.`
 
-The user can now log in with email + password only. They should re-enable MFA via Settings >
-Security after logging in.
+At their next sign-in, after the password, the app holds them at two-factor setup until they enroll
+an authenticator again. No account can sign in without two-factor.
 
 ### 4.6 Reviewing Audit Logs
 

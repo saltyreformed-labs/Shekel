@@ -27,7 +27,8 @@ This script takes every account's write lock, finds the user, runs it,
 commits, logs and reports.
 
 **It takes the lock a signed-in save takes, every account's, before it
-reads anything** (ruling plan#3823), as the deploy reconciles do
+reads the account it resets** (ruling plan#3823; the lock itself reads only
+the list of account ids it takes), as the deploy reconciles do
 (``app.services.user_write_lock.lock_every_user_writes``).  So it waits for
 any save in flight and no save overlaps it: the login gate's answer to "is
 two-factor on?" holds for the whole of each save, and the doors behind the
@@ -89,10 +90,11 @@ def reset_mfa(email: str | None) -> None:
     from app.utils.log_events import AUTH, EVT_MFA_RESET, log_event
     # pylint: enable=import-outside-toplevel
 
-    # Every account's write lock first, before anything is read (ruling
-    # plan#3823): a signed-in save holds its owner's from its transaction's
-    # start, and the login gate reads the two-factor row under it, so this
-    # waits for any save in flight and none starts until this transaction ends.
+    # Every account's write lock first, before the account is read (ruling
+    # plan#3823; the lock reads only the ids it takes): a signed-in save
+    # holds its owner's from its transaction's start, and the login gate
+    # reads the two-factor row under it, so this waits for any save in
+    # flight and none starts until this transaction ends.
     # Unlocked, a reset landing between the gate's read and Regenerate's
     # write left ten new backup codes on the row it had cleared (plan#3775).
     # Every account's rather than the one's: no key need be read unlocked to

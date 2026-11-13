@@ -400,14 +400,16 @@ def _card_refusal(card: Card) -> str | None:
     return None
 
 
-def _text_refusal(card: Card, path: str, body: str) -> str | None:
-    """Why ``body``, read from ``path``, is not ``card``'s new text; None when it may be.
+def _text_refusal(card: Card, path: str, body: str, old: str) -> str | None:
+    """Why ``body``, read from ``path``, is not ``card``'s new text over ``old``, its text as
+    it stands; None when it may be.
 
     A text that is only space would blank the card's spec or question: edit
     never blanks a text (a finding's, the check refuses too).  A question's
     text in a ruling's shape is what only its conversion writes: ``_filing``
     reads such an edit of quill's as an earlier conversion's
-    (``_Asked.converted_before``).
+    (``_Asked.converted_before``).  A text dropping a line that holds what the weekly update
+    told is one ``quill sync`` would file again (:func:`_waits.edit_refusal`).
     """
     if not body.strip():
         return f"{path} holds no text: edit never blanks a card's text"
@@ -416,7 +418,7 @@ def _text_refusal(card: Card, path: str, body: str) -> str | None:
                 "...\" then \"Answer: ...\"), which only its conversion writes: `quill file "
                 f"ruling --from-question plan#{card.number}` turns an answered question into "
                 "its ruling")
-    return None
+    return _waits.edit_refusal(f"plan#{card.number}", old, body)
 
 
 def cmd_edit(args, tracker: Tracker, _root: Path) -> int:
@@ -436,10 +438,10 @@ def cmd_edit(args, tracker: Tracker, _root: Path) -> int:
     card = _one(tracker, args.card)
     if why := _card_refusal(card):
         raise Refused(why)
-    body = None
+    body = old = None
     if args.body_file is not None:
-        body = _read(args.body_file)
-        if why := _text_refusal(card, args.body_file, body):
+        body, old = _read(args.body_file), tracker.body(card.number)
+        if why := _text_refusal(card, args.body_file, body, old):
             raise Refused(why)
     written = {part for part, new in ((TITLE, args.title), (BODY, body)) if new is not None}
     draft = Draft(card.kind, card.title if args.title is None else args.title, body,
@@ -454,7 +456,7 @@ def cmd_edit(args, tracker: Tracker, _root: Path) -> int:
             tracker.retitle(number, args.title)
             print(f"retitled plan#{number}: {card.title!r} -> {args.title!r}")
     if body is not None:
-        if normalized(tracker.body(number)) == normalized(body):
+        if normalized(old) == normalized(body):
             print(f"plan#{number}'s text is already this text: not written")
         else:
             tracker.set_body(number, body)

@@ -18,17 +18,19 @@ Examples:
     python scripts/audit_cleanup.py --days 90       # Delete rows older than 90 days
     python scripts/audit_cleanup.py --dry-run       # Preview without deleting
 
-Production invocation (the shekel-audit-cleanup.timer unit): run via
-``docker compose run`` so the ENTRYPOINT loads the docker secrets and
-rebuilds the owner DATABASE_URL first --
+Production invocation (the shekel-audit-cleanup.timer unit): a one-shot
+container of the migrate service, the one that logs in as the database
+owner.  Its entrypoint (scripts/owner_entrypoint.sh) loads the owner's
+password and builds the owner's DATABASE_URL, and ``--no-deps`` runs no
+deploy first --
 
-    cd /opt/docker/shekel && docker compose run --rm --no-deps app \
-        python scripts/audit_cleanup.py
+    cd /opt/docker/shekel && docker compose run --rm --no-deps \
+        --pull never migrate python scripts/audit_cleanup.py
 
-``docker exec <app> python scripts/audit_cleanup.py`` does NOT work
-post-C-38: exec'd processes get the container's stored Config.Env,
-which holds the ``replaced_by_docker_secret`` placeholders, not the
-values the entrypoint loaded for the gunicorn process.
+``docker exec <app> python scripts/audit_cleanup.py`` does NOT work:
+exec'd processes get the container's stored Config.Env, which holds the
+``replaced_by_docker_secret`` placeholders, and the app container holds
+no owner credential at all.
 """
 import argparse
 import logging
@@ -45,9 +47,11 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 # not granted to the least-privilege ``shekel_app`` role (the audit
 # log is tamper-resistant from the runtime app; init_db_role.sql
 # grants it SELECT/INSERT only), so this script must connect as the
-# owner.  When invoked through the container entrypoint (the
-# production timer path), DATABASE_URL_APP is already exported and
-# the config would otherwise prefer it.  Empty string rather than
+# owner.  In the migrate service, the production timer path, the
+# deploy's configuration reads DATABASE_URL alone (app/config.py,
+# DeployConfig), so this line changes nothing there.  It is for a host
+# run, whose configuration prefers DATABASE_URL_APP when the
+# environment or a ``.env`` line sets it.  Empty string rather than
 # ``pop`` for the dotenv-resurrection reason documented in
 # scripts/init_database.py: config.py's ``load_dotenv()`` re-inserts
 # a ``.env`` value into an absent key, while an existing-but-empty

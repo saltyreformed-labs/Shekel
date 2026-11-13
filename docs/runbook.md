@@ -79,9 +79,19 @@ Measured against the running maintainer host 2026-08-08. The nginx row differs b
 | `shekel-prod-db` | `postgres:18-alpine` (digest-pinned; server 18.4) | backend | `pg_isready` every 10s |
 | `shekel-prod-valkey` | `valkey/valkey:<version>-alpine` (digest-pinned in `docker-compose.yml`; Valkey replaced Redis under ruling R-BAL298) | none: the app reaches it over a socket file in the `valkey-socket` volume (ruling plan#2612) | `valkey-cli ping` over the socket as the `healthcheck` ACL user every 10s |
 | `shekel-prod-app` | `ghcr.io/saltyreformed-labs/shekel@sha256:...`, the digest `shekel-deploy` pins in `.env` | backend, monitoring | `GET /health` every 30s |
+| `shekel-prod-migrate` | the app's image and digest. From the compose files since card plan#2166, not measured on the host | backend | none: a one-shot that runs the deploy as the database owner and exits, so `docker compose ps -a` shows it `Exited (0)` between deploys |
 | `shekel-prod-nginx` | the `nginx:<minor>-alpine` tag `docker-compose.yml` pins (`1.29-alpine` since #434) -- **bundled mode only**. In shared mode (this host) there is no such container; the shared `nginx` reverse proxy fronts it | frontend, backend | `wget /health` every 30s |
 
 ### Script Inventory
+
+Each Python script runs from `/opt/docker/shekel` in a one-shot container of the service that holds
+the login it needs, and only that one: `docker compose run --rm --no-deps --pull never <service>`.
+The migrate service logs in as the database owner, `shekel_owner`; the app service as the web login,
+`shekel_app`, which reads and writes data and cannot delete an audit row or change the schema.
+`--no-deps` runs no deploy first, and `--pull never` keeps the run off the registry (the app
+service's `pull_policy: always` would otherwise pull). `docker exec shekel-prod-app` reaches neither
+login: an exec'd process gets the container's stored environment, which holds the placeholders, not
+the secrets the entrypoint loaded.
 
 | Script | Purpose | Usage |
 |--------|---------|-------|
@@ -91,11 +101,19 @@ Measured against the running maintainer host 2026-08-08. The nginx row differs b
 | `scripts/restore.sh` | Restore database from backup | `./scripts/restore.sh <backup_file>` |
 | `scripts/verify_backup.sh` | Verify backup integrity | `./scripts/verify_backup.sh <backup_file>` |
 | `scripts/backup_retention.sh` | Prune old backups | `./scripts/backup_retention.sh [--dry-run]` |
-| `scripts/integrity_check.py` | Validate database integrity | `docker exec shekel-prod-app python scripts/integrity_check.py [--verbose] [--category CAT]` |
-| `scripts/audit_cleanup.py` | Clean old audit log entries | `docker exec shekel-prod-app python scripts/audit_cleanup.py [--days N] [--dry-run]` |
-| `scripts/reset_mfa.py` | Emergency MFA reset for a user | `docker exec shekel-prod-app python scripts/reset_mfa.py <email>` |
-| `scripts/seed_ref_tables.py` | Seed reference lookup tables | `docker exec shekel-prod-app python scripts/seed_ref_tables.py` |
-| `scripts/seed_user.py` | Create initial seed user | `docker exec shekel-prod-app python scripts/seed_user.py` |
+| `scripts/integrity_check.py` | Validate database integrity (reads only) | `docker compose run --rm --no-deps --pull never app python scripts/integrity_check.py [--verbose] [--category CAT]` |
+| `scripts/audit_cleanup.py` | Clean old audit log entries (the owner's: the web login cannot delete them) | `docker compose run --rm --no-deps --pull never migrate python scripts/audit_cleanup.py [--days N] [--dry-run]` |
+| `scripts/reset_mfa.py` | Emergency MFA reset for a user | `docker compose run --rm --no-deps --pull never app python scripts/reset_mfa.py [--force] <email>` |
+| `scripts/rotate_sessions.py` | End every session (after a `SECRET_KEY` rotation) | `docker compose run --rm --no-deps --pull never app python scripts/rotate_sessions.py --confirm` |
+| `scripts/rotate_totp_key.py` | Re-encrypt TOTP secrets under the new key | `docker compose run --rm --no-deps --pull never app python scripts/rotate_totp_key.py --confirm` |
+| `scripts/seed_ref_tables.py` | Seed reference lookup tables (every deploy runs it) | `docker compose run --rm --no-deps --pull never migrate python scripts/seed_ref_tables.py` |
+| `scripts/seed_user.py` | Create initial seed user (the deploy's last step runs it) | `docker compose run --rm --no-deps --pull never migrate python scripts/seed_user.py`, with `SEED_USER_*` in `.env` |
+
+Measured 2026-11-12 on a throwaway stack built from card plan#2166's branch, with production's
+secret files mounted: each command above exited 0 in the service it names; the audit cleanup deleted
+a row older than its retention as the owner, a delete the web login was refused; and the audit
+cleanup run in the app service, and the TOTP rotation run in the migrate service, each exited 1,
+naming the setting that service lacks (`DATABASE_URL`, `TOTP_ENCRYPTION_KEY`).
 
 ### Cron Schedule
 
@@ -103,7 +121,7 @@ Measured against the running maintainer host 2026-08-08. The nginx row differs b
 |------|--------|---------|
 | 2:00 AM daily | `backup.sh` | Database backup (local + NAS) |
 | 2:30 AM daily | `backup_retention.sh` | Prune old backups per retention policy |
-| 3:00 AM daily | `audit_cleanup.py` | Delete audit log rows older than 365 days |
+| 3:30 AM daily | `audit_cleanup.py` | Delete audit log rows older than `AUDIT_RETENTION_DAYS` (365), by the systemd timer below |
 | 3:00 AM Sunday | `verify_backup.sh` | Restore latest backup to temp DB, run checks |
 | 3:30 AM Sunday | `integrity_check.py` | Validate production DB integrity |
 
@@ -113,7 +131,17 @@ Crontab entries (replace `/opt/shekel` with your actual path):
 # ── Shekel Backups & Maintenance ─────────────────────────────────
 0 2 * * * /opt/shekel/scripts/backup.sh >> /var/log/shekel_backup.log 2>&1
 30 2 * * * /opt/shekel/scripts/backup_retention.sh >> /var/log/shekel_backup.log 2>&1
-0 3 * * * docker exec shekel-prod-app python scripts/audit_cleanup.py >> /var/log/shekel_backup.log 2>&1
 0 3 * * 0 /opt/shekel/scripts/verify_backup.sh $(ls -t /var/backups/shekel/shekel_backup_*.sql.gz* | head -1) >> /var/log/shekel_backup.log 2>&1
-30 3 * * 0 docker exec shekel-prod-app python scripts/integrity_check.py >> /var/log/shekel_backup.log 2>&1
+30 3 * * 0 cd /opt/docker/shekel && docker compose run --rm --no-deps --pull never app python scripts/integrity_check.py >> /var/log/shekel_backup.log 2>&1
 ```
+
+The audit cleanup is not a crontab line but the systemd unit `shekel-audit-cleanup.service` and its
+`shekel-audit-cleanup.timer`, daily at 03:30, after the backup window, so every row it deletes is in
+that night's backup. The installed copies are under `/etc/systemd/system/`, and reference copies
+beside the compose files in `/opt/docker/shekel/`. The service runs, from `/opt/docker/shekel`:
+
+```bash
+/usr/bin/docker compose run --rm --no-deps --pull never migrate python scripts/audit_cleanup.py
+```
+
+Its log is `journalctl -u shekel-audit-cleanup.service`.

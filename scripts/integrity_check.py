@@ -29,8 +29,10 @@ Exit codes:
     2   One or more WARNING checks flagged issues (no critical failures)
     3   Script error (bad arguments, database connection failure)
 
-Cron example (weekly, after backup verification):
-    0 3 * * 0 docker exec shekel-prod-app python scripts/integrity_check.py
+Cron example (weekly, after backup verification), as the web login, in a
+one-shot container of the app service (docs/runbook.md 1, Script Inventory):
+    30 3 * * 0 cd /opt/docker/shekel && docker compose run --rm --no-deps \
+        --pull never app python scripts/integrity_check.py
 """
 
 import argparse

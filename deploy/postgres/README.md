@@ -65,13 +65,22 @@ declared in `deploy/docker-compose.prod.yml`):
 Verify the channel encryption:
 
 ```bash
-# From inside the app container, confirm the connection negotiated TLS.
-docker exec shekel-prod-app psql "${DATABASE_URL}" -c "SHOW ssl;"
-docker exec shekel-prod-app psql "${DATABASE_URL}" \
-    -c "SELECT pid, ssl, version, cipher FROM pg_stat_ssl WHERE pid = pg_backend_pid();"
+cd /opt/docker/shekel
+
+# Each service's own connection, by the URL its entrypoint builds, in a one-shot
+# container of it: the owner's in the migrate service, the web login's in the app.
+# The single quotes keep the URL the container's, never the host shell's.
+docker compose run --rm --no-deps --pull never migrate sh -c \
+    'psql "$DATABASE_URL" -Atc "SELECT current_user, ssl, version, cipher FROM pg_stat_ssl WHERE pid = pg_backend_pid()"'
+docker compose run --rm --no-deps --pull never app sh -c \
+    'psql "$DATABASE_URL_APP" -Atc "SELECT current_user, ssl, version, cipher FROM pg_stat_ssl WHERE pid = pg_backend_pid()"'
 ```
 
-Expected output: `ssl = on`, a `version` of `TLSv1.2` or `TLSv1.3`, and a non-NULL `cipher`.
+Expected output: one line each, `shekel_owner|t|TLSv1.3|<cipher>` and
+`shekel_app|t|TLSv1.3|<cipher>`, or `TLSv1.2`; an `f` is a cleartext connection. The running web
+server's own connections are 4.12.3's query in `docs/runbook/4_security_operations.md`, read from
+the database's side. (Measured 2026-11-12 on a throwaway stack without TLS: each printed its login
+and `f`.)
 
 ## Rotation
 

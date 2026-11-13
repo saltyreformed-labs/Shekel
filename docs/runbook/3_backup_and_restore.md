@@ -67,7 +67,8 @@ once the data is back.
 
 ```bash
 curl -s http://localhost/health
-docker exec shekel-prod-app python scripts/integrity_check.py --verbose
+cd /opt/docker/shekel && docker compose run --rm --no-deps --pull never app \
+    python scripts/integrity_check.py --verbose
 ```
 
 ### 3.3 Restoring from NAS
@@ -113,15 +114,21 @@ RETENTION_DAILY_DAYS=14 RETENTION_WEEKLY_WEEKS=8 ./scripts/backup_retention.sh
 
 ### 3.6 Integrity Checks
 
+The check only reads, so it runs as the web login, in a one-shot container of the app service (1's
+Script Inventory says why not `docker exec`):
+
 ```bash
-# Run all checks inside the app container.
-docker exec shekel-prod-app python scripts/integrity_check.py
+cd /opt/docker/shekel
+
+# Run all checks.
+docker compose run --rm --no-deps --pull never app python scripts/integrity_check.py
 
 # Verbose output (shows every check, not just failures).
-docker exec shekel-prod-app python scripts/integrity_check.py --verbose
+docker compose run --rm --no-deps --pull never app python scripts/integrity_check.py --verbose
 
 # Run only one category: referential, orphan, balance, or consistency.
-docker exec shekel-prod-app python scripts/integrity_check.py --category referential
+docker compose run --rm --no-deps --pull never app \
+    python scripts/integrity_check.py --category referential
 ```
 
 **Exit codes:** 0 = all passed, 1 = critical failures, 2 = warnings only, 3 = script error.

@@ -60,19 +60,23 @@ always in that night's snapshots), whose service runs:
 
 ```bash
 cd /opt/docker/shekel && docker compose run --rm --no-deps --pull never \
-    app python scripts/audit_cleanup.py
+    migrate python scripts/audit_cleanup.py
 ```
 
-`docker compose run` matters: the entrypoint loads the docker secrets and rebuilds the owner-role
-`DATABASE_URL` first. A bare `docker exec shekel-prod-app python scripts/...` does NOT work
-post-C-38 -- exec'd processes get the container's stored placeholder env, not the secret values the
-entrypoint loaded (and the least-privilege role deliberately cannot DELETE audit rows).
+The migrate service matters: it is the one that logs in as the database owner, `shekel_owner`. Its
+entrypoint loads the owner's password from `secrets/owner_role_password` and builds the owner's
+`DATABASE_URL`, and `--no-deps` runs no deploy first. The app service's web login cannot delete an
+audit row (`scripts/init_db_role.sql` grants it SELECT and INSERT only), and a run there stops
+before it connects, its configuration having no owner's URL. A bare
+`docker exec shekel-prod-app python scripts/...` reaches neither: an exec'd process gets the
+container's stored environment, the placeholders, not the secrets the entrypoint loaded. The
+service's output is in `journalctl -u shekel-audit-cleanup.service`.
 
 To preview what would be deleted without actually deleting:
 
 ```bash
 cd /opt/docker/shekel && docker compose run --rm --no-deps --pull never \
-    app python scripts/audit_cleanup.py --dry-run
+    migrate python scripts/audit_cleanup.py --dry-run
 ```
 
 ## Troubleshooting

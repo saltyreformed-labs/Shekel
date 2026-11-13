@@ -21,6 +21,8 @@ Section 7 of the runbook, whose contents and quick reference are
 | No logs in Grafana | Promtail not scraping | `docker logs promtail`. Verify `monitoring` network exists. Verify app is on the network: `docker network inspect monitoring` |
 | CSS/JS not loading | Static files volume issue | `docker exec shekel-prod-nginx ls /var/www/static/` to verify files exist. The entrypoint copies them on every start, so restart the app: `docker compose restart app` |
 | Health check returns 500 | Database connection issue | `docker exec shekel-prod-db pg_isready -U shekel_user -d shekel`. Check `docker logs shekel-prod-app --tail 20` |
+| `docker compose up` ends `service "migrate" didn't complete successfully: exit N`, the app container `Created` and not running | The deploy failed in the migrate service, so compose did not start the app | `docker logs shekel-prod-migrate` names the deploy step that failed. In production `shekel-deploy` saved that log beside its dump and decided the rollback (2.3). Repair what it names, then `docker compose up -d` runs the deploy again and starts the app |
+| The deploy stops naming `SECRET_KEY` (`SECRET_KEY environment variable is not set, so a guess record's email digest cannot be computed`) | A database from before 2026-11-09 holding a failed sign-in count or a lock: its migration needs the web secret key, which the migrate service does not hold | Run that one deploy with the key supplied by hand: 7.3, "A deploy stops naming SECRET_KEY" |
 | Database backup failed | Container down or disk full | `docker ps` to check shekel-prod-db. `df -h` to check disk space |
 | NAS backup failed | NAS not mounted | `mount \| grep nas`. Remount: `sudo mount -a` |
 | App fails with `connection requires SSL` | Shared-mode TLS not staged | Run `sudo ./scripts/generate_pg_cert.sh` (Commit C-37). See §4.12 Postgres TLS for the full procedure. |
@@ -35,6 +37,8 @@ Section 7 of the runbook, whose contents and quick reference are
 | Log | Command | Contents |
 |-----|---------|----------|
 | Flask app (JSON) | `docker logs shekel-prod-app` | Request logs, auth events, business events, errors |
+| The deploy | `docker logs shekel-prod-migrate --tail 100` | The deploy's steps, in the migrate service: the schemas, the grants, the migrations and the seeds, and the step that failed. An `up` that changes nothing in the service starts the same container again, so its log holds every deploy since compose last made it, the newest last |
+| Audit cleanup | `journalctl -u shekel-audit-cleanup.service` | The nightly cleanup's count of deleted rows, or its error |
 | Nginx (JSON) | `docker logs shekel-prod-nginx` | HTTP access logs, upstream errors |
 | PostgreSQL | `docker logs shekel-prod-db` | Database server logs, connection errors |
 | Cloudflared | `journalctl -u cloudflared` | Tunnel connection logs, reconnects |
@@ -50,8 +54,10 @@ Section 7 of the runbook, whose contents and quick reference are
 # 1. Identify which container is unhealthy.
 docker compose ps
 
-# 2. Check container logs for the failing service.
+# 2. Check container logs for the failing service.  An app container
+#    left `Created` means the deploy failed: the migrate log says why.
 docker logs shekel-prod-app --tail 50
+docker logs shekel-prod-migrate --tail 50
 docker logs shekel-prod-nginx --tail 20
 docker logs shekel-prod-db --tail 20
 
@@ -76,7 +82,8 @@ ls -lht /var/backups/shekel/
 
 # 3. Verify the restore.
 curl -s http://localhost/health
-docker exec shekel-prod-app python scripts/integrity_check.py --verbose
+cd /opt/docker/shekel && docker compose run --rm --no-deps --pull never app \
+    python scripts/integrity_check.py --verbose
 ```
 
 If local backups are corrupted, restore from NAS:
@@ -90,13 +97,55 @@ rm /tmp/shekel_backup_20260315_020000.sql.gz
 #### Locked out of the app -- MFA device lost
 
 ```bash
-# SSH to the Proxmox host.
-docker exec shekel-prod-app python scripts/reset_mfa.py your-email@example.com
-# Output: MFA has been disabled for your-email@example.com.
+# SSH to the Proxmox host.  The reset asks y/N before it changes anything.
+cd /opt/docker/shekel && docker compose run --rm --no-deps --pull never app \
+    python scripts/reset_mfa.py your-email@example.com
+# Output: MFA has been disabled for your-email@example.com; their sessions
+# are ended and their trusted devices forgotten.
 
 # Log in with email + password (MFA is now disabled).
 # Re-enable MFA in Settings > Security after logging in.
 ```
+
+#### A deploy stops naming SECRET_KEY
+
+The deploy runs in the migrate service, which holds the owner's password and no web secret (ruling
+plan#3450). One migration reads one: `3748145b83e3` (2026-11-09) names each failed sign-in count's
+record by a digest keyed with `SECRET_KEY`, and needs the key only on a database older than it that
+holds a count or a lock. Such a deploy stops with
+`SECRET_KEY environment variable is not set, so a guess record's email digest cannot be computed`
+and rolls back, changing nothing (`app/services/guess_record_service.py`, `_digest_key`). Production
+is past it; an install or a restored backup from before 2026-11-10 may not be.
+
+Run that one deploy with the key supplied by hand, then start the stack as usual. `-e SECRET_KEY`
+names no value, so the key never appears on a command line: compose takes it from the shell, else
+from `.env`.
+
+```bash
+cd /opt/docker/shekel
+
+# Production, whose key is the file secrets/secret_key:
+SECRET_KEY="$(cat secrets/secret_key)" \
+    docker compose run --rm --no-deps --pull never -e SECRET_KEY migrate
+
+# A self-hosted install, whose .env holds the key:
+docker compose run --rm --no-deps --pull never -e SECRET_KEY migrate
+
+# Then the stack: its deploy has nothing left to name, and the app starts.
+docker compose up -d
+```
+
+`run ... migrate` with no command runs the deploy, `scripts/deploy.sh`, the service's own command.
+The key is in that container's environment only while it runs: `--rm` removes it.
+
+Measured 2026-11-12 on a throwaway stack built from card plan#2166's branch, with production's
+secret files mounted. Downgraded to `b7e4c19a2d60`, the revision before the migration, with one
+user's failed sign-in count at 3, the deploy stopped with the message above and exit 1, leaving the
+stamp at `b7e4c19a2d60` and the count on the user's row. The production form above then deployed to
+the head, `Database initialised: ONE transaction, committed.`, carrying the count of 3 into one
+guess record, and `docker compose up -d` deployed again and started the app healthy. Run with the
+shell variable set, the run's `SECRET_KEY` held the file's 64 characters; with none, `.env`'s value;
+without `-e`, nothing.
 
 #### Locked out of Cloudflare Access
 
@@ -117,7 +166,10 @@ docker exec shekel-prod-app python scripts/reset_mfa.py your-email@example.com
    - `SECRET_KEY`: generate new (users must re-login)
    - `TOTP_ENCRYPTION_KEY`: use the backed-up key from password manager, or generate new (users must
      re-enroll MFA)
-   - `POSTGRES_PASSWORD`: use the password from the backup, or set new
+   - `POSTGRES_PASSWORD`, `OWNER_ROLE_PASSWORD`, `APP_ROLE_PASSWORD` and `SHEKEL_VALKEY_PASSWORD`:
+     generate new. A backup holds no login or password (it is taken `--no-owner --no-privileges`),
+     and the new cluster's first boot makes the superuser from the first and both logins from the
+     next two (`deploy/postgres/provision_roles.sh`)
 4. Create the monitoring network: `docker network create monitoring`
 5. Start the stack: `docker compose up -d`
 6. Restore from NAS backup: `./scripts/restore.sh /mnt/nas/backups/shekel/<latest>.sql.gz`

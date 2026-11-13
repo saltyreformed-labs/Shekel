@@ -29,8 +29,10 @@ compression, tiered retention, optional NAS replication, and optional GPG encryp
 ## 2. Prerequisites
 
 - **Host**: Arch Linux with Docker and Docker Compose installed
-- **Containers**: `shekel-prod-db` (PostgreSQL 16) running via `docker-compose.yml`
-- **App container** (production only): `shekel-prod-app` running via `docker-compose.yml`
+- **Containers**: `shekel-prod-db` (PostgreSQL 18) running via `docker-compose.yml`
+- **App and migrate services** (production only): the integrity check runs in a one-shot container
+  of the app service, and the backup verification's in one of the migrate service, both from
+  `docker-compose.yml`
 - **Disk space**: sufficient local storage for 7+ days of backups
 - **NAS** (optional): network share mounted on the host
 
@@ -54,14 +56,16 @@ Add these entries to the host's crontab (`crontab -e`):
 # Weekly backup verification (Sunday 3:00 AM).
 0 3 * * 0 /path/to/shekel/scripts/verify_backup.sh $(ls -t /var/backups/shekel/shekel_backup_*.sql.gz* | head -1) >> /var/log/shekel_backup.log 2>&1
 
-# Weekly integrity check on production database (Sunday 3:30 AM).
-30 3 * * 0 docker exec shekel-prod-app python scripts/integrity_check.py >> /var/log/shekel_backup.log 2>&1
-
-# Daily audit log retention cleanup at 3:00 AM.
-0 3 * * * docker exec shekel-prod-app python scripts/audit_cleanup.py >> /var/log/shekel_backup.log 2>&1
+# Weekly integrity check on production database (Sunday 3:30 AM), as the
+# web login, from the directory that holds the compose files.
+30 3 * * 0 cd /opt/docker/shekel && docker compose run --rm --no-deps --pull never app python scripts/integrity_check.py >> /var/log/shekel_backup.log 2>&1
 ```
 
 Replace `/path/to/shekel/` with the actual path to the Shekel project directory on the host.
+
+The audit log's retention cleanup is not a crontab line: it is the systemd timer
+`shekel-audit-cleanup.timer`, daily at 03:30, after this window, and it runs in the migrate service,
+as the database owner (`docs/runbook.md` 1, Cron Schedule).
 
 ### 3.2 NAS Mount Configuration
 
@@ -234,8 +238,9 @@ curl -s http://localhost:5000/login | head -5
 docker exec shekel-prod-db psql -U shekel_user -d shekel -c "SELECT COUNT(*) FROM auth.users;"
 docker exec shekel-prod-db psql -U shekel_user -d shekel -c "SELECT COUNT(*) FROM budget.pay_periods;"
 
-# Run integrity checks.
-docker exec shekel-prod-app python scripts/integrity_check.py --verbose
+# Run integrity checks, as the web login.
+cd /opt/docker/shekel && docker compose run --rm --no-deps --pull never app \
+    python scripts/integrity_check.py --verbose
 ```
 
 ### 6.4 Restoring from NAS
@@ -300,15 +305,22 @@ from its compose labels, as the owner, pointed at the copy.
 
 The integrity check script validates the database without modifying any data.
 
+In production it runs as the web login, which can read every table it checks, in a one-shot
+container of the app service: `docker exec shekel-prod-app` gets the container's stored environment,
+which holds the secrets' placeholders, not the web login's password.
+
 ```bash
-# Run all checks (inside the app container in production).
-docker exec shekel-prod-app python scripts/integrity_check.py
+cd /opt/docker/shekel
+
+# Run all checks.
+docker compose run --rm --no-deps --pull never app python scripts/integrity_check.py
 
 # Run all checks with verbose output.
-docker exec shekel-prod-app python scripts/integrity_check.py --verbose
+docker compose run --rm --no-deps --pull never app python scripts/integrity_check.py --verbose
 
 # Run only referential integrity checks.
-docker exec shekel-prod-app python scripts/integrity_check.py --category referential
+docker compose run --rm --no-deps --pull never app \
+    python scripts/integrity_check.py --category referential
 
 # Run locally in development, as the login .env's DATABASE_URL names:
 # the database owner, shekel_owner (ruling plan#3608).
@@ -354,7 +366,7 @@ python scripts/integrity_check.py --verbose
 | "NAS directory does not exist" | NAS not mounted | `sudo mount -a` and verify with `mount \| grep nas` |
 | "Backup file is empty" | Disk full or pg_dump failure | Check `df -h` and `docker logs shekel-prod-db` |
 | "Encrypted backup but no passphrase" | `BACKUP_ENCRYPTION_PASSPHRASE` not set | `export BACKUP_ENCRYPTION_PASSPHRASE="..."` |
-| "Restore failed: permission denied" | `PGUSER` lacks CREATEDB privilege | Run: `docker exec shekel-prod-db psql -U postgres -c "ALTER USER shekel_user CREATEDB;"` |
+| "Restore failed: permission denied" | `PGUSER` names a login that is not the database container's superuser: the restore drops and makes the database and hands every object to the owner | Leave `PGUSER` unset: its default, `shekel_user`, is the image's `POSTGRES_USER`, the superuser, which reaches the container's socket with no password. The image makes no `postgres` role |
 | "Integrity CRITICAL failures after restore" | Corrupt or partial backup | Try restoring from an older backup |
 | "verify_backup.sh: a `shekel_verify_<pid>` database left behind" | A run killed before its exit trap dropped its copy (each run names its own, so the next run does not drop it) | List them: `docker exec shekel-prod-db psql -U shekel_user -d postgres -c '\l shekel_verify_*'`, then drop each: `docker exec shekel-prod-db psql -U shekel_user -d postgres -c "DROP DATABASE shekel_verify_<pid>;"` |
 
@@ -364,6 +376,8 @@ python scripts/integrity_check.py --verbose
 |-----|----------|----------|
 | Backup/retention/verify logs | `/var/log/shekel_backup.log` | Cron job output (if redirected) |
 | Application structured logs | `docker logs shekel-prod-app` | JSON-formatted request and event logs |
+| The deploy | `docker logs shekel-prod-migrate --tail 100` | The deploy's steps, the newest last, among them the one `restore.sh`'s start runs after a restore |
+| Audit cleanup | `journalctl -u shekel-audit-cleanup.service` | The nightly retention cleanup's output |
 | PostgreSQL logs | `docker logs shekel-prod-db` | Database server logs |
 
 ---

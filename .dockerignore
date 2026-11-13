@@ -8,20 +8,28 @@
 #   - app/                      Flask application package
 #   - migrations/               Alembic migration history (used by
 #                               the deploy, scripts/deploy.sh, and
-#                               docker exec ops)
+#                               flask db run in the migrate service)
 #   - scripts/init_db.sql       Schema bootstrap (scripts/deploy.sh)
 #   - scripts/init_db_role.sql  The web login's grants (scripts/deploy.sh)
 #   - scripts/init_database.py  Step 3, one transaction (scripts/deploy.sh)
-#   - scripts/seed_user.py      Seed initial owner (scripts/deploy.sh +
-#                               docker exec ops)
-#   - scripts/seed_ref_tables.py    Seed lookup tables (docker exec repair)
-#   - scripts/seed_companion.py     Seed companion user (docker exec)
-#   - scripts/audit_cleanup.py  Audit log retention (docker exec)
-#   - scripts/integrity_check.py    Integrity sweep (docker exec)
+#
+# The operator scripts below run in a one-shot container of the service
+# that holds the login each needs (docker compose run --rm --no-deps
+# --pull never <service>; docs/runbook.md 1, Script Inventory): the
+# migrate service, as the database owner, or the app service, as the
+# web login.
+#   - scripts/seed_user.py      Seed initial owner (scripts/deploy.sh,
+#                               or a run in migrate)
+#   - scripts/seed_ref_tables.py    Seed lookup tables (a repair run in
+#                               migrate; every deploy runs it)
+#   - scripts/seed_companion.py     Seed companion user (app)
+#   - scripts/audit_cleanup.py  Audit log retention (migrate)
+#   - scripts/integrity_check.py    Integrity sweep (app; migrate for
+#                               scripts/verify_backup.sh's copy)
 #   - scripts/_integrity_*.py   Its check families + shared types
-#   - scripts/reset_mfa.py      Operator MFA reset (docker exec)
-#   - scripts/rotate_sessions.py    Session invalidation (docker exec)
-#   - scripts/rotate_totp_key.py    Key rotation (docker exec)
+#   - scripts/reset_mfa.py      Operator MFA reset (app)
+#   - scripts/rotate_sessions.py    Session invalidation (app)
+#   - scripts/rotate_totp_key.py    Key rotation (app)
 #   - scripts/_script_lib.py    Shared CLI helpers the runtime scripts
 #                               above import (run_in_app_context etc.)
 #   - alembic.ini               Alembic config

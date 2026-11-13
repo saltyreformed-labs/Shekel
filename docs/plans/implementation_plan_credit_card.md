@@ -9,9 +9,9 @@ to `historical/credit_card_plan_2026-07-19.md`.
 **The 2026-07-19 "Ratified sequencing" was DISCHARGED and is ARCHIVED** to
 `historical/credit_card_sequencing_2026-07-19.md`. It stayed here, live-looking, until 2026-08-11,
 warned about only by a paragraph in ANOTHER document -- which is the same failure the archive banner
-fixes for archived files (`CLAUDE.md`, Automated enforcement): the warning must be on the artifact.
-Two of the bare ids it ordered now name LIVE steps in other arcs (`pay_calendar:C8`,
-`recurrence:D1`), so it could send a reader at the wrong work by grep alone.
+fixes for archived files (`tools/ci/archive.py`): the warning must be on the artifact. Two of the
+bare ids it ordered now name LIVE steps in other arcs (`pay_calendar:C8`, `recurrence:D1`), so it
+could send a reader at the wrong work by grep alone.
 
 **The 2026-07-19 gate (ruling R-EB) was DISCHARGED on 2026-09-18** by the per-leaf trace
 `credit_card:R-CC13` asked for (**R-CC14**, **R-CC15**), and the same day's design loop re-minted
@@ -22,7 +22,7 @@ never `Transaction(`: `tests/manual/census_hand_built_rows.py` (`X-bi-7c`'s inst
 latter.
 
 **Each step, finding and ruling of this arc is a card in the tracker,
-`saltyreformed-labs/shekel-plan` (`CLAUDE.md`, Development Status), and what "done" means is
+`saltyreformed-labs/shekel-plan` (`CLAUDE.md`, Multi-session operation), and what "done" means is
 `verification.md`.** What stays HERE is the argument: the context, the design and what verifying
 this arc adds to that standard. The eight LOCKED rulings of 2026-07-19 are `R-CC1`-`R-CC8`, in the
 order that list numbered them, and the four `Grid / companion hard requirements` taken the same day

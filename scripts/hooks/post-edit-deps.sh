@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # PostToolUse (Write|Edit|MultiEdit): block when a dependency file is modified.
-# New dependencies require developer approval (CLAUDE.md: "Dependencies declared
-# in pyproject.toml and locked in uv.lock -- no new packages without approval").
+# New dependencies require developer approval (CLAUDE.md: "No new package without
+# approval. Dependencies are declared in `pyproject.toml` and locked in `uv.lock`").
 # Reads the edited path from the stdin JSON payload (see _hooklib.sh). Exit 2
 # surfaces the change to Claude so it pauses and confirms rather than proceeding
 # silently.

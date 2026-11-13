@@ -49,8 +49,8 @@ about money beats decoration every time.
 
 ## Hard constraints (non-negotiable)
 
-These come from the codebase and CLAUDE.md, not from taste. A direction that violates one of these
-is out of bounds regardless of how it looks.
+These come from the codebase and its rules (CLAUDE.md, `.claude/rules/coding.md`), not from taste. A
+direction that violates one of these is out of bounds regardless of how it looks.
 
 - **Stack:** Bootstrap 5 + the design-token layer + HTMX + vanilla JS. No frontend framework, no
   SPA, unless the stack ROI gate explicitly decides otherwise.

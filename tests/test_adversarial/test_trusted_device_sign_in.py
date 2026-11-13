@@ -22,9 +22,7 @@ the companion is made without it, so a test of hers turns it on.
 """
 
 import logging
-import time
 
-import pyotp
 import sqlalchemy
 
 from app.config import ProdConfig
@@ -34,7 +32,7 @@ from scripts.reset_mfa import reset_mfa
 from tests._test_helpers import enable_mfa, store_backup_codes
 from tests._seed_owner_fixtures import SEED_USER_EMAIL, SEED_USER_PASSWORD
 from tests._trusted_devices import trust_browser
-from tests._two_factor_sign_in import two_factor_secret_of
+from tests._two_factor_sign_in import code_now, two_factor_secret_of
 
 _SECOND_EMAIL = "second@shekel.local"
 _SECOND_PASSWORD = "secondpass12"
@@ -46,11 +44,6 @@ _COMPANION_PASSWORD = "companionpass"
 
 #: Thirty days in seconds: the cookie's Max-Age, spelled here as an oracle.
 _THIRTY_DAYS_IN_SECONDS = 30 * 24 * 60 * 60
-
-
-def _code(secret):
-    """Return the authenticator code for *secret* at this instant."""
-    return pyotp.TOTP(secret).at(int(time.time()))
 
 
 def _password(client, email, password, **kwargs):
@@ -72,7 +65,7 @@ def _sign_in_with_code(client, email, password, secret, trust, **kwargs):
         **kwargs: Passed to both requests (``base_url``).
     """
     assert _asked_the_code(_password(client, email, password, **kwargs))
-    form = {"totp_code": _code(secret)}
+    form = {"totp_code": code_now(secret)}
     if trust:
         form["trust_device"] = "1"
     response = client.post("/mfa/verify", data=form, **kwargs)

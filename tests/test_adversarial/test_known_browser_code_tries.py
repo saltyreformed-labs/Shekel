@@ -96,11 +96,6 @@ def _rate_app(app, monkeypatch):
         yield limited
 
 
-def _code(secret):
-    """Return the code valid now for *secret*."""
-    return pyotp.TOTP(secret).at(int(time.time()))
-
-
 def _next_code(secret):
     """Return a code for *secret* one step past now's, for a second sign-in.
 
@@ -153,7 +148,7 @@ def _known_browser(rate_app, secret, address):
     """
     browser = rate_app.test_client()
     _type_password(browser, address)
-    assert _signed_in(_try_code(browser, address, _code(secret)))
+    assert _signed_in(_try_code(browser, address, code_now(secret)))
     browser.post("/logout", **through_nginx(address))
     return browser
 
@@ -298,7 +293,7 @@ class TestAKnownBrowserHasItsOwnTries:
             made_up.set_cookie(f"shekel_device_{user_id}", secrets.token_urlsafe(32))
             _type_password(made_up, "9.9.9.2")
 
-            assert _refused_for_tries(_try_code(new_browser, "9.9.9.1", _code(secret)))
+            assert _refused_for_tries(_try_code(new_browser, "9.9.9.1", code_now(secret)))
             assert _refused_for_tries(_try_code(made_up, "9.9.9.2", _NEVER_A_CODE))
             assert count_of(SEED_USER_EMAIL) == _CODE_TRIES
 
@@ -532,7 +527,7 @@ class TestAKnownBrowserHasItsOwnReConfirmTries:
             secret = two_factor_secret_of(seed_user["user"].id)
             owner = rate_app.test_client()
             _type_password(owner, _OWNERS_ADDRESS)
-            assert _signed_in(_try_code(owner, _OWNERS_ADDRESS, _code(secret)))
+            assert _signed_in(_try_code(owner, _OWNERS_ADDRESS, code_now(secret)))
             _guesses_checked(rate_app, _CODE_TRIES - 1, "8.8.8")
             assert _refused_for_tries(_guess(rate_app, "8.8.9.0"))
 

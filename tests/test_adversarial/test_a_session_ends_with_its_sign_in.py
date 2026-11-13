@@ -7,29 +7,26 @@ ten wrong guesses removed its record.  These tests drive the real app:
 
 * :class:`TestThirtyDaysAfterItsSignIn` -- the boundary, to the second, and a
   session with no sign-in stamp, which every session open at the release is.
-* :class:`TestNothingButASignInRenewsIt` -- Log out all, Change password and
-  Disable two-factor each move ``_session_created_at`` to now, and none moves
-  the sign-in, so a session that pressed one near day 30 still ends on day 30.
+* :class:`TestNothingButASignInRenewsIt` -- Log out all and Change password
+  each move ``_session_created_at`` to now, and neither moves the sign-in, so a
+  session that pressed one near day 30 still ends on day 30.
 * :class:`TestTheSessionAndItsRecord` -- the session's sign-in is the record's
   ``last_signed_in_at``, and a browser kept active for 29 days still gets past
   a stranger's lock.
 
 The seed owner is made with two-factor (plan#3600), so a browser signs in with
 no code owed only on a browser the owner trusts, the shared sign-in
-(``tests._seed_owner_fixtures.log_in_seed_user``); the code tests type the
-owner's own (``tests._two_factor_sign_in.two_factor_secret_of``).
+(``tests._seed_owner_fixtures.log_in_seed_user``).
 """
 
-import time
 from datetime import datetime, timedelta, timezone
 
-import pyotp
 import pytest
 import time_machine
 
 from app.extensions import db
 from app.models.known_device import KnownDevice
-from app.models.user import MfaConfig, User
+from app.models.user import User
 from app.services import auth_service
 from app.utils.session_helpers import (
     SESSION_CREATED_AT_KEY,
@@ -42,7 +39,6 @@ from tests._seed_owner_fixtures import (
     SEED_USER_PASSWORD,
     log_in_seed_user,
 )
-from tests._two_factor_sign_in import code_now, two_factor_secret_of
 
 #: Ruling plan#3069's thirty days, spelled here as an oracle the model's
 #: constant cannot move silently.
@@ -57,9 +53,6 @@ _LATER = timedelta(minutes=2)
 
 #: Wrong passwords in a row that lock the account: spelled here as an oracle.
 _THRESHOLD = 10
-
-#: The length of one authenticator step.
-_TOTP_STEP_SECONDS = 30
 
 _NEW_PASSWORD = "a-brand-new-passphrase"
 
@@ -111,11 +104,6 @@ def _stamp(browser, **stamps):
             sess[key] = moment.isoformat()
 
 
-def _next_code(secret):
-    """Return a code for *secret* one step past now's, so it is no replay."""
-    return pyotp.TOTP(secret).at(int(time.time()) + _TOTP_STEP_SECONDS)
-
-
 class TestThirtyDaysAfterItsSignIn:
     """The session ends at the record's own boundary, however active."""
 
@@ -126,7 +114,6 @@ class TestThirtyDaysAfterItsSignIn:
             pytest.param(_THIRTY_DAYS - _ONE_SECOND, True, id="a-second-younger"),
         ],
     )
-
     def test_the_boundary_is_thirty_days_to_the_second(
         self, app, seed_user, age, still_signed_in,
     ):

@@ -11,10 +11,8 @@ their codes only inside the window a sign-in opens.  A backup-code sign-in says
 so, with the count left (ruling plan#3035).
 """
 
-import time
 from datetime import datetime, timedelta, timezone
 
-import pyotp
 import pytest
 
 from app.extensions import db
@@ -22,7 +20,7 @@ from app.models.user import MfaConfig, User
 from app.services import mfa_service
 from app.utils.session_helpers import FRESH_LOGIN_AT_KEY
 from tests._test_helpers import store_backup_codes
-from tests._two_factor_sign_in import two_factor_secret_of
+from tests._two_factor_sign_in import code_now, two_factor_secret_of
 
 _EMAIL = "test@shekel.local"
 _PASSWORD = "testpass"
@@ -190,7 +188,7 @@ class TestRegenerateTakesAStepUp:
 
             confirmed = auth_client.post(bounced.headers["Location"], data={
                 "password": _PASSWORD,
-                "totp_code": pyotp.TOTP(secret).at(int(time.time())),
+                "totp_code": code_now(secret),
             })
             assert confirmed.status_code == 302
             assert confirmed.headers["Location"].endswith("/dashboard")
@@ -266,7 +264,7 @@ class TestABackupCodeSignInSaysHowLongToReplaceThem:
             secret = _its_two_factor(user_id, codes=_THREE_CODES)
 
             landed = _sign_in_with(
-                client, "totp_code", pyotp.TOTP(secret).at(int(time.time())),
+                client, "totp_code", code_now(secret),
             )
 
             assert landed.status_code == 200

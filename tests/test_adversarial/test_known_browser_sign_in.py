@@ -59,7 +59,9 @@ from tests._guess_records import count_of, locked_until_of
 from tests._sign_in import make_a_stranger
 from tests._test_helpers import store_backup_codes
 from tests._seed_owner_fixtures import SEED_USER_EMAIL, SEED_USER_PASSWORD
-from tests._two_factor_sign_in import reset_two_factor_of, two_factor_secret_of
+from tests._two_factor_sign_in import (
+    code_now, reset_two_factor_of, two_factor_secret_of,
+)
 
 _SECOND_EMAIL = "second@shekel.local"
 _SECOND_PASSWORD = "secondpass12"
@@ -164,11 +166,6 @@ def _known(app, email=SEED_USER_EMAIL, password=SEED_USER_PASSWORD):
     return browser
 
 
-def _code(secret):
-    """Return the code valid now for *secret*."""
-    return pyotp.TOTP(secret).at(int(time.time()))
-
-
 def _second_code(secret):
     """Return a code for *secret* one step past now's, for a second sign-in.
 
@@ -190,7 +187,7 @@ def _known_with_a_code(app, secret, trust):
     """
     browser = app.test_client()
     assert _asked_the_code(_password(browser))
-    form = {"totp_code": _code(secret)}
+    form = {"totp_code": code_now(secret)}
     if trust:
         form["trust_device"] = "1"
     assert _signed_in(browser.post("/mfa/verify", data=form))
@@ -202,7 +199,7 @@ def _signed_in_with_a_code(app, secret):
     """Return a browser that finished a sign-in with its code, still signed in."""
     browser = app.test_client()
     assert _asked_the_code(_password(browser))
-    assert _signed_in(browser.post("/mfa/verify", data={"totp_code": _code(secret)}))
+    assert _signed_in(browser.post("/mfa/verify", data={"totp_code": code_now(secret)}))
     return browser
 
 

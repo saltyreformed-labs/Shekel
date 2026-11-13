@@ -17,10 +17,12 @@ def enable_mfa(db_session, user_id, backup_codes=()):
     copies nine files carried before plan#2173 wrote it here are gone
     (plan#3600).
 
-    **Every shared test account is made with two-factor** (plan#3600): the
+    **Every shared test owner is made with two-factor** (plan#3600): the
     fixture that creates it calls this, as production holds an account without
-    it at setup.  So a test calls this only for an account it made itself, and
-    reads a shared account's secret with
+    it at setup.  The shared companion, ``seed_companion``, is made without it,
+    as her owner makes her.  So a test calls this for her, for an account it
+    made itself, or to turn a reset owner's row on again (below), and reads a
+    shared owner's secret with
     :func:`tests._two_factor_sign_in.two_factor_secret_of`.
 
     Args:

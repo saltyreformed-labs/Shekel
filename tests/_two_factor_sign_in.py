@@ -26,9 +26,10 @@ them.
 :func:`two_factor_row_of`, a user's two-factor row read fresh; and
 :func:`two_factor_secret_of`, the secret that row holds.
 
-**An account without two-factor** is one a test makes itself (the companion
-here), or a shared one whose two-factor :func:`reset_two_factor_of` took away
-through the one reset act, as ``scripts/reset_mfa.py`` does.  Either signs in
+**An account without two-factor** is the shared companion, ``seed_companion``,
+made without it as her owner makes her, one a test makes itself, or a shared
+owner whose two-factor :func:`reset_two_factor_of` took away through the one
+reset act, as ``scripts/reset_mfa.py`` does.  Either signs in
 with its password alone (:func:`sign_in_by_password`), as production signs in
 an account before its setup.
 """
@@ -155,12 +156,10 @@ def sign_in_from_a_trusted_browser(browser, email, password, lands_on, **request
         *browser*, signed in.
     """
     user = db.session.query(User).filter_by(email=email).one()
-    has_two_factor = db.session.query(
-        db.session.query(MfaConfig)
-        .filter_by(user_id=user.id, is_enabled=True)
-        .exists()
-    ).scalar()
-    assert has_two_factor, (
+    # The question the login gate asks, through the property it reads, its
+    # row read again in case a test changed it since this session loaded it.
+    db.session.expire(user, ["mfa_config"])
+    assert user.has_two_factor, (
         f"Setup failed: {email} has no two-factor, so no browser of theirs can "
         f"be trusted; give it two-factor where the account is made"
     )

@@ -80,10 +80,13 @@ def set_totp_key():
 
     A seeded start state is built once per worker and cloned into each test
     that declares it, so its owner's two-factor row is encrypted under the key
-    of the test that built it.  A key per test made that row unreadable from
-    the second test on (measured 2026-11-12: 267 cases of one route sweep
-    errored ``InvalidToken`` once its owner had two-factor), so the key lives
-    as long as the worker does.  A test that needs a key of its own, or none,
+    of the test that built it.  A key per test makes that row unreadable from
+    the second test on, so a test that decrypts a world's secret (to type its
+    owner's code) would fail; so the key lives as long as the worker does.
+    *The 2026-11-12 measurement behind the ruling (267 cases of one route sweep
+    errored ``InvalidToken``) was taken while the shared sign-in typed a code;
+    the trusted browser chosen instead decrypts nothing, so no sweep meets it
+    now.*  A test that needs a key of its own, or none,
     still sets or deletes it with ``monkeypatch``, which puts this one back
     after it.
     """

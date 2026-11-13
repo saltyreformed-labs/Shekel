@@ -20,6 +20,7 @@ from app.services.amortization_engine import (
     project_forward,
     required_extra_for_projection,
 )
+from tests._repo_root import REPO_ROOT
 
 
 def _terms(
@@ -475,8 +476,7 @@ class TestPayoffByDateProjectForward:
         accidentally reintroduce the old engine call.
         """
         engine_path = (
-            Path(__file__).resolve().parent.parent.parent
-            / "app" / "services" / "amortization_engine" / "_payoff.py"
+            REPO_ROOT / "app" / "services" / "amortization_engine" / "_payoff.py"
         )
         source = engine_path.read_text(encoding="utf-8")
         marker = "def calculate_payoff_by_date("

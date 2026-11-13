@@ -225,7 +225,8 @@ def rhythm_of(cadence_days, shift=BusinessDayShiftEnum.NONE):
     ``FixedDays(None)`` -- a fixed-days cadence with NO day count, which is
     what the "absent cadence" refusal cases mean by absence; a bare ``None``
     where the VALUE should be is a different state with its own test
-    (``test_pay_calendar_derivation.TestTheCadenceIsAValueOfAKnownKind``).
+    (``TestTheCadenceIsAValueOfAKnownKind``, in
+    ``test_pay_calendar_derivation/test_what_the_derivation_refuses.py``).
 
     Args:
         cadence_days: Days between the paydays.

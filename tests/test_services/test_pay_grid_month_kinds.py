@@ -7,8 +7,8 @@ last day.  The grid arithmetic (:mod:`app.services.pay_calendar._grid`) is
 O(1) and walks nothing, so nothing in it is a listing of paydays -- which is
 why every case here grades it AGAINST one: a brute-force walk over calendar
 months, written with ``calendar.monthrange`` and nothing from the package, is
-the oracle, exactly as ``test_pay_calendar_derivation.py`` grades the
-fixed-days grid.
+the oracle, exactly as the ``test_pay_calendar_derivation/`` package grades
+the fixed-days grid.
 
 **Each exhaustive sweep is ONE test that loops rather than a parametrised
 case per pair**, deliberately: every item in this suite is one database

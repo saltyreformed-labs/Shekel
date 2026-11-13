@@ -28,7 +28,8 @@ second side and the harness that took it is gone**; the proof it was is in
 migration ``b7a41e2c9d63``'s docstring, measured on production itself.  What
 holds this function to its values now is
 ``tests/oracles/pay_calendar_derivation.py``'s hand-computed sweep, driven by
-``tests/test_services/test_pay_calendar_derivation.py``.
+the ``test_the_irregular_shapes_and_re_derivation`` part of the
+``tests/test_services/test_pay_calendar_derivation/`` package.
 
 **Pure, and that is load-bearing.**  No session, no Flask, no clock: the
 derivation is a function of two values, so the sweep drives it over a

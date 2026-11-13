@@ -53,7 +53,8 @@ from app.services.pay_calendar import (
 # Package-PRIVATE on purpose: the producers below have no caller outside the
 # package, and the W9910 gate (``shekel-private-module-import``) runs over
 # ``app/`` and ``scripts/``, not this tree -- the same reach
-# ``test_pay_calendar_derivation.py`` takes for ``_projection``.
+# ``test_pay_calendar_derivation/test_the_boundary_arithmetic.py`` takes for
+# ``_projection``.
 from app.services.pay_calendar._eras import (
     first_payday_of,
     horizon_step,

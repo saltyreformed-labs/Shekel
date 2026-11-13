@@ -188,8 +188,8 @@ def project_period_after(
     ``C17-b-2`` restored** (ledger row **N-495**): both read the era's phase
     now, where anchoring only the candidates on it while the estimate counted
     from the record would have added the displacement to the window.  Swept
-    in ``tests/test_services/test_pay_calendar_derivation.py`` over both
-    conventions, four anchors, every cadence from the floor to a year, and
+    in ``tests/test_services/test_pay_calendar_derivation/test_the_boundary_arithmetic.py``
+    over both conventions, four anchors, every cadence from the floor to a year, and
     steps either side of the anchor -- driving THIS function, not a second
     copy of its arithmetic -- and, for the seam, in
     ``tests/test_services/test_pay_calendar_eras.py`` against a brute-force

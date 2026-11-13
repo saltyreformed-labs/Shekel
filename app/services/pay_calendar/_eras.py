@@ -989,9 +989,9 @@ def _validate_semi_monthly(cadence: SemiMonthly) -> None:
 
 #: Each kind's parameter check, keyed by the value's class -- the bounds a
 #: calendar holds a cadence to, beside the grid's arithmetic table they
-#: mirror.  ``tests/test_services/test_pay_calendar_derivation.py`` holds
-#: the two key sets equal, so a kind the grid can project is never one
-#: this function forgets to bound.
+#: mirror.  ``tests/test_services/test_pay_grid_month_kinds.py`` holds the
+#: two key sets equal, so a kind the grid can project is never one this
+#: function forgets to bound.
 _PARAMETER_CHECKS = {
     FixedDays: _validate_fixed_days,
     Monthly: _validate_monthly,

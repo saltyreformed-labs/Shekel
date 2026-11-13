@@ -41,7 +41,7 @@ from tests._test_helpers import (
     create_envelope_txn,
     settlement_if_settling,
 )
-from app.routes.analytics_view import (  # pylint: disable=protected-access
+from app.routes.analytics_view import (
     _bar_pct,
     _history_note,
     _size_lens_rows,

@@ -5,7 +5,9 @@ parsed by ``nginx -t`` in a container.
 
 from __future__ import annotations
 
+import ipaddress
 import os
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -20,6 +22,8 @@ from ._helpers import (
     SHARED_VHOST_CONF,
     BUNDLED_FRONTEND_CIDR,
     SHARED_FRONTEND_CIDR,
+    CLOUDFLARED_TUNNEL_ADDRESS,
+    EDGE_TUNNEL_SUBNET,
     SECURITY_HEADERS,
     DOCKER_SUBPROCESS_TIMEOUT_S,
     _docker_available,
@@ -169,6 +173,40 @@ class TestSharedNginxRealIpAndTokens:
         """
         assert (
             f"set_real_ip_from {SHARED_FRONTEND_CIDR};" in conf_text
+        )
+
+    def test_set_real_ip_from_cloudflared_on_edge_tunnel(
+        self, conf_text: str
+    ) -> None:
+        """The shared Nginx trusts ``CF-Connecting-IP`` from
+        cloudflared's pinned address on ``edge-tunnel``, the bridge it
+        shares with Nginx and Alloy alone (ruling plan#3942), and from
+        nothing else on that bridge.  The host copy must carry this
+        line BEFORE cloudflared moves onto the bridge, or every WAN
+        client looks like the one address.
+
+        Every active (uncommented) ``set_real_ip_from`` entry that
+        overlaps ``EDGE_TUNNEL_SUBNET`` must be that one address, so
+        a widened entry (``172.34.6.0/24``, ``172.34.6.20/24``)
+        fails whether it replaces the bare line or sits beside it:
+        either would trust the gateway, Nginx itself and Alloy.
+        """
+        trusted = re.findall(
+            r"^\s*set_real_ip_from\s+(\S+);", conf_text, re.MULTILINE
+        )
+        tunnel = ipaddress.ip_network(EDGE_TUNNEL_SUBNET)
+        on_tunnel = [
+            entry for entry in trusted
+            if ipaddress.ip_network(entry, strict=False).overlaps(tunnel)
+        ]
+        # As networks, so ``172.34.6.20/32`` reads as the address and
+        # ``172.34.6.20/24`` as the whole bridge it names.
+        assert [
+            ipaddress.ip_network(entry, strict=False) for entry in on_tunnel
+        ] == [ipaddress.ip_network(CLOUDFLARED_TUNNEL_ADDRESS)], (
+            f"edge-tunnel trust must be {CLOUDFLARED_TUNNEL_ADDRESS} "
+            f"alone; the active entries overlapping {EDGE_TUNNEL_SUBNET} "
+            f"are {on_tunnel} (all entries: {trusted})"
         )
 
     def test_real_ip_header_cf_connecting_ip(

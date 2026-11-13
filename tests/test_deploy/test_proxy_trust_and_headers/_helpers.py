@@ -1,5 +1,6 @@
 """The helpers and constants every part of this package shares: the module-level helpers of
-``tests/test_deploy/test_proxy_trust_and_headers.py``, moved verbatim by ``tools/split``.
+``tests/test_deploy/test_proxy_trust_and_headers.py``, moved verbatim by ``tools/split``, and the
+addresses pinned since.
 """
 
 from __future__ import annotations
@@ -41,6 +42,19 @@ BUNDLED_FRONTEND_CIDR = "172.30.0.0/24"
 
 
 SHARED_FRONTEND_CIDR = "172.32.0.0/24"
+
+
+# cloudflared's pinned address on ``edge-tunnel``, the bridge it shares
+# with the shared Nginx and Alloy alone (ruling plan#3942).  A bare
+# address, not a range: the one peer the shared Nginx believes
+# ``CF-Connecting-IP`` from once plan#2169 drops the older entries.
+CLOUDFLARED_TUNNEL_ADDRESS = "172.34.6.20"
+
+
+# ``edge-tunnel``'s subnet.  Its other members (the gateway .1, Nginx .10,
+# Alloy from the ip_range) must never be trusted, so no trusted entry
+# that overlaps this subnet may be anything but the address above.
+EDGE_TUNNEL_SUBNET = "172.34.6.0/24"
 
 
 # The four defense-in-depth headers Nginx emits at every server block

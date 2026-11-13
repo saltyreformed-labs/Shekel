@@ -106,7 +106,7 @@ operations plus one documentation deliverable:
      model carries an explicit ``name=`` shaped by the convention.
      The contract is enforced by code review and by the regression
      test
-     ``tests/test_models/test_c43_ondelete_and_naming_convention.py``
+     ``tests/test_models/test_c43_ondelete_and_naming_convention/test_the_contracts.py``
      which asserts the explicit-name rule for every ref-FK and the
      transfers.pay_period_id FK touched by this commit.
 

@@ -33,8 +33,8 @@ from flask_wtf.csrf import CSRFProtect
 # ``db.CheckConstraint(...)`` MUST carry an explicit ``name=``
 # argument shaped by this convention.  The contract is enforced by
 # code review and by the regression test
-# ``tests/test_models/test_c43_ondelete_and_naming_convention.py::
-# TestNamingConventionContract`` which asserts the explicit-name
+# ``tests/test_models/test_c43_ondelete_and_naming_convention/
+# test_the_contracts.py::TestNamingConventionContract`` which asserts the explicit-name
 # rule for every FK in the model registry.
 #
 # Convention keys (mirroring SQLAlchemy's ``MetaData.naming_convention``

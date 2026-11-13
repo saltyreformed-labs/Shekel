@@ -2,10 +2,15 @@
 once cut's has run on it, compared row by row, the noise gate and the planted controls run
 every time (``design.md`` s.3 items 2, 3, 5, 8 and 10).
 
-THE DEPLOY IS PRODUCTION'S.  Each state's clone runs that state's ``scripts/init_database.py``
-from its worktree and under its venv, as entrypoint step 3 runs it, in an environment built
-whole from the side's own tree and under one instant every side's clock is pinned at
-(:mod:`.sides` says how).
+THE DEPLOY STEP IS PRODUCTION'S; ITS LOGIN IS NOT.  Each state's clone runs that state's
+``scripts/init_database.py`` from its worktree and under its venv, as the deploy's step 3 runs
+it, in an environment built whole from the side's own tree and under one instant every side's
+clock is pinned at (:mod:`.sides` says how).  It runs as the cluster's superuser under the
+production configuration, on both sides, and the boot connects as the superuser too.
+Production's deploy since plan#2166 runs as the owner, ``shekel_owner``, under the deploy
+configuration, after its schemas and the web login's grants, and its app boots as the web
+login, ``shekel_app``: a deploy that needs a right only the superuser holds, and a boot that
+needs a grant the web login lacks, pass here and fail there (step plan#3712).
 
 EVERY TABLE IN THE CATALOG, every row, every column.  A table with a primary key is compared
 row by row by that key; one without, or one whose key is not the same on both sides, as a

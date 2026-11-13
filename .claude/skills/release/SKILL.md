@@ -243,8 +243,11 @@ i).
 ```
 
 It restores the dump in a cluster of its own, runs base's deploy step on one copy and the cut's on
-another, as production's entrypoint runs it, and compares every stored row. It tears all of it down
-itself, so it makes nothing step 12 removes. Read `rows.txt`:
+another, and compares every stored row. Each side's step and boot run as the cluster's superuser,
+where production since plan#2166 deploys as the owner and boots as the web login: a deploy that
+needs a right only the superuser holds, or a boot that needs a grant the web login lacks, passes
+here and fails there (step plan#3712). It tears all of it down itself, so it makes nothing step 12
+removes. Read `rows.txt`:
 
 - **Exit 2** measured nothing, and `rows.txt` names why (the docstring's exit status lists every
   cause, a teardown that left something among them): STOP and report it.

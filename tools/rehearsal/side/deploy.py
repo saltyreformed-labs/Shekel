@@ -1,6 +1,9 @@
-"""The side probe's deploy (step X-cx's K1b-2): a side's ``scripts/init_database.py``, entrypoint
-step 3, run as the image runs it, under the instant the rehearsal pins every side's clock at
-(``design.md`` s.3 item 4; the K1b plan's D2).
+"""The side probe's deploy (step X-cx's K1b-2): a side's ``scripts/init_database.py``, the
+deploy's step 3, run as the image runs it but for the login and the configuration, under the
+instant the rehearsal pins every side's clock at (``design.md`` s.3 item 4; the K1b plan's D2).
+It connects by the ``DATABASE_URL`` it is given, the cluster's superuser's, under
+``FLASK_ENV=production``, where production since plan#2166 runs the step as the owner under the
+deploy configuration (:mod:`tools.rehearsal.rows` says what that leaves unmeasured).
 
 Run BY PATH under the side's venv, with the side's worktree as its directory, in the
 environment :func:`tools.rehearsal.sides.side_environment` builds::

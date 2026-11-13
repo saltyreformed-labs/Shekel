@@ -4,25 +4,21 @@
 # (docker-publish.yml's build-and-push) pushes what it builds and signs its
 # digest; ci.yml's ``image`` job loads it into the runner's docker and checks
 # what it holds, so a change that breaks the build fails a pull request
-# rather than a release (task plan#2366); and updates.yml's ``scan`` job
-# loads dev's image into the runner's docker to scan it for known CVEs each
-# week (plan#2444).  The pinned build action and its
+# rather than a release (task plan#2366).  The pinned build action and its
 # settings are here once; each caller says only whether the image is pushed
 # or loaded, and its tags and labels.  What each caller's job holds is its
 # own: its runner label, its environment, and the steps before this one.
-# The three callers' jobs run on one label and set up no builder
-# (tools/ci/test_ci_image.py refuses ``docker/setup-buildx-action`` by name
-# in the release's job and reads every step of the image job, and
-# tools/ci/test_updates_workflow.py every step of the scan; another way of
-# setting one up, or a ``BUILDX_`` variable in a job's environment, is
-# review's to hold).
+# The release's and the image job's run on one label and set up no builder
+# (tools/ci/test_ci_image.py reads ``docker/setup-buildx-action`` by name;
+# another way of setting one up, or a ``BUILDX_`` variable in a job's
+# environment, is review's to hold).
 #
 # NO LAYER CACHE, read or written (ruling plan#2471): the image is built
 # from the checkout and what it pins and downloads, never from layers
 # another run left (.github/actions/install-lock's header says why).
 #
 # THE RUNNER'S OWN BUILDER (ruling plan#2742): this action sets up no
-# builder, and no caller's job does, so the build runs on the runner's
+# builder, and neither caller's job does, so the build runs on the runner's
 # Docker Engine and its own BuildKit, and no BuildKit image is pulled.
 #
 # THE PROVENANCE RECORD AT mode=max, asked for by name (rulings plan#2746,

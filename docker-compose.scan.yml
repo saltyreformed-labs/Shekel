@@ -1,10 +1,9 @@
 # Shekel Budget App -- the weekly image scan's scanner
 #
-# Grype (ruling plan#3704) reads the app image a scan job saved as a file
-# and writes, on its standard output, every CVE it matches there as JSON;
-# .github/workflows/updates.yml's ``scan`` job runs it and hands the JSON to
-# the report, which judges it (tools/update/scan.py; rulings plan#3710,
-# plan#3720).  Run, from the repository's root, as:
+# Grype (ruling plan#3704) reads the app image saved as a file and writes,
+# on its standard output, every CVE it matches there as JSON, which
+# tools/update/scan.py judges (ruling plan#3720).  Run, from the
+# repository's root, as:
 #
 #   SCAN_IMAGE=/path/to/image.tar \
 #       docker compose -f docker-compose.scan.yml run --rm --no-TTY scan

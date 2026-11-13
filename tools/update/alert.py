@@ -2,18 +2,14 @@
 repository titled for the day, which mentions him, links the run and names each job's result.
 
 **It installs nothing** (plan#2481).  Its job (``.github/workflows/updates.yml``'s ``alert``,
-run when the refresh, the publish, the queue, the release-due job, the image scan or the
-scan's report failed) runs this module on the runner's own Python with the standard library
-alone (``python3 -S``, which puts no installed package on the path), and the runner's own
-``gh`` sends the issue.  Every other job but the scan installs the lock, a pull of uv from
-ghcr.io and downloads of its Python and the packages, so a failure there would otherwise stop
-the one job that reports it.  The ubuntu-26.04 image holds Python 3.14.4 and
-GitHub CLI 2.103.2 (runner-images ``ubuntu26/20261026.180``'s list, read 2026-11-01).  It
-holds only the workflow's own token, widened to ``issues: write`` for its one job, and runs no
-package code.  Being of the standard library alone, it is the home of the issue reads and
-writes the jobs that tell by an issue share (:func:`listed`, :func:`the_workflows`,
-:func:`sent`): the due job's, and the scan's report's (:mod:`tools.update.scan`), which imports
-the standard library alone too.
+run when the refresh, the publish, the queue or the release-due job failed) runs this module on
+the runner's own Python with the standard library alone (``python3 -S``, which puts no installed
+package on the path), and the runner's own ``gh`` sends the issue.  The other jobs each install
+the lock, a pull of uv from ghcr.io and downloads of its Python and the packages, so a failure
+there would otherwise stop the one job that reports it.  The ubuntu-26.04 image holds Python
+3.14.4 and GitHub CLI 2.103.2 (runner-images ``ubuntu26/20261026.180``'s list, read
+2026-11-01).  It holds only the workflow's own token, widened to ``issues: write`` for its one
+job, and runs no package code.
 
 A mention is what reaches him (measured 2026-10-27, on the tracker), and an issue is a
 mention's home that a failed run always has; he closes it once what failed is fixed.  Each
@@ -39,7 +35,7 @@ import sys
 from collections.abc import Callable, Sequence
 from datetime import UTC, date, datetime
 
-from tools.update.app import ACTIONS, DEVELOPER, REPOSITORY_VARIABLE, unset
+from tools.update.app import DEVELOPER, REPOSITORY_VARIABLE, unset
 
 #: The variable holding the workflow's own token, which the alert's job and the due job each
 #: widen to ``issues: write``: the one ``gh`` reads first.
@@ -47,13 +43,6 @@ ISSUE_TOKEN_VARIABLE = "GH_TOKEN"
 #: How the title of each issue the alert opens begins, the failed run's day after it: what
 #: ``quill sync`` knows an alert's issue by, beside the bot that opened it (ruling plan#3619).
 FAILED = "The weekly update failed "
-#: The login GitHub's REST names the workflow's own token by (measured 2026-11-04: an issue
-#: such a token opened, read through GitHub's search): its bot's,
-#: :data:`tools.update.app.ACTIONS`, as REST names a bot.  No user's login can spell it, as
-#: none holds a ``[``.
-BOT = f"{ACTIONS}[bot]"
-#: What closes an issue.
-CLOSED = {"state": "closed", "state_reason": "completed"}
 
 
 def issue(day: date, run: str, results: Sequence[tuple[str, str]]) -> dict[str, str]:
@@ -76,24 +65,6 @@ def sent(repository: str, body: dict[str, str],
                                           (f"{issues}/{number}", "--method", "PATCH")),
                            "--input", "-", "--jq", ".html_url"],
                           input=json.dumps(body), capture_output=True, text=True, check=False)
-
-
-def listed(repository: str) -> subprocess.CompletedProcess:
-    """Each open issue of ``repository`` the runner's ``gh`` reads, a JSON object a line, every
-    page of them: its number, title, body and who opened it (measured 2026-11-04 with gh
-    2.102.1 on this repository, a body's newlines escaped)."""
-    return subprocess.run(["gh", "api", f"repos/{repository}/issues?state=open&per_page=100",
-                           "--paginate", "--jq", ".[] | {number, title, body, by: .user.login}"],
-                          capture_output=True, text=True, check=False)
-
-
-def the_workflows(listing: str) -> list[dict[str, object]]:
-    """Each issue of ``listing`` (:func:`listed`'s output) that the workflow's own token opened
-    (:data:`BOT`), in its order: the alert's, the due job's and the scan's report's, each of
-    which tells its own apart by its title.  The repository is public, so anyone may open an
-    issue of any title, and a stranger's is none of them."""
-    return [issue for issue in (json.loads(line) for line in listing.split("\n") if line)
-            if issue["by"] == BOT]
 
 
 def opened(send: Callable[[str, dict[str, str]], subprocess.CompletedProcess],

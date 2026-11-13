@@ -1,11 +1,9 @@
 """Controls for ``.github/actions/build-image``: the one recipe for building the app image.
 
 The release (``docker-publish.yml``'s ``build-and-push``) builds the image it pushes and signs
-by this action, ci.yml's ``image`` job builds by it the image it loads and checks
-(:mod:`tools.ci.test_ci_image`), and updates.yml's ``scan`` job the image of dev it loads and
-scans (:mod:`tools.ci.test_updates_workflow`), so the settings the three share have one home
-(ruling plan#2752), the image job checks the build the release makes and the scan scans it.
-The action's one step runs the pinned
+by this action, and ci.yml's ``image`` job builds by it the image it loads and checks
+(:mod:`tools.ci.test_ci_image`), so the settings the two share have one home (ruling plan#2752)
+and the job checks the build the release makes.  The action's one step runs the pinned
 ``docker/build-push-action``, which runs only on a runner: why each setting is there, and what
 of each was measured or read, is the action's header.
 """
@@ -64,12 +62,12 @@ class TestTheAppImageHasOneRecipe:
             "provenance": "mode=max"}
         assert not re.search(r"\bsecrets\b|\btoken\b", yaml.safe_dump(step))
 
-    def test_its_three_callers_alone_call_it_and_no_step_else_names_its_action(self):
+    def test_the_release_and_the_image_job_alone_call_it_and_no_step_else_names_its_action(
+            self):
         """Its callers, in every workflow and every action of this repository's: the release's
         build step, ``id: build``, pushing with the metadata's tags and labels, the digest it
-        hands back the one the signing step signs and the summary prints for pinning;
-        ci.yml's ``image`` job (its call is :mod:`tools.ci.test_ci_image`'s to read); and
-        updates.yml's ``scan`` job (its call is :mod:`tools.ci.test_updates_workflow`'s).  Each
+        hands back the one the signing step signs and the summary prints for pinning; and
+        ci.yml's ``image`` job (its call is :mod:`tools.ci.test_ci_image`'s to read).  Each
         calls it by ``$/``, which GitHub loads from the running commit.  No other step of a
         workflow or an action names the build action, in any case, as GitHub reads an
         action's owner and name.  What each caller's job holds around the call (its runner
@@ -83,8 +81,7 @@ class TestTheAppImageHasOneRecipe:
                 callers[where] = step
             if uses.split("@")[0].lower() == BUILD_PUSH:
                 builds.append(where)
-        assert sorted(callers) == [("ci.yml", "image"), ("docker-publish.yml", "build-and-push"),
-                                   ("updates.yml", "scan")]
+        assert sorted(callers) == [("ci.yml", "image"), ("docker-publish.yml", "build-and-push")]
         assert builds == [("build-image", 0)]
         assert callers[("docker-publish.yml", "build-and-push")] == {
             "name": "Build and push image", "id": "build", "uses": USES, "with": {

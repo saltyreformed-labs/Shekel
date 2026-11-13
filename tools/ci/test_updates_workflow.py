@@ -1,21 +1,17 @@
-"""Controls for ``updates.yml``, the weekly dependency update (rulings plan#2448-plan#2450) and
-the weekly image scan and its report (plan#2444): which job holds the update App's key, whose
-code each runs, when each runs, and how long each job and step may run (rulings plan#2761,
-plan#2762, plan#2765, plan#3721).
+"""Controls for ``updates.yml``, the weekly dependency update (rulings plan#2448-plan#2450):
+which job holds the update App's key, whose code each runs, when each runs, and how long each
+job and step may run (rulings plan#2761, plan#2762, plan#2765, plan#3721).
 """
 from __future__ import annotations
 
-import os
 import re
-import stat
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 
 import pytest
 import yaml
 
 from tools.ci import arcs
-from tools.ci.test_build_image_action import USES as BUILD_IMAGE
-from tools.ci.test_ci_workflow import _is_a_limit, _run_step, _workflows
+from tools.ci.test_ci_workflow import _is_a_limit, _workflows
 
 
 #: The update workflow (rulings plan#2448-plan#2450), its jobs that hold the App's key, and the
@@ -33,10 +29,6 @@ NO_STEP_LIMITS = "alert"
 #: How a ``uses:`` names an action of this repository's own, which GitHub loads from the
 #: workflow's commit (``$/``) or the checkout (``./``).
 LOCAL_ACTION = ("$/", "./")
-#: The scan's schedule's day of the week, as cron spells Tuesday (plan#2444's spec).
-TUESDAY = "2"
-#: The failed or reported run's page, as the alert and the scan's report each name it.
-RUN = "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
 
 
 def _runs_an_outside_action(uses: str, root: Path = arcs.REPO) -> bool:
@@ -68,8 +60,8 @@ class TestTheUpdateWorkflowKeepsItsKeyFromPackageCode:
 
     def test_the_refresh_reads_dev_and_sees_no_secret(self):
         """The refresh checks out ``dev`` and names no secret, variable or mint; no job but the
-        alert, the due job and the scan's report widens the workflow's read-only token, and each
-        only to issues (rulings plan#2466, plan#2829, plan#3710)."""
+        alert and the due job widens the workflow's read-only token, and each only to issues
+        (rulings plan#2466, plan#2829)."""
         workflow = self._workflow()
         refresh = workflow["jobs"]["refresh"]
         text = yaml.safe_dump(refresh)
@@ -77,17 +69,16 @@ class TestTheUpdateWorkflowKeepsItsKeyFromPackageCode:
         assert refresh["steps"][0]["with"] == {"ref": "dev", "persist-credentials": False}
         assert workflow["permissions"] == {"contents": "read"}
         assert {name: job["permissions"] for name, job in workflow["jobs"].items()
-                if "permissions" in job} == dict.fromkeys(("alert", "due", "report"), {
+                if "permissions" in job} == dict.fromkeys(("alert", "due"), {
                     "contents": "read", "issues": "write"})
 
     def test_a_failed_job_opens_an_issue_with_the_workflow_s_own_token(self):
-        """The alert runs when the refresh, the publish, the queue, the due job, the scan or its
-        report failed, a scan that cannot run or be judged among them (ruling plan#3710),
+        """The alert runs when the refresh, the publish, the queue or the due job failed,
         holding no secret, variable or mint: main's own code, given the workflow's token and
         each job's result (ruling plan#2466), in two steps, the checkout and the alert, so it
         installs nothing and runs on the standard library alone (``-S``; plan#2481)."""
         alert = self._workflow()["jobs"]["alert"]
-        assert alert["needs"] == ["refresh", "publish", "queue", "due", "scan", "report"]
+        assert alert["needs"] == ["refresh", "publish", "queue", "due"]
         assert alert["if"] == "failure()"
         text = yaml.safe_dump(alert)
         assert "secrets." not in text and "vars." not in text and MINT not in text
@@ -95,7 +86,9 @@ class TestTheUpdateWorkflowKeepsItsKeyFromPackageCode:
         assert checkout["uses"].startswith("actions/checkout@")
         assert checkout["with"] == {"persist-credentials": False}
         assert step["env"] == {
-            "GH_TOKEN": "${{ github.token }}", "RUN": RUN,
+            "GH_TOKEN": "${{ github.token }}",
+            "RUN": "${{ github.server_url }}/${{ github.repository }}/actions/runs/"
+                   "${{ github.run_id }}",
             **{job.upper(): f"${{{{ needs.{job}.result }}}}" for job in alert["needs"]}}
         assert step["run"] == ('python3 -S -m tools.update.alert "${RUN}" ' + " ".join(
             f'"{job}=${{{job.upper()}}}"' for job in alert["needs"]))
@@ -151,16 +144,13 @@ class TestTheUpdateWorkflowKeepsItsKeyFromPackageCode:
 
     def test_each_job_runs_only_from_main_on_the_schedule_its_condition_names(self):
         """The refresh on Monday's schedule or a dispatch, the queue and the due job on the
-        daily one, the scan on Tuesday's (plan#2444), each only from main, so a dispatch from a
-        branch runs nothing (the environment, not these conditions, keeps the key from a
-        branch's code); the publish only after the refresh, and the scan's report only after
-        the scan, which skips it on any other day; and one run at a time, each waiting
-        for the one before, never cancelling it, so a dispatch never races Monday's publish,
-        nor the queue a publish."""
+        daily one, each only from main, so a dispatch from a branch runs nothing (the
+        environment, not these conditions, keeps the key from a branch's code); the publish only
+        after the refresh; and one run at a time, each waiting for the one before, never
+        cancelling it, so a dispatch never races Monday's publish, nor the queue a publish."""
         workflow = self._workflow()
         on = workflow.get(True, workflow.get("on"))
-        monday, daily, tuesday = (entry["cron"] for entry in on["schedule"])
-        assert tuesday.split()[2:] == ["*", "*", TUESDAY], tuesday
+        monday, daily = (entry["cron"] for entry in on["schedule"])
         assert "workflow_dispatch" in on
         jobs = workflow["jobs"]
         main = "github.ref == 'refs/heads/main'"
@@ -169,9 +159,7 @@ class TestTheUpdateWorkflowKeepsItsKeyFromPackageCode:
             f"github.event.schedule == '{monday}')")
         for name in ("queue", "due"):
             assert jobs[name]["if"] == f"{main} && github.event.schedule == '{daily}'", name
-        assert jobs["scan"]["if"] == f"{main} && github.event.schedule == '{tuesday}'"
         assert jobs["publish"]["needs"] == "refresh" and "if" not in jobs["publish"]
-        assert jobs["report"]["needs"] == "scan" and "if" not in jobs["report"]
         assert workflow["concurrency"] == {"group": "updates", "cancel-in-progress": False}
 
     def test_the_publish_reads_what_the_refresh_wrote_from_the_commit_it_read(self):
@@ -194,138 +182,6 @@ class TestTheUpdateWorkflowKeepsItsKeyFromPackageCode:
             "${{ needs.refresh.outputs.base }}")
         assert jobs["refresh"]["outputs"] == {"base": "${{ steps.checkout.outputs.commit }}"}
         assert jobs["refresh"]["steps"][0]["id"] == "checkout"
-
-
-class TestTheScanReadsDevsImageWithNoSecret:
-    """``updates.yml``'s ``scan`` (plan#2444): dev's image built by the one recipe, saved as a
-    file and read by the scanner's compose service, its JSON uploaded for the report, the job
-    holding no secret and only the workflow's read-only token, as its build runs dev's package
-    code."""
-
-    #: The step that saves the image and runs the scanner on it.
-    SCAN_STEP = "Save the image and scan it"
-
-    @staticmethod
-    def _scan() -> dict:
-        """The scan job, read."""
-        return _workflows()[UPDATES]["jobs"]["scan"]
-
-    def test_it_builds_dev_s_image_by_the_one_recipe_and_sees_no_secret(self):
-        """The job holds exactly its keys, so no permission, environment or ``needs``, and
-        names no secret, variable, mint or token; its four steps, in order, set up no builder
-        (ruling plan#2742).  It checks out dev keeping no credential, builds by the one recipe,
-        loaded under the job's image name and never pushed (ruling plan#2752), runs the scanner
-        in one step, and uploads, as the artifact ``scan``, the file that step's output names,
-        failing when there is none."""
-        scan = self._scan()
-        assert set(scan) == {"if", "runs-on", "timeout-minutes", "env", "steps"}
-        assert scan["env"] == {"IMAGE": "shekel:scan"}
-        text = yaml.safe_dump(scan)
-        assert "secrets." not in text and "vars." not in text and MINT not in text
-        assert not re.search(r"\bsecrets\b|\btoken\b", text)
-        checkout, build, step, upload = scan["steps"]
-        assert checkout["uses"].startswith("actions/checkout@")
-        assert checkout["with"] == {"ref": "dev", "persist-credentials": False}
-        assert set(build) == {"name", "timeout-minutes", "uses", "with"}
-        assert build["uses"] == BUILD_IMAGE
-        assert build["with"] == {"push": False, "load": True, "tags": "${{ env.IMAGE }}"}
-        assert step["name"] == self.SCAN_STEP and step["id"] == "scan"
-        assert upload["uses"].startswith("actions/upload-artifact@")
-        assert upload["with"] == {"name": "scan", "path": "${{ steps.scan.outputs.json }}",
-                                  "if-no-files-found": "error", "retention-days": 7}
-
-    def test_the_step_hands_the_scanner_the_file_it_reads_and_names_the_json_written(
-            self, tmp_path):
-        """The step's text, run as GitHub runs it (``shell: bash``), with a stand-in ``docker``
-        that writes a saved image readable by its owner alone, as ``docker save`` does: the
-        job's image is saved to the file the scanner's compose file binds (its
-        ``${VARIABLE:?...}``), made readable by all, as the scanner runs as uid 65532; the
-        scanner's service runs from its compose file with no TTY, its standard output alone the
-        JSON, whose file the step's output names.  A scanner that exits 1 fails the step, which
-        then names no JSON for the upload to find."""
-        step = next(step for step in self._scan()["steps"] if step["name"] == self.SCAN_STEP)
-        assert set(step) == {"name", "id", "timeout-minutes", "shell", "env", "run"}
-        assert step["shell"] == "bash"
-        compose = (arcs.REPO / "docker-compose.scan.yml").read_text(encoding="utf-8")
-        variable, = re.findall(r"\$\{(\w+):\?", compose)
-        assert variable in step["env"], (variable, step["env"])
-        files = {name: value.replace("${{ runner.temp }}", str(tmp_path))
-                 for name, value in step["env"].items()}
-        assert all(value.startswith(f"{tmp_path}/") for value in files.values()), files
-        bin_dir = tmp_path / "bin"
-        bin_dir.mkdir()
-        docker = bin_dir / "docker"
-        docker.write_text(
-            '#!/bin/bash\nprintf "%s\\n" "$*" >> "${CALLS}"\n'
-            'case "$1" in\n'
-            '  save) : > "$3"; chmod 0600 "$3" ;;\n'
-            '  compose) echo "{\\"matches\\": []}"; echo "progress" >&2; exit "${EXIT}" ;;\n'
-            "esac\n", encoding="utf-8")
-        docker.chmod(0o755)
-        for exit_status in (0, 1):
-            calls, output = tmp_path / f"calls{exit_status}", tmp_path / f"output{exit_status}"
-            output.write_text("", encoding="utf-8")
-            ran = _run_step(step["run"], {
-                **files, "PATH": f"{bin_dir}:/usr/bin:/bin", "IMAGE": "shekel:scan",
-                "GITHUB_OUTPUT": str(output), "CALLS": str(calls), "EXIT": str(exit_status)},
-                cwd=tmp_path)
-            assert ran.returncode == exit_status, ran
-            assert calls.read_text(encoding="utf-8").splitlines() == [
-                f"save --output {files[variable]} shekel:scan",
-                "compose -f docker-compose.scan.yml run --rm --no-TTY scan"]
-            assert stat.S_IMODE(os.stat(files[variable]).st_mode) == 0o644
-            json_file, = (value for name, value in files.items() if name != variable)
-            assert Path(json_file).read_text(encoding="utf-8") == '{"matches": []}\n'
-            assert output.read_text(encoding="utf-8") == (
-                "" if exit_status else f"json={json_file}\n")
-
-
-class TestTheScansReportReadsItsJsonAsData:
-    """``updates.yml``'s ``report`` (rulings plan#3710, plan#3720): after the scan, main's own
-    code judges the JSON the scan uploaded, read as data, on the lock's interpreter and the
-    standard library alone, with only the workflow's token, widened to issues."""
-
-    @staticmethod
-    def _jobs() -> dict:
-        """The update workflow's jobs, read."""
-        return _workflows()[UPDATES]["jobs"]
-
-    def test_it_runs_mains_code_on_the_standard_library_with_the_workflow_s_token(self):
-        """The job holds exactly its keys, so no job-level ``env`` or ``defaults`` reaches its
-        steps, and names no secret, variable or mint; in four steps it checks out the
-        workflow's own commit keeping no credential, installs the lock's interpreter and no
-        package, downloads the scan's artifact and runs the report, handed the token and the
-        run's page."""
-        report = self._jobs()["report"]
-        assert set(report) == {"needs", "runs-on", "timeout-minutes", "permissions", "steps"}
-        text = yaml.safe_dump(report)
-        assert "secrets." not in text and "vars." not in text and MINT not in text
-        checkout, install, download, step = report["steps"]
-        assert checkout["uses"].startswith("actions/checkout@")
-        assert checkout["with"] == {"persist-credentials": False}
-        assert install["with"] == {"install": "python"} and "env" not in install
-        assert download["uses"].startswith("actions/download-artifact@")
-        assert set(step) == {"name", "timeout-minutes", "env", "run"}
-        assert step["env"] == {"GH_TOKEN": "${{ github.token }}", "RUN": RUN}
-        assert step["run"].startswith("python -m tools.update.scan ")
-
-    def test_it_reads_the_one_file_the_scan_uploaded(self):
-        """The artifact the scan uploads is the one the report downloads, and the file it reads
-        is the one the scan wrote: its one file, which the upload puts at the artifact's root by
-        its name, in the folder the download names."""
-        jobs = self._jobs()
-        scan = {step["name"]: step for step in jobs["scan"]["steps"]}
-        report = {step["name"]: step for step in jobs["report"]["steps"]}
-        upload = scan["Upload the scanner's JSON"]["with"]
-        download = report["Download the scanner's JSON"]["with"]
-        assert upload["path"] == "${{ steps.scan.outputs.json }}"
-        assert download == {"name": upload["name"], "path": "${{ runner.temp }}/scan"}
-        written = PurePosixPath(scan[TestTheScanReadsDevsImageWithNoSecret.SCAN_STEP]["env"][
-            "SCAN_JSON"])
-        assert written.parent == PurePosixPath("${{ runner.temp }}")
-        folder = download["path"].replace("${{ runner.temp }}", "${RUNNER_TEMP}")
-        assert report["Open or close the scan's issue"]["run"] == (
-            f'python -m tools.update.scan "{folder}/{written.name}" "${{RUN}}"')
 
 
 class TestAStalledUpdateRunFailsLoudly:

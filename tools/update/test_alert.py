@@ -15,7 +15,7 @@ import pytest
 
 from tools.ci.arcs import REPO
 from tools.update import alert
-from tools.update.app import ACTIONS, DEVELOPER
+from tools.update.app import DEVELOPER
 
 _RUN = "https://github.com/owner/shekel/actions/runs/7"
 _DAY = date(2026, 11, 2)
@@ -96,36 +96,6 @@ def test_gh_is_handed_a_change_to_an_issue_by_its_number(tmp_path, monkeypatch):
         "api", "repos/owner/shekel/issues/9", "--method", "PATCH", "--input", "-",
         "--jq", ".html_url"]
     assert json.loads((tmp_path / "gh.input").read_text(encoding="utf-8")) == {"body": "a list"}
-
-
-def test_gh_is_asked_for_every_page_of_open_issues(tmp_path, monkeypatch):
-    """The real listing is one ``gh api`` read of the repository's open issues, every page, each
-    a line, answered as ``gh`` printed it (the due job's read and the scan's report's)."""
-    gh = tmp_path / "gh"
-    gh.write_text('#!/bin/sh\nprintf "%s\\n" "$@" > "$0.args"\necho \'{"number": 9}\'\n',
-                  encoding="utf-8")
-    gh.chmod(0o755)
-    monkeypatch.setenv("PATH", f"{tmp_path}{os.pathsep}{os.environ['PATH']}")
-    done = alert.listed("owner/shekel")
-    assert (done.returncode, done.stdout, done.stderr) == (0, '{"number": 9}\n', "")
-    assert (tmp_path / "gh.args").read_text(encoding="utf-8").splitlines() == [
-        "api", "repos/owner/shekel/issues?state=open&per_page=100", "--paginate", "--jq",
-        ".[] | {number, title, body, by: .user.login}"]
-
-
-def test_the_workflow_s_issues_are_those_its_own_token_opened():
-    """Of a listing, each issue the workflow's bot opened, as REST names it, in its order, and
-    none a person opened, whatever the title or a login that spells the bot's but its
-    ``[bot]``; only a newline ends a line, so a title's other line breaks split none."""
-    issues = [{"number": 3, "title": "a\u2028b\x85", "body": None, "by": alert.BOT},
-              {"number": 4, "title": "The weekly update failed 2026-11-02", "body": "",
-               "by": ACTIONS},
-              {"number": 5, "title": "x", "body": "", "by": "a-stranger"},
-              {"number": 9, "title": "y", "body": "z", "by": alert.BOT}]
-    listing = "".join(json.dumps(issue, ensure_ascii=False) + "\n" for issue in issues)
-    assert alert.BOT == f"{ACTIONS}[bot]"
-    assert alert.the_workflows(listing) == [issues[0], issues[3]]
-    assert not alert.the_workflows("")
 
 
 def test_the_module_runs_with_no_package_installed():

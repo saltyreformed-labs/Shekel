@@ -72,10 +72,9 @@ INSTALL_LOCK = "$/.github/actions/install-lock"
 #: The step that calls it, named alike in every job.
 INSTALL_STEP = "Install the lock"
 
-#: What each job installs from the lock: every job but the three that build the app image
-#: (ci.yml's ``image``, the release's and the update's ``scan``), which run no Python on the
-#: runner, and the update alert, which installs nothing so a failed install cannot stop it
-#: (plan#2481).  None restores
+#: What each job installs from the lock: every job but the two that build the app image
+#: (ci.yml's ``image`` and the release's), which run no Python on the runner, and the update
+#: alert, which installs nothing so a failed install cannot stop it (plan#2481).  None restores
 #: a cache, as no workflow does (ruling plan#2471).
 INSTALLS = {
     ("ci.yml", "landing"): {"install": "landing"},
@@ -92,7 +91,6 @@ INSTALLS = {
     ("updates.yml", "publish"): {"install": "landing"},
     ("updates.yml", "queue"): {"install": "landing"},
     ("updates.yml", "due"): {"install": "landing"},
-    ("updates.yml", "report"): {"install": "python"},
 }
 
 #: The triggers under which a step's PATH write lets a pull request's code run with the

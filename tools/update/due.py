@@ -52,6 +52,7 @@ variable is unset, saying which.
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import subprocess
 import sys
@@ -61,11 +62,17 @@ from pathlib import Path
 from tools.ci.arcs import REPO
 from tools.ci.gitcmd import GitError
 from tools.quill.door import Moved, NotVersions, described, fetch, versions_waiting
-from tools.update.alert import CLOSED, ISSUE_TOKEN_VARIABLE, listed, sent, the_workflows
-from tools.update.app import DEVELOPER, REPOSITORY_VARIABLE, unset
+from tools.update.alert import ISSUE_TOKEN_VARIABLE, sent
+from tools.update.app import ACTIONS, DEVELOPER, REPOSITORY_VARIABLE, unset
 
 #: The title this module's issue goes by, read back each run: its one record.
 TITLE = "A release is due: dev and main pin different versions"
+#: The login GitHub's REST names the workflow's own token by (measured 2026-11-04: an issue
+#: such a token opened, read through GitHub's search): its bot's,
+#: :data:`tools.update.app.ACTIONS`, as REST names a bot.
+BOT = f"{ACTIONS}[bot]"
+#: What closes the issue.
+CLOSED = {"state": "closed", "state_reason": "completed"}
 
 
 def _text(versions: Sequence[Moved]) -> str:
@@ -97,10 +104,19 @@ def writes(versions: Sequence[Moved],
             if issue["body"] not in (text, _mentioning(text))]
 
 
+def listed(repository: str) -> subprocess.CompletedProcess:
+    """Each open issue of ``repository`` the runner's ``gh`` reads, a JSON object a line, every
+    page of them: its number, title, body and who opened it (measured 2026-11-04 with gh
+    2.102.1 on this repository, a body's newlines escaped)."""
+    return subprocess.run(["gh", "api", f"repos/{repository}/issues?state=open&per_page=100",
+                           "--paginate", "--jq", ".[] | {number, title, body, by: .user.login}"],
+                          capture_output=True, text=True, check=False)
+
+
 def _ours(listing: str) -> list[dict[str, object]]:
-    """Each issue of ``listing`` (:func:`tools.update.alert.listed`'s output) that is this
-    module's: the workflow's (:func:`tools.update.alert.the_workflows`) of its exact title."""
-    return [issue for issue in the_workflows(listing) if issue["title"] == TITLE]
+    """Each issue of ``listing`` (:func:`listed`'s output) that is this module's."""
+    return [issue for issue in (json.loads(line) for line in listing.split("\n") if line)
+            if issue["title"] == TITLE and issue["by"] == BOT]
 
 
 def run(repository: str, versions: Sequence[Moved],

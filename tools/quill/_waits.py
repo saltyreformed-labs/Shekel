@@ -16,10 +16,6 @@ stays the one judge of what waits:
   one by the workflow's own bot (:data:`tools.update.app.ACTIONS`) titled as the alert titles
   one (:data:`tools.update.alert.FAILED`).  The alert writes no marker, so this pass makes the
   one its card holds from the issue's number (:func:`_alert`).
-- each CVE listed in an open issue of the code repository the weekly image scan's report
-  opened (``tools/update/scan.py``, ruling plan#3710): one by the same bot titled as the report
-  titles one (:data:`tools.update.scan.FOUND`), each line naming a CVE in a package and ending
-  with the report's marker for them (:func:`_scanned`).
 
 **A card holds each thing told as where it was told and the queue's marker for it**, one to a
 line of the pass's own form (:func:`told_line`) in the run of such lines that ends its text
@@ -28,13 +24,9 @@ the walk's refusals ``card pyproject.toml pins no version`` and ``card uv.lock c
 metadata``, which any pull request moving a capped requirement repeats (gunicorn 27's, first
 offered 2026-11-23, the census of plan#3615).  So a thing is held for the pull request it was
 told on, the queue's own scope: the queue tells a thing once on each pull request, reading
-that one's comments alone.  A CVE the scan lists is told on no one issue: each red scan opens
-a new one and lists a CVE still unfixed again, so it is told on the image scan of that CVE in
-its package (``image scan of CVE-2026-1999903 in python (binary)``), the same each week it is
-listed, and each is a card of its own (ruling plan#3710).  And only a line ending a text holds
-anything: a marker or a line quoted in prose, in a code span or in a code block, which its
-fence follows, holds nothing (plan#3676's own text quoted all five of PR 667-669's on
-2026-11-13).
+that one's comments alone.  And only a line ending a text holds anything: a marker or a line
+quoted in prose, in a code span or in a code block, which its fence follows, holds nothing
+(plan#3676's own text quoted all five of PR 667-669's on 2026-11-13).
 
 **One open card for each pull request or issue** (ruling plan#3722): a thing told where no
 card is open for it is filed a card holding every thing that comment told (one comment can
@@ -88,7 +80,6 @@ from tools.quill.check import TITLE_CAP, Draft, violations
 from tools.quill.setup_tracker import PLAN, Place
 from tools.update.alert import FAILED
 from tools.update.app import ACTIONS, APP, bot_of, marker, markers
-from tools.update.scan import FOUND, lines_of
 
 #: The code repository whose update's record the pass reads: the tracker's organization's
 #: ``Shekel``, which is public, so quill's App token, narrowed to the tracker
@@ -156,9 +147,7 @@ def every_text(place: Place) -> str:
 @dataclass(frozen=True)
 class Told:
     """One thing the update told, as its card is filed from it: ``where``, the pull request or
-    issue it was told on, as the card names it (``PR 669``), or for a CVE the scan lists, the
-    scan of it in its package (:func:`_scanned`); ``title``, that one's title, the issue's for
-    a CVE;
+    issue it was told on, as the card names it (``PR 669``); ``title``, that one's title;
     ``link``, where it was told, the comment's or the issue's address; ``said``, what it told,
     word for word; ``when``, when, as GitHub gives it; and ``marks``, each marker it holds, in
     its order."""
@@ -216,28 +205,10 @@ def _alert(issue: dict) -> Told:
                 issue["createdAt"], (marker(f"alert {issue['number']}"),))
 
 
-def _scanned(issue: dict) -> list[Told]:
-    """Each CVE the scan's issue ``issue`` lists in a package, as told: on the image scan of it
-    in that package, the same each week it is listed (the module says why); the lines listing
-    it (:func:`tools.update.scan.lines_of`), one for each version of the package installed, and
-    their marker.  The last listed first, so the first, the highest rated, is filed last and
-    sits at the top, as :func:`told` keeps the order of things told at the same time."""
-    lines: dict[str, list[str]] = {}
-    for vulnerability, package, kind, line in lines_of(issue["body"] or ""):
-        lines.setdefault(f"image scan of {vulnerability} in {package} ({kind})", []).append(line)
-    found = []
-    for where, rows in reversed(lines.items()):
-        said = "\n".join(rows)
-        found.append(Told(where, issue["title"], issue["url"], said, issue["createdAt"],
-                          markers(said)))
-    return found
-
-
 def told(github: GitHub) -> list[Told]:
     """Everything the update told that is still open, oldest first: each comment of the App's
-    on an open pull request of :data:`CODE` holding a marker, each open issue there the alert
-    opened, and each CVE listed in each open issue there the scan's report opened (the module
-    says which)."""
+    on an open pull request of :data:`CODE` holding a marker, and each open issue there the
+    alert opened (the module says which)."""
     owner, name = CODE
     found = []
     pulls, _ = paged(partial(github.graphql, PULLS, owner=owner, name=name),
@@ -251,10 +222,8 @@ def told(github: GitHub) -> list[Told]:
     issues, _ = paged(partial(github.graphql, ISSUES, owner=owner, name=name),
                       lambda answer: answer["repository"]["issues"],
                       f"the open issues of {owner}/{name}")
-    ours = [issue for issue in issues if bot_of(issue) == ACTIONS]
-    found += [_alert(issue) for issue in ours if issue["title"].startswith(FAILED)]
-    found += [item for issue in ours if issue["title"].startswith(FOUND)
-              for item in _scanned(issue)]
+    found += [_alert(issue) for issue in issues
+              if bot_of(issue) == ACTIONS and issue["title"].startswith(FAILED)]
     return sorted(found, key=lambda item: item.when)
 
 
@@ -297,13 +266,11 @@ def _carried(tracker: Tracker, numbers: Iterable[int]) -> dict[int, frozenset[Th
 def _title(item: Told) -> str:
     """The card's title: where ``item`` was told and that one's title, at most
     :data:`check.TITLE_CAP` characters: one longer is cut at the last word of that title that
-    fits, or inside its first word where none does, three dots marking the cut; or, where
-    the where alone leaves no room (a CVE in a package of a long name), inside the where."""
+    fits, or inside its first word where none does, three dots marking the cut."""
     head = f"Shekel {item.where}: "
     if len(title := head + item.title.strip()) <= TITLE_CAP:
         return title
-    if (room := TITLE_CAP - len(head) - len("...")) < 0:
-        return title[:TITLE_CAP - len("...")].rstrip() + "..."
+    room = TITLE_CAP - len(head) - len("...")
     fits = item.title.strip()[:room + 1]
     kept = fits.rsplit(" ", 1)[0] if " " in fits else fits[:room]
     return head + kept.rstrip() + "..."

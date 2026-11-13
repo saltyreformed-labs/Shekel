@@ -44,6 +44,15 @@ _DEFAULT_ADMIN_URL = "postgresql:///postgres"
 _EXPECTED_ACCOUNT_TYPE_COUNT = 19
 
 
+#: The condition both by-hand rebuild hints below name.  A template built on a
+#: cluster without the role carries none of the grants the role tests read
+#: (``tests/test_models/test_audit_migration.py``), so the suite fails on it.
+_HOLD_THE_APP_ROLE_FIRST = (
+    "which must hold the shekel_app role first, as the baked image does "
+    "(scripts/build_test_db_image.py)"
+)
+
+
 #: What separates a world SNAPSHOT's name from the worker database it was
 #: frozen from (plan step balance:X-be-2).  One constant because three places
 #: depend on the split: the name is built with it, the orphan sweep recovers a
@@ -113,7 +122,8 @@ def _bootstrap_worker_database():
         The bootstrap fails fast with an actionable
         ``RuntimeError`` if ``shekel_test_template`` does not
         exist.  The fix is documented in the error message:
-        ``python scripts/build_test_template.py``.
+        ``python scripts/build_test_template.py``, on a cluster
+        that already holds the ``shekel_app`` role.
 
     Clone verification:
         After the clone, a fresh psycopg connection counts rows
@@ -240,7 +250,8 @@ def _bootstrap_worker_database():
                     f"{_TEST_TEMPLATE_DATABASE!r} not found.  Under "
                     "./scripts/test.sh this is unreachable -- the image is "
                     "verified before pytest starts -- so something else "
-                    "supplied this cluster.  On a cluster you control: "
+                    "supplied this cluster.  On a cluster you control, "
+                    f"{_HOLD_THE_APP_ROLE_FIRST}: "
                     "python scripts/build_test_template.py"
                 )
 
@@ -282,7 +293,8 @@ def _bootstrap_worker_database():
                     "the image is stale in a way its own verification missed "
                     "-- rebuild it with "
                     "'python scripts/build_test_db_image.py --force'.  On a "
-                    "cluster you supplied: python scripts/build_test_template.py"
+                    f"cluster you supplied, {_HOLD_THE_APP_ROLE_FIRST}: "
+                    "python scripts/build_test_template.py"
                 )
     finally:
         verify_conn.close()

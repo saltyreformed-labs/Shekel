@@ -312,8 +312,11 @@ def shekel_app_role(db):
 
     The role is the cluster's from its start (the module docstring), so this
     neither creates nor drops it.  It gives the role, in this test's own
-    database, what ``scripts/init_db_role.sql`` gives it on every container
-    start, and re-closes the ledger through the shared SQL that file mirrors.
+    database, the grants ``scripts/init_db_role.sql`` gives it on every
+    container start on the schemas these tests exercise, and re-closes the
+    ledger through the shared SQL that file mirrors.  It copies those grants
+    rather than running the file, so it carries none of the file's
+    ``ALTER DEFAULT PRIVILEGES``; plan#3771 is the step that runs the file.
     Nothing is revoked afterwards: the grants live in the clone, which the next
     test's setup drops with them.
 

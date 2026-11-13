@@ -136,6 +136,8 @@ def _seed_placed_import(account, *, file_name, stated, day, period):
     db.session.add(level)
     db.session.flush()
     return statement, level
+
+
 class TestTheRoundTrip:
     """Head -> down -> up, over a standing placement and a released one."""
 

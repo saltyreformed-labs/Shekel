@@ -12,7 +12,8 @@ must-knows; a fact lives in one tier and the other tiers point at it.
 ## Test Infrastructure
 
 - Tests use a real PostgreSQL database (`TEST_DATABASE_URL` or TestConfig defaults).
-- `conftest.py` uses session-scoped app/db setup, truncates tables between tests.
+- `conftest.py` builds the app once per worker, and the `db` fixture (`tests/_app_fixtures.py`)
+  drops and re-clones each test's database from the template, so nothing is truncated.
 - Test categories: `test_routes/`, `test_services/`, `test_models/`, `test_integration/`,
   `test_adversarial/`, `test_scripts/`.
 - **Use existing fixtures** from `conftest.py` (`seed_user`, `seed_second_user`, `auth_client`,
@@ -266,6 +267,9 @@ idempotent, dropping and recreating `shekel_test_template` on every run, and pri
 drop+create, populate (Alembic chain to `head` + audit infrastructure + reference seed +
 `TRUNCATE system.audit_log`), verify (account-type count, audit trigger count, `system.audit_log`
 row count). It reads `TEST_ADMIN_DATABASE_URL` for the admin DSN (default `postgresql:///postgres`).
+The cluster must already hold the `shekel_app` role, which the bake creates before it builds
+(`scripts/build_test_db_image.py`). A template built on a cluster without the role carries none of
+its grants, and the role tests in `tests/test_models/test_audit_migration.py` then fail.
 `SECRET_KEY` is defaulted by the script -- the template DB is never reachable through Gunicorn so
 the value is purely scaffolding for app construction.
 **The template's NAME is a constant, not a knob**: it was resolved from `TEST_TEMPLATE_DATABASE` so
@@ -285,12 +289,15 @@ by the per-test clone: two xdist workers writing to `budget.transactions` cannot
 each writes to its own database. Cluster-scoped state (roles, tablespaces, replication slots,
 cluster-wide settings) is shared by every database on the cluster, so by every worker of the run.
 
-**No test changes cluster state** (plan#2954). The one cluster-scoped thing tests read, the
-`shekel_app` role, is created by the baked test-db image before the template is built
-(`scripts/build_test_db_image.py`, plan#3636), as the entrypoint creates it before it migrates. It
-exists for the whole run, and a test grants to it only inside its own clone, which goes with that
-clone. A test that needs other cluster state gets it from the image the same way: changed mid-run,
-it races every other worker, and there is no way to keep it on one worker.
+**No test changes cluster state another worker reads** (plan#2954). A database is itself a cluster
+object, and every test drops and creates one, but only under its own worker's names:
+`shekel_test_<worker>` and that name's world snapshots (`tests/_worker_database.py`). The one
+cluster-scoped thing every worker reads, the `shekel_app` role, is created by the baked test-db
+image before the template is built (`scripts/build_test_db_image.py`, plan#3636), as the entrypoint
+creates it before it migrates. It exists for the whole run, and a test grants to it only inside its
+own clone, which goes with that clone. A test that needs other cluster state gets it from the image
+the same way: changed mid-run, it races every other worker, and there is no way to keep it on one
+worker.
 
 **State a test keeps in its PROCESS is the same.** A module global, a cache or a counter is seen
 only by the tests that happen to run on that worker, in whatever order they run, and any test can
@@ -302,9 +309,12 @@ The suite once kept such tests on one worker with `@pytest.mark.xdist_group` and
 pytest 9.2.0 with pytest-xdist 3.8.0 silently stopped honouring them, and the suite failed whenever
 the scheduler split a group whose tests collided. The groups are gone, and collection refuses a test
 that carries one (rulings plan#3768, plan#3814): `tests/conftest.py`'s `pytest_make_collect_report`
-fails the file or class holding it, with an error naming each such test and saying where its state
-belongs. With no `--dist=loadgroup` the marker would keep nothing together, silently. The refusal is
-a tripwire, not a guarantee: nothing structural stops a new test sharing state.
+fails the file or class holding it, with an error saying where its state belongs. The error names
+each marked test, or each class when the mark is the module's own `pytestmark`. A marked class in a
+file whose other tests are also refused shows on the next run, once those are fixed, since pytest
+collects nothing under a collector that failed. With no `--dist=loadgroup` the marker would keep
+nothing together, silently. The refusal is a tripwire, not a guarantee: nothing structural stops a
+new test sharing state.
 
 ## Zero Tolerance for Failing Tests
 

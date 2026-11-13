@@ -170,6 +170,8 @@ def _seed_line(seed_user, name="Dental", amount="40.00"):
     db.session.add(line)
     db.session.commit()
     return line.id
+
+
 class TestHeadCarriesTheNewNamesOnly:
     """The template is at head: every artifact under its new name, none under the old."""
 
@@ -266,6 +268,8 @@ class TestHeadCarriesTheNewNamesOnly:
             assert db.session.execute(text(
                 "SELECT count(*) FROM pg_trigger WHERE tgname LIKE 'audit_%'"
             )).scalar() == EXPECTED_TRIGGER_COUNT
+
+
 class TestTheRoundTrip:
     """Down restores every old name; up restores the whole catalogue; the row rides through."""
 

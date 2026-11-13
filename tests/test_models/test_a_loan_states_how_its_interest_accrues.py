@@ -138,6 +138,8 @@ def _list_exists(db) -> bool:
     return db.session.execute(sqlalchemy.text(
         "SELECT to_regclass('ref.interest_accrual_conventions') IS NOT NULL"
     )).scalar_one()
+
+
 class TestTheMigration:
     """``08fda2e0b18b`` over this test's own clone, in both directions."""
 

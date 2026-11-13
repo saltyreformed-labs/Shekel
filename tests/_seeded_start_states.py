@@ -107,14 +107,24 @@ from tests._worker_database import (
 # each module that holds one, so a world's fixture imported into a second module
 # was built twice.
 #
-# **A world is built inside the ``db`` fixture, so it CANNOT see an autouse
-# fixture defined in a SUBDIRECTORY conftest, and that is a real limit rather
-# than an oversight.**  ``db`` names the two autouse fixtures beside it in
-# ``tests/_app_fixtures.py`` that a builder needs, which orders them ahead of
-# it; it cannot name a fixture defined below it in the tree, and those sort
-# after ``db`` unconditionally.  The pass runs under whichever declaring test
-# reaches ``db`` first on the worker, which may be another world's, so no
-# directory's own fixtures may reach a build.
+# **A world is built inside the ``db`` fixture of whichever declaring test
+# reaches it first on the worker, which may be another world's, and that is a
+# real limit rather than an oversight.**  Every world's build sees exactly the
+# fixtures THAT test has set up by then:
+#
+# - ``db`` names the two autouse fixtures beside it in ``tests/_app_fixtures.py``
+#   that a builder needs, which orders them ahead of it.
+# - A function-scoped fixture defined below it in the tree, a SUBDIRECTORY
+#   conftest's autouse one included, sorts after ``db`` unconditionally, so no
+#   build sees it.
+# - A session-, package-, module- or class-scoped fixture active for that test
+#   is set up before every function-scoped one, so the build of each world sees
+#   it, a world declared in another module included.  None of the three
+#   declaring modules (``tests/test_arch/test_a_seeded_start_state_is_built_once.py``
+#   and the two ``tests/test_routes/test_no_baseline_policy/`` sweeps) or their
+#   conftests holds one, read 2026-11-13.
+#
+# So no world may depend on any fixture outside ``tests/_app_fixtures.py``.
 # The live example: ``tests/test_services/conftest.py`` freezes
 # ``pay_period_service.date.today()`` to a fixed day for every test under it.
 # A world declared there would be BUILT on the real clock and then READ by

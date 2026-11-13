@@ -124,6 +124,8 @@ def _sight(statement, line, *, description, merchant_id=None):
 def _merchants():
     """Every merchant row as ``(id, name)``, ascending."""
     return _sql("SELECT id, name FROM budget.merchants ORDER BY id")
+
+
 class TestTheRoundTrip:
     """Head -> down -> up, over a line two imports named two ways."""
 
@@ -278,6 +280,8 @@ class TestTheRoundTrip:
         assert _sql(
             "SELECT merchant_id FROM budget.merchant_rules",
         ) == [(coffee_shop,)]
+
+
 class TestTheUpgradeOverTheOldSchema:
     """The upgrade's own arms, run over the shape ``af07125d00f1`` left."""
 

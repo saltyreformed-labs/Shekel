@@ -519,6 +519,8 @@ class TestTheUpgradeRefusesALossyRow:
             "WHERE name = 'corrected') WHERE id = :id", id=row_id,
         )
         assert _M.refuse_lossy_rows(db.session.connection()) is None
+
+
 class TestTheDowngradeRefusesADatedRowOutOfTheBand:
     """The downgrade's one refusal: a settle day on an unsettled row with no movement."""
 

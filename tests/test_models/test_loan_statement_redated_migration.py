@@ -232,6 +232,8 @@ def test_the_predicate_selects_the_copy_and_nothing_else(app, db, seed_user):
     assert [(r.id, r.account_id, r.setup_day) for r in rows] == [
         (ids["copy"], ids["copied"], _SETUP_DAY),
     ]
+
+
 def test_down_up_down_up_re_dates_the_copy_and_undoes_it_exactly(
     db, seed_user,
 ):
@@ -334,6 +336,8 @@ def test_the_setup_day_is_the_owners_civil_day(app, db, seed_user):
     assert [(r.id, r.setup_day) for r in rows] == [
         (copy_id, date(2026, 3, 9)),
     ]
+
+
 def test_the_downgrade_deletes_ONLY_the_statement_it_recorded(db, seed_user):
     """R-R99's "only", graded by decoys on the SAME loan.
 

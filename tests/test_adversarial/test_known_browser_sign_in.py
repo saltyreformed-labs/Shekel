@@ -50,11 +50,13 @@ import sqlalchemy
 
 from app.extensions import db
 from app.models.known_device import KnownDevice
+from app.models.sign_in import SignIn
 from app.models.user import User
 from app.routes.auth import _helpers as auth_route_helpers
 from app.services import auth_service, known_device_service
+from app.utils.bearer_tokens import token_hash
 from app.utils.log_events import EVT_KNOWN_DEVICE_DELETED
-from app.utils.session_helpers import SESSION_SIGNED_IN_AT_KEY
+from app.utils.session_helpers import SESSION_TOKEN_KEY
 from tests._guess_records import count_of, locked_until_of
 from tests._sign_in import make_a_stranger
 from tests._test_helpers import store_backup_codes
@@ -843,8 +845,9 @@ class TestAReConfirmReplacesTheCookie:
 
         The re-confirm's response carries the cookie, so the browser holds the
         new token; a stolen copy of the old one now names nothing.  Neither the
-        record's last sign-in nor the session's sign-in stamp moves: a
-        re-confirm is not a sign-in (ruling plan#3069).  The trusted
+        record's last sign-in nor the session's sign-in moves (its token and
+        its record's instant, ruling plan#3925): a re-confirm is not a sign-in
+        (ruling plan#3069).  The trusted
         browser's case is the next one.
         """
         user_id = seed_user["user"].id
@@ -853,6 +856,8 @@ class TestAReConfirmReplacesTheCookie:
         old_token = _token(browser, user_id)
         (device,) = _rows_of(user_id)
         device_id, signed_in_at = device.id, device.last_signed_in_at
+        with browser.session_transaction() as sess:
+            sign_in_token = sess[SESSION_TOKEN_KEY]
 
         response = browser.post("/reauth", data={
             "password": SEED_USER_PASSWORD, "totp_code": _second_code(secret),
@@ -869,7 +874,10 @@ class TestAReConfirmReplacesTheCookie:
         (device,) = _rows_of(user_id)
         assert device.last_signed_in_at == signed_in_at
         with browser.session_transaction() as sess:
-            assert datetime.fromisoformat(sess[SESSION_SIGNED_IN_AT_KEY]) == signed_in_at
+            assert sess[SESSION_TOKEN_KEY] == sign_in_token
+        assert db.session.query(SignIn.signed_in_at).filter_by(
+            token_hash=token_hash(sign_in_token),
+        ).scalar() == signed_in_at
 
     def test_a_code_re_confirm_keeps_the_row_its_days_and_its_trust(
         self, app, seed_user,

@@ -5,7 +5,11 @@ account it renders as, so it writes a signed-in session into a test client's
 cookie rather than posting the login form: the keys Flask-Login reads
 (``_user_id``, ``_fresh``, ``_id``) and the stamps a sign-in writes
 (:func:`~app.utils.session_helpers.login_session_stamps`), without which
-``load_user`` refuses the session (plan#2173).  Its caller switches strong
+``load_user`` refuses the session (plan#2173).  One of those stamps is the
+token of the sign-in's record on the server, which ``load_user`` requires too
+(ruling plan#3925), so the forge records a sign-in of the account and commits
+it first: a row in ``auth.sign_ins`` of the copy it measures, as the app's own
+sign-in would write.  Its caller switches strong
 session protection off first, since strong protection refuses a session whose
 identifier was not minted inside a request.
 
@@ -38,6 +42,8 @@ from urllib.parse import urlsplit
 from flask import Flask, url_for
 from flask.testing import FlaskClient
 
+from app.extensions import db
+from app.services import sign_in_service
 from app.utils.session_helpers import login_session_stamps
 from tests.manual.exit_status import NOTHING_MEASURED
 
@@ -51,7 +57,9 @@ def signed_in_client(app: Flask, user_id: int) -> FlaskClient:
     """Return a test client signed in as *user_id*, proven to reach a signed-in page.
 
     Args:
-        app: The Flask application, its strong session protection off.
+        app: The Flask application, its strong session protection off.  The
+            sign-in's record is written in an app context of its own, so a
+            caller may hold one or not.
         user_id: The ``auth.users.id`` to sign in as.
 
     Returns:
@@ -63,12 +71,16 @@ def signed_in_client(app: Flask, user_id: int) -> FlaskClient:
             answer 200: the account is held at two-factor setup, the app
             refused the session, or the page answered something else.
     """
+    now = datetime.now(timezone.utc)
+    with app.app_context():
+        token = sign_in_service.record_sign_in(user_id, None, now=now)
+        db.session.commit()
     client = app.test_client()
     with client.session_transaction() as session:
         session["_user_id"] = str(user_id)
         session["_fresh"] = True
         session["_id"] = None
-        session.update(login_session_stamps(datetime.now(timezone.utc), user_id))
+        session.update(login_session_stamps(now, user_id, token))
     answer = client.get(PROOF_PAGE)
     if answer.status_code == 200:
         return client

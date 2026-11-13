@@ -59,6 +59,7 @@ from app.utils.log_events import (
     EVT_USER_REGISTERED,
     log_event,
 )
+from app.utils.session_helpers import end_this_sign_in
 
 logger = logging.getLogger(__name__)
 
@@ -371,9 +372,16 @@ def register():
 
 @auth_bp.route("/logout", methods=["POST"])
 def logout():
-    """End the user's session and redirect to login."""
+    """End this browser's session, on the server and in its cookie, then redirect to login.
+
+    The sign-in's record is deleted first (ruling plan#3925), so a copy of
+    this browser's session cookie is refused from then on, while the user's
+    other browsers stay signed in and every trust and known browser stays.
+    Then Flask-Login clears its own keys from this browser's cookie.
+    """
     log_event(logger, logging.INFO, EVT_LOGOUT, AUTH,
               "User logged out", user_id=current_user.id)
+    end_this_sign_in()
     logout_user()
     flash("You have been logged out.", "info")
     return redirect(url_for("auth.login"))

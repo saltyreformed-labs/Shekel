@@ -125,10 +125,11 @@ def create_app(config_name=None, *, init_ref_cache=True):
             F-003, F-032).
           * Session whose last activity is older than
             ``IDLE_TIMEOUT_MINUTES`` or absent (commit C-10 -- F-006).
-          * Session whose sign-in is ``KNOWN_LIFETIME`` old or more, or
-            unstamped, however active (ruling plan#3069;
-            ``sign_in_is_live`` in session_helpers), so a browser that is
-            signed in is a known one.
+          * Session whose token names no live sign-in record of the user
+            (ruling plan#3925; ``sign_in_is_live`` in session_helpers): its
+            record was deleted by a sign-out, it carries no token, or its
+            sign-in is ``KNOWN_LIFETIME`` old or more, however active (ruling
+            plan#3069), so a browser that is signed in is a known one.
 
         A None return triggers Flask-Login's "logged out" flow on the
         next request, redirecting to the configured ``login_view``.
@@ -165,9 +166,11 @@ def create_app(config_name=None, *, init_ref_cache=True):
         # docstring for the per-state policy (missing -> stale,
         # malformed/naive -> stale, future-dated -> fresh,
         # within-window -> fresh, beyond-window -> stale).  The
-        # sign-in's lifetime (ruling plan#3069): reject it once its
-        # sign-in is ``KNOWN_LIFETIME`` old, however active.
-        if not _idle_session_is_fresh(app) or not sign_in_is_live(user_id):
+        # sign-in's record (ruling plan#3925): reject the session once a
+        # sign-out deleted it, or its sign-in is ``KNOWN_LIFETIME`` old,
+        # however active (ruling plan#3069).  Asked last, as the one check
+        # that reads the database for the session itself.
+        if not _idle_session_is_fresh(app) or not sign_in_is_live(user.id):
             return None
         return user
 

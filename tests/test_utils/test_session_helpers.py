@@ -34,16 +34,21 @@ from datetime import datetime, timedelta, timezone
 import pytest
 import time_machine
 
+from app.extensions import db
+from app.models.sign_in import SignIn
 from app.models.user import User
+from app.services import sign_in_service
 from app.utils.log_events import AUTH
 from app.utils.session_helpers import (
     FRESH_LOGIN_AT_KEY,
     SESSION_CREATED_AT_KEY,
     SESSION_LAST_ACTIVITY_KEY,
-    SESSION_SIGNED_IN_AT_KEY,
+    SESSION_TOKEN_KEY,
     SESSION_USER_ID_KEY,
+    end_this_sign_in,
     invalidate_other_sessions,
     session_stamp,
+    session_token,
     sign_in_created_at,
     sign_in_is_live,
     stamp_login_session,
@@ -55,6 +60,11 @@ from app.utils.session_helpers import (
 #: A user id for the stamping tests that load no user: the stamp is written
 #: whatever the id, and only the loader tests below look one up.
 _STAMPED_USER_ID = 7
+
+#: A sign-in token for the stamping tests that read no record: the cookie
+#: carries whatever token it is handed, and only the tests that ask whether a
+#: sign-in is live record one.
+_A_TOKEN = "a-sign-in-token"
 
 
 class _LogCapture:
@@ -298,9 +308,9 @@ class TestInvalidateOtherSessionsLoadUserIntegration:
         with the cookie value the helper just wrote, so the test grades
         the loader's own answer for that cookie.
 
-        The session is signed in first (``stamp_login_session``), as
-        its one caller's is: ``/mfa/verify`` stamps it just before its
-        backup-code call.  Since plan#2173 the loader refuses a session with no
+        The session is signed in first (its record, then
+        ``stamp_login_session``), as its one caller's is: ``/mfa/verify``
+        signs it in just before its backup-code call.  Since plan#2173 the loader refuses a session with no
         activity stamp, and the developer confirmed that change on
         2026-10-30, so a bare request context no longer stands in for one.
         """
@@ -315,7 +325,9 @@ class TestInvalidateOtherSessionsLoadUserIntegration:
         user = seed_user["user"]
 
         with app.test_request_context("/"):
-            stamp_login_session(datetime.now(timezone.utc), user.id)
+            now = datetime.now(timezone.utc)
+            token = sign_in_service.record_sign_in(user.id, None, now=now)
+            stamp_login_session(now, user.id, token)
             invalidate_other_sessions(user, "current_passes_check")
             # The cookie the helper just wrote is still on the
             # request context's session.  Drive the loader.
@@ -337,11 +349,13 @@ class TestInvalidateOtherSessionsLoadUserIntegration:
         loader must return None for the stale cookie -- the entire
         point of the helper.
 
-        The session is signed in first (``stamp_login_session``) so the
-        stale ``_session_created_at`` is the ONLY thing the loader can
-        refuse it for: since plan#2173 a session with no activity stamp is
-        refused too, and without the sign-in this test would pass on that
-        instead, measuring nothing about the comparison it exists for.
+        The session is signed in first (its record, then
+        ``stamp_login_session``) so the stale ``_session_created_at`` is the
+        ONLY thing the loader can refuse it for: since plan#2173 a session
+        with no activity stamp is refused too, and since ruling plan#3925 one
+        whose token names no record, and without the sign-in this test would
+        pass on either instead, measuring nothing about the comparison it
+        exists for.
         """
         # Pylint: ``import-outside-toplevel``, ``protected-access`` -- as in
         # test_current_cookie_value_passes_load_user_after_call above: the
@@ -352,7 +366,9 @@ class TestInvalidateOtherSessionsLoadUserIntegration:
         user = seed_user["user"]
 
         with app.test_request_context("/") as ctx:
-            stamp_login_session(datetime.now(timezone.utc), user.id)
+            now = datetime.now(timezone.utc)
+            token = sign_in_service.record_sign_in(user.id, None, now=now)
+            stamp_login_session(now, user.id, token)
             stale_value = (
                 datetime.now(timezone.utc) - timedelta(hours=1)
             ).isoformat()
@@ -389,7 +405,7 @@ class TestStampLoginSession:
         """
         with app.test_request_context("/") as ctx:
             now = datetime.now(timezone.utc)
-            stamp_login_session(now, _STAMPED_USER_ID)
+            stamp_login_session(now, _STAMPED_USER_ID, _A_TOKEN)
 
             iso = now.isoformat()
             assert ctx.session[SESSION_CREATED_AT_KEY] == iso
@@ -399,7 +415,7 @@ class TestStampLoginSession:
     def test_writes_the_user_as_flask_login_spells_the_id(self, app):
         """The user stamp is the id's string, as ``load_user`` is handed it."""
         with app.test_request_context("/") as ctx:
-            stamp_login_session(datetime.now(timezone.utc), _STAMPED_USER_ID)
+            stamp_login_session(datetime.now(timezone.utc), _STAMPED_USER_ID, _A_TOKEN)
 
             assert ctx.session[SESSION_USER_ID_KEY] == str(_STAMPED_USER_ID)
 
@@ -417,7 +433,7 @@ class TestStampLoginSession:
             ctx.session[SESSION_USER_ID_KEY] = "stale-4"
 
             now = datetime.now(timezone.utc)
-            stamp_login_session(now, _STAMPED_USER_ID)
+            stamp_login_session(now, _STAMPED_USER_ID, _A_TOKEN)
 
             iso = now.isoformat()
             assert ctx.session[SESSION_CREATED_AT_KEY] == iso
@@ -433,14 +449,14 @@ class TestSignInCreatedAt:
         """Asked for the user the sign-in named: its ``_session_created_at``."""
         with app.test_request_context("/"):
             now = datetime.now(timezone.utc)
-            stamp_login_session(now, _STAMPED_USER_ID)
+            stamp_login_session(now, _STAMPED_USER_ID, _A_TOKEN)
 
             assert sign_in_created_at(str(_STAMPED_USER_ID)) == now
 
     def test_another_user_gets_nothing(self, app):
         """Asked for any other user, as a remember-cookie restore asks: ``None``."""
         with app.test_request_context("/"):
-            stamp_login_session(datetime.now(timezone.utc), _STAMPED_USER_ID)
+            stamp_login_session(datetime.now(timezone.utc), _STAMPED_USER_ID, _A_TOKEN)
 
             assert sign_in_created_at(str(_STAMPED_USER_ID + 1)) is None
 
@@ -556,7 +572,7 @@ class TestStampHelpersWriteIsoStrings:
     def test_stamp_login_session_writes_iso_strings(self, app):
         """All three keys parse with ``datetime.fromisoformat``."""
         with app.test_request_context("/") as ctx:
-            stamp_login_session(datetime.now(timezone.utc), _STAMPED_USER_ID)
+            stamp_login_session(datetime.now(timezone.utc), _STAMPED_USER_ID, _A_TOKEN)
             for key in (
                 SESSION_CREATED_AT_KEY,
                 SESSION_LAST_ACTIVITY_KEY,
@@ -598,28 +614,28 @@ class TestStampHelpersWriteIsoStrings:
 _THIRTY_DAYS = timedelta(days=30)
 
 
-class TestTheSignInStamp:
-    """Only a sign-in writes ``_signed_in_at``; a password change does not."""
+class TestTheSignInToken:
+    """Only a sign-in writes ``_session_token``; a password change does not."""
 
     def test_stamp_login_session_writes_it(self, app):
-        """The sign-in stamp carries the same ``now`` as the other three."""
+        """The token the sign-in's record was given rides the session."""
         with app.test_request_context("/") as ctx:
-            now = datetime.now(timezone.utc)
-            stamp_login_session(now, _STAMPED_USER_ID)
+            stamp_login_session(datetime.now(timezone.utc), _STAMPED_USER_ID, _A_TOKEN)
 
-            assert ctx.session[SESSION_SIGNED_IN_AT_KEY] == now.isoformat()
+            assert ctx.session[SESSION_TOKEN_KEY] == _A_TOKEN
 
     def test_stamp_password_change_writes_the_three_and_leaves_the_sign_in(
         self, app,
     ):
-        """Created, activity and fresh move to ``now``; the user and sign-in stay.
+        """Created, activity and fresh move to ``now``; the user and token stay.
 
         So a password change survives its own bump and restarts the step-up
-        window, and does not restart the session's thirty days.
+        window, and does not restart the session's thirty days, which its
+        sign-in's record holds.
         """
         with app.test_request_context("/") as ctx:
             ctx.session[SESSION_USER_ID_KEY] = str(_STAMPED_USER_ID)
-            ctx.session[SESSION_SIGNED_IN_AT_KEY] = "the-sign-in"
+            ctx.session[SESSION_TOKEN_KEY] = _A_TOKEN
             now = datetime.now(timezone.utc)
 
             stamp_password_change(now)
@@ -629,7 +645,33 @@ class TestTheSignInStamp:
             assert ctx.session[SESSION_LAST_ACTIVITY_KEY] == iso
             assert ctx.session[FRESH_LOGIN_AT_KEY] == iso
             assert ctx.session[SESSION_USER_ID_KEY] == str(_STAMPED_USER_ID)
-            assert ctx.session[SESSION_SIGNED_IN_AT_KEY] == "the-sign-in"
+            assert ctx.session[SESSION_TOKEN_KEY] == _A_TOKEN
+
+
+class TestSessionToken:
+    """``session_token`` reads the token, or ``None`` for one no sign-in wrote."""
+
+    @pytest.mark.parametrize(
+        "value",
+        [
+            pytest.param(None, id="missing"),
+            pytest.param(12345, id="not-a-string"),
+        ],
+    )
+    def test_no_token_is_none(self, app, value):
+        """Never an exception: each of these must read as "sign in again"."""
+        with app.test_request_context("/") as ctx:
+            if value is not None:
+                ctx.session[SESSION_TOKEN_KEY] = value
+
+            assert session_token() is None
+
+    def test_a_token_is_itself(self, app):
+        """The string a sign-in wrote is returned as written."""
+        with app.test_request_context("/") as ctx:
+            ctx.session[SESSION_TOKEN_KEY] = _A_TOKEN
+
+            assert session_token() == _A_TOKEN
 
 
 class TestSessionStamp:
@@ -648,21 +690,35 @@ class TestSessionStamp:
         """Never an exception: each of these must read as "sign in again"."""
         with app.test_request_context("/") as ctx:
             if value is not None:
-                ctx.session[SESSION_SIGNED_IN_AT_KEY] = value
+                ctx.session[SESSION_CREATED_AT_KEY] = value
 
-            assert session_stamp(SESSION_SIGNED_IN_AT_KEY) is None
+            assert session_stamp(SESSION_CREATED_AT_KEY) is None
 
     def test_an_aware_stamp_is_its_moment(self, app):
         """A future one too: each check says what a clock jump means to it."""
         with app.test_request_context("/") as ctx:
             moment = datetime.now(timezone.utc) + timedelta(hours=1)
-            ctx.session[SESSION_SIGNED_IN_AT_KEY] = moment.isoformat()
+            ctx.session[SESSION_CREATED_AT_KEY] = moment.isoformat()
 
-            assert session_stamp(SESSION_SIGNED_IN_AT_KEY) == moment
+            assert session_stamp(SESSION_CREATED_AT_KEY) == moment
+
+
+def _signed_in(user_id, signed_in_at):
+    """Record a sign-in of *user_id* at *signed_in_at* and stamp this session with it.
+
+    The two halves of ``_complete_sign_in`` this module's helpers own, run in
+    the test's request context.
+
+    Returns:
+        The sign-in's token.
+    """
+    token = sign_in_service.record_sign_in(user_id, None, now=signed_in_at)
+    stamp_login_session(signed_in_at, user_id, token)
+    return token
 
 
 class TestSignInIsLive:
-    """A sign-in younger than thirty days is live, for the user it stamped."""
+    """A sign-in is live while its record is: younger than thirty days, never ended."""
 
     @pytest.mark.parametrize(
         "age, live",
@@ -674,26 +730,92 @@ class TestSignInIsLive:
             pytest.param(-timedelta(hours=1), True, id="in-the-future"),
         ],
     )
-    def test_its_age_decides(self, app, age, live):
-        """Frozen, so the age is exact: thirty days to the second is too old."""
+    def test_its_age_decides(self, app, seed_user, age, live):
+        """Frozen, so the age is exact: thirty days to the second is too old.
+
+        The age is the record's, which the session's cookie cannot move.
+        """
+        user_id = seed_user["user"].id
         moment = datetime.now(timezone.utc)
         with time_machine.travel(moment, tick=False):
             with app.test_request_context("/"):
-                stamp_login_session(moment - age, _STAMPED_USER_ID)
+                _signed_in(user_id, moment - age)
 
-                assert sign_in_is_live(str(_STAMPED_USER_ID)) is live
+                assert sign_in_is_live(user_id) is live
 
-    def test_another_users_session_is_not_live(self, app):
-        """Asked for any user but the one the sign-in stamped: ``False``."""
+    def test_another_users_session_is_not_live(self, app, seed_user):
+        """Asked for any user but the one whose record the token names: ``False``.
+
+        What a remember-me restore onto this session would ask (plan#2173).
+        The control is the same session asked for its own user.
+        """
+        user_id = seed_user["user"].id
         with app.test_request_context("/"):
-            stamp_login_session(datetime.now(timezone.utc), _STAMPED_USER_ID)
+            _signed_in(user_id, datetime.now(timezone.utc))
 
-            assert sign_in_is_live(str(_STAMPED_USER_ID + 1)) is False
+            assert sign_in_is_live(user_id) is True
+            assert sign_in_is_live(user_id + 1) is False
 
-    def test_a_session_with_no_sign_in_stamp_is_not_live(self, app):
-        """Every session signed in before the stamp existed is one."""
+    def test_a_session_with_no_token_is_not_live(self, app, seed_user):
+        """Every session signed in before the record existed is one."""
+        user_id = seed_user["user"].id
         with app.test_request_context("/") as ctx:
-            stamp_login_session(datetime.now(timezone.utc), _STAMPED_USER_ID)
-            del ctx.session[SESSION_SIGNED_IN_AT_KEY]
+            _signed_in(user_id, datetime.now(timezone.utc))
+            del ctx.session[SESSION_TOKEN_KEY]
 
-            assert sign_in_is_live(str(_STAMPED_USER_ID)) is False
+            assert sign_in_is_live(user_id) is False
+
+    def test_a_session_whose_record_is_gone_is_not_live(self, app, seed_user):
+        """However good its cookie: the record, not the cookie, answers.
+
+        The record is deleted as a sign-out deletes it, from another request:
+        this session's cookie still carries its token.
+        """
+        user_id = seed_user["user"].id
+        with app.test_request_context("/"):
+            token = _signed_in(user_id, datetime.now(timezone.utc))
+            assert sign_in_is_live(user_id) is True
+
+            sign_in_service.end_sign_in(token)
+
+            assert session_token() == token
+            assert sign_in_is_live(user_id) is False
+
+
+class TestEndThisSignIn:
+    """Sign-out's server half: the record goes, committed, then the token."""
+
+    def test_it_deletes_the_record_and_then_the_token(self, app, seed_user):
+        """Read back after the commit: no row holds the token, and the cookie has none."""
+        user_id = seed_user["user"].id
+        with app.test_request_context("/") as ctx:
+            _signed_in(user_id, datetime.now(timezone.utc))
+
+            end_this_sign_in()
+
+            assert SESSION_TOKEN_KEY not in ctx.session
+        db.session.expire_all()
+        assert db.session.query(SignIn).filter_by(user_id=user_id).count() == 0
+
+    def test_it_leaves_the_users_other_sign_ins(self, app, seed_user):
+        """Another browser's sign-in of the same user stays live."""
+        user_id = seed_user["user"].id
+        now = datetime.now(timezone.utc)
+        with app.test_request_context("/"):
+            other = sign_in_service.record_sign_in(user_id, None, now=now)
+            _signed_in(user_id, now)
+
+            end_this_sign_in()
+
+            assert sign_in_service.is_live(user_id, other, now) is True
+
+    def test_a_session_with_no_token_ends_nothing(self, app, seed_user):
+        """Nothing to name, so nothing is deleted: another sign-in stays."""
+        user_id = seed_user["user"].id
+        now = datetime.now(timezone.utc)
+        with app.test_request_context("/"):
+            other = sign_in_service.record_sign_in(user_id, None, now=now)
+
+            end_this_sign_in()
+
+            assert sign_in_service.is_live(user_id, other, now) is True

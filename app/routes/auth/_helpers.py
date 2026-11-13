@@ -50,6 +50,7 @@ from app.models.user import User
 from app.rate_limits import limiter, whose_attempt
 from app.services import (
     auth_service, guess_record_service, known_device_service, mfa_service,
+    sign_in_service,
 )
 from app.services.known_device_service import BrowserStanding
 from app.utils.device_cookie import device_token, device_tokens, set_device_cookie
@@ -58,7 +59,9 @@ from app.utils.log_events import (
     EVT_TOTP_REPLAY_REJECTED,
     log_event,
 )
-from app.utils.session_helpers import session_stamp, stamp_login_session
+from app.utils.session_helpers import (
+    session_stamp, session_token, stamp_login_session,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -326,13 +329,15 @@ def _complete_sign_in(
     plan#3007) if the record still holds what the checks saw, *checked*,
     records the browser (plan#2772,
     ruling plan#2994) so a password alone never makes one known on an account
-    with a code, calls ``login_user``, stamps the user and every lifecycle key
-    from the instant the record was renewed at, so the idle and fresh-login
-    checks start where the session did (commit C-10), no other user's id can
-    be loaded on it (plan#2173) and the session ends when the browser stops
-    being known (ruling plan#3069), and chooses the landing page.  What differs per proof stays
-    with its caller: the log event, and a backup code's sign-out of every other
-    session.
+    with a code, records the sign-in on the server from the same instant
+    (ruling plan#3925), replacing the record this browser's previous session
+    named, so a sign-out can end it and it ends when the browser stops being
+    known (ruling plan#3069), calls ``login_user``, stamps the user, the
+    sign-in's token and every lifecycle key from that instant, so the idle and
+    fresh-login checks start where the session did (commit C-10) and no other
+    user's id can be loaded on it (plan#2173), and chooses the landing page.
+    What differs per proof stays with its caller: the log event, and a backup
+    code's sign-out of every other session.
 
     A known browser's sign-in writes nothing to the account's count or lock,
     so it refills no stranger's guesses; the browser's own count clears in its
@@ -342,8 +347,8 @@ def _complete_sign_in(
     plan#3110), so the clear leaves a record that has counted one since
     (:func:`auth_service.clear_failed_attempts`).
 
-    The record is committed before its cookie rides the response, so a browser
-    never holds a token whose record a failed commit lost.
+    Both records are committed before their tokens ride the response, so a
+    browser never holds a token whose record a failed commit lost.
 
     Args:
         user: The :class:`~app.models.user.User` whose proof was accepted.
@@ -369,17 +374,20 @@ def _complete_sign_in(
     # (ruling plan#3523): this one, whoever's, starts with no fingerprint.
     flask_session.pop(_MFA_SETUP_FINGERPRINT_KEY, None)
     auth_service.clear_failed_attempts(checked)
-    # One instant for the record and the session's stamps: a session ends
-    # KNOWN_LIFETIME after its sign-in stamp (ruling plan#3069), and one read
-    # a moment after the record's would outlive the browser's standing.
+    # One instant for both records and the session's stamps: a session ends
+    # KNOWN_LIFETIME after its sign-in's record (ruling plan#3069), and one
+    # read a moment after the browser's would outlive the browser's standing.
     now = datetime.now(timezone.utc)
     token = known_device_service.record_sign_in(
         user.id, device_token(user.id),
         request.headers.get("User-Agent", ""), now=now, trust=trust,
     )
+    sign_in_token = sign_in_service.record_sign_in(
+        user.id, session_token(), now=now,
+    )
     db.session.commit()
     login_user(user)
-    stamp_login_session(now, user.id)
+    stamp_login_session(now, user.id, sign_in_token)
     response = redirect(_landing_page(user, next_page))
     set_device_cookie(response, user.id, token)
     return response

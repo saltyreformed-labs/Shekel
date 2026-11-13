@@ -5,14 +5,15 @@ however active, the same thirty days a browser stays known after it (ruling
 **plan#2995**), so a browser that is signed in is a known one, unless its own
 ten wrong guesses removed its record.  These tests drive the real app:
 
-* :class:`TestThirtyDaysAfterItsSignIn` -- the boundary, to the second, and a
-  session with no sign-in stamp, which every session open at the release is.
+* :class:`TestThirtyDaysAfterItsSignIn` -- the boundary, to the second, read
+  from the sign-in's record on the server (ruling plan#3925), and a session
+  with no sign-in token, which every session open at that release is.
 * :class:`TestNothingButASignInRenewsIt` -- Log out all and Change password
   each move ``_session_created_at`` to now, and neither moves the sign-in, so a
   session that pressed one near day 30 still ends on day 30.
-* :class:`TestTheSessionAndItsRecord` -- the session's sign-in is the record's
-  ``last_signed_in_at``, and a browser kept active for 29 days still gets past
-  a stranger's lock.
+* :class:`TestTheSessionAndItsRecord` -- the sign-in's record holds the
+  browser record's ``last_signed_in_at``, and a browser kept active for 29
+  days still gets past a stranger's lock.
 
 The seed owner is made with two-factor (plan#3600), so a browser signs in with
 no code owed only on a browser the owner trusts, the shared sign-in
@@ -26,12 +27,14 @@ import time_machine
 
 from app.extensions import db
 from app.models.known_device import KnownDevice
+from app.models.sign_in import SignIn
 from app.models.user import User
 from app.services import auth_service
+from app.utils.bearer_tokens import token_hash
 from app.utils.session_helpers import (
     SESSION_CREATED_AT_KEY,
     SESSION_LAST_ACTIVITY_KEY,
-    SESSION_SIGNED_IN_AT_KEY,
+    SESSION_TOKEN_KEY,
 )
 from tests._guess_records import locked_until_of
 from tests._seed_owner_fixtures import (
@@ -104,6 +107,25 @@ def _stamp(browser, **stamps):
             sess[key] = moment.isoformat()
 
 
+def _sign_in_of(browser):
+    """Return the record of *browser*'s sign-in, read fresh, by its session's token."""
+    with browser.session_transaction() as sess:
+        hashed = token_hash(sess[SESSION_TOKEN_KEY])
+    db.session.expire_all()
+    return db.session.query(SignIn).filter_by(token_hash=hashed).one()
+
+
+def _signed_in_at(browser, moment):
+    """Move *browser*'s sign-in to *moment*, as a sign-in then would have made it.
+
+    The record holds the sign-in's instant (ruling plan#3925), so that is
+    where its age is set; the cookie carries only the token naming it.
+    """
+    sign_in = _sign_in_of(browser)
+    sign_in.signed_in_at = moment
+    db.session.commit()
+
+
 class TestThirtyDaysAfterItsSignIn:
     """The session ends at the record's own boundary, however active."""
 
@@ -125,24 +147,22 @@ class TestThirtyDaysAfterItsSignIn:
         """
         browser = _sign_in(app)
         moment = datetime.now(timezone.utc)
+        _signed_in_at(browser, moment - age)
         with time_machine.travel(moment, tick=False):
-            _stamp(browser, **{
-                SESSION_SIGNED_IN_AT_KEY: moment - age,
-                SESSION_LAST_ACTIVITY_KEY: moment,
-            })
+            _stamp(browser, **{SESSION_LAST_ACTIVITY_KEY: moment})
 
             assert _is_signed_in(browser) is still_signed_in
 
-    def test_a_session_without_its_sign_in_stamp_is_refused(self, app, seed_user):
+    def test_a_session_without_its_sign_in_token_is_refused(self, app, seed_user):
         """Every session open at the release has none, so each signs in once then.
 
-        The control is the same session with its stamp, a request before.
+        The control is the same session with its token, a request before.
         """
         browser = _sign_in(app)
         assert _is_signed_in(browser)
 
         with browser.session_transaction() as sess:
-            del sess[SESSION_SIGNED_IN_AT_KEY]
+            del sess[SESSION_TOKEN_KEY]
 
         assert not _is_signed_in(browser)
 
@@ -164,10 +184,8 @@ def _the_session_after(browser, act):
         Whether the session still loads two minutes later.
     """
     signed_in = datetime.now(timezone.utc) - _THIRTY_DAYS + _BEFORE_DAY_THIRTY
-    _stamp(browser, **{
-        SESSION_SIGNED_IN_AT_KEY: signed_in,
-        SESSION_CREATED_AT_KEY: signed_in,
-    })
+    _signed_in_at(browser, signed_in)
+    _stamp(browser, **{SESSION_CREATED_AT_KEY: signed_in})
 
     act(browser)
 
@@ -223,9 +241,7 @@ class TestTheSessionAndItsRecord:
         user_id = seed_user["user"].id
         browser = _sign_in(app)
 
-        with browser.session_transaction() as sess:
-            signed_in = datetime.fromisoformat(sess[SESSION_SIGNED_IN_AT_KEY])
-        db.session.expire_all()
+        signed_in = _sign_in_of(browser).signed_in_at
         (device,) = db.session.query(KnownDevice).filter_by(user_id=user_id).all()
 
         assert device.last_signed_in_at == signed_in
@@ -242,10 +258,8 @@ class TestTheSessionAndItsRecord:
         (device,) = db.session.query(KnownDevice).filter_by(user_id=user_id).all()
         device.last_signed_in_at -= timedelta(days=29)
         db.session.commit()
-        _stamp(browser, **{
-            SESSION_SIGNED_IN_AT_KEY: device.last_signed_in_at,
-            SESSION_CREATED_AT_KEY: device.last_signed_in_at,
-        })
+        _signed_in_at(browser, device.last_signed_in_at)
+        _stamp(browser, **{SESSION_CREATED_AT_KEY: device.last_signed_in_at})
         for _ in range(_THRESHOLD):
             assert not _signed_in(_password(app.test_client(), "not-the-password"))
         assert locked_until_of(SEED_USER_EMAIL) > datetime.now(timezone.utc)

@@ -124,7 +124,7 @@ class TestRateLimitConfig:
         The vast majority of tests must not trip rate limits as a
         side effect of issuing many requests in quick succession.
         Tests that need rate limiting on (test_errors.py 429 tests,
-        test_auth/test_login_and_logout.py lockout tests) re-enable it
+        test_auth/ lockout tests) re-enable it
         temporarily on a fresh app instance.
         """
         assert _TestConfig.RATELIMIT_ENABLED is False

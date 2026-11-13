@@ -28,7 +28,8 @@ migrations could not drop by their original dialect-default names.
 Forward enforcement is therefore manual: every new constraint in a
 model carries an explicit ``name=`` shaped by the convention.
 ``TestNamingConventionContract``, in ``test_the_contracts.py``,
-asserts the explicit-name rule for every FK touched by this commit.
+asserts the explicit-name rule for every FK C-43 touched that a model
+still declares.
 
 The test suite exercises six invariants:
 
@@ -36,10 +37,12 @@ The test suite exercises six invariants:
      ``ondelete=RESTRICT`` under the new name; the
      ``TRANSFERS_PAY_PERIOD_SPEC`` FK carries ``ondelete=CASCADE``
      under ``fk_transfers_pay_period_id``.
-  2. **Cross-table pay_period_id consistency.**  All three child
-     tables that reference ``budget.pay_periods.id``
-     (``transactions``, ``transfers``, ``account_anchor_history``)
-     resolve to ``ondelete=CASCADE`` after C-43.
+  2. **Cross-table pay_period_id consistency.**  Of the three child
+     FKs onto ``budget.pay_periods.id`` that F-136 named, the two
+     still there (``transactions``, ``transfers``) resolve to
+     ``ondelete=CASCADE``.  The third, ``account_anchor_history``'s,
+     went with its column at plan step X-f1c3b (ruling R-EO), and a
+     case asserts it is gone.
   3. **Behavioral RESTRICT enforcement.**  Attempting to delete a
      ``ref.*`` row that is referenced by a budget or salary row
      raises ``IntegrityError`` immediately -- the behavioural proof
@@ -59,8 +62,8 @@ The test suite exercises six invariants:
 
 Two additional defensive tests guard the surrounding contracts:
 
-  7. **Naming convention contract.**  The model FK declarations for
-     every constraint touched by C-43 carry an explicit ``name=``
+  7. **Naming convention contract.**  Every FK C-43 touched that a
+     model still declares carries an explicit ``name=``
      argument that matches the
      ``fk_<table>_<column>`` convention -- the manual forward
      enforcement mechanism that replaces the global

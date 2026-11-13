@@ -35,8 +35,8 @@ from flask_wtf.csrf import CSRFProtect
 # code review and by the regression test
 # ``tests/test_models/test_c43_ondelete_and_naming_convention/
 # test_the_contracts.py::TestNamingConventionContract``, which asserts
-# the explicit-name rule for every FK C-43 touched (that file's
-# ``MODEL_FK_NAME_CONTRACT``).
+# the explicit-name rule for every FK C-43 touched that a model still
+# declares (that file's ``MODEL_FK_NAME_CONTRACT``).
 #
 # Convention keys (mirroring SQLAlchemy's ``MetaData.naming_convention``
 # template placeholders so the dictionary can be re-instated globally

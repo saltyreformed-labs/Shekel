@@ -27,8 +27,10 @@ _TABLES_NO_MODEL_DECLARES = frozenset({
 
 
 # Mapping of (model class, column attribute name) for every FK that
-# C-43 touched.  Used by ``TestNamingConventionContract`` to assert
-# every model declaration carries the convention-matching
+# C-43 touched and a model still declares (the other two are on the
+# tables ``_TABLES_NO_MODEL_DECLARES`` names).  Used by
+# ``TestNamingConventionContract`` to assert every model declaration
+# carries the convention-matching
 # ``name=`` argument.  Keyed by the same string the post-upgrade DB
 # carries so the test can also report the matching DB constraint
 # name on failure.
@@ -72,10 +74,10 @@ class TestNamingConventionContract:
     The convention is not applied globally to ``db.metadata`` (doing
     so would break the migration chain replay -- see
     ``app/extensions.py`` and the C-43 migration docstring for the
-    rationale).  Instead, every FK touched by C-43 carries an
-    explicit ``name=`` argument that matches the convention; these
-    tests verify the contract by inspecting the SQLAlchemy model
-    metadata directly.
+    rationale).  Instead, every FK C-43 touched that a model still
+    declares carries an explicit ``name=`` argument that matches the
+    convention; these tests verify the contract by inspecting the
+    SQLAlchemy model metadata directly.
     """
 
     def test_convention_has_full_template_set(self):
@@ -108,7 +110,7 @@ class TestNamingConventionContract:
     def test_model_fk_has_explicit_convention_name(
         self, model_cls, column_name, expected_fk_name,
     ):
-        """Every C-43 FK has an explicit name= matching the convention.
+        """Each C-43 FK a model declares has an explicit name= matching the convention.
 
         Walks the model's column metadata, finds the ForeignKey
         object on the named column, and asserts its ``name``

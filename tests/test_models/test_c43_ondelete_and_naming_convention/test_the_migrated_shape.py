@@ -113,7 +113,7 @@ class TestPostUpgradeDbShape:
 
 
 class TestPayPeriodIdConsistency:
-    """All child tables that reference pay_periods are CASCADE-consistent.
+    """The child FKs onto pay_periods that F-136 named are CASCADE-consistent.
 
     F-136 documented an asymmetry: ``transactions.pay_period_id`` and
     ``account_anchor_history.pay_period_id`` CASCADEd while
@@ -127,9 +127,9 @@ class TestPayPeriodIdConsistency:
     is DELETED: a balance assertion is a fact about a bank, and CASCADE meant a
     pay-period operation could destroy it -- measured, a schedule reset deleted
     all 78 of the developer's production assertions and fabricated 9
-    replacements.  Two tables reference ``pay_periods`` now and both still
-    CASCADE, so the consistency invariant is unchanged for the rows it still
-    covers; the case below asserts the third FK is GONE rather than dropping
+    replacements.  The other two FKs F-136 named are still there and both
+    still CASCADE, so the consistency invariant is unchanged for the rows it
+    still covers; the case below asserts the third FK is GONE rather than dropping
     it silently, because "the parametrize list got shorter" is not something a
     reader can distinguish from an accident.
     """
@@ -167,7 +167,7 @@ class TestPayPeriodIdConsistency:
     def test_pay_period_id_fk_cascades(
         self, app, db, schema, name,
     ):
-        """Both surviving child FKs that reference pay_periods.id CASCADE.
+        """Both of F-136's surviving child FKs onto pay_periods.id CASCADE.
 
         The ``transactions`` FK keeps its pre-C-43 Alembic-default name (the
         F-078 strategy retains ~35 default names rather than churning all of

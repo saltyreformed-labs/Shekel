@@ -1,27 +1,26 @@
 """
 Shekel Budget App -- Income Service Tests (C17 / F-20 / MED-06 / F-032).
 
-Pins the raise-aware paycheck-engine producer contract:
+Grades what ``app.services.income_service`` says a salary profile pays:
+the paycheck engine's own figure, priced per payday with its raises
+applied and under its own year's tax rules, and the one figure every
+consumer of it reads.  Each part's module docstring names which of
+these it grades.
 
-- The helper returns ``Decimal("0")`` when no active SalaryProfile exists.
-- The helper returns the profile's pay a paycheck -- its pay list's entry
-  since plan step salary:X-av-3a (ruling R-SAL59) -- byte-identical to the
-  engine for a no-raise profile.
-- The helper APPLIES applicable ``SalaryRaise`` rows so the post-raise
-  per-period gross is returned -- the F-032 worked example: $4,000.00 a
-  paycheck ($104,000 a year over 26) with a 3% raise effective in the as-of
-  period yields $4,120.00 per period, not the pre-Commit-17 off-engine
-  $4,000.00.
-- Every downstream consumer (savings, year-end, retirement, investment)
-  reads the same engine-derived value through the helper for a
-  raise-applicable user.
+C17 wrote this file for ``income_service.get_current_gross_biweekly``,
+the raise-aware gross helper, and plan step salary:R14-b deleted the
+helper: one figure read at one moment cannot show a raise landing
+between two paychecks.  ``TestThePerPeriodGrossIsTheENGINES``, in
+``test_the_engines_gross.py``, grades the property C17 protected on the
+feed that replaced it.
 
 Test fixture math (hand-computed):
 
 - one pay entry of ``$4,000.00`` a paycheck (``$104,000`` a year over 26)
   + 3% one-time raise effective 2026-03
 - Post-raise pay a paycheck: ``4000.00 * 1.03 = 4,120.00`` ->
-  ``Decimal("4120.00")``, the raise rounding to the cent (ruling R-SAL60)
+  ``Decimal("4120.00")``, the raise rounding to the cent (ruling R-SAL60),
+  on a paycheck whose pay period opens on or after 2026-03-01
 - Pre-fix (no raise applied): ``4,000.00`` -> the pre-Commit-17 value the
   off-engine sites returned.
 """

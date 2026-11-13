@@ -79,7 +79,7 @@ from app.services.statement_match import (
     Tab,
 )
 
-from ._builders import (
+from tests.test_services.test_statement_match._builders import (
     a_bank_line,
     a_later_period,
     a_scope,

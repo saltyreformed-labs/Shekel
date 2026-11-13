@@ -25,6 +25,12 @@ them.
 :func:`post_her_password`; :func:`redirect_path`;
 :func:`two_factor_row_of`, a user's two-factor row read fresh; and
 :func:`two_factor_secret_of`, the secret that row holds.
+
+**An account without two-factor** is one a test makes itself (the companion
+here), or a shared one whose two-factor :func:`reset_two_factor_of` took away
+through the one reset act, as ``scripts/reset_mfa.py`` does.  Either signs in
+with its password alone (:func:`sign_in_by_password`), as production signs in
+an account before its setup.
 """
 
 import time
@@ -81,6 +87,42 @@ def two_factor_secret_of(user_id):
         f"user {user_id} has no two-factor turned on, so it has no secret"
     )
     return mfa_service.decrypt_secret(row.totp_secret_encrypted)
+
+
+def reset_two_factor_of(user_id):
+    """Take *user_id*'s two-factor away through the one reset act, and commit.
+
+    ``mfa_service.reset_two_factor``, what ``scripts/reset_mfa.py`` runs: the
+    row is cleared and disabled, and every session and trusted device of the
+    account ends.  So call it before signing the account in.
+
+    Raises:
+        AssertionError: *user_id* had no two-factor to reset.
+    """
+    assert mfa_service.reset_two_factor(db.session.get(User, user_id)), (
+        f"user {user_id} had no two-factor to reset"
+    )
+    db.session.commit()
+
+
+def sign_in_by_password(browser, email, password, lands_on):
+    """Sign *browser* in with a password alone: the sign-in of an account without two-factor.
+
+    Args:
+        browser: A test client, which this signs in.
+        email: The account's email.
+        password: The account's password.
+        lands_on: The path a finished sign-in sends the account to.
+
+    Returns:
+        *browser*, signed in.
+    """
+    response = browser.post("/login", data={"email": email, "password": password})
+    assert redirect_path(response) == lands_on, (
+        f"Setup failed: {email}'s password answered {response.status_code} to "
+        f"{response.headers.get('Location')!r}, not {lands_on!r}"
+    )
+    return browser
 
 
 def sign_in_from_a_trusted_browser(browser, email, password, lands_on, **request_arguments):
@@ -155,13 +197,9 @@ def sign_in_seed_companion_by_password(app):
     Returns:
         A fresh test client signed in as the seed companion.
     """
-    browser = app.test_client()
-    response = post_her_password(browser)
-    assert redirect_path(response) == _HER_PAGE, (
-        f"Setup failed: her password answered {response.status_code} to "
-        f"{response.headers.get('Location')!r}, not her page"
+    return sign_in_by_password(
+        app.test_client(), SEED_COMPANION_EMAIL, SEED_COMPANION_PASSWORD, _HER_PAGE,
     )
-    return browser
 
 
 def sign_in_seed_companion(app):

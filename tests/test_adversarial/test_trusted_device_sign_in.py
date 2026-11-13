@@ -16,7 +16,9 @@ real app through its two forms, with real TOTP codes:
 
 **One code per user per test**, because replay prevention refuses a second
 code inside its thirty-second step: every sign-in after the first either skips
-the code or stops at the code form.
+the code or stops at the code form.  The owners are made with two-factor
+(plan#3600), so a test types its own account's code (``two_factor_secret_of``);
+the companion is made without it, so a test of hers turns it on.
 """
 
 import logging
@@ -31,10 +33,12 @@ from app.config import ProdConfig
 from app.extensions import db
 from app.models.known_device import KnownDevice
 from app.models.user import MfaConfig
-from app.services import known_device_service, mfa_service
+from app.services import mfa_service
 from scripts.reset_mfa import reset_mfa
-from tests._test_helpers import enable_mfa
+from tests._test_helpers import enable_mfa, store_backup_codes
 from tests._seed_owner_fixtures import SEED_USER_EMAIL, SEED_USER_PASSWORD
+from tests._trusted_devices import trust_browser
+from tests._two_factor_sign_in import two_factor_secret_of
 
 _SECOND_EMAIL = "second@shekel.local"
 _SECOND_PASSWORD = "secondpass12"
@@ -147,21 +151,17 @@ def _browser_trusted_through_the_service(app, user_id):
 
     What the code form's trust writes, without spending a code on it, for a
     test whose one code another act needs (replay prevention refuses a second
-    inside its thirty-second step).
+    inside its thirty-second step): ``tests._trusted_devices.trust_browser``.
     """
-    token = known_device_service.record_sign_in(
-        user_id, None, "", now=datetime.now(timezone.utc), trust=True,
-    )
-    db.session.commit()
     browser = app.test_client()
-    browser.set_cookie(f"shekel_device_{user_id}", token)
+    trust_browser(browser, user_id)
     return browser
 
 
 def _trusted_browser(app, seed_user):
     """Return a browser that trusted itself for the seed owner, signed out again."""
     user_id = seed_user["user"].id
-    secret = enable_mfa(db.session, user_id)
+    secret = two_factor_secret_of(user_id)
     browser = app.test_client()
     _sign_in_with_code(
         browser, SEED_USER_EMAIL, SEED_USER_PASSWORD, secret, trust=True,
@@ -190,7 +190,7 @@ class TestTheTrust:
     ):
         """HttpOnly, SameSite=Strict, Path=/, thirty days; not Secure here."""
         user_id = seed_user["user"].id
-        secret = enable_mfa(db.session, user_id)
+        secret = two_factor_secret_of(user_id)
 
         response = _sign_in_with_code(
             app.test_client(), SEED_USER_EMAIL, SEED_USER_PASSWORD, secret,
@@ -213,7 +213,7 @@ class TestTheTrust:
         cookie, so what an unticked box leaves out is the trust alone.
         """
         user_id = seed_user["user"].id
-        secret = enable_mfa(db.session, user_id)
+        secret = two_factor_secret_of(user_id)
         browser = app.test_client()
 
         response = _sign_in_with_code(
@@ -234,7 +234,7 @@ class TestTheTrust:
         plan#2994).
         """
         user_id = seed_user["user"].id
-        enable_mfa(db.session, user_id, backup_codes=[_BACKUP_CODE])
+        store_backup_codes(db.session, user_id, [_BACKUP_CODE])
         browser = app.test_client()
         assert _asked_the_code(
             _password(browser, SEED_USER_EMAIL, SEED_USER_PASSWORD),
@@ -260,7 +260,9 @@ class TestTheTrust:
 
     def test_the_code_form_offers_the_box(self, app, seed_user):
         """The code form carries "Trust this device for 30 days"; the backup form does not."""
-        enable_mfa(db.session, seed_user["user"].id)
+        # Pylint: ``unused-argument`` -- ``seed_user`` is asked for so the
+        # account, made with two-factor, exists to sign in to.
+        # pylint: disable=unused-argument
         browser = app.test_client()
         _password(browser, SEED_USER_EMAIL, SEED_USER_PASSWORD)
 
@@ -312,7 +314,6 @@ class TestWhatTheCookieCannotDo:
         """
         first_id = seed_user["user"].id
         second_id = seed_second_user["user"].id
-        enable_mfa(db.session, second_id)
         browser = _trusted_browser(app, seed_user)
 
         assert _asked_the_code(
@@ -377,7 +378,8 @@ class TestWhatForgetsTheDevice:
     def test_a_backup_code_sign_in_elsewhere(self, app, seed_user):
         """A backup code spent on another browser, then this one asks the code."""
         user_id = seed_user["user"].id
-        secret = enable_mfa(db.session, user_id, backup_codes=[_BACKUP_CODE])
+        store_backup_codes(db.session, user_id, [_BACKUP_CODE])
+        secret = two_factor_secret_of(user_id)
         browser = app.test_client()
         _sign_in_with_code(
             browser, SEED_USER_EMAIL, SEED_USER_PASSWORD, secret, trust=True,
@@ -401,7 +403,7 @@ class TestWhatForgetsTheDevice:
     def test_turning_two_factor_off(self, app, seed_user):
         """``/mfa/disable``, then a new authenticator: the code is asked."""
         user_id = seed_user["user"].id
-        secret = enable_mfa(db.session, user_id)
+        secret = two_factor_secret_of(user_id)
         browser = _browser_trusted_through_the_service(app, user_id)
         # Control: before two-factor is turned off, this browser skips the code.
         assert _signed_in(_password(browser, SEED_USER_EMAIL, SEED_USER_PASSWORD))
@@ -530,7 +532,7 @@ class TestTheProductionCookie:
     ):
         """Over HTTPS, with ``SESSION_COOKIE_SECURE``: ``__Host-``, Secure, the rest kept."""
         user_id = seed_user["user"].id
-        secret = enable_mfa(db.session, user_id)
+        secret = two_factor_secret_of(user_id)
         monkeypatch.setitem(app.config, "SESSION_COOKIE_SECURE", True)
         https = {"base_url": "https://localhost"}
 

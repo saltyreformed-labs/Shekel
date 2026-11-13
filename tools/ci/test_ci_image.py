@@ -1,7 +1,8 @@
 """Controls for ``ci.yml``'s ``image`` job: the app image is built and checked before a merge.
 
-``docker-publish.yml`` builds the release image only on a push to ``main``, so before task
-plan#2366 a change that broke the build landed in ``dev`` and failed only at the release.  The
+``docker-publish.yml`` builds the release image only from ``main`` (on a push and weekly), so
+before task plan#2366 a change that broke the build landed in ``dev`` and failed only at the
+release.  The
 job builds the image on every pull request, queue group and push to ``main`` by the release's
 own recipe (:mod:`tools.ci.test_build_image_action`), never pushes it, and checks that it runs
 psycopg's C implementation, holds exactly the lock's runtime set and its ``server`` group, and

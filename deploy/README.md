@@ -185,7 +185,8 @@ the maintainer's homelab layout) supplies the value.
 ### Updating the digest
 
 1. Build and push a new image. CI (`.github/workflows/docker-publish.yml`) runs on every push to
-   `main` and prints the digest in the "Image digest" workflow step output.
+   `main`, and rebuilds `main` every Monday so the image takes Debian's newest fixes (ruling
+   plan#3724), and prints the digest in the "Image digest" workflow step output.
 
 2. Verify the signature on the new digest before pinning it. CI signs keyless, through sigstore's
    OIDC flow, so there is no key to keep:

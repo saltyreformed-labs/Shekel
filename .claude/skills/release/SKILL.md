@@ -484,13 +484,15 @@ sha as `M`:
 ```bash
 . ~/projects/shekel-handoffs/releases/current.sh && cd "${W:?}" || exit 1
 : "${M:?}"
-gh run list --workflow docker-publish.yml --branch main --limit 3 --json databaseId,headSha \
-    --jq ".[] | select(.headSha == \"$M\") | .databaseId"; echo "exit=$?"
+gh run list --workflow docker-publish.yml --branch main --event push --limit 3 \
+    --json databaseId,headSha --jq ".[] | select(.headSha == \"$M\") | .databaseId"; echo "exit=$?"
 ```
 
-It prints the build's run id, the run whose `headSha` is `$M`. Nothing printed means the run is not
-listed yet (on 10-14 it was listed about 20 seconds after the merge): run the block again until it
-prints one, never taking another run. Then, `<run>` being that id:
+It prints the build's run id, the push's run whose `headSha` is `$M`. The Monday rebuild of `main`
+(ruling plan#3724) can build the same commit, on the `schedule` event, and is never the merge's
+build. Nothing printed means the run is not listed yet (on 10-14 it was listed about 20 seconds
+after the merge): run the block again until it prints one, never taking another run. Then, `<run>`
+being that id:
 
 ```bash
 . ~/projects/shekel-handoffs/releases/current.sh && cd "${W:?}" || exit 1
@@ -595,7 +597,9 @@ shekel-deploy --dry-run > "$R/dryrun.txt" 2>&1; echo "exit=$?"
 
 Read it, not its exit alone:
 
-- `current pin` is production now; `target pin` must be `$DIGEST`, the image step 7 built.
+- `current pin` is production now; `target pin` must be `$DIGEST`, the image step 7 built. A
+  Monday rebuild that finished after step 7 has moved `:latest` (ruling plan#3724), which stops
+  the release here.
 - The stamp line, `database is stamped at: <revision>`, is a real check. With `ADDED` migrations:
   `plan.txt` lists them in PATH order, not chain order, so take the one whose `down_revision`
   (`git show "$CUT":<its path>`) is not itself an `ADDED` revision; the stamp must be that

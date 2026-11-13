@@ -584,8 +584,9 @@ class TestAMatchMayNameAsManyRowsAsThePassOFFERS:
     * the DOMAIN bound -- ``_resolve.resolve_rows`` looks every submitted row
       up in the pass's own offer set and refuses anything else by name, and
       ``load_lines`` does the same for lines.  Graded by
-      ``test_accept.TestEveryOtherRefusalFires`` (a cancelled row, a card
-      purchase, an unknown line, a row another match already claims);
+      ``test_accept.test_what_the_door_refuses.TestEveryOtherRefusalFires``
+      (a cancelled row, a card purchase, an unknown line, a row another match
+      already claims);
     * the RESOURCE bound -- ``MAX_CONTENT_LENGTH`` (524,288,
       ``app/config.py``), the ONE bound on a request body (ruling
       **R-BAL218**), refuses the body before this schema sees it, and

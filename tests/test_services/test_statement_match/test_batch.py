@@ -501,7 +501,8 @@ class TestOneDerivationStAYSCorrectAcrossThePass:
         **R-CC144**); its last live shape -- an envelope matched EMPTY,
         reverted, then given a purchase -- was a false refusal and matches
         since leaf 5c-2b (finding **CC-385**, ruling **R-CC143**;
-        ``test_accept.py::TestEveryOtherRefusalFires::
+        ``test_accept/test_what_the_door_refuses.py
+        ::TestEveryOtherRefusalFires::
         test_a_purchase_under_a_REVERTED_matched_envelope_matches``).
         """
         with app.app_context():
@@ -713,8 +714,9 @@ class TestASIBLINGWriteCannotBookAgainstAStalePrice:
             # and "the row you reviewed at -60.00 now stands at -50.00" is the
             # cause, named.  ``_reject_unbalanced`` still owns the case where
             # nothing moved and the two sides simply disagree -- the `$0.05`
-            # payroll shortfall (finding **N-239**), which ``test_accept``'s
-            # own ``test_a_five_cent_shortfall_is_refused`` fires on.
+            # payroll shortfall (finding **N-239**), which
+            # ``test_accept.test_what_is_recorded``'s own
+            # ``test_a_five_cent_shortfall_is_refused`` fires on.
             assert "reviewed against different figures" in (
                 outcome.refused[0].reason
             )

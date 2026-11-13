@@ -61,7 +61,8 @@ def _unset_the_key(monkeypatch):
     """Remove ``TOTP_ENCRYPTION_KEY``, as an app booted without it runs.
 
     Raises ``KeyError`` when it is already unset, so a test never claims to
-    remove a key that the autouse ``set_totp_key`` did not set.
+    remove a key the suite did not hold (``tests/conftest.py`` writes it
+    before the app is imported).
     """
     monkeypatch.delenv("TOTP_ENCRYPTION_KEY")
 

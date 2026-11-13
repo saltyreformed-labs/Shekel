@@ -36,14 +36,15 @@ and the failures that decision produced; do not restore
 ``FILE_COPY`` without re-measuring against a durable cluster.
 """
 
-# Pylint: wrong-import-position, wrong-import-order -- SECRET_KEY must be set,
-# and the per-worker database cloned, before any ``app`` module is imported;
-# the comment below says why.
+# Pylint: wrong-import-position, wrong-import-order -- SECRET_KEY and the
+# two-factor key must be set, and the per-worker database cloned, before any
+# ``app`` module is imported; the comment below says why.
 # pylint: disable=wrong-import-position,wrong-import-order
-# Imports below are intentionally ordered so the SECRET_KEY env var
-# is set AND the per-pytest-worker database is cloned from
-# ``shekel_test_template`` BEFORE any ``app`` module is imported.
-# Two class-body reads at first-app-import time depend on this:
+# Imports below are intentionally ordered so the SECRET_KEY and
+# TOTP_ENCRYPTION_KEY env vars are set AND the per-pytest-worker
+# database is cloned from ``shekel_test_template`` BEFORE any ``app``
+# module is imported.  Three class-body reads at first-app-import time
+# depend on this:
 #
 # * ``app.config.TestConfig.SQLALCHEMY_DATABASE_URI`` reads
 #   ``TEST_DATABASE_URL`` -- ``_bootstrap_worker_database``, which
@@ -51,13 +52,16 @@ and the failures that decision produced; do not restore
 #   the per-session DSN.
 # * Production / ``_reject_sentinel`` defends read ``SECRET_KEY``
 #   with no fallback (audit finding F-016).
+# * ``app.config.BaseConfig.TOTP_ENCRYPTION_KEY`` reads the suite's
+#   one two-factor key (ruling plan#3890).
 #
-# Setting either env var after the first ``from app import ...``
+# Setting any of these env vars after the first ``from app import ...``
 # would leave the app pointed at a stale value.  So the two modules
 # imported first, ``tests._fixture_profile`` and
 # ``tests._worker_database``, import nothing from ``app``, and every
 # fixture module after them may.
 
+import base64
 import os
 
 import psycopg
@@ -77,6 +81,21 @@ os.environ.setdefault(
     "SECRET_KEY",
     "test-suite-fixed-key-not-used-in-production-do-not-deploy",
 )
+
+# The suite's ONE two-factor encryption key (ruling plan#3890), written here
+# for the reason SECRET_KEY is: ``app/config.py`` reads it at class-definition
+# time, as production's config does.  ``app.services.mfa_service`` reads the
+# environment at each call, so every build, test, worker and run holds this one
+# key, and a seeded world's owner, whose secret is encrypted once when the
+# worker builds the world, decrypts in every test that clones it.  Written
+# outright rather than ``setdefault``, so a key in the developer's shell or
+# ``.env`` is never the run's.  A test needing another key, or none, sets or
+# deletes it with ``monkeypatch``, which puts this one back after it.  A
+# Fernet key is 32 bytes in url-safe base64, built here from readable bytes so
+# the source holds no string the secret scan reads as a credential.
+os.environ["TOTP_ENCRYPTION_KEY"] = base64.urlsafe_b64encode(
+    b"shekel-test-suite-two-factor-key",
+).decode()
 
 from tests._fixture_profile import _FIXTURE_PROFILE_ENABLED, _profile_print_summary
 from tests._worker_database import _BOOTSTRAP_RESULT
@@ -99,7 +118,6 @@ from tests._app_fixtures import (
     fast_bcrypt,
     owner_client,
     seeded_world,
-    set_totp_key,
     setup_database,
     tax_law,
 )

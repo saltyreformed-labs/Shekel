@@ -73,30 +73,6 @@ def fast_bcrypt():
     _bcrypt.gensalt = _original_gensalt
 
 
-@pytest.fixture(scope="session", autouse=True)
-def set_totp_key():
-    """Hold ONE two-factor encryption key for the whole test process (ruling plan#3625).
-
-    A seeded start state is built once per worker and cloned into each test
-    that declares it, so its owner's two-factor row is encrypted under the key
-    of the test that built it.  A key per test makes that row unreadable from
-    the second test on, so a test that decrypts a world's secret (to type its
-    owner's code) would fail; so the key lives as long as the worker does.
-    *The 2026-11-12 measurement behind the ruling (267 cases of one route sweep
-    errored ``InvalidToken``) was taken while the shared sign-in typed a code;
-    the trusted browser chosen instead decrypts nothing, so no sweep meets it
-    now.*  ``TestAWorldsTwoFactorSecretIsReadInEveryTest``
-    (``tests/test_arch/test_a_seeded_start_state_is_built_once.py``) fails
-    under a key per test.  A test that needs a key of its own, or none,
-    still sets or deletes it with ``monkeypatch``, which puts this one back
-    after it.
-    """
-    from cryptography.fernet import Fernet  # pylint: disable=import-outside-toplevel
-    with pytest.MonkeyPatch.context() as patch:
-        patch.setenv("TOTP_ENCRYPTION_KEY", Fernet.generate_key().decode())
-        yield
-
-
 @pytest.fixture(autouse=True)
 def disable_hibp_check(monkeypatch):
     """Disable the HIBP breached-password check by default.
@@ -290,27 +266,28 @@ def _declared_world(request):
 
 
 @pytest.fixture(autouse=True)
-def db(app, setup_database, request, set_totp_key, disable_hibp_check):  # pylint: disable=unused-argument
+def db(app, setup_database, request, disable_hibp_check):  # pylint: disable=unused-argument
     """Provide a freshly-cloned database for each test.
 
-    **It DEPENDS on the two environment fixtures rather than merely coexisting
-    with them** (plan step balance:X-be-2).  All three are autouse, so every
-    test got them either way, and all three were function-scoped until
-    ``set_totp_key`` became session-scoped (ruling plan#3625) -- but pytest builds
-    the fixture list from ``dir(module)``, which is ALPHABETICAL, and
-    ``"db" < "disable_hibp_check" < "set_totp_key"``.  That is the whole of
-    why this one used to run first: not scope, and nothing about what it does.
-    Harmless while it issued nothing but DDL; it can now run a seeded start
-    state's builder, which is ordinary application code, and the first attempt
-    built its owner with the HIBP check still live -- ``hash_password``
-    refused the suite's own seed password with a message about a data breach.
+    **It DEPENDS on ``disable_hibp_check`` rather than merely coexisting with
+    it** (plan step balance:X-be-2).  Both are autouse and function-scoped, so
+    every test gets both either way, but pytest builds the fixture list from
+    ``dir(module)``, which is ALPHABETICAL, and ``"db" < "disable_hibp_check"``.
+    That is the whole of why this one used to run first: not scope, and
+    nothing about what it does.  Harmless while it issued nothing but DDL; it
+    can now run a seeded start state's builder, which is ordinary application
+    code, and the first attempt built its owner with the HIBP check still live
+    -- ``hash_password`` refused the suite's own seed password with a message
+    about a data breach.
 
     **So the dependency edge is the only thing pinning this order**, and
-    renaming any of the three would otherwise silently re-sort them.  The
-    edge is what makes the ordering a stated requirement rather than an
-    alphabetical accident, and ``_refuse_a_build_the_environment_is_not_ready_for``
-    is what says so out loud if the next builder needs a fixture nobody added
-    here.
+    renaming either fixture would otherwise silently re-sort them.  It is the
+    one edge a builder needs: the two-factor key it also needs is in the
+    environment before the app is imported (``tests/conftest.py``, ruling
+    plan#3890), so no fixture order can miss it.  The edge is what makes the
+    ordering a stated requirement rather than an alphabetical accident, and
+    ``_refuse_a_build_the_environment_is_not_ready_for`` is what says so out
+    loud if the next builder needs a fixture nobody added here.
 
     Clones the per-worker DB from ``shekel_test_template`` via
     ``CREATE DATABASE ... TEMPLATE ... STRATEGY WAL_LOG``

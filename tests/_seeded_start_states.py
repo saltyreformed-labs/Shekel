@@ -122,8 +122,10 @@ from tests._worker_database import (
 # real limit rather than an oversight.**  Every world's build sees exactly the
 # fixtures THAT test has set up by then:
 #
-# - ``db`` names the two autouse fixtures beside it in ``tests/_app_fixtures.py``
-#   that a builder needs, which orders them ahead of it.
+# - ``db`` names the autouse fixture beside it in ``tests/_app_fixtures.py``
+#   that a builder needs, ``disable_hibp_check``, which orders it ahead of
+#   ``db``.  The two-factor key a builder also needs is in the environment
+#   before the app is imported (``tests/conftest.py``).
 # - A function-scoped fixture defined below it in the tree, a SUBDIRECTORY
 #   conftest's autouse one included, sorts after ``db`` unconditionally, so no
 #   build sees it.
@@ -272,10 +274,12 @@ def _refuse_a_build_the_environment_is_not_ready_for(name):
     refused the suite's own seed password with a message about a data breach,
     naming nothing about ordering.
 
-    **It is a diagnostic, not a guarantee**: it can only name the two the
-    ``db`` fixture already enumerates, and it cannot see an autouse fixture in
-    a SUBDIRECTORY conftest -- those sort after ``db`` and no dependency in
-    the root conftest's fixtures can reach them.  See the block comment above.
+    **It is a diagnostic, not a guarantee**: it can only name the one the
+    ``db`` fixture enumerates, and it cannot see an autouse fixture in a
+    SUBDIRECTORY conftest -- those sort after ``db`` and no dependency in the
+    root conftest's fixtures can reach them.  See the block comment above.
+    The two-factor key a builder also needs is not a fixture's: it is in the
+    environment before the app is imported (``tests/conftest.py``).
 
     Args:
         name: The world's registered name, for the message.
@@ -283,14 +287,9 @@ def _refuse_a_build_the_environment_is_not_ready_for(name):
     Raises:
         RuntimeError: The environment is not the one a fixture would see.
     """
-    missing = []
     if os.environ.get("HIBP_CHECK_ENABLED") != "false":
-        missing.append("disable_hibp_check")
-    if not os.environ.get("TOTP_ENCRYPTION_KEY"):
-        missing.append("set_totp_key")
-    if missing:
         raise RuntimeError(
-            f"the world {name!r} is being built before {' and '.join(missing)} "
+            f"the world {name!r} is being built before disable_hibp_check "
             f"has run, so its builder would see an environment no ordinary "
             f"fixture sees. The `db` fixture must DEPEND on every autouse "
             f"fixture a builder needs -- pytest orders fixtures defined in one "

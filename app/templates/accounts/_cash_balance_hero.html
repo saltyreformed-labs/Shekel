@@ -15,8 +15,9 @@
    resolver current-period balance (the same display-vs-edit split the
    grid, dashboard, cockpit, and investment hero use).  The
    data-current-balance hook is the L6 cross-page oracle's read point
-   (tests/test_integration/test_cross_page_balance_equality.py) -- it
-   must keep carrying the raw Decimal whenever a balance resolves.
+   (_accounts_checking_value in
+   tests/test_integration/test_cross_page_balance_equality/_helpers.py)
+   -- it must keep carrying the raw Decimal whenever a balance resolves.
 
    Context: account (Account), current_balance (Decimal | None --
    rendered as a non-editable dash when no figure resolves). #}

@@ -773,7 +773,8 @@ class TestGridPeriodSubtotalCanonical:
         """Static guard: grid balance computation routes through the balance-at seam.
 
         F-6 lock.  The cross-page balance-equality regression test
-        (``tests/test_integration/test_cross_page_balance_equality.py``,
+        (``tests/test_integration/test_cross_page_balance_equality/
+        test_the_cash_surfaces_agree.py``,
         Commit 11 of the main remediation) cannot catch a route-handler
         bypass of the canonical producer because its grid reader
         re-runs the seam itself rather than parsing the rendered HTML.  A

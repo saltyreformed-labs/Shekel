@@ -691,13 +691,14 @@ class TestCheckingDetailCanonicalProducer:
         F-6 lock, sibling of
         ``test_grid_balance_computation_routed_through_resolver``.
         The cross-page balance-equality regression test
-        (``tests/test_integration/test_cross_page_balance_equality.py``,
-        Commit 11 of the main remediation) cannot catch a route-handler
-        bypass of the canonical producer because its /accounts reader
-        re-runs ``balance_at.cash_balance_map`` itself rather than parsing
-        the rendered HTML.  A regression that swaps the detail route for a
-        hand-rolled balance loop would drift silently through that lock.  This
-        static guard closes the gap.
+        (``tests/test_integration/test_cross_page_balance_equality/
+        test_the_cash_surfaces_agree.py``, Commit 11 of the main remediation)
+        reads this page's balance off the rendered ``data-current-balance``
+        hook (its L6 route-render reader, since 9b35483c9), so it catches a
+        route that renders a figure other than the seam's, but only on its
+        five parameter cases.  A regression that swaps the detail route for a
+        hand-rolled balance loop agreeing with the seam on those five would
+        drift silently through that lock.  This static guard closes the gap.
 
         The single ``cash_detail`` route reads plain cash balances via the
         cash-flow entry ``balance_at.cash_balance_map`` and interest-bearing

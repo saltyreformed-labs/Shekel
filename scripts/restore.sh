@@ -169,8 +169,9 @@ recovery_guidance() {
                 echo "  The backup is restored into '${PGDATABASE}', but every object"
                 echo "  in it is still the superuser's and the web login holds no"
                 echo "  grant on any: the owner's deploy cannot change them, and the"
-                echo "  app cannot read them.  The app was not started.  Finish with"
-                echo "  the hand-over, then the start:"
+                echo "  app cannot read them.  The app was not started.  Put right"
+                echo "  what stopped the hand-over (its error is above), then finish"
+                echo "  with the hand-over and the start:"
                 print_command "${HAND_OVER[@]}"
                 if [[ ${#APP_START[@]} -gt 0 ]]; then
                     print_command "${APP_START[@]}"

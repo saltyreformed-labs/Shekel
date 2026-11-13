@@ -607,13 +607,17 @@ class TestRestoreSaysWhereAFailureLeftIt:
         assert _START not in calls, calls
 
     def test_a_failed_hand_over_says_how_to_finish(self, tmp_path):
-        """Restored, not handed over: the guidance gives the hand-over and the
-        start to run, and the script keeps its own exit status."""
+        """Restored, not handed over: the guidance says to put right what the
+        hand-over's own error names first, since a hand-over run again over
+        the same cause fails again (a short owner password, measured
+        2026-11-13), then gives the hand-over and the start to run, and the
+        script keeps its own exit status."""
         result, calls = _restore_main(
             tmp_path, failing=frozenset({"hand-over"}),
         )
         assert result.returncode == 1, result.stdout + result.stderr
         assert "RESTORED, BUT NOT HANDED TO THE OWNER" in result.stderr
+        assert "what stopped the hand-over (its error is above)" in result.stderr
         lines = result.stderr.splitlines()
         assert (
             "      docker exec --env POSTGRES_DB=shekel probe-db " + _PROVISION_ROLES

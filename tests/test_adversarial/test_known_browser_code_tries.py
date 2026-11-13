@@ -31,12 +31,14 @@ address and browser it signed in from (``session_protection = "strong"``), so
 a copy is used from the owner's address, and re-confirm has no address limit
 that could answer instead of the counters.
 
-Every shared account is made with two-factor (plan#3600).  A test whose
-browsers sign in with the password alone, or re-confirm with it, resets the
-account's two-factor first (``reset_two_factor_of``), as ``scripts/reset_mfa.py``
-does, and one that then turns it on again sets it up afresh (``enable_mfa``);
-a test of a code from the start types the account's own
-(``two_factor_secret_of``).
+Every shared account is made with two-factor (plan#3600), and the owner's
+signed-in browser is one it trusts (``tests._limited_app.signed_in_browser``,
+ruling plan#3621), so it signs in with no code and every code of the step is
+the test's: a code test, and a right re-confirm, type the owner's own
+(``two_factor_secret_of``).  The two tests whose browsers sign in with the
+password alone, as before two-factor was on, reset the account's first
+(``reset_two_factor_of``), as ``scripts/reset_mfa.py`` does, and the one that
+needs it on again then sets it up afresh (``enable_mfa``).
 """
 
 import secrets
@@ -48,14 +50,20 @@ import pytest
 
 from app.extensions import db
 from app.models.known_device import KnownDevice
+from app.models.user import User
 from app.services import known_device_service
 from tests._guess_records import count_of, locked_until_of
 from tests._limited_app import (
     limited_app, signed_in_browser, stolen_session, through_nginx,
 )
 from tests._test_helpers import enable_mfa
-from tests._seed_owner_fixtures import SEED_USER_EMAIL, SEED_USER_PASSWORD
-from tests._two_factor_sign_in import reset_two_factor_of, two_factor_secret_of
+from tests._seed_owner_fixtures import OWNERS_PAGE, SEED_USER_EMAIL, SEED_USER_PASSWORD
+from tests._two_factor_sign_in import (
+    code_now,
+    reset_two_factor_of,
+    sign_in_by_password,
+    two_factor_secret_of,
+)
 
 _SECOND_EMAIL = "second@shekel.local"
 _SECOND_PASSWORD = "secondpass12"
@@ -244,9 +252,15 @@ class TestAKnownBrowserHasItsOwnTries:
         """
         with rate_app.app_context():
             reset_two_factor_of(seed_user["user"].id)
-            first = signed_in_browser(rate_app, "7.7.7.7")
+            first = sign_in_by_password(
+                rate_app.test_client(), SEED_USER_EMAIL, SEED_USER_PASSWORD,
+                OWNERS_PAGE, **through_nginx("7.7.7.7"),
+            )
             first.post("/logout", **through_nginx("7.7.7.7"))
-            second = signed_in_browser(rate_app, "7.7.7.8")
+            second = sign_in_by_password(
+                rate_app.test_client(), SEED_USER_EMAIL, SEED_USER_PASSWORD,
+                OWNERS_PAGE, **through_nginx("7.7.7.8"),
+            )
             second.post("/logout", **through_nginx("7.7.7.8"))
             enable_mfa(db.session, seed_user["user"].id)
             _type_password(first, "7.7.7.7")
@@ -336,14 +350,12 @@ class TestAKnownBrowserHasItsOwnTries:
         scope of their own, so each POST spends one of each.  As one counter,
         each POST would spend two, and the third would be refused.  No flow
         of the app leaves a session signed in with a code pending, so the
-        session is written here; the sign-in had no code to ask, so it spent
-        none of the code form's counters.
+        session is written here; the sign-in, on a browser the owner trusts,
+        asked no code, so it spent none of the code form's counters.
         """
         with rate_app.app_context():
-            reset_two_factor_of(seed_user["user"].id)
             user_id = seed_user["user"].id
             owner = signed_in_browser(rate_app, "7.7.7.7")
-            enable_mfa(db.session, user_id)
             with owner.session_transaction() as session:
                 session["_mfa_pending_user_id"] = user_id
                 session["_mfa_pending_at"] = datetime.now(timezone.utc).isoformat()
@@ -371,9 +383,16 @@ _LOCKED_OUT = b"Too many wrong attempts. Try again later."
 
 
 def _re_confirm(browser, address, password=SEED_USER_PASSWORD):
-    """POST *password* at ``/reauth`` from *address*; return the response."""
+    """POST *password* and the owner's code at ``/reauth`` from *address*; return the response.
+
+    The owner has two-factor, so a right re-confirm types the current step's
+    code too; a wrong password is refused before the code is read.
+    """
+    owner_id = db.session.query(User.id).filter_by(email=SEED_USER_EMAIL).scalar()
     return browser.post(
-        "/reauth", data={"password": password}, **through_nginx(address),
+        "/reauth",
+        data={"password": password, "totp_code": code_now(two_factor_secret_of(owner_id))},
+        **through_nginx(address),
     )
 
 
@@ -420,7 +439,6 @@ class TestAKnownBrowserHasItsOwnReConfirmTries:
         password.
         """
         with rate_app.app_context():
-            reset_two_factor_of(seed_user["user"].id)
             owner = signed_in_browser(rate_app, _OWNERS_ADDRESS)
             thief = stolen_session(rate_app, owner)
             _wrong_passwords_checked(thief, _CODE_TRIES)
@@ -440,7 +458,6 @@ class TestAKnownBrowserHasItsOwnReConfirmTries:
         has its password checked.
         """
         with rate_app.app_context():
-            reset_two_factor_of(seed_user["user"].id)
             user_id = seed_user["user"].id
             owner = signed_in_browser(rate_app, _OWNERS_ADDRESS)
             _wrong_passwords_checked(owner, _CODE_TRIES)
@@ -467,7 +484,6 @@ class TestAKnownBrowserHasItsOwnReConfirmTries:
         five wrong ones and no more.
         """
         with rate_app.app_context():
-            reset_two_factor_of(seed_user["user"].id)
             user_id = seed_user["user"].id
             owner = signed_in_browser(rate_app, _OWNERS_ADDRESS)
             _wrong_passwords_checked(stolen_session(rate_app, owner), _CODE_TRIES)
@@ -492,7 +508,6 @@ class TestAKnownBrowserHasItsOwnReConfirmTries:
         them for the whole page.
         """
         with rate_app.app_context():
-            reset_two_factor_of(seed_user["user"].id)
             owner = signed_in_browser(rate_app, _OWNERS_ADDRESS)
             assert _re_confirmed(_re_confirm(owner, _OWNERS_ADDRESS))
 
@@ -535,7 +550,6 @@ class TestAKnownBrowserHasItsOwnReConfirmTries:
         one, and the sixth POST is the browser's first try.
         """
         with rate_app.app_context():
-            reset_two_factor_of(seed_user["user"].id)
             user_id = seed_user["user"].id
             owner = signed_in_browser(rate_app, _OWNERS_ADDRESS)
             for _ in range(_CODE_TRIES):
@@ -559,7 +573,6 @@ class TestAKnownBrowserHasItsOwnReConfirmTries:
         put the lock on, as a stranger who knows the email would.
         """
         with rate_app.app_context():
-            reset_two_factor_of(seed_user["user"].id)
             owner = signed_in_browser(rate_app, _OWNERS_ADDRESS)
             for octet in range(_LOCK_THRESHOLD):
                 rate_app.test_client().post(

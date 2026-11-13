@@ -21,7 +21,8 @@ from contextlib import contextmanager
 from app import CONFIG_MAP, create_app
 from app.extensions import db
 from app.rate_limits import limiter
-from tests._seed_owner_fixtures import SEED_USER_EMAIL, SEED_USER_PASSWORD
+from tests._seed_owner_fixtures import OWNERS_PAGE, SEED_USER_EMAIL, SEED_USER_PASSWORD
+from tests._two_factor_sign_in import sign_in_from_a_trusted_browser
 
 #: An address on ``TestConfig.FORWARDED_ALLOW_IPS``, as nginx is in production.
 NGINX_ADDRESS = "172.32.0.4"
@@ -72,10 +73,10 @@ def through_nginx(client_address):
 def signed_in_browser(app, address):
     """Return a browser that finished the seed user's sign-in from *address*, still signed in.
 
-    The account has no code to ask (its test reset its two-factor first,
-    ``tests._two_factor_sign_in.reset_two_factor_of``), so the password
-    finishes the sign-in, and the browser holds the cookie of the record it
-    made: it is known.
+    The shared sign-in (ruling plan#3621): the browser is one the seed user
+    trusts, so the password finishes the sign-in with no code, and the browser
+    holds the cookie of its record: it is known.  It typed no code, so every
+    code of the account's current step is the test's to type.
 
     Args:
         app: The app under test.
@@ -84,15 +85,10 @@ def signed_in_browser(app, address):
     Returns:
         The signed-in test client.
     """
-    browser = app.test_client()
-    response = browser.post(
-        "/login", data={"email": SEED_USER_EMAIL, "password": SEED_USER_PASSWORD},
+    return sign_in_from_a_trusted_browser(
+        app.test_client(), SEED_USER_EMAIL, SEED_USER_PASSWORD, OWNERS_PAGE,
         **through_nginx(address),
     )
-    assert response.status_code == 302
-    location = response.headers["Location"]
-    assert "/login" not in location and "/mfa/verify" not in location
-    return browser
 
 
 def stolen_session(app, owner):

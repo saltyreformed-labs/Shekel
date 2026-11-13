@@ -36,6 +36,10 @@ proves it fires:
   is turned away, because taking the lock expires the signed-in user's row and
   the gate reads ``is_active`` again after the wait.  The control is the same
   wait with the companion left active, which saves.
+
+The seed owner is made with two-factor (plan#3600), so its password step owes
+the code; a backup-code case gives the owner's row known codes
+(``tests._test_helpers.store_backup_codes``).
 """
 
 import time
@@ -50,8 +54,6 @@ from app import ref_cache
 from app.enums import StatusEnum
 from app.extensions import db
 from app.models.transaction import Transaction
-from app.models.user import MfaConfig
-from app.services import mfa_service
 from app.services.user_write_lock import _USER_WRITE_LOCK_NAMESPACE
 from tests._guess_records import count_of
 from tests._sign_in import browser_count, make_known
@@ -64,6 +66,7 @@ from tests._test_helpers import (
     generate_row_of,
     make_expense_template,
     owner_lock_key,
+    store_backup_codes,
 )
 from tests._seed_owner_fixtures import SEED_USER_EMAIL, SEED_USER_PASSWORD
 
@@ -72,7 +75,7 @@ from tests._seed_owner_fixtures import SEED_USER_EMAIL, SEED_USER_PASSWORD
 #: the wait is visible, so the figure only bounds a failure.
 _THREAD_DEADLINE_S = 20.0
 
-#: The backup codes the MFA arms enable; any one of them signs in once.
+#: The backup codes the MFA arms give the owner; any one of them signs in once.
 _BACKUP_CODES = ["aaaaaaaa", "bbbbbbbb", "cccccccc"]
 
 
@@ -102,19 +105,13 @@ def _lock_index(statements):
     return _first_index(statements, lambda sql: "pg_advisory_xact_lock" in sql)
 
 
-def _enable_mfa(user_id):
-    """Enable two-factor sign-in for *user_id* with the known backup codes.
+def _give_backup_codes(user_id):
+    """Give *user_id*'s two-factor the known backup codes.
 
     Args:
-        user_id: The user to enable it for.
+        user_id: The user, who has two-factor.
     """
-    db.session.add(MfaConfig(
-        user_id=user_id,
-        is_enabled=True,
-        totp_secret_encrypted=mfa_service.encrypt_secret("JBSWY3DPEHPK3PXP"),
-        backup_codes=mfa_service.hash_backup_codes(_BACKUP_CODES),
-    ))
-    db.session.commit()
+    store_backup_codes(db.session, user_id, _BACKUP_CODES)
 
 
 def _post_login(client, password=SEED_USER_PASSWORD, email=SEED_USER_EMAIL):
@@ -186,7 +183,7 @@ class TestSignInLocksBeforeItChecks:
         ``mfa_verify`` takes, not the password step's.
         """
         user_id = seed_user["user"].id
-        _enable_mfa(user_id)
+        _give_backup_codes(user_id)
         pending = _post_login(client)
         assert urlsplit(pending.headers["Location"]).path == "/mfa/verify"
 
@@ -245,7 +242,7 @@ class TestAHeldKeyMakesSignInWait:
     def test_the_code_step_waits_on_a_held_key(self, client, seed_user):
         """The backup-code step blocks too: it takes the lock before the codes."""
         user_id = seed_user["user"].id
-        _enable_mfa(user_id)
+        _give_backup_codes(user_id)
         _post_login(client)
         with HeldOwnerKey(user_id):
             bound_lock_waits()
@@ -255,7 +252,7 @@ class TestAHeldKeyMakesSignInWait:
 
     def test_the_code_step_completes_when_the_key_is_free(self, client, seed_user):
         """The control for the code step."""
-        _enable_mfa(seed_user["user"].id)
+        _give_backup_codes(seed_user["user"].id)
         _post_login(client)
         bound_lock_waits()
         response = client.post(
@@ -327,7 +324,6 @@ class TestTheLockEndsWithItsRequest:
         took the key at all, so a free key afterwards is the teardown's doing.
         """
         user_id = seed_user["user"].id
-        _enable_mfa(user_id)
         response, statements = capture_sql_statements(
             lambda: _post_login(client),
         )

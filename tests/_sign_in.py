@@ -17,6 +17,7 @@ from app.models.known_device import KnownDevice
 from app.models.user import User
 from app.services import auth_service
 from tests._seed_owner_fixtures import SEED_USER_EMAIL, SEED_USER_PASSWORD
+from tests._two_factor_sign_in import code_now, redirect_path, two_factor_secret_of
 
 
 def stranger_signs_in(email, password) -> User:
@@ -41,14 +42,23 @@ def stranger_signs_in(email, password) -> User:
 def make_known(client) -> None:
     """Make *client* a browser known to the seed user, signed out again.
 
-    A finished sign-in with no code sets the browser's record and cookie
-    (ruling plan#2994); signing out keeps the cookie.
+    A finished sign-in sets the browser's record and cookie (ruling
+    plan#2994); signing out keeps the cookie.  The seed user has two-factor
+    (plan#3600), so the sign-in finishes at the code form, with the user's own
+    code and without trusting the browser: it is known, and holds no trust.
+    It types the current step's code, so a test that calls this types no
+    other in that step.
 
     Args:
         client: The test client, as a browser.
     """
     response = client.post(
         "/login", data={"email": SEED_USER_EMAIL, "password": SEED_USER_PASSWORD},
+    )
+    assert redirect_path(response) == "/mfa/verify"
+    user_id = db.session.query(User.id).filter_by(email=SEED_USER_EMAIL).scalar()
+    response = client.post(
+        "/mfa/verify", data={"totp_code": code_now(two_factor_secret_of(user_id))},
     )
     assert response.status_code == 302
     assert urlsplit(response.headers["Location"]).path not in ("/login", "/mfa/verify")

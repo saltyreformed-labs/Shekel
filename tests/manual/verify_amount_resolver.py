@@ -141,7 +141,8 @@ which is N-445 one layer up.  On the 2026-09-09 clone ``transfer_series`` is
 such an arm (every one of the 175 transfers still owns its amount; plan step
 **X-au-f** is what changes that) and so is the LOAN_PAYMENT rule
 (``budget.loan_payment_settings`` is empty).  They are graded by the seeded
-fixtures in ``tests/test_services/test_amount_source.py`` and by nothing here.
+fixtures in the ``tests/test_services/test_amount_source/`` package and by
+nothing here.
 
 **WHICH ROWS MUST MOVE IS READ OFF THE DECLARATION AND STORED COLUMNS.**  The
 expectation is built in pass 1 from ``amount_source_id``, ``template_id`` and
@@ -502,8 +503,8 @@ def _apply_own_column(records):
     only negatively, so a ``write_past_the_amount_seam`` that stopped reaching
     the mapped column would report every derived row as held and exit 0: N-445's
     outcome through a new door.  The suite proves that helper reaches the real
-    column (``test_amount_source
-    .test_a_declared_row_cannot_carry_a_rival_figure_at_all`` flushes one and
+    column (``test_a_declared_row_cannot_carry_a_rival_figure_at_all``, in
+    ``test_amount_source/test_what_the_rules_do_not_read.py``, flushes one and
     catches the ``IntegrityError``), but that is out of band from the run whose
     report quotes the number.
 
@@ -1197,8 +1198,8 @@ def _report_perturbation(perturbation, sources, score):
         print(
             "    rows DECLARED to it: 0 -- THIS PERTURBATION GRADES NOTHING in "
             "the moving direction. No row in this database is priced by that "
-            "source, so that arm is graded by "
-            "tests/test_services/test_amount_source.py and by nothing here. "
+            "source, so that arm is graded by the "
+            "tests/test_services/test_amount_source/ package and by nothing here. "
             f"It still grades {score.held} rows in the HOLDING direction."
         )
     else:

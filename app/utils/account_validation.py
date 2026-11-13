@@ -102,13 +102,15 @@ INVALID_COLLATERAL_LINK = ("Invalid linked account.", "danger")
 #: The refusal of a re-type that would leave a worked-out card payment on an
 #: account that is not a card (plan step credit_card:CC-6): only a credit
 #: card's balance, statement and minimum exist to work its payment out from.
-#: Formatted with the card's name and the payment's.  The way out it names is
-#: always open: deleting the payment can be refused for history (it is then
-#: archived, and its settings stay), but a new account never is.
+#: Formatted with the card's name and the payment's.  It names two ways out:
+#: a new account, always open, and for a card added by mistake the card's
+#: delete, which takes its payment with it (task plan#3754) or, where the card
+#: holds history, archives the two, the settings staying.
 CARD_PAYMENT_KEEPS_ITS_CARD = (
     "'{card}' has a card payment, '{payment}', that works out what to pay "
     "from the card's balance, so it must stay a credit card. To use another "
-    "type, create a new account of that type."
+    "type, create a new account of that type; if '{card}' was added as a "
+    "card by mistake, delete it, and its payment goes with it."
 )
 
 

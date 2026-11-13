@@ -20,51 +20,18 @@ from app.enums import StatusEnum
 from app.extensions import db
 from app.models.account import Account
 from app.models.ref import AccountType
-from app.models.transfer import Transfer
 from app.models.transfer_template import TransferTemplate
 from app.services import transfer_service
 from tests._test_helpers import create_account_of_type
 
-from ._helpers import _bump_account_version_outside_session
-
-
-def _flashes(auth_client):
-    """Return, and consume, the flash messages left by unfollowed redirects."""
-    with auth_client.session_transaction() as sess:
-        return [message for _category, message in sess.pop("_flashes", [])]
-
-
-def _add_card(auth_client, seed_user, owed="500.00"):
-    """Add a card named Visa through the create door; return it and its payment."""
-    card_type = db.session.query(AccountType).filter_by(
-        name="Credit Card", user_id=None,
-    ).one()
-    auth_client.post("/accounts", data={
-        "name": "Visa", "account_type_id": card_type.id, "anchor_balance": owed,
-    })
-    card = db.session.query(Account).filter_by(
-        user_id=seed_user["user"].id, name="Visa",
-    ).one()
-    payment = db.session.query(TransferTemplate).filter_by(
-        to_account_id=card.id,
-    ).one()
-    _flashes(auth_client)  # the create door's own, consumed
-    return card, payment
-
-
-def _live_rows(template_id):
-    """The ids of the template's transfers that are not soft-deleted, in date order."""
-    return [
-        row.id for row in db.session.query(Transfer).filter_by(
-            transfer_template_id=template_id, is_deleted=False,
-        ).order_by(Transfer.due_date)
-    ]
-
-
-def _reload(model, row_id):
-    """The row as the request left it."""
-    db.session.expire_all()
-    return db.session.get(model, row_id)
+from ._helpers import (
+    _add_card,
+    _bump_account_version_outside_session,
+    _flashes,
+    _live_rows,
+    _reload,
+    _retype_into_a_card,
+)
 
 
 @pytest.mark.usefixtures("seed_periods_today")
@@ -108,21 +75,7 @@ class TestArchivingACardArchivesItsPayment:
         and prices $500.00.
         """
         with app.app_context():
-            savings = create_account_of_type(
-                seed_user, db.session, "Savings", "Rainy Day",
-                anchor_balance=Decimal("-500.00"),
-            )
-            db.session.commit()
-            card_type = db.session.query(AccountType).filter_by(
-                name="Credit Card", user_id=None,
-            ).one()
-            auth_client.post(f"/accounts/{savings.id}", data={
-                "account_type_id": card_type.id, "name": "Visa",
-            })
-            _flashes(auth_client)
-            payment = db.session.query(TransferTemplate).filter_by(
-                to_account_id=savings.id,
-            ).one()
+            savings, payment = _retype_into_a_card(auth_client, seed_user)
             first, *later = _live_rows(payment.id)
             for status in (StatusEnum.DONE, StatusEnum.PROJECTED):
                 transfer_service.update_transfer(

@@ -49,6 +49,7 @@ from sqlalchemy.orm import InstrumentedAttribute, Query
 from sqlalchemy.sql.expression import ColumnElement
 
 from app.extensions import db
+from app.models.card_payment_settings import CardPaymentSettings
 from app.models.merchant_rule import MerchantRule
 from app.models.pay_period import PayPeriod
 from app.models.ref import Status
@@ -496,14 +497,50 @@ def account_has_history(account_id: int) -> bool:
     so the two arms answered alike for every account -- 0 accounts differed
     on the 2026-09-30 00:11 production dump.
 
+    **A card's own payment is asked the transfer delete's question instead**
+    (task plan#3754, plan step ``credit_card:CC-6``).  Every card has one
+    payment, made with the card (task plan#2933), so its projected rows made
+    every card read as history and its delete archive.  Those rows are the
+    payment's PLAN, which goes with the card; what is history is what the
+    Recurring page's own delete keeps: a settled transfer, soft-deleted or
+    not (:func:`transfer_template_has_paid_history`, ruling **R-JE**), and
+    one either of whose legs holds a payment
+    (:func:`transfer_template_holding_movements`, ruling **R-CC65**).  So
+    the live-transfer arm leaves the payment's transfers out, and those two
+    questions are asked of the payment.  A transfer that names no definition,
+    an extra payment set up by hand, still counts here.
+
     Args:
         account_id: The Account.id to check.
 
     Returns:
         True if the account has any non-deleted transaction history, on it or
-        under one of its definitions, or any live transfer from or to it.
+        under one of its definitions, any live transfer from or to it but its
+        own payment's, or a settled transfer or one holding a payment under
+        its own payment.
     """
-
+    own_payment_id = (
+        db.session.query(CardPaymentSettings.transfer_template_id)
+        .filter(CardPaymentSettings.card_account_id == account_id)
+        .scalar()
+    )
+    if own_payment_id is not None and (
+        transfer_template_has_paid_history(own_payment_id)
+        or transfer_template_holding_movements(own_payment_id)
+    ):
+        return True
+    live_transfers = [
+        db.or_(
+            Transfer.from_account_id == account_id,
+            Transfer.to_account_id == account_id,
+        ),
+        Transfer.is_deleted.is_(False),
+    ]
+    if own_payment_id is not None:
+        # ``IS DISTINCT FROM``, so a transfer naming no definition still counts.
+        live_transfers.append(
+            Transfer.transfer_template_id.is_distinct_from(own_payment_id),
+        )
     return db.session.query(
         db.or_(
             db.session.query(Transaction)
@@ -515,13 +552,7 @@ def account_has_history(account_id: int) -> bool:
                 ),
                 Transaction.is_deleted.is_(False),
             ).exists(),
-            db.session.query(Transfer).filter(
-                db.or_(
-                    Transfer.from_account_id == account_id,
-                    Transfer.to_account_id == account_id,
-                ),
-                Transfer.is_deleted.is_(False),
-            ).exists(),
+            db.session.query(Transfer).filter(*live_transfers).exists(),
         )
     ).scalar()
 

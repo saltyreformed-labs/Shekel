@@ -24,7 +24,7 @@ owner retries against fresh row state.
 
 import logging
 
-from flask import abort, flash, redirect, url_for
+from flask import Response, abort, flash, redirect, url_for
 from flask_login import current_user
 
 from app.extensions import db
@@ -48,6 +48,7 @@ from app.routes._commit_helpers import (
 from app.routes._redirect_target import RedirectTarget
 from app.routes._transfer_lifecycle import (
     archive_transfer_definition,
+    remove_transfer_definition,
     unarchive_transfer_definition,
 )
 from app.routes.accounts._bp import accounts_bp
@@ -103,6 +104,71 @@ def _own_payment(account: Account) -> TransferTemplate | None:
     return None if settings is None else settings.template
 
 
+def _other_transfer_definitions(account_id: int, payment: TransferTemplate | None):
+    """Return the query of the transfer definitions naming the account, but its own payment.
+
+    The refusal both the archive and the delete ask, from either side of the
+    transfer: a card's one payment is not counted (tasks plan#3697 and
+    plan#3754), because every card has one and it goes with the card.
+
+    Args:
+        account_id: The owner-checked account's id.
+        payment: The card's one payment (:func:`_own_payment`), or ``None``.
+
+    Returns:
+        An unexecuted query of the owner's :class:`TransferTemplate` rows,
+        active or archived, naming the account but *payment*.
+    """
+    query = db.session.query(TransferTemplate).filter(
+        TransferTemplate.user_id == current_user.id,
+        db.or_(
+            TransferTemplate.from_account_id == account_id,
+            TransferTemplate.to_account_id == account_id,
+        ),
+    )
+    if payment is not None:
+        query = query.filter(TransferTemplate.id != payment.id)
+    return query
+
+
+def _archive_with_its_payment(
+    account: Account, payment: TransferTemplate | None, ctx: StaleConflictContext,
+) -> str | Response:
+    """Archive *account*, and a card's active payment with it, then commit.
+
+    The one archive of an account, which its Archive performs and its
+    delete's history arm performs in place of the delete
+    (:func:`_archive_instead_of_delete`, task plan#3754).  The card's payment
+    is archived through the transfers' own archive act
+    (:func:`~app.routes._transfer_lifecycle.archive_transfer_definition`),
+    which flushes the account's write with the payment's under the stale
+    guard and commits both; a payment already archived is left as it is.
+
+    Args:
+        account: The owner-checked account to archive.
+        payment: The card's one payment (:func:`_own_payment`), or ``None``.
+        ctx: The door's stale-race context.
+
+    Returns:
+        The clause naming the payment archived with it ("" when none was),
+        committed, or the refusal :class:`Response` the door returns
+        verbatim, the session rolled back.
+    """
+    account.is_active = False
+    if payment is None or not payment.is_active:
+        conflict = commit_or_handle_stale(ctx)
+        return "" if conflict is None else conflict
+    archived = archive_transfer_definition(payment, ctx)
+    if not isinstance(archived, tuple):
+        return archived
+    removed, kept = archived
+    stays = kept.stays("row", named=True)
+    return (
+        f", and its payment '{payment.name}' with it: {removed} projected "
+        "payment(s) removed" + (f"; {stays}" if stays else "")
+    )
+
+
 @accounts_bp.route("/accounts/<int:account_id>/archive", methods=["POST"])
 @require_owner
 def archive_account(account_id):
@@ -132,17 +198,10 @@ def archive_account(account_id):
         abort(404)
 
     payment = _own_payment(account)
-    others = [
-        TransferTemplate.user_id == current_user.id,
+    active_others = _other_transfer_definitions(account_id, payment).filter(
         TransferTemplate.is_active.is_(True),
-        db.or_(
-            TransferTemplate.from_account_id == account_id,
-            TransferTemplate.to_account_id == account_id,
-        ),
-    ]
-    if payment is not None:
-        others.append(TransferTemplate.id != payment.id)
-    if db.session.query(TransferTemplate).filter(*others).first():
+    )
+    if active_others.first():
         flash(
             "Cannot archive this account -- it is used by active recurring transfers. "
             "Archive those recurring transfers first.",
@@ -150,24 +209,11 @@ def archive_account(account_id):
         )
         return redirect(url_for("savings.dashboard"))
 
-    ctx = _stale_context("archive_account", account_id)
-    account.is_active = False
-    with_payment = ""
-    if payment is None or not payment.is_active:
-        conflict = commit_or_handle_stale(ctx)
-        if conflict is not None:
-            return conflict
-    else:
-        # The act commits the account's write with the payment's.
-        archived = archive_transfer_definition(payment, ctx)
-        if not isinstance(archived, tuple):
-            return archived
-        removed, kept = archived
-        stays = kept.stays("row", named=True)
-        with_payment = (
-            f", and its payment '{payment.name}' with it: {removed} projected "
-            "payment(s) removed" + (f"; {stays}" if stays else "")
-        )
+    with_payment = _archive_with_its_payment(
+        account, payment, _stale_context("archive_account", account_id),
+    )
+    if not isinstance(with_payment, str):
+        return with_payment
     logger.info("Archived account: %s (id=%d)", account.name, account.id)
     flash(f"Account '{account.name}' archived{with_payment}.", "info")
     return redirect(url_for("savings.dashboard"))
@@ -224,31 +270,38 @@ def unarchive_account(account_id):
     return redirect(url_for("savings.dashboard"))
 
 
-def _archive_instead_of_delete(account, account_id, reason):
+def _archive_instead_of_delete(account, account_id, payment, reason):
     """Archive an account with history worth preserving, instead of deleting.
 
     The shared outcome of the hard-delete history guard's two arms
-    (:func:`_history_refusal`): flash *reason*, flip ``is_active`` to False
-    idempotently, and commit under the optimistic lock.  Returns the Flask
-    response the caller returns directly.
+    (:func:`_history_refusal`): an active account is archived by the
+    account's one archive (:func:`_archive_with_its_payment`), so **a card's
+    payment is archived with it** (task plan#3754), as the card's own Archive
+    does; an account already archived is left as it is.  *reason* is
+    flashed once the archive has committed, with the payment's clause: a
+    refusal (the stale race) sends its own sentence, and this one beside it
+    would report an archive that did not happen.  Returns the Flask response
+    the caller returns directly.
 
     Args:
         account: The owned Account being archived.
         account_id: Its id (for the stale-conflict log label and redirect).
-        reason: The user-facing flash message explaining the archive.
+        payment: The card's one payment (:func:`_own_payment`), or ``None``.
+        reason: The user-facing sentence saying why it is not deleted.
 
     Returns:
         A Flask redirect response, or the stale-conflict response when a
         concurrent update bumped the row's version.
     """
-    flash(reason, "warning")
+    with_payment = ""
     if account.is_active:
-        account.is_active = False
-        conflict = commit_or_handle_stale(
+        with_payment = _archive_with_its_payment(
+            account, payment,
             _stale_context("hard_delete_account archive-fallback", account_id),
         )
-        if conflict is not None:
-            return conflict
+        if not isinstance(with_payment, str):
+            return with_payment
+    flash(f"{reason} It has been archived instead{with_payment}.", "warning")
     return redirect(url_for("savings.dashboard"))
 
 
@@ -256,7 +309,7 @@ def _history_refusal(account, definitions) -> "str | None":
     """Return why *account*'s history forbids a permanent delete, or ``None``.
 
     Guard 4 of :func:`hard_delete_account`, its two arms asked in order and
-    each answering with the sentence the archive flash prints:
+    each answering with the sentence the archive flash opens with:
 
     * **rows** -- any non-deleted transaction on the account or under one of
       its definitions, and any SETTLED row under one of its definitions
@@ -294,13 +347,12 @@ def _history_refusal(account, definitions) -> "str | None":
     ):
         return (
             f"'{account.name}' has transaction history and cannot be "
-            "permanently deleted. It has been archived instead."
+            "permanently deleted."
         )
     if archive_helpers.account_holds_other_rows_movements(account.id):
         return (
             f"'{account.name}' has purchases recorded on it from other "
-            "accounts' rows and cannot be permanently deleted. It has been "
-            "archived instead."
+            "accounts' rows and cannot be permanently deleted."
         )
     return None
 
@@ -315,7 +367,12 @@ def hard_delete_account(account_id):
       1. Ownership -- account exists and belongs to current user.
       2. Transfer template guard -- any TransferTemplate (active or
          archived) referencing this account blocks deletion because the
-         FK is ON DELETE RESTRICT.
+         FK is ON DELETE RESTRICT.  **A card's own payment is not one of
+         them** (task plan#3754): every card has one (task plan#2933), so
+         the refusal held every card, a card added by mistake included; the
+         payment goes with the card instead (step 0), or is archived with
+         it where guard 4 archives.  Any other recurring transfer naming the
+         card still refuses.
       3. Recurring-definition guard -- any TransactionTemplate (active or
          archived) on this account that RECURS blocks deletion for the same
          FK reason.  A rule-less definition is a ONE-OFF's (plan step
@@ -341,7 +398,12 @@ def hard_delete_account(account_id):
          as a 500.  A row or transfer the cleanup below removes holds no
          payment or purchase: a live one is history above, and the
          database refuses a hidden one holding one (rulings **R-CC89**,
-         **R-CC92**).
+         **R-CC92**).  **A card's own payment's transfers are its plan,
+         not its history** (task plan#3754, ``account_has_history``):
+         under it only a settled transfer, soft-deleted or not, or one
+         holding a payment archives the card -- what the Recurring page's
+         delete of the payment keeps -- and the archive then takes the
+         payment with it, as the card's own Archive does.
 
     **Balance records alone do not archive** (ruling plan#2784).  An account's
     openings and true-ups, and a loan's terms and statements, are its alone:
@@ -353,6 +415,12 @@ def hard_delete_account(account_id):
     Permanent delete cleanup:
       After all guards pass, remaining RESTRICT-FK rows must be
       explicitly removed before the account row can be deleted:
+        - A card's one payment, first, through the transfers' own delete
+          act (``_transfer_lifecycle.remove_transfer_definition``, the
+          Recurring page's delete without its commit): its unsettled
+          transfers, the definition, and its settings row by cascade.  The
+          definition keys onto the card, so its DELETE flushes before the
+          card's, and the door commits both once.
         - Transfer rows (soft-deleted or ghost ad-hoc) referencing this
           account, deleted through transfer_service, which every write of
           a transfer goes through (CLAUDE.md, Architecture).
@@ -383,19 +451,10 @@ def hard_delete_account(account_id):
     if account is None:
         abort(404)
 
-    # Guard 2: transfer templates with RESTRICT FK.
-    blocking_xfer_template = (
-        db.session.query(TransferTemplate)
-        .filter(
-            TransferTemplate.user_id == current_user.id,
-            db.or_(
-                TransferTemplate.from_account_id == account_id,
-                TransferTemplate.to_account_id == account_id,
-            ),
-        )
-        .first()
-    )
-    if blocking_xfer_template:
+    # Guard 2: transfer templates with RESTRICT FK, but a card's own payment,
+    # which goes with the card (step 0 below).
+    payment = _own_payment(account)
+    if _other_transfer_definitions(account_id, payment).first():
         flash(
             "Cannot delete this account -- it is used by recurring transfers. "
             "Delete those recurring transfers first.",
@@ -423,9 +482,26 @@ def hard_delete_account(account_id):
     # Guard 4: transaction history, in its two arms (:func:`_history_refusal`).
     history_refusal = _history_refusal(account, definitions)
     if history_refusal is not None:
-        return _archive_instead_of_delete(account, account_id, history_refusal)
+        return _archive_instead_of_delete(
+            account, account_id, payment, history_refusal,
+        )
 
     # All guards passed -- permanently delete.
+    ctx = _stale_context("hard_delete_account", account_id)
+
+    # Step 0: a card's one payment, through the transfers' own delete act
+    # (task plan#3754).  Guard 4 has found no settled transfer under it and
+    # none holding a payment (``account_has_history``), so what goes is its
+    # plan: the act deletes its unsettled transfers and the definition, its
+    # settings row cascading.  First, because the definition keys onto the
+    # card (``RESTRICT``): its DELETE flushes here, before the card's at
+    # step 4, and the act writes no commit, which the door makes once.
+    with_payment = ""
+    if payment is not None:
+        with_payment = f", and its payment '{payment.name}' with it"
+        refused = remove_transfer_definition(payment, ctx)
+        if refused is not None:
+            return refused
     # A loan's terms go first, before step 1.  Step 1's delete of a hidden
     # payment re-syncs the loan it left, and a loan the store is short of
     # would have the sync post on the very chart rows step 3 disposes of:
@@ -504,11 +580,9 @@ def hard_delete_account(account_id):
     # handler converts into a flash + redirect rather than a 500.
     account_name = account.name
     db.session.delete(account)
-    conflict = commit_or_handle_stale(
-        _stale_context("hard_delete_account", account_id),
-    )
+    conflict = commit_or_handle_stale(ctx)
     if conflict is not None:
         return conflict
 
-    flash(f"Account '{account_name}' permanently deleted.", "info")
+    flash(f"Account '{account_name}' permanently deleted{with_payment}.", "info")
     return redirect(url_for("savings.dashboard"))

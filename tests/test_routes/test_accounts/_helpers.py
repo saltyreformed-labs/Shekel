@@ -9,12 +9,16 @@ from sqlalchemy import text
 
 from app.extensions import db
 from tests._test_helpers import (
+    create_account_of_type,
     figure_source_columns,
     generate_row_of,
     make_expense_template,
     open_owner_calendar,
     settle_day_columns,
 )
+from app.models.account import Account
+from app.models.transfer import Transfer
+from app.models.transfer_template import TransferTemplate
 from app.models.user import User, UserSettings
 from app.models.ref import AccountType
 from app.services.auth_service import hash_password
@@ -375,3 +379,67 @@ def _login_as(app, email, password):
         f"login as {email} failed; got status {resp.status_code}"
     )
     return client
+
+
+def _flashes(auth_client):
+    """Return, and consume, the flash messages left by unfollowed redirects."""
+    with auth_client.session_transaction() as sess:
+        return [message for _category, message in sess.pop("_flashes", [])]
+
+
+def _add_card(auth_client, seed_user, owed="500.00"):
+    """Add a card named Visa through the create door; return it and its payment."""
+    card_type = db.session.query(AccountType).filter_by(
+        name="Credit Card", user_id=None,
+    ).one()
+    auth_client.post("/accounts", data={
+        "name": "Visa", "account_type_id": card_type.id, "anchor_balance": owed,
+    })
+    card = db.session.query(Account).filter_by(
+        user_id=seed_user["user"].id, name="Visa",
+    ).one()
+    payment = db.session.query(TransferTemplate).filter_by(
+        to_account_id=card.id,
+    ).one()
+    _flashes(auth_client)  # the create door's own, consumed
+    return card, payment
+
+
+def _live_rows(template_id):
+    """The ids of the template's transfers that are not soft-deleted, in date order."""
+    return [
+        row.id for row in db.session.query(Transfer).filter_by(
+            transfer_template_id=template_id, is_deleted=False,
+        ).order_by(Transfer.due_date)
+    ]
+
+
+def _reload(model, row_id):
+    """The row as the request left it."""
+    db.session.expire_all()
+    return db.session.get(model, row_id)
+
+
+def _retype_into_a_card(auth_client, seed_user):
+    """Re-type a Savings account owing $500.00 into a card named Visa; return it and its payment.
+
+    The re-type makes the card's payment (task plan#2933) with its first row
+    dated this paycheck, pricing $500.00, which a card the create door adds
+    does not have.  The door's flash is consumed.
+    """
+    savings = create_account_of_type(
+        seed_user, db.session, "Savings", "Rainy Day",
+        anchor_balance=Decimal("-500.00"),
+    )
+    db.session.commit()
+    card_type = db.session.query(AccountType).filter_by(
+        name="Credit Card", user_id=None,
+    ).one()
+    auth_client.post(f"/accounts/{savings.id}", data={
+        "account_type_id": card_type.id, "name": "Visa",
+    })
+    _flashes(auth_client)
+    payment = db.session.query(TransferTemplate).filter_by(
+        to_account_id=savings.id,
+    ).one()
+    return savings, payment

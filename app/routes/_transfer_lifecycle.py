@@ -13,6 +13,8 @@ calls (task plan#3697, plan step ``credit_card:CC-6``):
 * :func:`destroy_transfer_definition` -- the transfer hard-delete's
   no-history arm, moved here beside the other two because the three share
   their ending: the loan's standing payment re-derived, then the commit.
+  Its writes are :func:`remove_transfer_definition`, which an account's
+  delete calls for a card's one payment (task plan#3754).
 
 They lived in :mod:`app.routes.transfers.lifecycle` (the archive as its
 private ``_archive`` since plan step R7d-g-2, the unarchive written out in
@@ -30,8 +32,11 @@ redirect included, so a refusal returns the owner to the page they pressed.
 **Each act ends with the door's commit**, under that same guard: every door
 performing one commits straight after it, the door's own writes made before
 the call riding in the same transaction, so the commit is part of the act
-rather than six copies of it.  The door owns its flash, made once the act
-has committed.
+rather than six copies of it.  **The one door that writes AFTER an act is an
+account's delete**, which deletes the card the payment's template keys onto:
+the template's ``DELETE`` must flush before the card's, so that door calls
+:func:`remove_transfer_definition`, the delete's writes, and commits once
+its own are made.  The door owns its flash, made once the act has committed.
 """
 
 from flask import Response, flash
@@ -302,16 +307,17 @@ def unarchive_transfer_definition(
     return len(transfers_to_restore), stays_deleted
 
 
-def destroy_transfer_definition(
+def remove_transfer_definition(
     template: TransferTemplate, ctx: StaleConflictContext,
 ) -> Response | None:
-    """Permanently delete *template* and its unsettled transfers, then commit.
+    """Permanently delete *template* and its unsettled transfers, flushed; no commit.
 
-    The transfer hard-delete's no-history arm, moved here from
-    ``routes/transfers/lifecycle._destroy`` beside the archive and the
-    unarchive (task plan#3697): the three acts of a transfer definition's
-    lifecycle, each ending with the loan's standing payment re-derived and
-    the door's commit.
+    The writes of :func:`destroy_transfer_definition`, which the transfer
+    hard-delete's no-history arm performs and then commits, and which an
+    account's delete performs for a card's one payment BEFORE its own writes
+    (task plan#3754): the card's ``DELETE`` must flush after the template's,
+    whose ``to_account_id`` keys onto it (``RESTRICT``), so the account door
+    commits once its own writes are made.
 
     Permanently deletes the linked transfers through the transfer service,
     which every write of a transfer goes through (``CLAUDE.md``,
@@ -341,7 +347,7 @@ def destroy_transfer_definition(
             ``redirect``.
 
     Returns:
-        ``None`` once committed, or a refusal :class:`Response` (the stale
+        ``None`` once flushed, or a refusal :class:`Response` (the stale
         race, or the promotion's refusal) the caller returns verbatim, the
         session rolled back.
     """
@@ -368,17 +374,41 @@ def destroy_transfer_definition(
     stale = flush_or_handle_stale(ctx)
     if stale is not None:
         return stale
-    refused = sync_loan_payment_start_or_refuse(
+    return sync_loan_payment_start_or_refuse(
         to_account_id, redirect=ctx.redirect,
     )
-    if refused is not None:
-        return refused
-    return commit_or_handle_stale(ctx)
+
+
+def destroy_transfer_definition(
+    template: TransferTemplate, ctx: StaleConflictContext,
+) -> Response | None:
+    """Permanently delete *template* and its unsettled transfers, then commit.
+
+    The transfer hard-delete's no-history arm, moved here from
+    ``routes/transfers/lifecycle._destroy`` beside the archive and the
+    unarchive (task plan#3697): the three acts of a transfer definition's
+    lifecycle, each ending with the loan's standing payment re-derived and
+    the door's commit.  The writes are :func:`remove_transfer_definition`'s.
+
+    Args:
+        template: The owner-checked :class:`TransferTemplate`, with no
+            settled history and no transfer holding a payment.
+        ctx: The door's stale-race context; a refusal redirects to its
+            ``redirect``.
+
+    Returns:
+        ``None`` once committed, or a refusal :class:`Response` (the stale
+        race, or the promotion's refusal) the caller returns verbatim, the
+        session rolled back.
+    """
+    refused = remove_transfer_definition(template, ctx)
+    return refused if refused is not None else commit_or_handle_stale(ctx)
 
 
 __all__ = [
     "UNARCHIVE_NEEDS_ITS_ACCOUNTS",
     "archive_transfer_definition",
     "destroy_transfer_definition",
+    "remove_transfer_definition",
     "unarchive_transfer_definition",
 ]

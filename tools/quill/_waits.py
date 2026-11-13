@@ -67,7 +67,9 @@ in each component of the image, or its failure, is an :class:`Item` as each thin
 told is, filed by the one loop (:func:`file_told`) over what the cards hold, read once
 (:func:`holdings`), and printed as whoever told it (:class:`Teller`).  So a card holds what the
 scan found in the form this pass reads, and one rule says when a thing is filed, put on an open
-card, or held already.
+card, or held already.  The scan says which cards hold nothing for its pass
+(:meth:`Holdings.left_out`): each closed card whose fix the image it read holds (ruling
+plan#3765), and, for its failure, each closed card (:meth:`Holdings.open_alone`).
 
 Its own module: the command module stands within ten lines of the 1,000 ``too-many-lines``
 allows, and the tracker's within two.
@@ -225,16 +227,31 @@ class Holdings:
         return {number: card for number, card in self.cards.items()
                 if where in {place for place, _ in self.held[number]}}
 
+    def holding(self, number: int) -> frozenset[Thing]:
+        """Each thing told that card ``number`` holds, in its text or in quill's comments on
+        it."""
+        return self.held[number] | self.carried.get(number, frozenset())
+
     def standing(self, where: str) -> set[Thing]:
         """Each thing told that a card for ``where`` whose filing is not unfinished holds
-        (:func:`_standing`), so nothing is filed or put over it again."""
-        return _standing(self.mine(where), self.held, self.carried)
+        (:meth:`holding`): one filed, or closed since, shipped or dropped, so nothing is filed
+        or put over it again."""
+        return {thing for number, card in self.mine(where).items()
+                if not filing_unfinished(card) for thing in self.holding(number)}
+
+    def left_out(self, numbers: Collection[int]) -> Holdings:
+        """These holdings with each card of ``numbers`` left out of :attr:`cards`, so that it
+        holds nothing for the pass, though :attr:`held` and :attr:`carried` still say what it
+        holds: each closed card whose fix the image the scan read holds (``_scan``)."""
+        return Holdings(self.held, {number: card for number, card in self.cards.items()
+                                    if number not in numbers}, self.carried)
 
     def open_alone(self) -> Holdings:
-        """These holdings with each closed card left out, so that a card holds a thing only
-        while it is open: what the image scan's failure is held by (``_scan``)."""
-        return Holdings(self.held, {number: card for number, card in self.cards.items()
-                                    if card.is_open}, self.carried)
+        """These holdings with each closed card left out (:meth:`left_out`), so that a card
+        holds a thing only while it is open: what the image scan's failure is held by
+        (``_scan``)."""
+        return self.left_out({number for number, card in self.cards.items()
+                              if not card.is_open})
 
 
 def told_line(where: str, mark: str) -> str:
@@ -433,15 +450,6 @@ def _unfinished(mine: dict[int, Card]) -> Card | None:
     return next((card for _, card in sorted(mine.items()) if filing_unfinished(card)), None)
 
 
-def _standing(mine: dict[int, Card], held: dict[int, frozenset[Thing]],
-              carried: dict[int, frozenset[Thing]]) -> set[Thing]:
-    """Each thing told that a card of ``mine`` whose filing is not unfinished holds, in its
-    text or in quill's comments on it: one filed, or closed since, shipped or dropped, so
-    nothing is filed or put over it again."""
-    return {thing for number, card in mine.items() if not filing_unfinished(card)
-            for thing in held[number] | carried.get(number, frozenset())}
-
-
 def _open(mine: dict[int, Card]) -> Card | None:
     """The card of ``mine`` open for where a thing was told, its filing finished (ruling
     plan#3722): the lowest numbered, should a person have filed a second; None for none."""
@@ -509,7 +517,7 @@ def file_told(tracker: Tracker, items: Iterable[Item], have: Holdings, teller: T
     reports, done, open_for = 0, set(), {}
     for item in items:
         mine = have.mine(item.where)
-        if item.things <= _standing(mine, have.held, have.carried) | done:
+        if item.things <= have.standing(item.where) | done:
             continue
         if item.where not in open_for and (card := _open(mine)) is not None:
             open_for[item.where] = card.number

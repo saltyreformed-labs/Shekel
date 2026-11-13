@@ -11,11 +11,25 @@ as the place each CVE was found at, the same each day whatever version is instal
 marker for each CVE in it (:attr:`tools.update.scan.Counted.marker`).  A CVE in a component
 whose card is open is put on that card in a comment of quill's (ruling plan#3722's
 mechanism); one in a component no card is open for is filed a card, the High step at the top
-of the board (ruling plan#3620); and a CVE a card holds, open or closed, shipped or dropped,
-files nothing again, so a dropped card keeps its CVEs quiet (ruling plan#3790).  Only the CVEs
-no card holds are filed or put on a card (:func:`found_items`), so a card filed after a
-component's card was dropped lists the new CVEs alone.  The component with the most severe CVE
-is filed last, so it is the board's top.
+of the board (ruling plan#3620); and a CVE a card holds, open or closed, files nothing again,
+so a dropped card keeps its CVEs quiet (ruling plan#3790), but for the closed cards the next
+paragraph names, which hold nothing.  Only the CVEs no card holds are
+filed or put on a card (:func:`found_items`), so a card filed after a component's card was
+dropped lists the new CVEs alone.  The component with the most severe CVE is filed last, so it
+is the board's top.
+
+**A CVE still found once its fix is in the image is filed again** (ruling plan#3765): a closed
+card whose fix the scanned image holds holds nothing (:func:`fixed`, the pass's
+:meth:`_waits.Holdings.left_out`), so a CVE only such cards hold is filed as a new one is, on
+a card of its own or the component's open card, which cites them (:func:`_again`).  A card's
+fix is in the image when git
+says the card shipped, its ``plan/ships/N`` in the merge of ``dev`` and ``main`` as a fetch
+finds them now, and the commit the image was built from (its revision label, ruling plan#3786)
+holds that file too.  So a card shipped into ``dev`` since the image was built holds its CVEs
+until a release puts its fix in what production runs, and a dropped card, closed and never
+shipped, holds them for good; so does a card shipped into the image and then reverted, which
+git no longer says shipped.  A card git says shipped but the tracker shows open holds them too:
+it is open.
 
 **A scan refused or unable to run files a card too** (ruling plan#3788), once for each failure:
 the card for the scan's failure (:data:`FAILURE`) holds one marker whatever the failure said
@@ -37,12 +51,14 @@ thing told, as only the lines ending a text do (:func:`_waits.holds`).
 A scan whose answer is refused (:class:`tools.update.scan.NotAScan`) is refused, exit 1; one
 that could not run (:class:`tools.update.scan.ScanFailed`, or git or the system failing it) is
 a failed call, exit 2 (the command module's exit statuses); each once its card is filed, and
-neither is ever read as a clean scan.  The door connects to the tracker only when it has
-something to file, so a clean scan reads nothing there.
+neither is ever read as a clean scan.  Git failing the read of which cards' fixes the image
+holds (:func:`fixed`) fails the scan so too, as no CVE it found can then be filed.  The door
+connects to the tracker, and fetches ``dev`` and ``main``, only when it has something to file,
+so a clean scan reads nothing of either.
 """
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Collection, Mapping, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -86,37 +102,78 @@ def _image(done: scan.Scanned) -> str:
     return f"the image `{done.image}`, built from `{done.revision}`"
 
 
-def _card(place: str, fresh: Sequence[scan.Counted], marks: Sequence[str], done: scan.Scanned,
+def _again(fresh: Sequence[scan.Counted], cited: Mapping[str, tuple[int, ...]]) -> list[str]:
+    """The paragraph naming each CVE of ``fresh`` that closed cards whose fix the image holds
+    held (``cited``, by marker: those cards; ruling plan#3765), grouped by those cards, each
+    CVE once, and the blank line after it; none where ``cited`` names none of them."""
+    groups: dict[tuple[int, ...], dict[str, None]] = {}
+    for item in fresh:
+        if cards := cited.get(item.marker):
+            groups.setdefault(cards, {})[f"`{item.vulnerability}`"] = None
+    if not groups:
+        return []
+    return [
+        "The scan still finds these though every card that held each is closed and shipped, "
+        "and the image was built from a commit holding each one's ship marker, so its fix did "
+        "not remove them (ruling plan#3765): " + "; ".join(
+            f"{', '.join(f'plan#{number}' for number in cards)} held {', '.join(named)}"
+            for cards, named in groups.items()) + ".", ""]
+
+
+def _listed(fresh: Sequence[scan.Counted], cited: Mapping[str, tuple[int, ...]]) -> list[str]:
+    """``fresh`` as the card or comment filing them lists them: each one's line in a code
+    block, then the paragraph naming each found again after its fix shipped into the image
+    (:func:`_again`)."""
+    return [*_waits.block("\n".join(item.line for item in fresh)), "", *_again(fresh, cited)]
+
+
+def _card(place: str, listed: Sequence[str], marks: Sequence[str], done: scan.Scanned,
           when: str) -> Draft:
-    """The card filed for ``fresh``, the CVEs found in the component ``place`` names that no
-    card holds, its lines holding ``marks``."""
+    """The card filed for the CVEs found in the component ``place`` names that no card holds,
+    as ``listed`` lists them (:func:`_listed`), its lines holding ``marks``."""
     return _waits.step(_waits.capped("Production image CVEs: ", place), "\n".join([
         f"The daily scan of the image production is running found these CVEs in its {place}, "
         f"at {when}, in {_image(done)}: each has a fix rated HIGH or CRITICAL by some source, or "
-        "is known to be exploited (rulings plan#3720, plan#3819).", "",
-        *_waits.block("\n".join(item.line for item in fresh)), "",
+        "is known to be exploited (rulings plan#3720, plan#3819).", "", *listed,
         "`quill scan` filed this card for that package (ruling plan#3787), holding Priority "
         "High at the top of the board (ruling plan#3620). A CVE the scan finds in it later is "
-        "put on this card while it is open, and none the card holds is filed again. The session "
-        "that claims this card takes the fix, and sets the card's Effort.", "",
+        "put on this card while it is open, and one the card holds is filed again only if the "
+        "scan still finds it once the card has shipped and production's image was built from a "
+        "commit holding its ship marker (ruling plan#3765). The session that claims this card "
+        "takes the fix, and sets the card's Effort.", "",
         *_waits.told_lines(place, marks)]))
 
 
-def _later(place: str, fresh: Sequence[scan.Counted], marks: Sequence[str],
-           done: scan.Scanned, when: str) -> str:
-    """The comment putting ``fresh`` on the card open for the component ``place`` names, its
-    lines holding ``marks``."""
+def _later(place: str, listed: Sequence[str], marks: Sequence[str], done: scan.Scanned,
+           when: str) -> str:
+    """The comment putting the CVEs ``listed`` lists (:func:`_listed`) on the card open for
+    the component ``place`` names, its lines holding ``marks``."""
     return "\n".join([
         f"The daily scan found these CVEs later in production's {place}, at {when}, in "
-        f"{_image(done)}:", "", *_waits.block("\n".join(item.line for item in fresh)), "",
+        f"{_image(done)}:", "", *listed,
         "`quill scan` put them on this card, the one open for that package, rather than filing "
         "another (ruling plan#3787).", "", *_waits.told_lines(place, marks)])
 
 
-def found_items(done: scan.Scanned, when: str, have: _waits.Holdings) -> list[_waits.Item]:
+def _cited(have: _waits.Holdings, spent: Collection[int], place: str,
+           marks: Sequence[str]) -> dict[str, tuple[int, ...]]:
+    """Each of ``marks``, markers of CVEs found in the component ``place`` names, that a card
+    of ``spent`` held (:meth:`_waits.Holdings.holding`), with each such card, lowest first."""
+    cited = {}
+    for mark in marks:
+        if held := tuple(sorted(number for number in spent
+                                if (place, mark) in have.holding(number))):
+            cited[mark] = held
+    return cited
+
+
+def found_items(done: scan.Scanned, when: str, have: _waits.Holdings,
+                spent: Collection[int]) -> list[_waits.Item]:
     """An item for each component ``done`` found a CVE in that no card holds for it
-    (:meth:`_waits.Holdings.standing`), found at ``when``, holding those CVEs alone; the
-    component with the most severe CVE last, as ``done`` lists the most severe first."""
+    (:meth:`_waits.Holdings.standing`), found at ``when``, holding those CVEs alone, each that
+    cards of ``spent`` held cited (:func:`_again`): ``spent``, the closed cards whose fix the
+    image holds, which ``have`` leaves out (:meth:`_waits.Holdings.left_out`).  The component
+    with the most severe CVE last, as ``done`` lists the most severe first."""
     found: dict[str, list[scan.Counted]] = {}
     for item in done.found:
         found.setdefault(where(item), []).append(item)
@@ -125,21 +182,43 @@ def found_items(done: scan.Scanned, when: str, have: _waits.Holdings) -> list[_w
         standing = have.standing(place)
         if fresh := [item for item in counted if (place, item.marker) not in standing]:
             marks = tuple(dict.fromkeys(item.marker for item in fresh))
-            items.append(_waits.Item(place, when, marks, _card(place, fresh, marks, done, when),
-                                     _later(place, fresh, marks, done, when)))
+            listed = _listed(fresh, _cited(have, spent, place, marks))
+            items.append(_waits.Item(place, when, marks, _card(place, listed, marks, done, when),
+                                     _later(place, listed, marks, done, when)))
     return items[::-1]
 
 
-def file_found(tracker: Tracker, done: scan.Scanned, when: str, dry_run: bool) -> int:
-    """What ``done`` found, at ``when``, filed (:func:`found_items`, :func:`_waits.file_told`);
-    under ``dry_run`` printed and not written.  The number of REPORT lines.
+def fixed(root: Path, revision: str) -> frozenset[int]:
+    """Each card whose fix the image built from the commit ``revision`` holds (ruling
+    plan#3765; the module says why): each git says shipped, its marker in the merge of ``dev``
+    and ``main`` as one fetch of both brings them now (:func:`_git.fetch`,
+    :func:`_git.shipped`), whose marker the tree of ``revision`` holds too
+    (:func:`_git.markers_in`), from the checkout at ``root``.
+
+    Raises:
+        GitError: the fetch failed, git cannot read ``revision``, or a marker or a task's file
+            conflicts in that merge (:class:`_git.MarkerConflict`), so which cards shipped is
+            unknown.
+    """
+    _git.fetch(root)
+    return _git.shipped(root).cards & _git.markers_in(root, revision)[0]
+
+
+def file_found(tracker: Tracker, done: scan.Scanned, when: str, fix: Collection[int],
+               dry_run: bool) -> int:
+    """What ``done`` found, at ``when``, filed (:func:`found_items`, :func:`_waits.file_told`),
+    each closed card of ``fix``, the cards whose fix the image holds (:func:`fixed`), holding
+    nothing; under ``dry_run`` printed and not written.  The number of REPORT lines.
 
     Raises:
         GitHubError, requests.RequestException, TrackerError: as the reads and the writes
             raise them.
     """
     have = _waits.holdings(tracker, {where(item) for item in done.found})
-    return _waits.file_told(tracker, found_items(done, when, have), have, FOUND, dry_run)
+    spent = {number for number, card in have.cards.items()
+             if not card.is_open and number in fix}
+    kept = have.left_out(spent)
+    return _waits.file_told(tracker, found_items(done, when, kept, spent), kept, FOUND, dry_run)
 
 
 def failure_item(said: str, when: str) -> _waits.Item:
@@ -193,18 +272,21 @@ def cmd_scan(args, connect: Callable[[], Tracker], root: Path,
     """Scan the image production is running from the checkout at ``root``, and print the
     image's digest, the commit it was built from, how many matches count, and each one
     (:attr:`tools.update.scan.Counted.line`); then file each component one counts in that no
-    card holds it for (:func:`file_found`), or a scan refused or unable to run as the scan's
-    failure (:func:`file_failure`), each at the time ``clock`` reads at the start, and under
-    ``args.dry_run`` printed and not written.  Exit 0, or 1 on a REPORT.
+    card holds it for (:func:`file_found`), a closed card whose fix the image holds holding
+    nothing (:func:`fixed`, read only when one counts), or a scan refused or unable to run as
+    the scan's failure (:func:`file_failure`), each at the time ``clock`` reads at the start,
+    and under ``args.dry_run`` printed and not written.  Exit 0, or 1 on a REPORT.
 
     Raises:
         Refused: the scanner's answer is no scan, names no commit, or saw not what the image
             runs, once its failure is filed.
-        ScanFailed, GitError, OSError: the scan could not run, once its failure is filed.
+        ScanFailed, GitError, OSError: the scan could not run, or git could not say which
+            cards' fixes the image holds, once its failure is filed.
     """
     when = _git.instant(clock())
     try:
         done = scan.scanned(root)
+        fix = fixed(root, done.revision) if done.found else frozenset()
     except scan.NotAScan as error:
         refused = Refused(f"{REFUSED}{error}")
         _failed(connect, str(refused), when, args.dry_run)
@@ -219,4 +301,4 @@ def cmd_scan(args, connect: Callable[[], Tracker], root: Path,
         print(f"  {item.line}")
     if not done.found:
         return 0
-    return 1 if file_found(connect(), done, when, args.dry_run) else 0
+    return 1 if file_found(connect(), done, when, fix, args.dry_run) else 0

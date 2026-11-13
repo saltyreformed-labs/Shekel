@@ -1,16 +1,11 @@
 """The helpers and constants every part of this package shares: the module-level helpers of
 ``tests/test_adversarial/test_step_up.py``, moved verbatim by ``tools/split``.
+
+Its private two-factor enrol and password-only sign-in went at plan#3600: the
+seed owner is made with two-factor, so a test signs in through the shared
+sign-in (``tests._seed_owner_fixtures.log_in_seed_user``) and types the owner's
+own code (``tests._two_factor_sign_in.two_factor_secret_of``).
 """
-
-from app.extensions import db
-from app.models.user import MfaConfig
-from app.services import mfa_service
-
-
-_KNOWN_TOTP_SECRET = "JBSWY3DPEHPK3PXP"
-
-
-_KNOWN_BACKUP_CODES = ["aaaaaaaa", "bbbbbbbb", "cccccccc"]
 
 
 # Env vars that BaseConfig consults at class-definition time for the
@@ -66,29 +61,3 @@ def _restore_config_module():
 
     from app import config as config_module
     importlib.reload(config_module)
-
-
-def _enable_mfa(user_id):
-    """Persist an enabled MFA config with a known secret and codes.
-
-    Mirrors the helper in ``test_session_invalidation.py``.
-    """
-    config = MfaConfig(
-        user_id=user_id,
-        is_enabled=True,
-        totp_secret_encrypted=mfa_service.encrypt_secret(_KNOWN_TOTP_SECRET),
-        backup_codes=mfa_service.hash_backup_codes(_KNOWN_BACKUP_CODES),
-    )
-    db.session.add(config)
-    db.session.commit()
-
-
-def _do_login_no_mfa(client):
-    """Run a fresh password-only login on a test client.
-
-    Returns the login response so the caller can assert on it.
-    """
-    return client.post("/login", data={
-        "email": "test@shekel.local",
-        "password": "testpass",
-    }, follow_redirects=False)

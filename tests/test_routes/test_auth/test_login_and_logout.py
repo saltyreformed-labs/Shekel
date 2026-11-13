@@ -1,5 +1,11 @@
 """Auth route tests: the safe-redirect check, /login, /logout, and lockout through the /login
 route.
+
+The seed owner is made with two-factor (plan#3600), so a sign-in that must
+finish at ``/login`` itself, as the redirect cases' do, is on a browser the
+owner trusts (``tests._trusted_devices.trust_browser``); from any other
+browser the password leads to the code form, and a case that finishes there
+types the owner's own code (``tests._two_factor_sign_in.two_factor_secret_of``).
 """
 
 from datetime import datetime, timedelta, timezone
@@ -9,6 +15,8 @@ from app.extensions import db
 from app.models.user import User
 from app.routes.auth._helpers import _is_safe_redirect
 from tests._guess_records import count_of, locked_until_of, set_record
+from tests._trusted_devices import trust_browser
+from tests._two_factor_sign_in import code_now, redirect_path, two_factor_secret_of
 
 
 class TestIsSafeRedirect:
@@ -101,6 +109,7 @@ class TestLogin:
     def test_successful_login(self, app, client, seed_user):
         """POST /login with valid credentials redirects to grid."""
         with app.app_context():
+            trust_browser(client, seed_user["user"].id)
             response = client.post("/login", data={
                 "email": "test@shekel.local",
                 "password": "testpass",
@@ -192,8 +201,7 @@ class TestLogin:
                 # guarantees this runs even if an assertion above
                 # raised.
                 with rate_app.app_context():
-                    from app.extensions import db as _db
-                    _db.engine.dispose()
+                    db.engine.dispose()
                 if limiter._storage is not None:  # pylint: disable=protected-access
                     limiter.reset()
                 limiter.enabled = False
@@ -302,6 +310,7 @@ class TestLogin:
         crafts /login?next=https://evil.com/phishing and sends it to a victim.
         """
         with app.app_context():
+            trust_browser(client, seed_user["user"].id)
             response = client.post("/login?next=https://evil.com", data={
                 "email": "test@shekel.local",
                 "password": "testpass",
@@ -321,6 +330,7 @@ class TestLogin:
         the current page's scheme.  Must be rejected.
         """
         with app.app_context():
+            trust_browser(client, seed_user["user"].id)
             response = client.post("/login?next=//evil.com", data={
                 "email": "test@shekel.local",
                 "password": "testpass",
@@ -338,6 +348,7 @@ class TestLogin:
         builds.  Must be rejected.
         """
         with app.app_context():
+            trust_browser(client, seed_user["user"].id)
             response = client.post("/login?next=\\evil.com", data={
                 "email": "test@shekel.local",
                 "password": "testpass",
@@ -353,6 +364,7 @@ class TestLogin:
         Must be rejected to prevent XSS via redirect.
         """
         with app.app_context():
+            trust_browser(client, seed_user["user"].id)
             response = client.post(
                 "/login?next=javascript:alert(1)", data={
                     "email": "test@shekel.local",
@@ -369,6 +381,7 @@ class TestLogin:
         Must be rejected to prevent phishing via redirect.
         """
         with app.app_context():
+            trust_browser(client, seed_user["user"].id)
             response = client.post(
                 "/login?next=data:text/html,<h1>phish</h1>", data={
                     "email": "test@shekel.local",
@@ -386,6 +399,7 @@ class TestLogin:
         after logging in.
         """
         with app.app_context():
+            trust_browser(client, seed_user["user"].id)
             response = client.post("/login?next=/templates", data={
                 "email": "test@shekel.local",
                 "password": "testpass",
@@ -403,6 +417,7 @@ class TestLogin:
         ?next=/settings%3Fsection%3Dsecurity to the login URL.
         """
         with app.app_context():
+            trust_browser(client, seed_user["user"].id)
             response = client.post(
                 "/login?next=/settings%3Fsection%3Dsecurity", data={
                     "email": "test@shekel.local",
@@ -419,6 +434,7 @@ class TestLogin:
         This is the normal login flow -- no next parameter at all.
         """
         with app.app_context():
+            trust_browser(client, seed_user["user"].id)
             response = client.post("/login", data={
                 "email": "test@shekel.local",
                 "password": "testpass",
@@ -490,7 +506,9 @@ class TestLogin:
             user.is_active = True
             db.session.commit()
 
-            # Login must succeed again.
+            # Login must succeed again, on a browser the owner trusts so it
+            # finishes with no code.
+            trust_browser(client, seed_user["user"].id)
             response = client.post("/login", data={
                 "email": "test@shekel.local",
                 "password": "testpass",
@@ -509,15 +527,10 @@ class TestLogout:
             assert response.status_code == 302
             assert "login" in response.headers.get("Location", "")
 
-    def test_logout_rejects_get(self, app, seed_user, client):
+    def test_logout_rejects_get(self, app, auth_client):
         """GET /logout returns 405 Method Not Allowed for authenticated users."""
         with app.app_context():
-            # Log in with a fresh client so the session is still active.
-            client.post("/login", data={
-                "email": "test@shekel.local",
-                "password": "testpass",
-            })
-            response = client.get("/logout")
+            response = auth_client.get("/logout")
             assert response.status_code == 405
 
 
@@ -608,11 +621,12 @@ class TestLoginLockoutIntegration:
     def test_successful_login_after_typo_resets_counter(
         self, app, client, seed_user,
     ):
-        """A correct password after a few typos zeroes the counter.
+        """A correct password and code after a few typos zeroes the counter.
 
         Mirrors the service-level test but goes through the HTTP
         boundary so the route's commit-after-authenticate path is
-        exercised.
+        exercised.  The owner has two-factor, so the sign-in finishes, and
+        the count clears, at the code form.
         """
         with app.app_context():
             for _ in range(3):
@@ -626,7 +640,12 @@ class TestLoginLockoutIntegration:
                 "email": "test@shekel.local",
                 "password": "testpass",
             }, follow_redirects=False)
+            assert redirect_path(response) == "/mfa/verify"
+            response = client.post("/mfa/verify", data={
+                "totp_code": code_now(two_factor_secret_of(seed_user["user"].id)),
+            })
             assert response.status_code == 302
+            assert redirect_path(response) == "/dashboard"
 
             assert count_of("test@shekel.local") == 0
             assert locked_until_of("test@shekel.local") is None

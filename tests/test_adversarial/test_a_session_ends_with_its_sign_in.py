@@ -13,6 +13,11 @@ ten wrong guesses removed its record.  These tests drive the real app:
 * :class:`TestTheSessionAndItsRecord` -- the session's sign-in is the record's
   ``last_signed_in_at``, and a browser kept active for 29 days still gets past
   a stranger's lock.
+
+The seed owner is made with two-factor (plan#3600), so a browser signs in with
+no code owed only on a browser the owner trusts, the shared sign-in
+(``tests._seed_owner_fixtures.log_in_seed_user``); the code tests type the
+owner's own (``tests._two_factor_sign_in.two_factor_secret_of``).
 """
 
 import time
@@ -32,8 +37,12 @@ from app.utils.session_helpers import (
     SESSION_SIGNED_IN_AT_KEY,
 )
 from tests._guess_records import locked_until_of
-from tests._test_helpers import enable_mfa
-from tests._seed_owner_fixtures import SEED_USER_EMAIL, SEED_USER_PASSWORD
+from tests._seed_owner_fixtures import (
+    SEED_USER_EMAIL,
+    SEED_USER_PASSWORD,
+    log_in_seed_user,
+)
+from tests._two_factor_sign_in import code_now, two_factor_secret_of
 
 #: Ruling plan#3069's thirty days, spelled here as an oracle the model's
 #: constant cannot move silently.
@@ -71,10 +80,12 @@ def _signed_in(response):
 
 
 def _sign_in(app):
-    """Return a browser that has just finished a sign-in with no code owed."""
-    browser = app.test_client()
-    assert _signed_in(_password(browser))
-    return browser
+    """Return a browser that has just finished a sign-in with no code owed.
+
+    A browser the owner trusts, through the shared sign-in, which asserts its
+    own redirect.
+    """
+    return log_in_seed_user(app.test_client())
 
 
 def _is_signed_in(browser):
@@ -98,11 +109,6 @@ def _stamp(browser, **stamps):
     with browser.session_transaction() as sess:
         for key, moment in stamps.items():
             sess[key] = moment.isoformat()
-
-
-def _code(secret):
-    """Return the code valid now for *secret*."""
-    return pyotp.TOTP(secret).at(int(time.time()))
 
 
 def _next_code(secret):
@@ -223,10 +229,10 @@ class TestNothingButASignInRenewsIt:
     def test_turning_two_factor_off(self, app, seed_user):
         """``/mfa/disable`` near day thirty: the session still ends on it."""
         user_id = seed_user["user"].id
-        secret = enable_mfa(db.session, user_id)
+        secret = two_factor_secret_of(user_id)
         browser = app.test_client()
         assert _password(browser).headers["Location"].endswith("/mfa/verify")
-        assert _signed_in(browser.post("/mfa/verify", data={"totp_code": _code(secret)}))
+        assert _signed_in(browser.post("/mfa/verify", data={"totp_code": code_now(secret)}))
 
         def turn_two_factor_off(browser):
             browser.post("/mfa/disable", data={

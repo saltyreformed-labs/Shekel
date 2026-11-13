@@ -1,38 +1,33 @@
-"""Tests for the MFA reset CLI script."""
+"""Tests for the MFA reset CLI script.
+
+**The seed owner is made with two-factor** (plan#3600), as every account past
+setup has it, so a reset here resets the owner's own.  A case that needs its
+row to hold backup codes gives it some (:func:`tests._test_helpers.store_backup_codes`).
+An account with no two-factor row at all is the seed companion, whom her owner
+has just made and who has not set it up.
+"""
 
 import logging
 from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from app.extensions import db
 from app.models.user import MfaConfig, User
 from app.services import mfa_service
 from scripts.reset_mfa import parse_args, reset_mfa
+from tests._test_helpers import store_backup_codes
+
+#: Backup codes the owner's row holds, so a reset has them to clear.
+_BACKUP_CODES = ["aaaaaaaa", "bbbbbbbb"]
 
 
 class TestResetMfa:
     """Tests for scripts/reset_mfa.py reset_mfa() function."""
 
-    def _enable_mfa(self, user_id):
-        """Helper to enable MFA for a user with a known secret.
-
-        Args:
-            user_id: The user's primary key.
-        """
-        mfa_config = MfaConfig(
-            user_id=user_id,
-            is_enabled=True,
-            totp_secret_encrypted=mfa_service.encrypt_secret("JBSWY3DPEHPK3PXP"),
-            backup_codes=mfa_service.hash_backup_codes(["aaaaaaaa", "bbbbbbbb"]),
-        )
-        db.session.add(mfa_config)
-        db.session.commit()
-
     def test_reset_mfa_disables_for_user(self, app, db, seed_user):
         """reset_mfa() clears MFA config for the given email."""
         with app.app_context():
-            self._enable_mfa(seed_user["user"].id)
+            store_backup_codes(db.session, seed_user["user"].id, _BACKUP_CODES)
 
             reset_mfa(seed_user["user"].email)
 
@@ -62,7 +57,6 @@ class TestResetMfa:
         """
         with app.app_context():
             user_id = seed_user["user"].id
-            self._enable_mfa(user_id)
             assert db.session.get(User, user_id).session_invalidated_at is None
             before = datetime.now(timezone.utc)
 
@@ -85,11 +79,16 @@ class TestResetMfa:
             captured = capsys.readouterr()
             assert "No user found" in captured.out
 
-    def test_reset_mfa_not_enabled(self, app, db, seed_user, capsys):
-        """reset_mfa() prints message when MFA is not enabled."""
+    def test_reset_mfa_not_enabled(self, app, db, seed_companion, capsys):
+        """reset_mfa() prints message when MFA is not enabled.
+
+        The seed companion has no two-factor row: her owner has just made her.
+        """
         with app.app_context():
-            # No MFA enabled for seed_user -- just call reset_mfa.
-            reset_mfa(seed_user["user"].email)
+            assert db.session.query(MfaConfig).filter_by(
+                user_id=seed_companion["user"].id,
+            ).first() is None
+            reset_mfa(seed_companion["user"].email)
 
             captured = capsys.readouterr()
             assert "MFA is not enabled" in captured.out
@@ -139,15 +138,16 @@ class TestResetMfa:
         early here and left the orphan in place; that was a bug.)
         """
         with app.app_context():
-            # Create an MfaConfig with is_enabled=False but leftover secret.
-            mfa_config = MfaConfig(
-                user_id=seed_user["user"].id,
-                is_enabled=False,
-                totp_secret_encrypted=mfa_service.encrypt_secret("JBSWY3DPEHPK3PXP"),
-                backup_codes=None,
-                confirmed_at=None,
+            # The owner's row, disabled by hand with its secret left behind.
+            mfa_config = (
+                db.session.query(MfaConfig)
+                .filter_by(user_id=seed_user["user"].id)
+                .one()
             )
-            db.session.add(mfa_config)
+            assert mfa_config.totp_secret_encrypted is not None
+            mfa_config.is_enabled = False
+            mfa_config.backup_codes = None
+            mfa_config.confirmed_at = None
             db.session.commit()
 
             reset_mfa(seed_user["user"].email)
@@ -168,7 +168,9 @@ class TestResetMfa:
             assert config.confirmed_at is None
             assert config.last_totp_timestep is None
 
-    def test_reset_clears_abandoned_pending_setup(self, app, db, seed_user, capsys):
+    def test_reset_clears_abandoned_pending_setup(
+        self, app, db, seed_companion, capsys,
+    ):
         """reset_mfa() scrubs a pending-setup ciphertext on a disabled row.
 
         An abandoned /mfa/setup leaves ONLY pending_secret_encrypted +
@@ -179,10 +181,11 @@ class TestResetMfa:
         decryptable secret at rest") requires clearing it; historically
         the residue check ignored the pending fields and took the
         "MFA is not enabled" early exit, leaving the ciphertext behind.
+        The seed companion, who has never set two-factor up, abandons hers.
         """
         with app.app_context():
             mfa_config = MfaConfig(
-                user_id=seed_user["user"].id,
+                user_id=seed_companion["user"].id,
                 is_enabled=False,
                 pending_secret_encrypted=mfa_service.encrypt_secret(
                     "ORSXG5A2ORSXG5A2"
@@ -194,14 +197,14 @@ class TestResetMfa:
             db.session.add(mfa_config)
             db.session.commit()
 
-            reset_mfa(seed_user["user"].email)
+            reset_mfa(seed_companion["user"].email)
 
             captured = capsys.readouterr()
             assert "MFA has been disabled" in captured.out
 
             config = (
                 db.session.query(MfaConfig)
-                .filter_by(user_id=seed_user["user"].id)
+                .filter_by(user_id=seed_companion["user"].id)
                 .first()
             )
             assert config.pending_secret_encrypted is None
@@ -219,7 +222,7 @@ class TestResetMfa:
         regardless (the clear_mfa_material shared rule).
         """
         with app.app_context():
-            self._enable_mfa(seed_user["user"].id)
+            store_backup_codes(db.session, seed_user["user"].id, _BACKUP_CODES)
             config = (
                 db.session.query(MfaConfig)
                 .filter_by(user_id=seed_user["user"].id)
@@ -250,7 +253,7 @@ class TestResetMfa:
     def test_reset_mfa_idempotent(self, app, db, seed_user, capsys):
         """Calling reset_mfa() twice does not crash on the second call."""
         with app.app_context():
-            self._enable_mfa(seed_user["user"].id)
+            store_backup_codes(db.session, seed_user["user"].id, _BACKUP_CODES)
 
             # First reset disables MFA.
             reset_mfa(seed_user["user"].email)
@@ -297,22 +300,9 @@ class TestParseArgs:
 class TestResetMfaAuditLog:
     """Tests for audit logging on MFA reset."""
 
-    def _enable_mfa(self, user_id):
-        """Helper to enable MFA for a user."""
-        mfa_config = MfaConfig(
-            user_id=user_id,
-            is_enabled=True,
-            totp_secret_encrypted=mfa_service.encrypt_secret("JBSWY3DPEHPK3PXP"),
-            backup_codes=mfa_service.hash_backup_codes(["aaaaaaaa", "bbbbbbbb"]),
-        )
-        db.session.add(mfa_config)
-        db.session.commit()
-
     def test_reset_mfa_logs_audit_event(self, app, db, seed_user, caplog):
         """reset_mfa() emits a WARNING-level audit log entry on success."""
         with app.app_context():
-            self._enable_mfa(seed_user["user"].id)
-
             with caplog.at_level(logging.WARNING, logger="scripts.reset_mfa"):
                 reset_mfa(seed_user["user"].email)
 

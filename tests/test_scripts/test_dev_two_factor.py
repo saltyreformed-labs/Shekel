@@ -7,6 +7,11 @@ the app is even built, so production's two-factor is never touched; it
 replaces every piece of the copy's two-factor material, production's secret
 among them; and a code of the dev key then signs the account in through the
 real password and code forms.
+
+The seed owner is made with two-factor (plan#3600), so a production copy's
+row is the owner's own row made to hold production's material
+(:func:`_copy_of_productions_two_factor`), and an account with no two-factor
+row is the seed companion, whom her owner has just made.
 """
 
 import time
@@ -22,6 +27,12 @@ from app.extensions import db
 from app.models.user import MfaConfig
 from app.services import mfa_service
 from tests._seed_owner_fixtures import SEED_USER_EMAIL, SEED_USER_PASSWORD
+from tests._two_factor_sign_in import (
+    SEED_COMPANION_EMAIL,
+    code_now,
+    two_factor_row_of,
+    two_factor_secret_of,
+)
 from tools import dev_two_factor
 
 #: The dev key the tests write, made the way ``.env``'s is made, so no secret
@@ -32,33 +43,21 @@ _DEV_KEY = pyotp.random_base32()
 _PRODUCTIONS_KEY = pyotp.random_base32()
 
 
-def _code_now(secret):
-    """Return *secret*'s code at the instant ``time.time()`` reads, the verifier's clock."""
-    return pyotp.TOTP(secret).at(int(time.time()))
-
-
-def _row_of(user_id):
-    """Return *user_id*'s two-factor row, read fresh."""
-    db.session.expire_all()
-    return db.session.query(MfaConfig).filter_by(user_id=user_id).one_or_none()
-
-
 def _copy_of_productions_two_factor(user_id):
-    """Give *user_id* the two-factor row a production copy carries, committed.
+    """Make *user_id*'s two-factor row the one a production copy carries, committed.
 
     On, under another secret, with backup codes, a consumed replay step and a
-    pending setup: every field the writer must replace or clear.
+    pending setup: every field the writer must replace or clear.  The account
+    has two-factor, so its own row is the one rewritten.
     """
-    db.session.add(MfaConfig(
-        user_id=user_id,
-        is_enabled=True,
-        totp_secret_encrypted=mfa_service.encrypt_secret(_PRODUCTIONS_KEY),
-        backup_codes=mfa_service.hash_backup_codes(["aaaaaaaa"], rounds=4),
-        confirmed_at=datetime(2026, 1, 2, tzinfo=timezone.utc),
-        last_totp_timestep=int(time.time()) // 30 + 1000,
-        pending_secret_encrypted=mfa_service.encrypt_secret(_PRODUCTIONS_KEY),
-        pending_secret_expires_at=datetime.now(timezone.utc) + timedelta(minutes=10),
-    ))
+    row = two_factor_row_of(user_id)
+    row.is_enabled = True
+    row.totp_secret_encrypted = mfa_service.encrypt_secret(_PRODUCTIONS_KEY)
+    row.backup_codes = mfa_service.hash_backup_codes(["aaaaaaaa"], rounds=4)
+    row.confirmed_at = datetime(2026, 1, 2, tzinfo=timezone.utc)
+    row.last_totp_timestep = int(time.time()) // 30 + 1000
+    row.pending_secret_encrypted = mfa_service.encrypt_secret(_PRODUCTIONS_KEY)
+    row.pending_secret_expires_at = datetime.now(timezone.utc) + timedelta(minutes=10)
     db.session.commit()
 
 
@@ -163,7 +162,7 @@ class TestWriteDevKey:
 
         dev_two_factor.write_dev_key(SEED_USER_EMAIL, _DEV_KEY)
 
-        row = _row_of(user_id)
+        row = two_factor_row_of(user_id)
         assert row.is_enabled is True
         assert mfa_service.decrypt_secret(row.totp_secret_encrypted) == _DEV_KEY
         assert row.backup_codes is None
@@ -172,23 +171,36 @@ class TestWriteDevKey:
         assert row.pending_secret_expires_at is None
         assert row.confirmed_at >= before
 
-    def test_an_account_without_two_factor_gets_it(self, app, seed_user):
-        """An account with no two-factor row gets one, on, under the dev key."""
-        user_id = seed_user["user"].id
-        assert _row_of(user_id) is None
+    def test_an_account_without_two_factor_gets_it(self, app, seed_companion):
+        """An account with no two-factor row gets one, on, under the dev key.
 
-        dev_two_factor.write_dev_key(SEED_USER_EMAIL, _DEV_KEY)
+        The seed companion: her owner has just made her, and she has none.
+        """
+        user_id = seed_companion["user"].id
+        assert two_factor_row_of(user_id) is None
 
-        row = _row_of(user_id)
+        dev_two_factor.write_dev_key(SEED_COMPANION_EMAIL, _DEV_KEY)
+
+        row = two_factor_row_of(user_id)
         assert row.is_enabled is True
         assert mfa_service.decrypt_secret(row.totp_secret_encrypted) == _DEV_KEY
 
     def test_an_unknown_email_writes_nothing(self, app, seed_user):
-        """An email no account has is refused by name, and no row is written."""
+        """An email no account has is refused by name, and no row is written or changed.
+
+        The owner's own two-factor keeps its secret, and the table holds the
+        rows it held.
+        """
+        user_id = seed_user["user"].id
+        secret_before = two_factor_secret_of(user_id)
+        rows_before = db.session.query(MfaConfig).count()
+
         with pytest.raises(SystemExit) as refused:
             dev_two_factor.write_dev_key("nobody@shekel.local", _DEV_KEY)
+
         assert "'nobody@shekel.local'" in str(refused.value)
-        assert _row_of(seed_user["user"].id) is None
+        assert two_factor_secret_of(user_id) == secret_before
+        assert db.session.query(MfaConfig).count() == rows_before
 
     def test_the_dev_keys_code_signs_the_copied_account_in(self, app, client, seed_user):
         """After the write, the password then a dev-key code reach the account's pages.
@@ -208,7 +220,7 @@ class TestWriteDevKey:
         assert password.status_code == 302
         assert urlsplit(password.headers["Location"]).path == "/mfa/verify"
 
-        code = client.post("/mfa/verify", data={"totp_code": _code_now(_DEV_KEY)})
+        code = client.post("/mfa/verify", data={"totp_code": code_now(_DEV_KEY)})
         assert code.status_code == 302
         landed = urlsplit(code.headers["Location"]).path
         assert landed not in ("/login", "/mfa/verify", "/mfa/setup"), landed

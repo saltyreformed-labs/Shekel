@@ -15,6 +15,14 @@ assertion while guarding nothing).
 its thirty-second step, so each test that signs in through the code form does
 so once.  Devices a test needs beyond the one a real sign-in trusts are made
 through the service, as the trust itself would make them.
+
+**The seed owner is made with two-factor** (plan#3600), and the shared
+sign-in's browser is one it trusts (ruling plan#3621), so ``auth_client``'s own
+browser is in the owner's list.  A test that reads the list therefore signs in
+on a browser of its own with the owner's code and without trusting it
+(:func:`_firefox_signed_in_with_a_code`), which the list leaves out.  The case
+without two-factor signs in as the owner after a reset
+(``no_two_factor_client``).
 """
 
 import logging
@@ -26,11 +34,10 @@ import sqlalchemy
 from app.extensions import db
 from app.models.known_device import KnownDevice
 from tests._csrf_tokens import without_csrf_tokens
-from tests._test_helpers import enable_mfa
 from tests._trusted_devices import (
     CHROME_WINDOWS, FIREFOX_LINUX, SAFARI_IPHONE, is_trusted, move_trust_to, trust,
 )
-from tests._two_factor_sign_in import code_now
+from tests._two_factor_sign_in import code_now, two_factor_secret_of
 from tests._seed_owner_fixtures import SEED_USER_EMAIL, SEED_USER_PASSWORD
 
 #: The Security page, a page of its own since ruling plan#3435.
@@ -64,23 +71,39 @@ def _signed_in(response):
     return "/login" not in location and "/mfa/verify" not in location
 
 
-def _firefox_that_trusted_itself(app, secret):
-    """Return a Firefox browser signed in with a code and "Trust this device".
+def _firefox_signed_in_with_a_code(app, secret, trust_it):
+    """Return a Firefox browser signed in with the owner's code, trusted if *trust_it*.
 
+    *trust_it* ticks "Trust this device"; without it the browser is known and
+    holds no trust, so the owner's list of trusted devices leaves it out.
     The User-Agent is set on the client, so every request it makes sends the
     same one: strong session protection ends a session whose browser changes.
+
+    Args:
+        app: The Flask application.
+        secret: The owner's two-factor secret.
+        trust_it: Whether the sign-in ticks "Trust this device".
+
+    Returns:
+        The signed-in test client.
     """
     browser = app.test_client()
     browser.environ_base["HTTP_USER_AGENT"] = FIREFOX_LINUX
     assert _asked_the_code(_password(browser))
-    response = browser.post("/mfa/verify", data={
-        "totp_code": code_now(secret), "trust_device": "1",
-    })
+    form = {"totp_code": code_now(secret)}
+    if trust_it:
+        form["trust_device"] = "1"
+    response = browser.post("/mfa/verify", data=form)
     assert _signed_in(response), (
-        f"Setup failed: the trusting sign-in did not complete "
+        f"Setup failed: the code sign-in did not complete "
         f"({response.status_code}, {response.headers.get('Location')!r})"
     )
     return browser
+
+
+def _a_browser_trusting_nothing(app, user_id):
+    """Return a browser signed in as the owner that is in no list of trusted devices."""
+    return _firefox_signed_in_with_a_code(app, two_factor_secret_of(user_id), False)
 
 
 def _device_ids_of(user_id):
@@ -116,9 +139,7 @@ def _forget_action(row):
 class TestTheList:
     """Each live device of the user, named, dated, and this browser marked."""
 
-    def test_each_device_shows_its_browser_and_its_two_days(
-        self, auth_client, seed_user,
-    ):
+    def test_each_device_shows_its_browser_and_its_two_days(self, app, seed_user):
         """Newest first; days in the display timezone, not UTC's.
 
         The older device is trusted at 03:00 UTC two days ago, which is the
@@ -137,7 +158,9 @@ class TestTheList:
         trusted_day = utc_day - timedelta(days=1)
         expires_day = utc_day + timedelta(days=30) - timedelta(days=1)
 
-        page = auth_client.get(_SECURITY_PAGE).get_data(as_text=True)
+        page = _a_browser_trusting_nothing(app, user_id).get(
+            _SECURITY_PAGE,
+        ).get_data(as_text=True)
 
         rows = [_text(row) for row in _rows(page)]
         assert len(rows) == 2
@@ -147,14 +170,15 @@ class TestTheList:
             f"Trusted {trusted_day.strftime(_DAY_FORMAT)}; "
             f"expires {expires_day.strftime(_DAY_FORMAT)}"
         ) in rows[1]
-        # This browser holds no device cookie, so neither row is marked.
+        # This browser's record holds no trust, so it is not listed, and
+        # neither row is marked.
         assert "This browser" not in _card(page)
 
     def test_the_browser_the_page_is_on_is_marked(self, app, seed_user):
         """The device this browser trusted is marked; the other one is not."""
         user_id = seed_user["user"].id
-        browser = _firefox_that_trusted_itself(
-            app, enable_mfa(db.session, user_id),
+        browser = _firefox_signed_in_with_a_code(
+            app, two_factor_secret_of(user_id), True,
         )
         trust(user_id, SAFARI_IPHONE)
 
@@ -168,7 +192,7 @@ class TestTheList:
         assert _card(page).count("This browser") == 1
 
     def test_only_the_users_live_devices_are_listed(
-        self, auth_client, seed_user, seed_second_user,
+        self, app, seed_user, seed_second_user,
     ):
         """An expired device and another user's are absent; the live one shows."""
         user_id = seed_user["user"].id
@@ -180,7 +204,9 @@ class TestTheList:
         )
         trust(seed_second_user["user"].id, CHROME_WINDOWS)
 
-        page = auth_client.get(_SECURITY_PAGE).get_data(as_text=True)
+        page = _a_browser_trusting_nothing(app, user_id).get(
+            _SECURITY_PAGE,
+        ).get_data(as_text=True)
 
         rows = [_text(row) for row in _rows(page)]
         assert len(rows) == 1
@@ -188,13 +214,11 @@ class TestTheList:
         assert "Safari on iPhone" not in page
         assert "Chrome on Windows" not in page
 
-    def test_no_device_with_two_factor_on_says_how_to_trust_one(
-        self, auth_client, seed_user,
-    ):
+    def test_no_device_with_two_factor_on_says_how_to_trust_one(self, app, seed_user):
         """The empty state names the box that trusts a device."""
-        enable_mfa(db.session, seed_user["user"].id)
-
-        page = auth_client.get(_SECURITY_PAGE).get_data(as_text=True)
+        page = _a_browser_trusting_nothing(app, seed_user["user"].id).get(
+            _SECURITY_PAGE,
+        ).get_data(as_text=True)
 
         assert _rows(page) == []
         assert (
@@ -202,9 +226,9 @@ class TestTheList:
             "tick \"Trust this device for 30 days\""
         ) in _text(page).replace("&quot;", '"')
 
-    def test_no_device_with_two_factor_off_says_it_needs_it(self, auth_client):
+    def test_no_device_with_two_factor_off_says_it_needs_it(self, no_two_factor_client):
         """Without two-factor no device can be trusted, and the card says so."""
-        page = auth_client.get(_SECURITY_PAGE).get_data(as_text=True)
+        page = no_two_factor_client.get(_SECURITY_PAGE).get_data(as_text=True)
 
         assert _rows(page) == []
         assert (
@@ -216,22 +240,21 @@ class TestTheList:
 class TestTheTrustLength:
     """The card states the trust length from its one constant."""
 
-    def test_the_card_follows_the_constant(
-        self, auth_client, seed_user, monkeypatch,
-    ):
+    def test_the_card_follows_the_constant(self, app, seed_user, monkeypatch):
         """With the lifetime at 7 days, both sentences say 7 and none says 30.
 
-        Two-factor is on, so the empty state that quotes the box's label is
-        the one rendered beside the card's opening sentence.
+        Two-factor is on and no device is trusted, so the empty state that
+        quotes the box's label is the one rendered beside the card's opening
+        sentence.
         """
-        enable_mfa(db.session, seed_user["user"].id)
+        browser = _a_browser_trusting_nothing(app, seed_user["user"].id)
         # Where the Security page reads the constant: its own route since
         # ruling plan#3435 moved the page out of Settings.
         monkeypatch.setattr(
             "app.routes.auth.session_security.TRUST_LIFETIME", timedelta(days=7),
         )
 
-        card = _text(_card(auth_client.get(_SECURITY_PAGE).get_data(as_text=True)))
+        card = _text(_card(browser.get(_SECURITY_PAGE).get_data(as_text=True)))
 
         assert "A device stays trusted for 7 days" in card
         assert "&quot;Trust this device for 7 days&quot;" in card
@@ -246,8 +269,8 @@ class TestForgetting:
     ):
         """Forget this browser from its own row; the next sign-in asks the code."""
         user_id = seed_user["user"].id
-        browser = _firefox_that_trusted_itself(
-            app, enable_mfa(db.session, user_id),
+        browser = _firefox_signed_in_with_a_code(
+            app, two_factor_secret_of(user_id), True,
         )
         browser.post("/logout")
         # Control: before the forget, this browser skips the code.

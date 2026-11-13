@@ -22,34 +22,24 @@ banner visibility on the next page load -- the contract is "after
 this change, the user sees a banner explaining what happened" and
 that contract spans the route's commit and the context processor's
 read.
+
+The seed owner is made with two-factor (plan#3600): the disable and
+regenerate cases act on its own, and the setup cases set it up as the owner
+after a reset (``no_two_factor_client``).
 """
 import re
 from datetime import datetime, timedelta, timezone
 
-import pytest
-
 from app.extensions import db
-from app.models.user import MfaConfig, User
+from app.models.user import User
 from app.services import mfa_service
 from app.services.mfa_service import TotpVerificationResult
+from tests._other_user_fixtures import SECOND_USER_EMAIL, SECOND_USER_PASSWORD
+from tests._seed_owner_fixtures import OWNERS_PAGE
+from tests._two_factor_sign_in import sign_in_from_a_trusted_browser
 
 
 # --- Helpers ---------------------------------------------------------------
-
-
-def _enable_mfa(user_id: int) -> str:
-    """Create a confirmed MFA row and return the plaintext secret."""
-    secret = "JBSWY3DPEHPK3PXP"
-    config = MfaConfig(
-        user_id=user_id,
-        is_enabled=True,
-        totp_secret_encrypted=mfa_service.encrypt_secret(secret),
-        backup_codes=mfa_service.hash_backup_codes(["aaaaaaaa"]),
-        confirmed_at=datetime.now(timezone.utc),
-    )
-    db.session.add(config)
-    db.session.commit()
-    return secret
 
 
 def _reload(user_id: int) -> User:
@@ -104,7 +94,7 @@ class TestMfaConfirmStampsSecurityEvent:
     """``/mfa/confirm`` writes ``mfa_enabled`` to the user row."""
 
     def test_successful_mfa_confirm_stamps_event(
-        self, app, auth_client, seed_user, monkeypatch,
+        self, app, no_two_factor_client, seed_user, monkeypatch,
     ):
         """Initial MFA enrolment surfaces an mfa_enabled banner."""
         user_id = seed_user["user"].id
@@ -112,10 +102,10 @@ class TestMfaConfirmStampsSecurityEvent:
             mfa_service, "verify_totp_setup_code", lambda s, c: 12345,
         )
         # Visit setup so the pending secret exists.
-        auth_client.get("/mfa/setup")
+        no_two_factor_client.get("/mfa/setup")
         before = datetime.now(timezone.utc)
 
-        response = auth_client.post(
+        response = no_two_factor_client.post(
             "/mfa/confirm", data={"totp_code": "123456"},
         )
         assert response.status_code == 200
@@ -126,15 +116,15 @@ class TestMfaConfirmStampsSecurityEvent:
         assert before <= user.last_security_event_at <= after
 
     def test_invalid_mfa_confirm_does_not_stamp(
-        self, app, auth_client, seed_user, monkeypatch,
+        self, app, no_two_factor_client, seed_user, monkeypatch,
     ):
         """A bad code keeps the row clean."""
         user_id = seed_user["user"].id
         monkeypatch.setattr(
             mfa_service, "verify_totp_setup_code", lambda s, c: None,
         )
-        auth_client.get("/mfa/setup")
-        auth_client.post(
+        no_two_factor_client.get("/mfa/setup")
+        no_two_factor_client.post(
             "/mfa/confirm", data={"totp_code": "000000"},
             follow_redirects=False,
         )
@@ -151,7 +141,6 @@ class TestMfaDisableStampsSecurityEvent:
     ):
         """Disable surfaces an mfa_disabled banner."""
         user_id = seed_user["user"].id
-        _enable_mfa(user_id)
         monkeypatch.setattr(
             mfa_service, "verify_totp_code",
             lambda mc, c: TotpVerificationResult.ACCEPTED,
@@ -178,7 +167,6 @@ class TestRegenerateBackupCodesStampsSecurityEvent:
     ):
         """Regen surfaces a backup_codes_regenerated banner."""
         user_id = seed_user["user"].id
-        _enable_mfa(user_id)
         before = datetime.now(timezone.utc)
 
         response = auth_client.post("/mfa/regenerate-backup-codes")
@@ -366,16 +354,16 @@ class TestBannerRendering:
         assert b"security-event-banner" not in second.data
 
     def test_banner_kind_specific_copy_renders(
-        self, app, auth_client, seed_user, monkeypatch,
+        self, app, no_two_factor_client, seed_user, monkeypatch,
     ):
         """The MFA-enabled banner uses the mfa_enabled copy, not generic."""
         monkeypatch.setattr(
             mfa_service, "verify_totp_setup_code", lambda s, c: 12345,
         )
-        auth_client.get("/mfa/setup")
-        auth_client.post("/mfa/confirm", data={"totp_code": "123456"})
+        no_two_factor_client.get("/mfa/setup")
+        no_two_factor_client.post("/mfa/confirm", data={"totp_code": "123456"})
 
-        response = auth_client.get("/dashboard")
+        response = no_two_factor_client.get("/dashboard")
         assert response.status_code == 200
         # The MFA-enabled title must appear ...
         assert b"Two-factor authentication was enabled" in response.data
@@ -462,14 +450,10 @@ class TestBannerCrossUserIsolation:
         )
         db.session.commit()
 
-        # Fresh test_client, fresh cookie jar.
-        client = app.test_client()
-        login_resp = client.post("/login", data={
-            "email": "other@shekel.local",
-            "password": "otherpass",
-        })
-        assert login_resp.status_code == 302, (
-            f"second-user login failed; got status {login_resp.status_code}"
+        # Fresh test_client, fresh cookie jar, signed in through the shared
+        # sign-in (it asserts its own redirect).
+        client = sign_in_from_a_trusted_browser(
+            app.test_client(), SECOND_USER_EMAIL, SECOND_USER_PASSWORD, OWNERS_PAGE,
         )
 
         response = client.get("/dashboard")

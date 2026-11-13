@@ -11,6 +11,10 @@ exercising the same code path through a different lens.
 Extension-level posture (LoginManager session_protection, etc.) is
 asserted alongside the config classes here so a single regression
 gate covers every static security knob the app ships with.
+
+The suite's configuration class is imported as ``_TestConfig``: bound by
+its own name, ``python_classes = Test*`` would collect it as a test class
+in each module that imports it.
 """
 
 from importlib import reload
@@ -26,11 +30,11 @@ from app.config import (
     DevConfig,
     DevContainerConfig,
     ProdConfig,
-    TestConfig,
     _DATABASE_URL_SENTINEL,
     _reject_sentinel,
     _runtime_database_uri,
 )
+from app.config import TestConfig as _TestConfig
 from app.extensions import login_manager
 
 
@@ -117,7 +121,7 @@ class TestTheUploadCeiling:
     def test_every_config_inherits_it(self):
         """Dev, test and prod all bound their bodies."""
         assert DevConfig.MAX_CONTENT_LENGTH == BaseConfig.MAX_CONTENT_LENGTH
-        assert TestConfig.MAX_CONTENT_LENGTH == BaseConfig.MAX_CONTENT_LENGTH
+        assert _TestConfig.MAX_CONTENT_LENGTH == BaseConfig.MAX_CONTENT_LENGTH
 
     def test_a_form_body_at_the_ceiling_parses(self, app):
         """Nothing smaller than the ceiling bounds an ordinary form.
@@ -184,21 +188,21 @@ class TestTestConfig:
 
     def test_database_uri_is_not_none(self):
         """TestConfig.SQLALCHEMY_DATABASE_URI is never None."""
-        assert TestConfig.SQLALCHEMY_DATABASE_URI is not None
-        assert TestConfig.SQLALCHEMY_DATABASE_URI != ""
+        assert _TestConfig.SQLALCHEMY_DATABASE_URI is not None
+        assert _TestConfig.SQLALCHEMY_DATABASE_URI != ""
 
     def test_database_uri_is_valid_postgresql_uri(self):
         """The test URI is a valid PostgreSQL connection string."""
-        uri = TestConfig.SQLALCHEMY_DATABASE_URI
+        uri = _TestConfig.SQLALCHEMY_DATABASE_URI
         assert uri.startswith("postgresql")
 
     def test_csrf_disabled(self):
         """TestConfig disables CSRF for test convenience."""
-        assert TestConfig.WTF_CSRF_ENABLED is False
+        assert _TestConfig.WTF_CSRF_ENABLED is False
 
     def test_testing_flag(self):
         """TestConfig has TESTING=True."""
-        assert TestConfig.TESTING is True
+        assert _TestConfig.TESTING is True
 
     def test_testconfig_loads_without_default(self, monkeypatch):
         """TestConfig has no SECRET_KEY fallback default (F-016).
@@ -208,7 +212,7 @@ class TestTestConfig:
         that explicitly clear the value do not see a hidden fallback.
         """
         monkeypatch.setattr(BaseConfig, "SECRET_KEY", None)
-        config = TestConfig()
+        config = _TestConfig()
         assert config.SECRET_KEY is None
 
 
@@ -917,7 +921,7 @@ class TestRateLimitConfig:
 
     def test_testconfig_stores_counters_in_memory(self):
         """TestConfig keeps BaseConfig's memory://, so the suite needs no Valkey."""
-        assert TestConfig.RATELIMIT_STORAGE_URI == "memory://"
+        assert _TestConfig.RATELIMIT_STORAGE_URI == "memory://"
 
     def test_testconfig_disables_rate_limiting(self):
         """TestConfig sets RATELIMIT_ENABLED=False.
@@ -928,7 +932,7 @@ class TestRateLimitConfig:
         test_auth.py lockout tests) re-enable it temporarily on a
         fresh app instance.
         """
-        assert TestConfig.RATELIMIT_ENABLED is False
+        assert _TestConfig.RATELIMIT_ENABLED is False
 
     @pytest.mark.parametrize("config", [DevContainerConfig, ProdConfig])
     def test_the_configs_beside_valkey_name_its_socket(self, config):
@@ -1120,7 +1124,7 @@ class TestEveryConfigConnectsTheSameWay:
     """
 
     @pytest.mark.parametrize(
-        "config", [DevConfig, DevContainerConfig, TestConfig, ProdConfig]
+        "config", [DevConfig, DevContainerConfig, _TestConfig, ProdConfig]
     )
     def test_each_config_carries_the_driver_arguments(self, config):
         """A five-second connect timeout and no server-side preparing."""

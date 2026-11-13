@@ -34,8 +34,9 @@ contract-order running sum over the SAME visible event set the reader
 walked.  Step E1c's oracle parallel-ran
 the two on EVERY DAY of nine shapes and they agreed byte for byte; step E1d-b
 retired that oracle with its counterparty and re-anchored every shape on
-HAND-COMPUTED values instead (``tests/test_services/test_confirmed_view.py``),
-so the rows are pinned by arithmetic rather than by a second implementation.
+HAND-COMPUTED values instead
+(``tests/test_services/test_confirmed_view/test_the_shape_matrix.py``), so the
+rows are pinned by arithmetic rather than by a second implementation.
 
 **Two DELIBERATE divergences from the reader, both documented not hidden.**  The
 fold is TOTAL, so it answers where the partial reader returned ``None`` -- a

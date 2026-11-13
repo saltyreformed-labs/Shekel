@@ -674,7 +674,7 @@ class TestTheSettledWalkChargesOncePerInstallment:
     **FOUR places in the suite give different money under the two rules, and
     this docstring claimed to be the only one until an adversarial review
     measured it false.**  The other three are pre-existing and all three FAILED
-    on the cutover -- ``test_confirmed_view`` 's
+    on the cutover -- ``test_confirmed_view.test_the_shape_matrix`` 's
     ``test_two_payments_in_one_due_month_show_as_two_rows_in_that_month`` and
     ``test_a_late_settled_payment_is_dated_at_its_installment_but_visible_late``,
     and ``test_posting_ledger_loan_reconciliation.test_the_reader_against_hand_worked_figures`` 's

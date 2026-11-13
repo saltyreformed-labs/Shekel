@@ -23,7 +23,7 @@ ledger -- two producers, not one read twice -- but no screen reads either
 schedule's rows: the year-end consumer went at plan step F2, and the one
 ``app/`` reader left asks only whether the schedule is empty.  A narrower
 form of that comparison, a read before origination, stays in
-``tests/test_services/test_confirmed_view.py``.  Hand-computed expectations
+``tests/test_services/test_confirmed_view/test_the_guards.py``.  Hand-computed expectations
 follow the arithmetic conventions in
 ``tests/test_integration/test_loan_resolver_single_source.py``; the
 two files reinforce each other on the loan single-source-of-truth

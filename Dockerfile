@@ -149,6 +149,23 @@ ENV PSYCOPG_IMPL=c
 # C.UTF-8 is the one UTF-8 locale this image can adopt.
 ENV LC_ALL=C.UTF-8
 
+# THE PROCESS TIMEZONE IS PINNED HERE (rulings plan#3807, plan#3811; parity
+# audit 2026-06-12, finding M01 in shekel-audits/dev-prod-parity/findings.md).
+# The app still reads the process clock as its civil day in places
+# (``date.today()``), so the process timezone is the app's there, and the base
+# image's default is UTC: ``date.today()`` turned to the next day at 20:00 New
+# York (19:00 in winter), so date-defaulted entries, pay-period membership and
+# staleness flags disagreed with the user's wall clock until midnight.  Pinned
+# in the image, every container of the app runs it, a bundled install's too.
+# The zone is ``app.utils.dates.DISPLAY_TIMEZONE``'s, which
+# tests/test_deploy/test_image_supply_chain/test_dockerfile.py holds this line
+# to; tzdata ships in python:3.14-slim (/usr/share/zoneinfo/America/New_York).
+# deploy/docker-compose.prod.yml and docker-compose.dev.yml pin the same value
+# until plan#2166 deletes them.  The clock rework, plan#1068, deletes this
+# line once each user's own zone answers every civil-day read (ruling
+# plan#3857).
+ENV TZ=America/New_York
+
 # Copy application code.  entrypoint.sh ships in the build context (see
 # .dockerignore -- it is a must-ship file), so this single COPY already
 # places it at /home/shekel/app/entrypoint.sh with shekel ownership; no

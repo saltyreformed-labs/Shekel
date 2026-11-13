@@ -1,6 +1,7 @@
 """Image supply-chain tests: the Dockerfile pins its base images by digest, upgrades OpenSSL in
 both Python stages, installs uv.lock with uv and runs no pip, and keeps the C-34 hardening and
-psycopg's C implementation (audit findings F-025, F-062, F-120).
+psycopg's C implementation (audit findings F-025, F-062, F-120); and it pins the process
+timezone to the app's (parity audit finding M01).
 """
 
 from __future__ import annotations
@@ -10,6 +11,7 @@ import tomllib
 
 import pytest
 
+from app.utils.dates import DISPLAY_TIMEZONE
 from tests.test_deploy.test_uv_build_hashes import BUILD_HASHES_SETTING, PYPROJECT
 
 from ._helpers import (
@@ -495,4 +497,33 @@ class TestDockerfileRequiresPsycopgC:
             "``ENV PSYCOPG_IMPL=c``; an image without psycopg-c would serve "
             "every query through psycopg's pure-Python fallback unnoticed "
             "(ruling balance:R-BAL209)."
+        )
+
+
+class TestDockerfilePinsTheAppsTimezone:
+    """The runtime stage pins the process timezone to the app's civil zone.
+
+    The app still reads the process clock as its civil day in places
+    (``date.today()``), and the base image's default zone is UTC, so an image
+    without the pin turns the user's day over at 20:00 New York (parity audit
+    finding M01; rulings plan#3807, plan#3811).  The zone is the one
+    ``app.utils.dates.DISPLAY_TIMEZONE`` names, read here rather than spelled
+    a second time, so a move of the app's zone that leaves this line behind
+    fails.  The clock rework, plan#1068, deletes the pin and this class once
+    each user's own zone answers every civil-day read (ruling plan#3857).
+    """
+
+    def test_the_runtime_stage_sets_tz_to_the_display_timezone(self) -> None:
+        """``ENV TZ=`` the zone's key is an instruction of the LAST stage, the one the
+        image runs (:func:`_stages`), in the one-line ``ENV NAME=value`` form the
+        rehearsal kit reads (``tools/rehearsal/bench.py``'s ``_IMAGE_ENV``).
+
+        A line in the builder stage would not reach the image that runs.
+        """
+        wanted = f"ENV TZ={DISPLAY_TIMEZONE.key}"
+        runtime = _stages(DOCKERFILE.read_text(encoding="utf-8"))[-1]
+        assert wanted in runtime, (
+            f"the Dockerfile's runtime stage does not set ``{wanted}``; the "
+            "image's processes would run on UTC and turn the user's day over "
+            "hours early each night (parity audit finding M01)."
         )

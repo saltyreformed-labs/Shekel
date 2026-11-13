@@ -864,7 +864,8 @@ def _build_chips(
     Args:
         liability: The liability (federal taxable + both liabilities).
         box1_wages: The effective-rate denominator.
-        bracket_set: The year's :class:`app.tax_law.FederalRules` (or
+        bracket_set: The year's
+            :class:`~app.services.tax_config_service.FederalTaxRules` (or
             ``None``).
         next_stub: The precomputed next-payday date (or ``None``).
 

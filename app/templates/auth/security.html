@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block title %}Security -- Shekel{% endblock title %}
+
+{# The Security page (ruling plan#3435): each user's own sign-in -- password,
+   two-factor, trusted devices and sessions -- for an owner and a companion
+   alike, so it lives outside Settings, which is the household's and the
+   owner's alone.  Reached from the menu under the user's name. #}
+{% block content %}
+<h4 class="mb-3"><i class="bi bi-shield-lock"></i> Security</h4>
+
+<div class="row">
+  <div class="col-lg-9 col-xl-8">
+    {% include "auth/_security.html" %}
+  </div>
+</div>
+{% endblock content %}
+
+{% block scripts %}
+{# Strength meter (audit F-089) and show/hide toggle (audit F-090) on the
+   change-password form.  Loaded only here so the ~400 KB zxcvbn asset does
+   not download on every page view. #}
+<script src="{{ url_for('static', filename='vendor/zxcvbn/zxcvbn.js') }}"></script>
+<script src="{{ url_for('static', filename='js/password_strength.js') }}"></script>
+<script src="{{ url_for('static', filename='js/password_toggle.js') }}"></script>
+{% endblock scripts %}

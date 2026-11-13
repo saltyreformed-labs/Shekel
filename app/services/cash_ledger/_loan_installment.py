@@ -91,7 +91,7 @@ deleted; the terms' one loader since plan step recurrence:R25 is the pass's
 memo, :meth:`app.services.loan_ledger.LoanCalendars.loan_calendar_of`, which
 loads the rate history and escrow lines and builds the calendar from them
 (``loan_ledger._calendars.build_loan_calendar``, pure since plan task
-plan#2649), and ``test_loan_payment_service.test_the_contractual_payment
+plan#2649), and ``test_a_loans_price_reads_its_terms
 .TestALoansPriceDoesNotReadItsOwnPayments`` grades that it issues no statement
 against the payment rows.
 

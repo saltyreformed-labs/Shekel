@@ -69,7 +69,7 @@ Deferred or corrected:
   - **Five only run `docker compose config`,** which renders merged YAML and creates **no**
     container: `test_container_hardening.py::TestMergedComposeHardeningSurvivesOverride`,
     `test_deploy_configs.py::TestDeployComposeParses`,
-    `test_internal_tls_and_access.py::TestMergedComposeCarriesTLS`,
+    `test_internal_tls_and_access/test_postgres_tls.py::TestMergedComposeCarriesTLS`,
     `test_image_supply_chain.py::TestComposeOverrideRequiresDigest`, and
     `test_docker_secrets_and_env_hygiene.py::TestProdComposeMergedConfig`. They touch the daemon but
     do not pollute `cadvisor`/`alloy`; they carry the marker for a clean "no daemon interaction by

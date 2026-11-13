@@ -333,7 +333,8 @@ See the runbook for retention policies, NAS configuration, and encryption setup.
 If Shekel is only accessible on your local network, the default configuration is sufficient. You
 should still:
 
-- Change the default seed password on first login (Settings > Security > Change Password).
+- Change the default seed password on first login (Security, in the menu under your name > Change
+  Password).
 - Set up automated backups (see [Backups](#backups)).
 
 ### External Access (Cloudflare Tunnel, Tailscale, etc.)
@@ -343,8 +344,10 @@ If you expose Shekel outside your local network, take these additional steps:
 1. **Verify public registration is disabled.** `REGISTRATION_ENABLED` defaults to `false` in
    production (set in `docker-compose.yml` and enforced by `ProdConfig`). Confirm with
    `docker exec shekel-prod-app env | grep REGISTRATION_ENABLED` -- the value should be `false`.
-2. **Enable MFA for all users.** Go to Settings > Security > Enable TOTP. This requires
-   `TOTP_ENCRYPTION_KEY` to be set (see [MFA Setup](#mfa-setup) below).
+2. **Enable MFA for all users.** Open Security from the menu under your name and choose Set Up
+   Two-Factor Authentication. A companion account must use it, so the app holds a companion at that
+   setup at her next sign-in until she has it. This requires `TOTP_ENCRYPTION_KEY` to be set (see
+   [MFA Setup](#mfa-setup) below).
 3. **Verify HTTPS.** Cloudflare Tunnel and Tailscale handle TLS automatically. If using a different
    method, ensure your reverse proxy terminates HTTPS.
 4. **Set your own seed password before the first boot.** The deploy refuses to seed `.env.example`'s
@@ -391,7 +394,8 @@ again with it (a `restart` keeps the environment the container was made with):
 docker compose up -d app
 ```
 
-You can then enable MFA in Settings > Security > Enable TOTP.
+You can then enable MFA from Security, in the menu under your name: Set Up Two-Factor
+Authentication.
 
 **Do not use `openssl rand` as a substitute.** It produces an incompatible key format. Only the
 Fernet method above generates a valid key.

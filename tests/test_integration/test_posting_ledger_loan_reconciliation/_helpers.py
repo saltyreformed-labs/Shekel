@@ -14,11 +14,8 @@ from app.models.pay_period import PayPeriod
 from app.models.scenario import Scenario
 from app.models.transaction_entry import TransactionEntry
 from app.models.transfer import Transfer
-from app.services import loan_ledger, loan_loaders, loan_resolver, posting_service
-from app.services import amortization_engine
+from app.services import loan_ledger, posting_service
 from app.services.ledger_lines import LOAN_KINDS
-from app.services.loan_resolver._periods import _replay_from_anchor
-from app.utils.money import round_money
 from app.utils.balance_predicates import settled_status_ids
 from app.services.balance_at import BalanceContext
 from app.services.balance_at._resolution import resolved_loan
@@ -42,10 +39,11 @@ from tests._test_helpers import (
 
 # The shared synthetic split-loan fixture ($250,000 @ 6%, trued up to $100,000 --
 # distinct so a correct interest figure proves the walk's anchor reset); see
-# SPLIT_LOAN in tests/_test_helpers.py.  _P1/_P2/_P3 are the seed_periods indices
+# SPLIT_LOAN in tests/_test_helpers/_loans.py.  _P1/_P2/_P3 are the seed_periods indices
 # (payment_day=1) due 02-01 / 03-01 / 04-01 -- distinct months after the anchor,
-# so the resolver's biweekly-collision redistribution never shifts a date and the
-# parallel run is exact.
+# so each payment pays its own installment and each month's interest is charged
+# once (a due-month collision is its own case,
+# ``test_biweekly_due_month_collision_charges_the_month_once``).
 _ORIGINATION_PRINCIPAL = SPLIT_LOAN.origination_principal
 
 
@@ -70,6 +68,27 @@ _P2 = SPLIT_LOAN.p2
 _P3 = SPLIT_LOAN.p3
 
 
+# The contract's level monthly P&I for SPLIT_LOAN, worked by hand: $250,000 at
+# 6% over 360 months from origination (the true-up re-bases the balance, not
+# the payment), i = 0.06 / 12 = 0.005:
+#   250000 * 0.005 / (1 - 1.005 ** -360) = 1498.876... -> 1498.88.
+# A case paying exactly this is ON SCHEDULE: no extra and no short principal.
+# Against the $100,000 true-up each month then books, by hand:
+#   month 1: interest round(100000.00 * 0.005) = 500.00, principal 998.88,
+#            balance 99,001.12;
+#   month 2: interest round( 99001.12 * 0.005) = 495.01, principal 1,003.87,
+#            balance 97,997.25.
+_SCHEDULED_PI = Decimal("1498.88")
+
+
+# The balance after one and after two on-schedule months (the arithmetic is at
+# :data:`_SCHEDULED_PI`).
+_ONE_SCHEDULED_MONTH = Decimal("99001.12")
+
+
+_TWO_SCHEDULED_MONTHS = Decimal("97997.25")
+
+
 # The origination a case takes when a payment is walked BEFORE its true-up: the
 # month before P1's 02-01 installment (plan step recurrence:R16-c-2, ruling
 # R-R101).  Every contractual installment from origination is charged now, so
@@ -79,7 +98,7 @@ _ORIGINATION_BEFORE_P1 = date(2026, 1, 1)
 
 
 # The frozen as-of: after every payment period used, so each settled payment is
-# historical (eligible) and the resolver / wiring see the same today.
+# historical (eligible) and every read sees the same today.
 _AS_OF = date(2026, 5, 15)
 
 
@@ -175,10 +194,10 @@ def _settle(
     marking it Paid produces it.
 
     Settles ON the period's start by default (``settled_on=None``), so the
-    payment is visible from its period start under C2's settled-date clock -- the
-    on-time basis the resolver's confirmed-payment eligibility uses, keeping the
-    reader-vs-resolver parallel run exact.  A test exercising an early / late
-    settle passes an explicit ``settled_on`` civil date.
+    payment is visible from its period start under C2's settled-date clock, so a
+    per-period read moves exactly at a period start and each period's hand-worked
+    balance is one figure.  A test exercising an early / late settle passes an
+    explicit ``settled_on`` civil date.
     """
     return create_settled_transfer(
         user, _db.session, user["account"], loan, period,
@@ -266,71 +285,6 @@ def _independent_settled_income_cash(
 # ---------------------------------------------------------------------------
 
 
-def _resolver_balance(
-    loan_account_id: int, scenario_id: int, as_of: date
-) -> Decimal:
-    """Return the un-seeded anchor-replay balance -- the parallel reference.
-
-    The oracle's genuinely independent producer: it replays the SCHEDULED payment
-    (``principal = period_pi - interest``) forward from the latest anchor and
-    discards the cash, so it NEVER reads the posted ledger -- the load-bearing
-    property the whole parallel run rests on (module docstring invariants 1 / 7).
-
-    Since the read switch (plan Section 8) the PRODUCTION balance reads the
-    ledger's facts (the seam's fold; the seeded resolver threaded the confirmed
-    balance in until plan step D2a deleted its balance field entirely) -- so a
-    production window here would make the "resolver" read the very ledger it is
-    meant to cross-check, collapsing the parallel run to a tautology.  This
-    helper therefore runs the production replay derivation directly, on the
-    production feed, preserving the schedule-replay reference.  The
-    production path is verified separately -- that it equals the
-    ledger off-schedule is the read switch, pinned by
-    ``TestReadSwitchProductionPath``.
-
-    **It takes its OWN inputs, and that is plan step balance:X-bl-2b** (finding
-    **N-432**).  The replay reads three dates per payment and NO amount, but
-    this assembled its feed through ``loan_payment_service.load_loan_context``,
-    which prices every row through the amount model -- so the reference's
-    import closure was **101 modules** where its own arithmetic needs **45**,
-    and an ``AmountUnresolvable`` could break a control that reads no figure.
-    Every module in that closure is a module this reference has to be right
-    about; the amount-free feed
-    (:func:`app.services.loan_ledger.payment_installments`) removes 56 of them.
-    """
-    params = loan_loaders.load_loan_params(loan_account_id)
-    assert params is not None, "loan is not resolvable (no LoanParams)"
-    # The DATES alone -- no pricing tier behind them.  ``options=()`` and
-    # ``leg_options=()`` because nothing here traverses a relationship on the
-    # settled rows or on the projected legs' parents.
-    installments = loan_ledger.payment_installments(
-        loan_account_id, scenario_id, params,
-        options=(), leg_options=(),
-    )
-    periods = loan_resolver.resolve_periods(
-        params, loan_loaders.load_rate_changes(loan_account_id),
-    )
-    # The replay derivation directly (``LoanState.current_balance`` carried it
-    # until plan step D2a deleted the field): unchanged as the oracle's
-    # independent schedule-replay reference.  ``slotted_dates`` is the ONE
-    # biweekly-collision assignment, shared with the priced feed's
-    # ``prepare_payments_for_engine``, so the two cannot resolve a collision
-    # differently.  It is called MODULE-QUALIFIED on purpose: the roots control
-    # below reads this body's qualifiers, and a bare name would hide the
-    # dependency from it.
-    return round_money(
-        _replay_from_anchor(
-            anchor_events=loan_loaders.load_loan_anchor_facts(params),
-            periods=periods,
-            payments=amortization_engine.slotted_dates(
-                [installment.dates for installment in installments],
-                params.payment_day,
-            ),
-            payment_day=params.payment_day,
-            as_of=as_of,
-        ).balance_as_of
-    )
-
-
 def _ledger_balance(loan_account_id: int, scenario_id: int) -> Decimal:
     """Return the ledger's genesis view of the current balance.
 
@@ -376,12 +330,12 @@ def _posted_period_map(
     """Return the dated posting window at every period END (the per-period form).
 
     :func:`tests._ledger_reads.posted_loan_balance_map` -- the scalar window
-    applied at each period's END, which is what lets the early-settle parallel
-    run below check period boundaries past the frozen today (no posted entry in
+    applied at each period's END, which is what lets the early-settle case
+    below check period boundaries past the frozen today (no posted entry in
     these fixtures is dated later, so such a period carries the confirmed sum
     flat).  Because it IS the scalar per period, never assert the two agree --
-    that identity cannot fail; the assertions here are against the independent
-    resolver.  Asserts non-``None`` for the same reason as
+    that identity cannot fail; the assertions here are against hand-worked
+    figures.  Asserts non-``None`` for the same reason as
     :func:`_posted_balance`.
     """
     result = posted_loan_balance_map(
@@ -468,8 +422,8 @@ def _assert_loan_reconciles(loan, scenario_id: int) -> None:
     booked interest 700 instead of 500, ``per_loan`` and the loan leg both shift and
     the identities still pass (this is why, in the injected-``+$10`` experiment, only
     the two invariant-only tests survived).  So every caller MUST pair this with a
-    value assertion -- a parallel-run ``ledger == resolver`` or a hand-computed
-    literal -- which is what actually pins the split; the sweep's job is to catch a
+    value assertion -- a hand-computed literal, its arithmetic shown -- which is
+    what actually pins the split; the sweep's job is to catch a
     reader / scenario-scope / routing / balance defect the value checks do not.
     (b)/(c) also assume the loan has NO OUTBOUND transfer:
     ``_independent_settled_income_cash`` sums transfers INTO the loan only, which

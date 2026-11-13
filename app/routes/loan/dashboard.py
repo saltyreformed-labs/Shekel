@@ -674,8 +674,8 @@ def balance_hero(account_id):
     """
     if not request.headers.get("HX-Request"):
         return redirect(url_for("loan.dashboard", account_id=account_id))
-    account, params = _load_configured_loan_or_404(account_id)
-    ctx = _load_route_context(account, params)
+    account, _params = _load_configured_loan_or_404(account_id)
+    ctx = _load_route_context(account)
     return render_template(
         "loan/_balance_hero.html",
         account=account,
@@ -702,7 +702,7 @@ def anchor_form(account_id):
     if not request.headers.get("HX-Request"):
         return redirect(url_for("loan.dashboard", account_id=account_id))
     account, params = _load_configured_loan_or_404(account_id)
-    ctx = _load_route_context(account, params)
+    ctx = _load_route_context(account)
     return render_template(
         "loan/_anchor_edit.html",
         account=account,
@@ -723,7 +723,7 @@ def dashboard(account_id):
     if params is None:
         return render_loan_setup(account, account_type)
 
-    ctx = _load_route_context(account, params)
+    ctx = _load_route_context(account)
     scenario_id = ctx.balance_ctx.scenario_id
     today = date.today()
     # Every recurring transfer paying INTO the loan, oldest first, loaded ONCE

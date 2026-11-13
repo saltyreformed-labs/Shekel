@@ -12,19 +12,17 @@ corrected from the single filer's $201,775 at plan step salary:X-at-7, finding
 where its withholding documents print other figures than the return's).  On
 2026-11-10 neither prints one: the Pub 15-T draft irs.gov posts is still 2026's,
 and the draft Form W-4 (2027), created 2026-06-10, shows placeholders for its
-Step 3 child credit and its standard deductions.  Re-verify against both when
-the IRS posts them final.
+Step 3 child credit and its standard deductions.  Step plan#3353 re-checks
+against both when the IRS posts them final.
 
 **North Carolina's 2027 rate is fixed by statute, not by a revenue trigger.**
 S.L. 2026-41 sec. 44.1(a) (approved 2026-07-07) rewrote N.C.G.S.
 105-153.7(a): 3.99% in 2026, 3.49% in 2027 through 2029.  It also struck the
 trigger rows for the 2027 through 2034 tax years from subsection (a1), so no
 revenue test can move 2027's rate.  North Carolina's standard and child
-deductions are the enacted, unindexed tables in
-:mod:`app.tax_law._north_carolina`: S.L. 2026-31 and S.L. 2026-41 amend
-N.C.G.S. 105-153.5, but neither touches the standard deduction in (a)(1) or
-the child deduction in (a1).  Re-verify the deductions against the 2027
-Form D-401 instructions when NCDOR posts them.
+deductions are the unindexed tables in :mod:`app.tax_law._north_carolina`,
+graded there; step plan#3349 re-checks them against the 2027 Form D-401
+instructions when NCDOR posts them.
 """
 
 from decimal import Decimal
@@ -32,6 +30,7 @@ from decimal import Decimal
 from app.enums import FilingStatusEnum
 from app.tax_law import _north_carolina
 from app.tax_law._types import (
+    FederalCredits,
     FederalRules,
     FicaRules,
     TaxYearLaw,
@@ -58,9 +57,6 @@ SOURCES = (
 _FEDERAL = {
     FilingStatusEnum.SINGLE: FederalRules(
         standard_deduction=Decimal("16600.00"),
-        child_credit_amount=Decimal("2300.00"),
-        other_dependent_credit_amount=Decimal("500.00"),
-        child_credit_refundable_cap=Decimal("1800.00"),
         brackets=ladder(
             ("0.00", "12800.00", "0.1000"),
             ("12800.00", "52025.00", "0.1200"),
@@ -73,9 +69,6 @@ _FEDERAL = {
     ),
     FilingStatusEnum.MARRIED_JOINTLY: FederalRules(
         standard_deduction=Decimal("33200.00"),
-        child_credit_amount=Decimal("2300.00"),
-        other_dependent_credit_amount=Decimal("500.00"),
-        child_credit_refundable_cap=Decimal("1800.00"),
         brackets=ladder(
             ("0.00", "25600.00", "0.1000"),
             ("25600.00", "104050.00", "0.1200"),
@@ -88,9 +81,6 @@ _FEDERAL = {
     ),
     FilingStatusEnum.MARRIED_SEPARATELY: FederalRules(
         standard_deduction=Decimal("16600.00"),
-        child_credit_amount=Decimal("2300.00"),
-        other_dependent_credit_amount=Decimal("500.00"),
-        child_credit_refundable_cap=Decimal("1800.00"),
         brackets=ladder(
             ("0.00", "12800.00", "0.1000"),
             ("12800.00", "52025.00", "0.1200"),
@@ -103,9 +93,6 @@ _FEDERAL = {
     ),
     FilingStatusEnum.HEAD_OF_HOUSEHOLD: FederalRules(
         standard_deduction=Decimal("24925.00"),
-        child_credit_amount=Decimal("2300.00"),
-        other_dependent_credit_amount=Decimal("500.00"),
-        child_credit_refundable_cap=Decimal("1800.00"),
         brackets=ladder(
             ("0.00", "18250.00", "0.1000"),
             ("18250.00", "69650.00", "0.1200"),
@@ -117,6 +104,12 @@ _FEDERAL = {
         ),
     ),
 }
+
+_CREDITS = FederalCredits(
+    child_credit_amount=Decimal("2300.00"),
+    other_dependent_credit_amount=Decimal("500.00"),
+    child_credit_refundable_cap=Decimal("1800.00"),
+)
 
 _FICA = FicaRules(
     ss_rate=Decimal("0.0620"),
@@ -130,6 +123,7 @@ YEAR_2027 = TaxYearLaw(
     tax_year=2027,
     sources=SOURCES,
     federal=_FEDERAL,
+    federal_credits=_CREDITS,
     fica=_FICA,
     states={"NC": _north_carolina.state_year("0.0349")},
 )

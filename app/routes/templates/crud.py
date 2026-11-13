@@ -68,7 +68,6 @@ from app.routes._recurrence_conflict_chooser import (
 )
 from app.routes._recurrence_form_helpers import (
     author_recurrence_for_create,
-    recurrence_spec_for_create,
     resolve_recurrence_rule_for_update,
 )
 from app.routes._recurrence_form_refusals import (
@@ -82,7 +81,7 @@ from app.routes._recurrence_form_render import (
 )
 from app.routes._form_errors import load_form_or_redirect
 from app.routes._redirect_target import RedirectTarget
-from app.schemas.validation import RECURRENCE_END_BOUND_KEY
+from app.schemas.validation import RECURRENCE_SUBMISSION_KEY
 from app.routes.templates._bp import templates_bp
 
 logger = logging.getLogger(__name__)
@@ -163,29 +162,19 @@ def create_template():
     if invalid is not None:
         return invalid
 
-    # Read the cadence the form states.  The F-24 helper pops every
-    # recurrence-related key from ``data`` so the TransactionTemplate
-    # constructor below does not receive stray kwargs.  **It never answers
-    # "no rule" for THIS kind since plan step balance:X-bi-7b** (ruling
-    # R-BAL23): the form offers no "Does not repeat" and
+    # Read the cadence the form states: the schema consumed every recurrence
+    # key into ONE submission (plan step R7e), popped here so the
+    # TransactionTemplate constructor below receives no stray kwarg, and the
+    # spec it authors is read out of it.  **It never answers "no rule" for
+    # THIS kind since plan step balance:X-bi-7b** (ruling R-BAL23): the form
+    # offers no "Does not repeat" and
     # ``TemplateCreateSchema.validate_a_cadence_is_chosen`` has refused an
     # empty unit before this line -- a transaction that does not repeat is a
     # ONE-OFF, made at the Budget grid through ``one_off.place_one_off``, so a
     # definition with no occurrence is not something this door can mint.  The
-    # helper's ``None`` arm is the transfer form's.
-    #
-    # **The ``duplicate-code`` disable this call carried is GONE, and so is
-    # the duplication** (plan step R7b-4).  The suppression's stated reason
-    # was that this preamble could not be hoisted -- the transfers side reused
-    # ``start_period_id`` afterwards and a wrapper popping it internally would
-    # have had to thread it back out.  That field is the transfer form's alone
-    # now, so the preamble hoisted into
-    # :func:`recurrence_spec_for_create` and there is one copy of it.
-    spec = recurrence_spec_for_create(
-        data,
-        user_id=current_user.id,
-        redirect=RedirectTarget("templates.new_template"),
-    )
+    # ``None`` arm of :meth:`~app.services.recurrence.RecurrenceSubmission.authored`
+    # is the transfer form's.
+    spec = data.pop(RECURRENCE_SUBMISSION_KEY).authored(current_user.id)
 
     # Create the template.  The form's Amount is ``amount`` since plan step
     # X-bp, which is not a column: it is the price the series opens at below,
@@ -384,11 +373,11 @@ def update_template(template_id):
     # carry it into the field-update loop below.  It used to be popped
     # because the field was on the shared recurrence mixin and this form
     # collected it only at creation.
-    # The closing bound, composed by the schema's ``@post_load`` into ONE
-    # value under the mode key.  ABSENT when the form stated no bound --
-    # a disabled control, or a partial update -- which the helpers read as
-    # "leave the stored one alone" (plan step R7b-3).
-    end_bound = data.pop(RECURRENCE_END_BOUND_KEY, None)
+    # What the form stated about the recurrence, which the schema's
+    # ``@post_load`` consumed every recurrence control into (plan step R7e):
+    # each field stated, cleared or not mentioned -- a disabled control, or a
+    # partial update, which the helpers read as "leave the stored one alone".
+    submission = data.pop(RECURRENCE_SUBMISSION_KEY)
 
     # The template's before-image, captured BEFORE anything overwrites it
     # (plan step R2e-1).  ``had_recurrence_rule`` is what lets the
@@ -402,12 +391,12 @@ def update_template(template_id):
         had_recurrence_rule=template.recurs,
     )
 
-    # Re-point, rebuild, or clear the recurrence rule from the update payload
-    # (F-24).  The helper dispatches the existing-rule (mutate in place)
-    # vs no-existing-rule (build + link) branches and pops every
-    # recurrence key from ``data`` so the field-update loop below sees
-    # none.  The pass is the PRE-WRITE one the refusals read (plan step
-    # R7d-f); regeneration below builds its own after the write.
+    # Re-point, rebuild, or clear the recurrence rule from the submission
+    # (F-24).  The helper dispatches the existing-rule (mutate in place) vs
+    # no-existing-rule (build + link) branches; no recurrence key is left in
+    # ``data`` for the field-update loop below to see.  The pass is the
+    # PRE-WRITE one the refusals read (plan step R7d-f); regeneration below
+    # builds its own after the write.
     pass_ctx = BalanceContext.build(current_user.id)
     # What the stranded-row refusal below reads of the definition as it
     # STANDS -- the rows its unarchive would restore -- asked before the edit
@@ -421,9 +410,8 @@ def update_template(template_id):
         RedirectTarget("templates.edit_template", {"template_id": template_id}),
     ) or resolve_recurrence_rule_for_update(
         template,
-        data,
         ctx=RecurrenceFormContext(
-            end_bound=end_bound,
+            submission=submission,
             redirect=RedirectTarget(
                 "templates.edit_template",
                 {"template_id": template_id},

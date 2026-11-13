@@ -28,6 +28,7 @@ from marshmallow import ValidationError
 from app import ref_cache
 from app.enums import PeriodPlacementEnum, RecurrenceUnitEnum
 from app.schemas.validation import (
+    RECURRENCE_SUBMISSION_KEY,
     TemplateCreateSchema,
     TemplateUpdateSchema,
     TransferTemplateCreateSchema,
@@ -37,7 +38,7 @@ from app.schemas.validation.salary import (
     PaycheckLineCreateSchema,
     PaycheckLineUpdateSchema,
 )
-from app.services.recurrence import MonthReading, WeekdayReading
+from app.services.recurrence import UNSET, MonthReading, WeekdayReading
 
 #: Every schema that declares ``starts_on`` and ``repeats_on``.
 _SCHEMAS = pytest.mark.parametrize(
@@ -114,10 +115,10 @@ class TestAWeekdayReadingTheDateAllows:
                 _submission(_THIRD_TUESDAY, "from_start"), partial=True,
             )
 
-        assert loaded["repeats_on"] == MonthReading(
+        assert loaded[RECURRENCE_SUBMISSION_KEY].reading == MonthReading(
             weekday_reading=WeekdayReading.FROM_START,
         )
-        assert loaded["starts_on"] == _THIRD_TUESDAY
+        assert loaded[RECURRENCE_SUBMISSION_KEY].starts_on == _THIRD_TUESDAY
 
     @_SCHEMAS
     def test_the_last_monday_loads_as_read_from_the_end(self, app, schema_cls):
@@ -127,7 +128,7 @@ class TestAWeekdayReadingTheDateAllows:
                 _submission(_LAST_MONDAY, "from_end"), partial=True,
             )
 
-        assert loaded["repeats_on"] == MonthReading(
+        assert loaded[RECURRENCE_SUBMISSION_KEY].reading == MonthReading(
             weekday_reading=WeekdayReading.FROM_END,
         )
 
@@ -263,7 +264,7 @@ class TestANominalDayTheDateRefuses:
                 partial=True,
             )
 
-        assert "repeats_on" not in loaded
+        assert loaded[RECURRENCE_SUBMISSION_KEY].reading is UNSET
 
 
 class TestTheOldKeyIsGone:
@@ -285,6 +286,6 @@ class TestTheOldKeyIsGone:
             )
 
         assert "nominal_day" not in loaded
-        assert loaded["repeats_on"] == MonthReading(
+        assert loaded[RECURRENCE_SUBMISSION_KEY].reading == MonthReading(
             weekday_reading=WeekdayReading.FROM_START,
         )

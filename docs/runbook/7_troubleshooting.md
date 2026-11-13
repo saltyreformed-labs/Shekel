@@ -104,7 +104,8 @@ cd /opt/docker/shekel && docker compose run --rm --no-deps --pull never app \
 # are ended and their trusted devices forgotten.
 
 # Log in with email + password (MFA is now disabled).
-# Re-enable MFA in Settings > Security after logging in.
+# Re-enable MFA from Security, in the menu under your name, after logging in.
+# A companion is held at two-factor setup at her next sign-in instead.
 ```
 
 #### A deploy stops naming SECRET_KEY

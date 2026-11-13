@@ -7,9 +7,9 @@ import dataclasses
 from decimal import Decimal
 
 from app.tax_law import TaxLaw
+from tests._made_up_federal import made_up_credits, made_up_federal
 from tests._test_helpers import (
     bracket_set_law,
-    made_up_federal,
     made_up_year,
     state_and_fica_law,
 )
@@ -143,19 +143,28 @@ class TestTaxConfigLayout:
     ):
         """A year whose withholding documents print other figures shows them (ruling plan#3213).
 
-        The made-up 2025 states a 13,850.00 withholding deduction and a
-        1,800.00 withholding child credit beside the return's 14,600.00 and
-        2,000.00, for every filing status; the made-up 2026 states none, so its
-        card shows no withholding line.
+        The made-up 2025 states a 13,850.00 withholding deduction for every
+        filing status beside the return's 14,600.00, and a 1,800.00
+        withholding child credit beside the return's 2,000.00; the made-up
+        2026 states none, so its card shows no withholding line.  The child
+        credit is the year's, stated once for every filer (ruling plan#3340),
+        so the card shows it once where it showed it under each status.
         """
-        stating = dataclasses.replace(
-            made_up_federal(),
-            withholding_standard_deduction=Decimal("13850.00"),
-            withholding_child_credit_amount=Decimal("1800.00"),
-        )
         tax_law(TaxLaw(years=(
-            made_up_year(2025, federal=stating),
-            made_up_year(2026, federal=made_up_federal()),
+            made_up_year(
+                2025,
+                federal=dataclasses.replace(
+                    made_up_federal(),
+                    withholding_standard_deduction=Decimal("13850.00"),
+                ),
+                federal_credits=dataclasses.replace(
+                    made_up_credits(),
+                    withholding_child_credit_amount=Decimal("1800.00"),
+                ),
+            ),
+            made_up_year(
+                2026, federal=made_up_federal(), federal_credits=made_up_credits(),
+            ),
         )))
         with app.app_context():
             response = auth_client.get("/settings?section=tax")
@@ -167,11 +176,15 @@ class TestTaxConfigLayout:
         card_2026 = html[start_2026:start_2025]
         card_2025 = html[start_2025:]
         assert "Paychecks withhold on" not in card_2026
-        assert card_2025.count("Paychecks withhold on (Pub 15-T and Form W-4):") == 4
+        assert card_2025.count("Paychecks withhold on (Pub 15-T):") == 4
         assert card_2025.count("$13,850.00") == 4
-        assert card_2025.count("$1,800.00") == 4
-        # The return's figures still head each status.
+        assert card_2025.count("Paychecks withhold on (Form W-4):") == 1
+        assert card_2025.count("$1,800.00") == 1
+        # The return's figures: each status's deduction heads it, and the
+        # year's credits show once.
         assert card_2025.count("(Std. Deduction: $14,600.00)") == 4
+        assert card_2025.count("Child Credit:</span> $2,000.00") == 1
+        assert card_2025.count("Other Dependent Credit:</span> $500.00") == 1
 
     def test_tax_config_page_renders_without_errors(self, app, auth_client, seed_user):
         """Tax config page renders 200 with no template errors."""

@@ -145,8 +145,8 @@ from decimal import Decimal
 from app.services.rate_period_engine import RatePeriod, period_for_date
 from app.utils.money import (
     PaymentCashSplit,
-    accrue_monthly_interest,
     apply_payment_cash,
+    installment_interest,
 )
 
 from ._charges import AccrualCharge, LoanCalendar, contract_charges
@@ -531,12 +531,38 @@ class LoanReplay:
     resets: list[ResetOutcome]
 
 
+def latest_recorded_on(stream: LoanEventStream) -> date | None:
+    """Return the date of *stream*'s latest RECORDED fact, or ``None`` when it records none.
+
+    The loan record's LAST EVENT: its last settled payment or its last
+    assertion, in contract time -- a payment's own due date
+    (:attr:`LoanCashEvent.on_date`), an assertion's own date.  Charges and
+    projections are not records of anything having happened, so neither moves
+    it.  Two readers ask it, and this is its one statement: the day after it
+    is where projections may walk (:func:`projection_boundary`), and the
+    installment after it is where the contract's remaining installments begin
+    (the confirmed view's ``last_recorded_on``,
+    :func:`app.services.balance_at.confirmed_view`; ruling plan#3382).
+
+    Args:
+        stream: The loan's :class:`LoanEventStream`.
+
+    Returns:
+        The latest recorded ``on_date``, or ``None`` for a stream with no
+        recorded fact.
+    """
+    return max(
+        (event.on_date for event in (*stream.payments, *stream.resets)),
+        default=None,
+    )
+
+
 def projection_boundary(stream: LoanEventStream) -> date | None:
     """Return the first day on which *stream*'s projections may be walked.
 
-    The day after the loan's latest RECORDED fact -- its last settled payment
-    or its last assertion, in contract time -- or ``None`` when the stream
-    records nothing.  A projection whose own date is earlier is keyed here
+    The day after the loan's latest RECORDED fact
+    (:func:`latest_recorded_on`), or ``None`` when the stream records
+    nothing.  A projection whose own date is earlier is keyed here
     instead (:func:`_ordered`), so no projection is ever replayed ahead of a
     fact, and the ``extra_per_period`` what-if accrues only at charges on or
     after it (:func:`replay_loan_events`).  Charges do not move it: a charge is
@@ -551,10 +577,7 @@ def projection_boundary(stream: LoanEventStream) -> date | None:
     Returns:
         The boundary ``date``, or ``None`` for a stream with no recorded fact.
     """
-    latest = max(
-        (event.on_date for event in (*stream.payments, *stream.resets)),
-        default=None,
-    )
+    latest = latest_recorded_on(stream)
     return None if latest is None else latest + _ONE_DAY
 
 
@@ -772,7 +795,10 @@ def _accrued(
     if balance <= _ZERO_MONEY:
         return _NOTHING_DUE
     return _Due(
-        interest=accrue_monthly_interest(balance, charge.period.annual_rate),
+        interest=installment_interest(
+            balance, charge.period.annual_rate, charge.opens_on,
+            charge.on_date, charge.period.convention,
+        ),
         escrow=charge.escrow,
         extra=(
             extra_per_period
@@ -795,7 +821,7 @@ def replay_loan_events(
     -- accumulating each accrual period's charge and allocating each payment's
     cash against whatever stands
     (:func:`~app.utils.money.apply_payment_cash`, the ONE allocation, over
-    :func:`~app.utils.money.accrue_monthly_interest`, the ONE accrual).
+    :func:`~app.utils.money.installment_interest`, the ONE accrual).
 
     A CLOSED loan (``balance <= 0``) accrues nothing and impounds nothing
     (:func:`_accrued`), so its charge adds nothing to what stands; a payment
@@ -806,8 +832,8 @@ def replay_loan_events(
     distinguishes it** -- an adversarial review deleted the skip and all 101
     tests in the loan files stayed green, which is worth recording rather than
     hiding.  The reason it cannot be observed today: a balance reaches ``<= 0``
-    only at exactly ``0.00`` (principal caps at the balance), ``accrue_monthly_
-    interest(0, r)`` is ``0.00`` anyway, and whatever escrow the arm would
+    only at exactly ``0.00`` (principal caps at the balance), the interest
+    on a zero balance is ``0.00`` anyway, and whatever escrow the arm would
     accumulate is discarded by the allocator's own closed-loan arm at the next
     payment, or cleared by the next balance statement first.  It is kept
     because it is not unobservable in PRINCIPLE: without it,

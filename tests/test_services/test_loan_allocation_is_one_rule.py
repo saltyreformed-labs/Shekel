@@ -12,9 +12,10 @@ modules); ``amortization_engine`` (closure 2) and ``rate_period_engine``
 (closure 3) sit BELOW it, so reaching it was the cycle ``loan_ledger._split ->
 rate_period_engine -> amortization_engine``.  Each restated it instead.  The
 remedy was to move :func:`~app.utils.money.apply_payment_cash` down beside
-:func:`~app.utils.money.accrue_monthly_interest` -- the CHARGE half, shared from
-that leaf since E-24 -- so both halves of a loan payment's arithmetic are
-reachable from every walk.
+the CHARGE half, shared from that leaf since E-24 (``accrue_monthly_interest``
+until plan step recurrence:R16-d, :func:`~app.utils.money.installment_interest`
+since) -- so both halves of a loan payment's arithmetic are reachable from
+every walk.
 
 Two properties are pinned, and they fail for different reasons:
 
@@ -35,13 +36,14 @@ from decimal import Decimal
 
 import pytest
 
+from app.enums import InterestAccrualConventionEnum
 from app.services.amortization_engine._projection import (
     _apply_contractual_payment,
 )
-from app.services.rate_period_engine import RatePeriod, _replay_payment_row
+from app.services.installment_calendar import accrual_window
 from app.utils.money import (
-    accrue_monthly_interest,
     apply_payment_cash,
+    installment_interest,
     round_money,
 )
 
@@ -51,8 +53,9 @@ from app.utils.money import (
 APP_ROOT = pathlib.Path(__file__).resolve().parents[2] / "app"
 
 ZERO = Decimal("0.00")
-ORIGINATION = date(2018, 12, 1)
 PAY_DATE = date(2026, 10, 1)
+#: The window the installment due on ``PAY_DATE`` charges for: September.
+PAY_WINDOW = accrual_window(PAY_DATE, PAY_DATE.day)
 # Fixed seed: a sweep that changes run to run cannot be quoted in a review.
 SWEEP_SEED = 20260901
 SWEEP_TRIALS = 2_000
@@ -69,7 +72,10 @@ def _sweep():
     for _ in range(SWEEP_TRIALS):
         balance = Decimal(str(round(rng.uniform(0.01, 400_000), 2)))
         rate = Decimal(str(round(rng.uniform(0.0, 0.15), 5)))
-        interest = accrue_monthly_interest(balance, rate)
+        interest = installment_interest(
+            balance, rate, *PAY_WINDOW,
+            InterestAccrualConventionEnum.MONTHLY_1_12,
+        )
         # A third of the draws land at or past the balance, so the cap and
         # overrun arms are swept rather than left to chance on a wide uniform.
         cash = rng.choice([
@@ -112,25 +118,6 @@ class TestEveryWalkAllocatesThroughTheOneRule:
         assert seen == {
             "negative_amortization", "overrun", "exact_payoff", "ordinary",
         }, f"sweep missed branches: {seen}"
-
-    def test_the_replay_row_allocates_through_the_one_rule(self):
-        """``rate_period_engine._replay_payment_row`` restates nothing.
-
-        Its cash is the period's contractual P&I and it charges no escrow (a
-        contractual schedule is escrow-free by definition), so the shared rule
-        with ``charged_escrow=0.00`` must reproduce its row exactly.
-        """
-        for balance, rate, interest, cash, _extra in _sweep():
-            period = RatePeriod(
-                index=0, start_date=ORIGINATION, annual_rate=rate,
-                period_pi=cash, start_month_index=0, term_months_at_start=360,
-            )
-            row = _replay_payment_row(balance, period, PAY_DATE, ORIGINATION)
-            parts = apply_payment_cash(cash, balance, interest, ZERO)
-            assert row.interest == interest
-            assert row.principal == round_money(parts.principal)
-            assert row.payment == round_money(parts.principal + interest)
-            assert row.remaining_balance == parts.balance_after
 
     def test_the_contractual_path_allocates_through_the_one_rule(self):
         """``amortization_engine._apply_contractual_payment`` restates nothing.
@@ -250,12 +237,16 @@ class TestTheAllocationSitsBelowEveryWalk:
 
     @pytest.mark.parametrize("walk", [
         "app.services.amortization_engine",
-        "app.services.rate_period_engine",
         "app.services.loan_ledger",
         "app.services.balance_at",
     ])
     def test_every_walk_can_reach_the_rule(self, walk):
-        """Each of the four loan walks imports the leaf the rule lives in."""
+        """Each loan walk imports the leaf the rule lives in.
+
+        Three since plan step recurrence:R16-e deleted the fourth, the rate
+        engine's ``replay_schedule``; its row step and its entry here went with
+        it (ruling plan#3382).
+        """
         assert "app.utils.money" in self._closure(walk), (
             f"{walk} cannot reach app.utils.money, so it cannot call the one "
             "allocation and will have to restate it"

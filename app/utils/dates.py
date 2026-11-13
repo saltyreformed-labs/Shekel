@@ -145,9 +145,8 @@ def days_paid_before_due(
     LEG answers the same question off its covering movement's day
     (``TransferLeg.days_paid_before_due``), and two properties each spelling
     ``(due_date - settled_on).days`` would be rule 14's two spellings, so
-    both call this.  It lives here beside :func:`has_settled_by` for that
-    function's reason: two ``date`` values and a subtraction, no status, no
-    row, no reference cache.
+    both call this.  It lives in this stdlib-only module because it is two
+    ``date`` values and a subtraction: no status, no row, no reference cache.
 
     Args:
         due_date: The item's due date, or ``None`` for an undated one.
@@ -161,78 +160,6 @@ def days_paid_before_due(
     return (due_date - settled_on).days
 
 
-def has_settled_by(settled_on: date | None, as_of: date) -> bool:
-    """Return whether a row's cash had already moved on or before *as_of*.
-
-    The companion question to
-    :func:`app.utils.balance_predicates.settled_day`: that one answers WHICH day
-    a settled row's money moved, this one answers whether it had moved YET.
-    Both read the one stored fact ``transactions.settled_on``, so a caller
-    cannot reach a different answer by comparing a different date.
-
-    **It lives HERE, not beside** :func:`~app.utils.balance_predicates.settled_day`,
-    on a purity argument that its consumers force.  It reads no status, no ORM
-    row and no reference cache -- it is two ``date`` values and a comparison --
-    while ``balance_predicates`` imports :class:`~app.models.transaction.Transaction`
-    and :mod:`app.ref_cache`.  Its two callers are
-    :mod:`app.services.rate_period_engine`, whose module docstring promises "no
-    Flask, no ``db``", and :mod:`app.services.loan_resolver`, which goes to the
-    trouble of a ``TYPE_CHECKING``-only import to stay a runtime model-free leaf
-    (``loan_resolver/_periods.py``).  Putting it in ``balance_predicates`` would
-    have given both a runtime edge to a model-importing module for a two-date
-    comparison; this module is stdlib-only and both already import from it.
-
-    **The two take opposite positions on a missing day, deliberately.**
-    :func:`~app.utils.balance_predicates.settled_day` REFUSES ``None``, because
-    its caller is holding a row it believes is settled and a missing day means
-    the settled-iff-dated invariant is broken.  This one ACCEPTS it and answers
-    ``False``: its callers classify a MIXED feed of settled and projected rows,
-    and a projected row legitimately carries no day.  A row that has not settled
-    has not settled by any date.
-
-    **Written once, and the reason is the LEDGER, not a measured drift between
-    its two callers** (plan step **X-an**, finding **N-187**).  The loan resolver
-    splits its payment feed on this ONE predicate: the HISTORY side goes to
-    :func:`app.services.rate_period_engine.replay_schedule` and the rest was
-    the composer's plan (``_build_monthly_override``, until plan step R7d-g-3
-    made the balance seam's fold the one planned walk).  They had
-    two inline comparisons and those AGREED -- both read the payment's
-    PAY-PERIOD start -- so the split stayed clean while the rule itself was
-    wrong.  What they disagreed with was the posted ledger, which counts the same
-    payment from the day it settled
-    (:func:`app.services.loan_ledger.payment_visible_on`).  Naming the rule once
-    is what stops the NEXT edit moving one side: the two spellings are the
-    latent hazard, the ledger divergence is the measured one.
-
-    **This predicate is the WHOLE split, and the replay then drops more.**  A
-    payment this answers ``False`` for is planned, always.  A payment it answers
-    ``True`` for is a CANDIDATE for the replay, which then excludes the ones an
-    anchor subsumes (``due_date <= anchor_date``) and the ones past a payoff --
-    and neither is handed back to the plan, correctly, because the anchor
-    already contains them and a paid-off loan owes nothing.  So the two consumers
-    are disjoint and their union is the SETTLED-BY set, not the whole feed.
-
-    **Measured on production before the move** (both live loans, every day of a
-    306-day span): no balance moved on any day, and the loan's amortization
-    SCHEDULE lost a whole installment on 34 (loan, day) pairs -- a ``$1,910.95``
-    mortgage payment absent from the confirmed history AND from the forward plan
-    for the 12 days between its pay period opening and its cash leaving, with the
-    page meanwhile naming the FOLLOWING month's installment as the next one due.
-
-    Args:
-        settled_on: The row's stored ``settled_on``, or ``None`` when the row has
-            not settled.  Takes the VALUE rather than the row, for the same
-            reason :func:`~app.utils.balance_predicates.settled_day` does:
-            callers hold ORM attributes, batched query tuples and pure value
-            objects alike.
-        as_of: The evaluation date.
-
-    Returns:
-        ``True`` iff *settled_on* is a day at or before *as_of*.
-    """
-    return settled_on is not None and settled_on <= as_of
-
-
 class DatedAssertion(Protocol):
     """The three fields a loan anchor's chronological position is built from.
 
@@ -241,7 +168,7 @@ class DatedAssertion(Protocol):
     concrete class.  The production value is
     :class:`app.services.loan_loaders.LoanAnchorFact`, which this module must
     not import (it would give a stdlib-only module a runtime edge to the model
-    layer -- the same purity argument :func:`has_settled_by` makes above).
+    layer, and this module is stdlib-only).
 
     Attributes:
         anchor_date: The civil day the balance was asserted FOR -- the business
@@ -280,8 +207,7 @@ def anchor_chronology_key(
     ``max()`` returns the FIRST maximal element where the walk applies the LAST,
     so a tie named opposite rows.
 
-    **It lives HERE for the reason :func:`has_settled_by` does, one step
-    earlier in the same arc.**  Its two callers cannot share a module: the
+    **It lives HERE because its two callers cannot share a module**: the
     resolver is a runtime model-free leaf (``loan_resolver/_periods.py`` takes a
     ``TYPE_CHECKING``-only import to stay one) and ``loan_loaders`` imports
     models and ``db`` while declaring itself a leaf that imports "never another

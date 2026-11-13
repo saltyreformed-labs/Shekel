@@ -607,6 +607,26 @@ class CompoundingFrequency(db.Model):
         return f"<CompoundingFrequency {self.name}>"
 
 
+class InterestAccrualConvention(db.Model):
+    """Interest accrual convention reference: how interest accrues over a window.
+
+    The list behind ``budget.loan_params.interest_accrual_convention_id``
+    (plan step recurrence:R16-d, finding D52); one row, ``monthly_1_12``, until
+    a member's first consumer adds the next (ruling plan#3354).
+    :class:`app.enums.InterestAccrualConventionEnum` carries each member's
+    rule.  Resolved through ``ref_cache`` and compared by ID, never by name.
+    """
+
+    __tablename__ = "interest_accrual_conventions"
+    __table_args__ = {"schema": "ref"}
+
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(30), unique=True, nullable=False)
+
+    def __repr__(self):
+        return f"<InterestAccrualConvention {self.name}>"
+
+
 class LedgerAccountClass(db.Model):
     """Ledger account class reference: the five accounting classes, plus Unrealized.
 

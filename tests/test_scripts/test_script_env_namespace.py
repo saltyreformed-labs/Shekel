@@ -80,7 +80,7 @@ What the extractor matches, and which way it errs
     What this does NOT assert is that the runner's variables are unshared in
     general.  ``TEST_DATABASE_URL`` and ``TEST_ADMIN_DATABASE_URL`` are
     deliberately shared -- the runner EXPORTS both, naming its private
-    cluster's socket, and ``tests/conftest.py`` reads them.  (Until
+    cluster's socket, and ``tests/_worker_database.py`` reads them.  (Until
     ``balance:X-br-4`` two more were shared the other direction,
     ``TEST_DB_PREFIX`` and ``TEST_TEMPLATE_DATABASE``, read from ``.env`` by
     the runner and by ``scripts/build_test_template.py``; a cluster per run

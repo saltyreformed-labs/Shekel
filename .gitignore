@@ -49,7 +49,7 @@ deploy/postgres/server.key
 # Security audits.  They are written in the private repository
 # saltyreformed-labs/shekel-audits (~/projects/shekel-audits), never
 # here, so an open finding is never public (rulings plan#2178,
-# plan#2213; CLAUDE.md, Development Status).  These patterns are the
+# plan#2213; CLAUDE.md, Multi-session operation).  These patterns are the
 # backstop against a session writing one into this tree by habit,
 # under a name the moved audits had, as a directory or a single file.
 docs/audits/security-*
@@ -80,7 +80,7 @@ coverage.xml
 # ``SHEKEL_TEST_FIXTURE_PROFILE=1`` is set; one CSV per pytest-xdist
 # worker plus a "main.csv" for single-process runs.  Files are
 # truncated on every pytest invocation (see
-# ``tests/conftest.py::_profile_session_init``), so the only purpose
+# ``tests/_fixture_profile.py::_profile_session_init``), so the only purpose
 # of ignoring them is to keep harness runs out of accidental commits.
 tests/.fixture-profile/
 

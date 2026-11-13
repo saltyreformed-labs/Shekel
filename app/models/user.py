@@ -142,6 +142,44 @@ class User(UserMixin, TimestampMixin, db.Model):
         "UserSettings", back_populates="user", uselist=False, cascade="all, delete-orphan"
     )
     role = db.relationship("UserRole", lazy="joined")
+    # The user's one two-factor row, read through :attr:`has_two_factor`.
+    # View-only: every write of the row goes through its own query, and a
+    # deleted user's row goes with them by the foreign key's ``ON DELETE
+    # CASCADE``.  Loaded on first read and kept for the rest of the request,
+    # whose closing rollback expires it, so the login gate, the Security page
+    # and the enrolment nag ask the database once between them.
+    mfa_config = db.relationship("MfaConfig", uselist=False, viewonly=True)
+
+    @property
+    def must_have_two_factor(self) -> bool:
+        """Return whether this user must use two-factor authentication.
+
+        **The one statement of that rule** (ruling plan#3434): every companion
+        must, and there is no switch, so it is the role's and nothing stores
+        it.  The login gate holds a user it names at setup until they have
+        it, ``/mfa/disable`` refuses them, and the Security page and the setup
+        page say it is required.  None of those reads the role.
+
+        Returns:
+            True for a companion, False for an owner.
+        """
+        return self.role_id == ref_cache.role_id(RoleEnum.COMPANION)
+
+    @property
+    def has_two_factor(self) -> bool:
+        """Return whether this user has two-factor authentication turned on.
+
+        A row whose setup was started and never confirmed is not two-factor:
+        ``is_enabled`` is what ``/mfa/confirm`` sets, and what ``/mfa/disable``
+        and the one reset act clear
+        (:func:`~app.services.mfa_service.reset_two_factor`), which
+        ``scripts/reset_mfa.py`` and the owner's Reset two-factor for a
+        companion on Settings > Companions both run.
+
+        Returns:
+            True when the user's ``auth.mfa_configs`` row is enabled.
+        """
+        return self.mfa_config is not None and self.mfa_config.is_enabled
 
     @property
     def data_owner_id(self) -> int | None:

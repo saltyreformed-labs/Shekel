@@ -14,8 +14,8 @@ from datetime import date
 from decimal import Decimal, ROUND_CEILING
 
 from flask import render_template, request
-from flask_login import current_user
 
+from app.enums import InterestAccrualConventionEnum
 from app.routes.loan._bp import loan_bp
 from app.routes.loan._helpers import (
     _load_loan_account,
@@ -30,9 +30,6 @@ from app.routes.loan._helpers import (
 from app.services import amortization_engine, balance_at, loan_resolver
 from app.services.amortization_engine import AmortizationSummary
 from app.services.installment_calendar import first_installment_date
-from app.services.recurring_transfer_query import (
-    active_recurring_transfer_templates,
-)
 from app.utils.auth_helpers import require_owner
 from app.utils.dates import months_between
 from app.utils.money import round_money
@@ -308,11 +305,11 @@ def payoff_calculate(account_id):
     data = _payoff_schema.load(request.form)
     mode = data["mode"]
 
-    # Shared loan context: payments, rate changes, seam balance + figures.
+    # Shared loan context: rate changes, seam balance + figures.
     # Identical to the dashboard's data loading so calculations are
     # consistent.  ``ctx.current_owed`` is the same dollar figure
     # rendered on the loan card (the seam's fold, plan C4).
-    ctx = _load_route_context(account, params)
+    ctx = _load_route_context(account)
 
     # A retired loan has no plan to accelerate: the seam's plan is empty for
     # it and its payoff ``None``, and a "Never" beside a "Paid off" chip
@@ -323,14 +320,13 @@ def payoff_calculate(account_id):
             error="This loan is paid off. No payoff scenario available.",
         )
 
-    # Whether the loan has a plan of ITS OWN to compare with the contract: a
-    # recurring definition into it (the plan prices every occurrence, rows
-    # or not -- ruling R-R64) or a payment row.  A loan with neither folds
-    # the contract's own installments, and a comparison would read "on
-    # track, $0.00 saved" of a plan that is the contract.
-    has_plan = bool(ctx.loan.payments) or bool(
-        active_recurring_transfer_templates(account.id, current_user.id),
-    )
+    # Whether the loan has a plan of ITS OWN to compare with the contract --
+    # a payment in its record, a recurring definition into it, or a projected
+    # row its forward plan folds -- is the seam's answer, read off the loan's
+    # one record (``LoanFigures.has_own_plan``).  A loan with none folds the
+    # contract's own installments, and a comparison would read "on track,
+    # $0.00 saved" of a plan that is the contract.
+    has_plan = ctx.figures.has_own_plan
     if mode == "extra_payment":
         return _payoff_extra_payment_result(
             account, params, ctx, data, has_plan,
@@ -343,7 +339,13 @@ def payoff_calculate(account_id):
     )
 
 
-def _project_refinance(refi_principal, refi_rate, refi_term, payment_day):
+def _project_refinance(
+    refi_principal: Decimal,
+    refi_rate: Decimal,
+    refi_term: int,
+    payment_day: int,
+    convention: InterestAccrualConventionEnum,
+) -> tuple[Decimal, Decimal, date]:
     """Project a hypothetical refinance schedule and summarize it.
 
     Commit 7 of the amortization-engine split: a pure forward projection
@@ -352,11 +354,19 @@ def _project_refinance(refi_principal, refi_rate, refi_term, payment_day):
     :func:`amortization_engine.project_forward` -- no replay, no extra;
     the contractual P&I drives every row.
 
+    The hypothetical loan accrues under the convention of the loan it
+    refinances (plan step recurrence:R16-d): the form asks for a new rate
+    and term, not a new note's accrual rule, so the comparison holds that
+    rule fixed rather than assuming one.
+
     Args:
         refi_principal: Decimal starting balance for the refinance.
         refi_rate: Decimal annual rate (storage-domain fraction).
         refi_term: New term in months.
         payment_day: Day-of-month the payment falls on.
+        convention: The refinanced loan's
+            :class:`~app.enums.InterestAccrualConventionEnum` member
+            (:func:`app.services.loan_resolver.accrual_convention`).
 
     Returns:
         Tuple of (refi_monthly P&I, refi_total_interest, refi_payoff
@@ -381,6 +391,7 @@ def _project_refinance(refi_principal, refi_rate, refi_term, payment_day):
                 start_date=starting_date,
                 annual_rate=refi_rate,
                 monthly_pi=refi_monthly,
+                convention=convention,
             )],
         ),
         extra_monthly=Decimal("0.00"),
@@ -456,7 +467,8 @@ def _build_refinance_comparison(current_owed, ctx, scenarios, data, params):
             ``original_forward`` slice is the contractual current-side baseline.
         data: Validated :class:`RefinanceSchema` form data.  ``new_rate``
             is already the storage-domain fraction (schema ``@pre_load``).
-        params: ORM :class:`LoanParams` instance (payment_day source).
+        params: ORM :class:`LoanParams` instance (payment_day and accrual
+            convention source).
 
     Returns:
         dict of comparison fields consumed by
@@ -471,6 +483,7 @@ def _build_refinance_comparison(current_owed, ctx, scenarios, data, params):
 
     refi_monthly, refi_total_interest, refi_payoff = _project_refinance(
         refi_principal, data["new_rate"], refi_term, params.payment_day,
+        loan_resolver.accrual_convention(params),
     )
 
     # Forward-only CONTRACTUAL baseline: what is still ahead on the current loan
@@ -546,7 +559,7 @@ def refinance_calculate(account_id):
 
     # Shared loan context: seam balance + figures.  Identical to the dashboard's
     # data loading so the "current" refinance baseline matches the card.
-    ctx = _load_route_context(account, params)
+    ctx = _load_route_context(account)
 
     # Paid-off loan: no refinance comparison is meaningful.  Read the seam's
     # balance (the fold, plan C4) ONCE, and gate on it: a loan that owes nothing

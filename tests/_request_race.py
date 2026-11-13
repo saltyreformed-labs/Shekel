@@ -36,7 +36,7 @@ from sqlalchemy.orm import Session
 
 from app.extensions import db as _db
 from tests._test_helpers import owner_lock_key
-from tests.conftest import SEED_USER_EMAIL, SEED_USER_PASSWORD
+from tests._seed_owner_fixtures import SEED_USER_EMAIL, SEED_USER_PASSWORD
 
 
 #: How long a race waits for a request to reach its commit, or the second

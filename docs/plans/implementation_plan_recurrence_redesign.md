@@ -3,8 +3,8 @@
 **The argument for the two-axis recurrence model and the cash-date / installment-date split.** R1-R4
 and the R7c cutover are ARCHIVED; the closed pattern set is GONE, which is what this arc was for
 (R-R16 / R-R18 / R-R27). Each step, finding and ruling is a card in the tracker,
-`saltyreformed-labs/shekel-plan` (`CLAUDE.md`, Development Status): an open step's specification is
-its card's body and the order is the board's.
+`saltyreformed-labs/shekel-plan` (`CLAUDE.md`, Multi-session operation): an open step's
+specification is its card's body and the order is the board's.
 
 **Ten decisions were archived on 2026-08-08** to `historical/recurrence_as_built_2026-08-08.md`: the
 `Once` retirement, R2 and R4 sequencing, the wrong stored paycheck, bound semantics, the

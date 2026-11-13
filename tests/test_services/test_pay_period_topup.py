@@ -48,7 +48,7 @@ from scripts.integrity_check import (
     check_balance_anomalies,
     check_referential_integrity,
 )
-from tests.conftest import SEED_USER_CADENCE_DAYS
+from tests._seed_owner_fixtures import SEED_USER_CADENCE_DAYS
 from tests._test_helpers import (
     record_paydays_across_a_hole,
     era_of,

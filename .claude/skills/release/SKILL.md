@@ -136,9 +136,9 @@ what `main` holds beyond production:
 - `production is not in main`: STOP and tell Josh.
 - `main holds more than added done files`: `main` holds a change production lacks. The cases
   below say which; none matching is a STOP.
-- `dev lacks main`: a records-only merge into `main` whose resync into `dev` (CLAUDE.md, Git
-  Workflow) has not landed, so step 6 would refuse the cut after the approval. STOP and tell
-  Josh: the resync lands first.
+- `dev lacks main`: a records-only merge into `main` whose resync into `dev` (CLAUDE.md,
+  Multi-session operation) has not landed, so step 6 would refuse the cut after the approval. STOP
+  and tell Josh: the resync lands first.
 - A release whose record ends at "Not now" at step 10: resume it at step 9 by copying its record's
   `current.sh` back.
 - The start block refused with `an unfinished run`: a run that never reached step 13 (a lost
@@ -568,9 +568,9 @@ one runs in its place. Production reads nothing in this venv, so a failure holds
 deploy: name it in the record (step 13) with uv's own words.
 
 Then `dev`. No one can push to `dev` (ruleset `dev-queue`, whose bypass list is empty, R-BAL322),
-so `main` reaches it as a pull request from `main` through `dev`'s merge queue, as CLAUDE.md's Git
-Workflow resyncs `dev` (measured on a throwaway repository 10-18: it lands, and `main` is not
-deleted):
+so `main` reaches it as a pull request from `main` through `dev`'s merge queue, the resync
+CLAUDE.md's Multi-session operation names (measured on a throwaway repository 10-18: it lands, and
+`main` is not deleted):
 
 ```bash
 . ~/projects/shekel-handoffs/releases/current.sh && cd "${W:?}" || exit 1
@@ -584,9 +584,7 @@ with `gh pr merge "$RS" --merge` (no `--match-head-commit`: whatever `main` hold
 what `dev` should get), find its queue run on the branch `gh-readonly-queue/dev/pr-<RS>-<sha>` and watch it into
 `$R/queue_<run>.txt`. A failed run is read as step 6 reads one: nothing reached `dev`; queue it
 again or STOP. Once it is merged, append `RM="<its merge sha>"` as step 6 appends `M`. Neither
-wait holds the deploy: go on to step 9, and read both before step 13. A resync that conflicts over
-a file the tracker switch deleted is settled by CLAUDE.md's resync rule (Git Workflow): it takes
-`dev`'s delete.
+wait holds the deploy: go on to step 9, and read both before step 13.
 
 ## 9. The dry run
 

@@ -129,7 +129,7 @@ ADMIN_URL: str = os.environ.get("TEST_ADMIN_DATABASE_URL", _DEFAULT_ADMIN_URL)
 # postmaster could each build a template at their own migration head without
 # overwriting the other's.  ``scripts/test.sh`` now gives every run a private
 # cluster, so there is one template per cluster and nothing to name it apart
-# from.  ``tests/conftest.py`` and ``scripts/build_test_db_image.py``
+# from.  ``tests/_worker_database.py`` and ``scripts/build_test_db_image.py``
 # (``_TEMPLATE_DATABASE``, which its verifier reads) spell the same constant;
 # all THREE must agree or the suite clones a template nobody built.
 TEMPLATE_DB: str = "shekel_test_template"
@@ -384,8 +384,9 @@ def _populate_template(app) -> None:
         ``system.audit_log``.
     13. ``TRUNCATE system.audit_log``: clear those seed-time audit rows
         so the template ships with a zeroed log and every per-test clone
-        of it starts from a clean slate (``tests/conftest.py``'s world
-        builder truncates after its own seed for the same reason).
+        of it starts from a clean slate (the world builder in
+        ``tests/_seeded_start_states.py`` truncates after its own seed for the
+        same reason).
     14. :func:`_start_each_table_in_an_id_range_of_its_own`: every non-ref
         table's ids start in a range of their own, so no two kinds of id
         coincide in a clone (ruling ``balance:R-BAL356``).

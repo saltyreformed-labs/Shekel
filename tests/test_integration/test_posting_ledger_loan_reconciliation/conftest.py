@@ -15,10 +15,10 @@ from ._helpers import _AS_OF
 
 @pytest.fixture(autouse=True)
 def _freeze_today(monkeypatch):
-    """Freeze today to 2026-05-15 so the wiring's and resolver's as-of is fixed.
+    """Freeze today to 2026-05-15 so the wiring's and every read's as-of is fixed.
 
     ``create_settled_transfer`` fires the Commit-5 wiring, which syncs as of
-    ``date.today()``; the parallel run resolves as of the same date.  2026-05-15
+    ``date.today()``; the reads under test default to the same date.  2026-05-15
     is after every payment period used (P1/P2/P3 in Jan-Mar), so each settled
     payment is historical regardless of the wall-clock date.
     """

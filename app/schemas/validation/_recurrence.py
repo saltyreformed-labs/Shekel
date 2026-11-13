@@ -42,6 +42,12 @@ from app.schemas.validation._helpers import (
     _EFFECTIVE_DATE_RANGE,
     _RefEnumField,
 )
+from app.schemas.validation._recurrence_submission import (
+    RECURRENCE_END_BOUND_KEY,
+    RECURRENCE_REPEATS_ON_KEY,
+    RECURRENCE_SUBMISSION_KEY,
+    consume_recurrence_submission,
+)
 from app.utils.digit_strings import MAX_INTEGER_COLUMN
 
 if TYPE_CHECKING:
@@ -334,53 +340,6 @@ def validate_authorable_cadence(data):
             "repeat unit or a different funding choice.",
             field_name="recurrence_unit",
         )
-
-
-#: The key a form posts its closing-bound SHAPE under, and the key the
-#: composed bound is handed to the route under.
-#:
-#: They are the same field: :func:`compose_end_bound` replaces the submitted
-#: token with the value it names, the way
-#: :class:`RecurrenceUnitField` replaces a submitted id with its enum member.
-#: One key rather than two is what keeps "the form said nothing about the
-#: bound" expressible -- an ABSENT key, which a loan payment's form and an
-#: amount-only PATCH both produce, and which the update route reads as "leave
-#: the stored bound alone".
-#: The rule's FIRST OCCURRENCE, as the payload spells it, and how the "repeating
-#: on" control reads it.
-#:
-#: Named here for the reason :data:`RECURRENCE_END_BOUND_KEY` is: the route
-#: helpers read these keys' PRESENCE, not just their values, and presence is
-#: how a form says "not mine to state" -- so the string has to be the same one
-#: the field is declared under or a locked control's silence reads as a stated
-#: ``None``.  Three route modules and the schema spelled it four times between
-#: them before plan step R7c-b named it, which is three chances for a rename to
-#: half-land.
-#:
-#: The two are one constant apart rather than one value because the payload has
-#: two keys; they RIDE TOGETHER on the start's presence, which
-#: ``update_recurrence_rule_from_form`` is where that rule is written.
-#:
-#: **``repeats_on`` replaced ``nominal_day`` at plan step recurrence:R8-c**
-#: (developer ruling 2026-11-02, the rename approved with its tests): the
-#: control offers the weekday readings beside the clamped month-end days, and
-#: one ``<select>`` posts one key, so a nominal day beside a weekday reading
-#: (``ck_recurrence_rules_one_month_reading``) is a pair no form can post.
-#: The schema replaces the token with the
-#: :class:`~app.services.recurrence.MonthReading` it names, under the same
-#: key, as :func:`compose_end_bound` does for the bound.
-RECURRENCE_STARTS_ON_KEY: str = "starts_on"
-RECURRENCE_REPEATS_ON_KEY: str = "repeats_on"
-
-#: The per-month ceiling's key (plan step salary:R15-a), named for the same
-#: reason: the update door reads its PRESENCE.  The control is rendered only
-#: beside a unit whose occurrences can repeat within a month and DISABLED
-#: beside any other, so an absent key means "the form could not show it" and
-#: leaves the stored value alone, while a present ``None`` is a cleared box.
-RECURRENCE_MAX_PER_MONTH_KEY: str = "max_per_month"
-
-
-RECURRENCE_END_BOUND_KEY: str = "recurrence_end_mode"
 
 
 def compose_end_bound(data):
@@ -798,8 +757,9 @@ class RecurrenceFormFieldsMixin(RecurrenceCadenceFieldsMixin):
 
     # The CLOSING BOUND, as three controls that compose into ONE value (plan
     # step R7b-3).  ``recurrence_end_mode`` names which of the bound's three
-    # shapes the user chose and :meth:`build_end_bound` replaces it with the
-    # :class:`~app.services.recurrence.EndBound` that shape builds, consuming
+    # shapes the user chose and :meth:`build_recurrence_submission` replaces
+    # it with the :class:`~app.services.recurrence.EndBound` that shape
+    # builds (and then hands it on inside the submission), consuming
     # the two inputs beside it -- the same wire-format-to-logic-value
     # conversion :class:`RecurrenceUnitField` performs one field up.
     #
@@ -865,8 +825,9 @@ class RecurrenceFormFieldsMixin(RecurrenceCadenceFieldsMixin):
         Skipped unless the submission states all three.  A form that names no
         cadence authors no rule; one that omits ``starts_on`` leaves the stored
         date alone, and the update door then ignores a submitted choice with
-        it (both ride on ONE presence key, because they are one statement of
-        when the rule fires).
+        it (:meth:`~app.services.recurrence.RecurrenceSubmission.applied_to`
+        applies a reading only beside a stated start, because the two are one
+        statement of when the rule fires).
 
         Args:
             data: The deserialized payload.
@@ -938,25 +899,46 @@ class RecurrenceFormFieldsMixin(RecurrenceCadenceFieldsMixin):
         raise ValidationError(RECURRENCE_NEEDS_A_START)
 
     @post_load
-    def build_end_bound(self, data, **kwargs):
-        """Replace the submitted bound token with the value it names.
+    def build_recurrence_submission(self, data, **kwargs):
+        """Replace every recurrence control with the ONE submission they state.
 
-        See :func:`compose_end_bound`, which carries the reasoning, and
-        :func:`require_end_bound_after_start` for the window rule checked once
-        the bound is a value rather than three controls.
+        Two steps, in the one order they can run in.  The closing bound's
+        three controls are composed into one value first
+        (:func:`compose_end_bound`, which carries the reasoning) and the
+        window rule is checked once the bound is a value rather than three
+        controls (:func:`require_end_bound_after_start`).  Then every
+        recurrence key is CONSUMED into one
+        :class:`~app.services.recurrence.RecurrenceSubmission` under
+        :data:`~app.schemas.validation._recurrence_submission.RECURRENCE_SUBMISSION_KEY`
+        (plan step R7e, finding **D36**):
+        :func:`~app.schemas.validation._recurrence_submission.consume_recurrence_submission`
+        states each field's wire meaning, and every door reads the value
+        rather than testing the payload for a key.
+
+        **It was ``build_end_bound`` until plan step R7e**, which composed the
+        bound and handed the route every other recurrence key as posted --
+        so each door re-derived "cleared" against "not mentioned" for itself,
+        and a pop-every-key fence in the route helpers kept the keys out of
+        the model constructors.  The fence is deleted with the reads.
+
+        Runs only once every validator has passed, so the cross-field rules
+        above read the payload as posted.
 
         Args:
             data: The deserialized payload.
             **kwargs: Marshmallow's hook contract.
 
         Returns:
-            The payload, with the three bound controls collapsed into one
-            ``recurrence_end_mode`` entry holding an
-            :class:`~app.services.recurrence.EndBound`.
+            The payload, its recurrence controls replaced by the one
+            submission.
 
         Raises:
-            ValidationError: See :func:`require_end_bound_after_start`.
+            ValidationError: See :func:`compose_end_bound` and
+                :func:`require_end_bound_after_start`.
         """
         composed = compose_end_bound(data)
         require_end_bound_after_start(composed)
+        composed[RECURRENCE_SUBMISSION_KEY] = consume_recurrence_submission(
+            composed,
+        )
         return composed

@@ -5,8 +5,8 @@ Defines the legal status transitions for ``ref.statuses`` rows and the
 ``verify_transition`` helper that every state-changing code path must
 call before mutating ``status_id`` on a Transaction or Transfer.
 
-Transaction workflow per CLAUDE.md
-----------------------------------
+Transaction workflow
+--------------------
 
   projected -> done | received | credit | cancelled
   done -> projected (revert mistakes)

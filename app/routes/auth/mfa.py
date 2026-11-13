@@ -13,8 +13,12 @@ backup-code consumer, and the setup TTL constant come from
 ``/reauth`` flow enforce one replay-prevention policy.
 """
 
+import hashlib
 import logging
+from collections.abc import Callable
 from datetime import datetime, timezone
+from functools import wraps
+from typing import NamedTuple, ParamSpec
 
 from flask import (
     current_app,
@@ -25,6 +29,7 @@ from flask import (
     session as flask_session,
     url_for,
 )
+from flask.typing import ResponseReturnValue
 from flask_login import current_user
 
 from cryptography.fernet import InvalidToken
@@ -47,6 +52,7 @@ from app.routes.auth._helpers import (
     MFA_SETUP_PENDING_TTL,
     _MFA_PENDING_NEXT_KEY,
     _MFA_PENDING_USER_ID_KEY,
+    _MFA_SETUP_FINGERPRINT_KEY,
     _clear_mfa_pending_state,
     _complete_sign_in,
     _consume_backup_code,
@@ -75,6 +81,9 @@ from app.utils.security_events import (
 from app.utils.session_helpers import invalidate_other_sessions
 
 logger = logging.getLogger(__name__)
+
+#: A guarded view's own parameters, which :func:`_refused_where_required` keeps.
+_ViewParams = ParamSpec("_ViewParams")
 
 
 def _check_mfa_code(mfa_config, user_id, totp_code, backup_code):
@@ -348,79 +357,259 @@ def mfa_verify():  # pylint: disable=too-many-return-statements
     return response
 
 
+def _live_pending_ciphertext(mfa_config: MfaConfig | None) -> bytes | None:
+    """Return the pending setup's ciphertext while its window is open, or ``None``.
+
+    The ONE statement of when a setup is pending, which ``/mfa/setup`` and
+    ``/mfa/confirm`` both read: the row holds a pending secret and its expiry
+    has not passed.  The expiry is ``MFA_SETUP_PENDING_TTL`` from the latest
+    load of setup in the sign-in that made the key (ruling plan#3523, which
+    replaced ruling plan#3470's window counted from when the key was made),
+    and the window is open through its last instant: it closes once ``now``
+    is past it.
+
+    Which browser may be SHOWN the key is not asked here but in
+    :func:`_readable_pending_secret`.  ``/mfa/confirm`` asks only whether a
+    key is pending, and takes a right code for it from any signed-in browser
+    of the account: a code proves its typist holds the key, and only the
+    sign-in that made the key is shown it.
+
+    Args:
+        mfa_config: The signed-in user's two-factor row, or ``None``.
+
+    Returns:
+        The pending ``pending_secret_encrypted``, or ``None`` for no row, no
+        pending secret, or one whose window has closed.
+    """
+    if (
+        mfa_config is None
+        or mfa_config.pending_secret_encrypted is None
+        or mfa_config.pending_secret_expires_at is None
+        or mfa_config.pending_secret_expires_at < datetime.now(timezone.utc)
+    ):
+        return None
+    return mfa_config.pending_secret_encrypted
+
+
+def _setup_fingerprint(ciphertext: bytes) -> str:
+    """Return the fingerprint by which a session names the setup key it made.
+
+    The SHA-256 hex digest of the pending key's ciphertext (ruling
+    plan#3523).  It tells the browser that made a key from every other
+    browser of the account without the session cookie, which is signed but
+    not encrypted, holding the key or its ciphertext (audit finding F-031 /
+    commit C-05): the digest is one-way, so it gives back neither.  Fernet
+    puts a fresh random IV in every ciphertext, so a fingerprint names one
+    key and never a later one.
+
+    Args:
+        ciphertext: A pending ``pending_secret_encrypted``.
+
+    Returns:
+        Its 64-character lowercase hex SHA-256 digest.
+    """
+    return hashlib.sha256(ciphertext).hexdigest()
+
+
+def _readable_pending_secret(mfa_config: MfaConfig | None) -> str | None:
+    """Return the pending setup's secret for the sign-in that made it, or ``None``.
+
+    The key is shown again only where it was made (ruling plan#3523): while
+    a setup is pending (:func:`_live_pending_ciphertext`) AND this browser's
+    session holds the fingerprint ``/mfa/setup`` stored with the key
+    (:func:`_setup_fingerprint`).  So a second browser of the account, which
+    someone else holding her password may be using, never sees the key she
+    scans.  Every finished sign-in clears the fingerprint
+    (:func:`~app.routes.auth._helpers._complete_sign_in`), so neither does
+    whoever signs in next on her browser.  The fingerprint is compared
+    plainly, not in constant time: the session is signed, so its holder
+    cannot choose the value compared, and a timing difference has nothing to
+    tell them.
+
+    ``None`` when no setup is pending; when the session holds no fingerprint
+    or another key's (another browser made the pending key, or replaced this
+    one's since); and when the ciphertext does not decrypt: an
+    ``InvalidToken`` (the key it was written under was pruned since) or a
+    ``RuntimeError`` (no key is set).  Every ``None`` makes ``/mfa/setup``
+    make a new key, which replaces the pending one.  With no key set that
+    attempt's own encrypt raises too, and the setup page then says in place
+    that two-factor is unavailable until the key is set, so no failure is
+    hidden here.
+
+    Args:
+        mfa_config: The signed-in user's two-factor row, or ``None``.
+
+    Returns:
+        The plaintext base32 secret of the pending setup, or ``None``.
+    """
+    ciphertext = _live_pending_ciphertext(mfa_config)
+    if ciphertext is None:
+        return None
+    if flask_session.get(_MFA_SETUP_FINGERPRINT_KEY) != _setup_fingerprint(ciphertext):
+        return None
+    try:
+        return mfa_service.decrypt_secret(ciphertext)
+    except (RuntimeError, InvalidToken):
+        return None
+
+
+class _SetupKey(NamedTuple):
+    """The key a load of ``/mfa/setup`` shows, as :func:`_key_to_show` picks it."""
+
+    #: The plaintext base32 secret the page shows.
+    secret: str
+    #: Its new ciphertext when this load made the key, for the row and the
+    #: session's fingerprint; ``None`` when it is the pending key shown again.
+    new_ciphertext: bytes | None
+
+
+def _key_to_show(mfa_config: MfaConfig | None) -> _SetupKey | None:
+    """Return the key this load of setup shows: the pending one again, or a new one.
+
+    The pending key when this browser's sign-in may be shown it
+    (:func:`_readable_pending_secret`); else a new TOTP secret and its
+    ciphertext, which the caller writes over any pending one.  It encrypts
+    before the caller mutates anything, so a missing ``TOTP_ENCRYPTION_KEY``
+    leaves the database untouched: no orphan pending row, no half-initialized
+    ``MfaConfig``.  :func:`mfa_service.encrypt_secret` raises
+    ``RuntimeError`` when the key is unset (see
+    ``app/services/mfa_service.py:_build_fernet_list``).
+
+    Args:
+        mfa_config: The signed-in user's two-factor row, read inside the
+            setup's command, or ``None``.
+
+    Returns:
+        The key to show, or ``None`` when no key can be made because
+        ``TOTP_ENCRYPTION_KEY`` is unset.
+    """
+    secret = _readable_pending_secret(mfa_config)
+    if secret is not None:
+        return _SetupKey(secret, None)
+    secret = mfa_service.generate_totp_secret()
+    try:
+        return _SetupKey(secret, mfa_service.encrypt_secret(secret))
+    except RuntimeError:
+        return None
+
+
 @auth_bp.route("/mfa/setup", methods=["GET"])
 def mfa_setup():
-    """Display the MFA setup page with QR code and manual key.
+    """Display the MFA setup page: its app link, QR code and manual key.
 
-    Generates a fresh TOTP secret, encrypts it under the application's
-    Fernet/MultiFernet key, and persists the ciphertext on the user's
-    ``MfaConfig`` row in ``pending_secret_encrypted`` (paired with a
-    15-minute expiry in ``pending_secret_expires_at``) instead of in
-    the user's signed-but-unencrypted Flask session cookie.  See audit
-    finding F-031 / commit C-05.
+    Three ways to put one key in the authenticator app: on the phone itself,
+    the "Open in my authenticator app" link opens the app with the key filled
+    in (ruling plan#3442); from a computer, the QR code; and by hand, the
+    manual key.  The link and the QR code carry the one ``otpauth://`` URI.
 
-    Each visit overwrites any previous pending secret -- legitimate
-    re-visits after invalid-code retries get a new QR code, and a
-    stale pending row from an abandoned setup is replaced rather than
-    accumulated.
+    **The pending key is kept only for the browser that made it, and each
+    load there gives it 15 fresh minutes** (ruling plan#3523, which replaced
+    ruling plan#3470's window counted from when the key was made).  In that
+    browser every load while the key is pending shows the same QR code and
+    manual key, and moves the expiry to ``MFA_SETUP_PENDING_TTL`` from now.
+    So a wrong code at ``/mfa/confirm`` (which sends the user back here), a
+    refresh, the login gate holding a companion here, or the phone reloading
+    the tab on the way back from the authenticator app all show the key
+    already scanned, and the entry made from it keeps working, however late
+    in its window it was reached.  Until ruling plan#3470 each load made a
+    new key, and each of those reloads killed the entry just scanned.
+
+    Every other load makes a new key, replacing any pending one: none is
+    pending, the pending one's window has closed, its ciphertext no longer
+    decrypts, or this browser's session does not hold its fingerprint
+    (:func:`_readable_pending_secret`).  The last is a second browser of the
+    account: someone who signed in with her password on a laptop and opened
+    setup cannot see the key her phone's setup shows, because her phone's
+    load replaced the laptop's key, and the laptop's next load replaces hers
+    rather than showing it.  Under ruling plan#3470 the phone showed the
+    laptop's key, and the laptop's user could make her codes from then on.
+    A sign-in clears the fingerprint, so the key is kept for the sign-in that
+    made it: a new sign-in in the same browser, hers or anyone's, gets a new
+    key.
+
+    A new key is a fresh TOTP secret, encrypted under the application's
+    Fernet/MultiFernet key and persisted on the user's ``MfaConfig`` row in
+    ``pending_secret_encrypted`` (paired with its expiry in
+    ``pending_secret_expires_at``) instead of in the user's
+    signed-but-unencrypted Flask session cookie.  See audit finding F-031 /
+    commit C-05.  The session holds only the key's fingerprint
+    (:func:`_setup_fingerprint`), stored after the commit that writes the
+    key, so a write that fails stores none.
 
     If MFA is already enabled the user is redirected back to security
-    settings.  If the encryption key is missing the user is redirected
-    with a flash explaining the operator-side prerequisite.
+    settings.  **If the encryption key is missing the page says so in place**
+    (plan#3514): a 200 naming the operator-side prerequisite, with no key, QR
+    code or form, and nothing written.  It once redirected to the Security
+    page with a flash, which the login gate refuses a companion it holds here,
+    so she was sent straight back, round and round, the flash never shown.
+    ``/mfa/confirm`` sends its own key failures here for the same reason.
 
     **A GET that WRITES, and it says so** (plan step balance:X-i3).  Every
     other request method declares itself; this route is the one place where a
-    safe method genuinely records something, because the pending secret must
-    be persisted before the QR that encodes it can be shown.  It therefore
-    holds its write inside :func:`app.db_transaction.write_transaction` rather
-    than being exempted from the rule -- the block is a command, the rest of
-    the request is a query, and the row it stages cannot be created outside
-    the block because the surrounding transaction is read-only.
+    safe method genuinely records something, because a new pending secret
+    must be persisted before the QR that encodes it can be shown.  It
+    therefore holds its write inside :func:`app.db_transaction.write_transaction`
+    rather than being exempted from the rule -- the block is a command, the
+    rest of the request is a query, and the row it stages cannot be created
+    outside the block because the surrounding transaction is read-only.
+    Every load that shows a key writes: a new key and its expiry, or the
+    shown key's renewed expiry.
     """
-    mfa_config = (
-        db.session.query(MfaConfig)
-        .filter_by(user_id=current_user.id)
-        .first()
-    )
-    if mfa_config and mfa_config.is_enabled:
-        flash("Two-factor authentication is already enabled.", "info")
-        return redirect(url_for("settings.show", section="security"))
-
-    secret = mfa_service.generate_totp_secret()
-    # Encrypt before any DB mutation so a missing TOTP_ENCRYPTION_KEY
-    # leaves the database state untouched -- no orphan pending row, no
-    # half-initialized MfaConfig.  encrypt_secret() raises RuntimeError
-    # when the key is unset (see app/services/mfa_service.py:_build_fernet_list).
-    try:
-        encrypted_pending = mfa_service.encrypt_secret(secret)
-    except RuntimeError:
-        flash(
-            "MFA is not available. The server administrator must set "
-            "TOTP_ENCRYPTION_KEY before MFA can be enabled.",
-            "danger",
-        )
-        return redirect(url_for("settings.show", section="security"))
-
-    # The row is CONSTRUCTED inside the block, not before it: opening the
+    # The whole read-decide-write is ONE command, the row read inside it
+    # (app/db_transaction.py: a write's deciding reads sit inside its block,
+    # which holds the owner's lock).  /mfa/confirm and the owner's reset on
+    # Companions take that lock at their own request's start, so neither
+    # commits between this read and this write.  Read before the block, a load
+    # racing her confirm could put a new pending key on her just-enabled row,
+    # which a later confirm would promote over her secret, and a renewal
+    # racing a confirm or a reset wrote an expiry onto a row whose key they
+    # had cleared.  The row is also CONSTRUCTED inside the block: opening the
     # command rolls the query's snapshot back, and a pending instance staged
-    # ahead of that would be expunged with it.
+    # ahead of that would be expunged with it.  The page renders after it.
     with write_transaction():
-        if mfa_config is None:
-            mfa_config = MfaConfig(user_id=current_user.id)
-            db.session.add(mfa_config)
+        mfa_config = (
+            db.session.query(MfaConfig)
+            .filter_by(user_id=current_user.id)
+            .first()
+        )
+        already_enabled = mfa_config is not None and mfa_config.is_enabled
+        shown = None if already_enabled else _key_to_show(mfa_config)
+        if shown is not None:
+            # No row means no key was pending, so a new one was just made.
+            if mfa_config is None:
+                mfa_config = MfaConfig(user_id=current_user.id)
+                db.session.add(mfa_config)
+            if shown.new_ciphertext is not None:
+                mfa_config.pending_secret_encrypted = shown.new_ciphertext
+            # A fresh window on every load that shows a key, the one shown
+            # again and a new one alike (ruling plan#3523).
+            mfa_config.pending_secret_expires_at = (
+                datetime.now(timezone.utc) + MFA_SETUP_PENDING_TTL
+            )
 
-        mfa_config.pending_secret_encrypted = encrypted_pending
-        mfa_config.pending_secret_expires_at = (
-            datetime.now(timezone.utc) + MFA_SETUP_PENDING_TTL
+    if already_enabled:
+        flash("Two-factor authentication is already enabled.", "info")
+        return redirect(url_for("auth.security"))
+    if shown is None:
+        # The page says so here, in place, never by a redirect: this is the
+        # one page a companion without two-factor is held at (plan#3514).
+        return render_template("auth/mfa_setup.html", key_missing=True)
+    if shown.new_ciphertext is not None:
+        # After the commit, so a write that fails stores no fingerprint.
+        flask_session[_MFA_SETUP_FINGERPRINT_KEY] = _setup_fingerprint(
+            shown.new_ciphertext,
         )
 
-    qr_data_uri = mfa_service.generate_qr_code_data_uri(
-        mfa_service.get_totp_uri(secret, current_user.email)
-    )
+    # The one provisioning URI, built once and handed to both ways in (ruling
+    # plan#3442): the QR code a computer's page shows for a phone to scan, and
+    # the "Open in my authenticator app" link a phone's page follows itself.
+    totp_uri = mfa_service.get_totp_uri(shown.secret, current_user.email)
     return render_template(
         "auth/mfa_setup.html",
-        qr_data_uri=qr_data_uri,
-        manual_key=secret,
+        key_missing=False,
+        totp_uri=totp_uri,
+        qr_data_uri=mfa_service.generate_qr_code_data_uri(totp_uri),
+        manual_key=shown.secret,
     )
 
 
@@ -443,9 +632,12 @@ def mfa_confirm():
         consumed/cleared.  Redirect to /mfa/setup with a flash.
       * Pending expiry has elapsed -- reject and clear the pending
         columns so the next /mfa/setup call starts cleanly.
-      * Encryption key is missing or the pending ciphertext does not
-        decrypt under any configured key -- redirect with a flash that
-        names the operator-side fix.
+      * Encryption key is missing, at the decrypt or at the promotion's
+        re-encrypt -- redirect to /mfa/setup, which says in place that the
+        operator must set it (plan#3514), never to a page the login gate
+        refuses a companion it holds at setup.
+      * The pending ciphertext does not decrypt under any configured key
+        -- clear it and redirect to /mfa/setup with a flash to start again.
       * Invalid TOTP code -- flash and redirect; pending state is
         retained until expiry so a typo does not force a re-scan.
     """
@@ -454,22 +646,19 @@ def mfa_confirm():
         .filter_by(user_id=current_user.id)
         .first()
     )
-    # Single guard for "no usable pending secret".  Covers three cases
-    # that share the same user-facing recovery (start over): no row, a
-    # row with no pending columns set, or a row whose expiry has
+    # Single guard for "no usable pending secret", the one statement of a
+    # pending setup /mfa/setup reads too (_live_pending_ciphertext).  Covers
+    # three cases that share the same user-facing recovery (start over): no
+    # row, a row with no pending columns set, or a row whose expiry has
     # elapsed.  When the row had stale data we clear it in the same
     # commit so a request that races a fresh /mfa/setup GET does not
     # see the same expired ciphertext twice.
-    has_pending = (
-        mfa_config is not None
-        and mfa_config.pending_secret_encrypted is not None
-        and mfa_config.pending_secret_expires_at is not None
-    )
-    if not has_pending or (
-            mfa_config.pending_secret_expires_at
-            < datetime.now(timezone.utc)
-    ):
-        if has_pending:
+    ciphertext = _live_pending_ciphertext(mfa_config)
+    if ciphertext is None:
+        if (
+            mfa_config is not None
+            and mfa_config.pending_secret_encrypted is not None
+        ):
             mfa_config.pending_secret_encrypted = None
             mfa_config.pending_secret_expires_at = None
             db.session.commit()
@@ -477,23 +666,18 @@ def mfa_confirm():
         return redirect(url_for("auth.mfa_setup"))
 
     try:
-        secret = mfa_service.decrypt_secret(mfa_config.pending_secret_encrypted)
+        secret = mfa_service.decrypt_secret(ciphertext)
     except RuntimeError:
-        # TOTP_ENCRYPTION_KEY is unset.  Sending the user back to
-        # /mfa/setup would only loop them through the same failure
-        # (encrypt_secret would raise RuntimeError too), so clear the
-        # pending state and bounce to the security settings page where
-        # the user can see the status and wait for the operator-side
-        # fix.  Mirrors the recovery path used in /mfa/disable.
+        # TOTP_ENCRYPTION_KEY is unset.  Clear the pending state it can no
+        # longer read and send the user to /mfa/setup, whose own encrypt
+        # fails the same way and which then says in place that the operator
+        # must set the key (plan#3514).  No flash: setup's page is the one
+        # place that says it, and a redirect anywhere else loops a companion
+        # the login gate holds at setup.
         mfa_config.pending_secret_encrypted = None
         mfa_config.pending_secret_expires_at = None
         db.session.commit()
-        flash(
-            "MFA is not available. The server administrator must set "
-            "TOTP_ENCRYPTION_KEY before MFA can be enabled.",
-            "danger",
-        )
-        return redirect(url_for("settings.show", section="security"))
+        return redirect(url_for("auth.mfa_setup"))
     except InvalidToken:
         # The pending ciphertext is unreadable under the current Fernet
         # key list -- typically because the key it was written under has
@@ -543,13 +727,11 @@ def mfa_confirm():
     except RuntimeError:
         # decrypt_secret() succeeded above so MultiFernet was usable a
         # moment ago.  This branch is only hit if TOTP_ENCRYPTION_KEY
-        # was unset between the two calls -- defensive, not expected.
-        flash(
-            "MFA is not available. The server administrator must set "
-            "TOTP_ENCRYPTION_KEY before MFA can be enabled.",
-            "danger",
-        )
-        return redirect(url_for("settings.show", section="security"))
+        # was unset between the two calls -- defensive, not expected.  Sent
+        # to /mfa/setup, which says so in place (plan#3514), as the decrypt's
+        # key failure above is.  Nothing was written: the assignment above
+        # raised before it took.
+        return redirect(url_for("auth.mfa_setup"))
 
     # Single ``now`` flows into both ``confirmed_at`` and the
     # security-event timestamp so an analyst correlating the audit
@@ -596,7 +778,7 @@ def regenerate_backup_codes():
     )
     if not mfa_config or not mfa_config.is_enabled:
         flash("Two-factor authentication is not enabled.", "danger")
-        return redirect(url_for("settings.show", section="security"))
+        return redirect(url_for("auth.security"))
 
     codes = mfa_service.generate_backup_codes()
     mfa_config.backup_codes = mfa_service.hash_backup_codes(codes)
@@ -615,12 +797,49 @@ def regenerate_backup_codes():
     return render_template("auth/mfa_backup_codes.html", backup_codes=codes)
 
 
+def _refused_where_required(
+    view: Callable[_ViewParams, ResponseReturnValue],
+) -> Callable[_ViewParams, ResponseReturnValue]:
+    """Refuse a view that turns off two-factor to a user who must have it.
+
+    Ruling plan#3434: every companion must use two-factor, and there is no
+    switch, so ``/mfa/disable`` refuses her on GET and POST alike, before the
+    view reads or counts any password or code.  The Security page hides the
+    button and says it is required; this answers the URL typed or a stale
+    link.  ``scripts/reset_mfa.py`` still clears it, and she meets setup at
+    her next sign-in.
+
+    Args:
+        view: The view function to guard.
+
+    Returns:
+        The guarded view, which redirects such a user to the Security page,
+        saying why, and runs *view* for anyone else.
+    """
+    @wraps(view)
+    def guarded(
+        *args: _ViewParams.args, **kwargs: _ViewParams.kwargs,
+    ) -> ResponseReturnValue:
+        """Redirect a user who must have two-factor; else run the view."""
+        if current_user.must_have_two_factor:
+            flash(
+                "Two-factor authentication is required for your account and "
+                "cannot be turned off.",
+                "warning",
+            )
+            return redirect(url_for("auth.security"))
+        return view(*args, **kwargs)
+    return guarded
+
+
 @auth_bp.route("/mfa/disable", methods=["GET"])
+@_refused_where_required
 def mfa_disable():
     """Display the MFA disable confirmation page.
 
     Requires MFA to be currently enabled. Redirects to security
-    settings if MFA is not enabled.
+    settings if MFA is not enabled.  A user who must have two-factor never
+    reaches it (:func:`_refused_where_required`).
     """
     mfa_config = (
         db.session.query(MfaConfig)
@@ -629,12 +848,13 @@ def mfa_disable():
     )
     if not mfa_config or not mfa_config.is_enabled:
         flash("Two-factor authentication is not enabled.", "info")
-        return redirect(url_for("settings.show", section="security"))
+        return redirect(url_for("auth.security"))
 
     return render_template("auth/mfa_disable.html")
 
 
 @auth_bp.route("/mfa/disable", methods=["POST"])
+@_refused_where_required
 def mfa_disable_confirm():
     """Process MFA disable after verifying password and TOTP code.
 
@@ -655,6 +875,10 @@ def mfa_disable_confirm():
     its own record and passes the account's lock, a stranger counts on the
     account and meets it.  Success does not clear the count: that is a
     finished sign-in's or re-confirm's (ruling plan#3007).
+
+    A user who must have two-factor never reaches it
+    (:func:`_refused_where_required`), so a wrong password or code there
+    counts nothing and a right pair turns nothing off.
     """
     # Schema validates shape before bcrypt is invoked.  current_password
     # accepts any historical length (legacy short passwords still work
@@ -693,7 +917,7 @@ def mfa_disable_confirm():
     )
     if not mfa_config or not mfa_config.is_enabled:
         flash("Two-factor authentication is not enabled.", "danger")
-        return redirect(url_for("settings.show", section="security"))
+        return redirect(url_for("auth.security"))
 
     # Same verifier as /mfa/verify underneath: emits
     # ``totp_replay_rejected`` on REPLAY and commits
@@ -705,7 +929,7 @@ def mfa_disable_confirm():
         mfa_config, totp_code, current_user.id,
     )
     if key_failure:
-        return redirect(url_for("settings.show", section="security"))
+        return redirect(url_for("auth.security"))
 
     if not accepted:
         auth_service.record_failed_attempt(current_user, device=device)
@@ -747,4 +971,4 @@ def mfa_disable_confirm():
     log_event(logger, logging.INFO, EVT_MFA_DISABLED, AUTH,
               "MFA disabled", user_id=current_user.id)
     flash("Two-factor authentication has been disabled.", "success")
-    return redirect(url_for("settings.show", section="security"))
+    return redirect(url_for("auth.security"))

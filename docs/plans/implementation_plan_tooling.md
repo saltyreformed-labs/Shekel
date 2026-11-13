@@ -5,8 +5,8 @@
 2026-10-29 (plan#2227 moves its cards here), in the developer's words: "I also think there needs to
 be an arc for security and tooling that isn't balance and move those type of cards to the new arc. I
 don't want balance to be the catch-all." Each step, finding and ruling is a card in the tracker,
-`saltyreformed-labs/shekel-plan` (`CLAUDE.md`, Development Status), whose board holds the order, and
-what "done" means is `verification.md`.
+`saltyreformed-labs/shekel-plan` (`CLAUDE.md`, Multi-session operation), whose board holds the
+order, and what "done" means is `verification.md`.
 
 **This document states the arc's scope and nothing else.** The repository is public, so no open
 finding's detail is written here: that lives on its card in the private tracker, and a security

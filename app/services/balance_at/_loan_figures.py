@@ -32,17 +32,28 @@ recurrence:R16-c-2 deleted both with their last caller.
 ``is_paid_off`` lives here, not in a consumer, for the same reason: it is a
 LEDGER-derived predicate over the loan's confirmed balance, so it belongs beside
 the balance rules rather than in a dashboard module that would have to reach for
-the balance to compute it.
+the balance to compute it.  ``has_own_plan`` lives here because what it reads --
+the loan's record, its definitions and its forward plan -- is the seam's, and a
+route holding the resolved loan to read its definitions would be one attribute
+away from an unfenced balance.
+
+**Both read the loan's ONE record** (plan step recurrence:R16-e, ruling
+**R-R93**): the pass's facts walk, the resolved loan's definitions and the
+pass's forward plan.  They read the loan's payment LIST until that step, which
+existed only to feed a walk the step deleted.
 """
 
 from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
 
+from app.enums import InterestAccrualConventionEnum
 from app.models.account import Account
+from app.services import loan_resolver
 from ._context import BalanceContext
 from ._fold import last_closed_on
 from . import _plan_fold
+from ._plan import memoized_plan
 
 # The payoff derivation this module INJECTS into the read pass's memo (see
 # :func:`loan_figures`).  ``_positions`` does not import this module, so the
@@ -120,6 +131,13 @@ class LoanTerms:
             net-worth trend's gate (ruling **R-R112**) read it here, where
             each read a schedule row's date until plan step
             recurrence:R16-c-2.
+        convention: How the loan's note accrues interest
+            (:class:`~app.enums.InterestAccrualConventionEnum`), through the
+            one reading of the stored id
+            (:func:`app.services.loan_resolver.accrual_convention`, plan step
+            recurrence:R16-d).  A contract fact like the rate beside it:
+            /debt-strategy charges its payoff projection under it, so that
+            page needs no ``ResolvedLoan`` to learn it.
     """
 
     monthly_payment: Decimal
@@ -127,6 +145,7 @@ class LoanTerms:
     is_originated: bool
     is_arm: bool
     recorded_start: date
+    convention: InterestAccrualConventionEnum
 
 
 @dataclass(frozen=True)
@@ -213,6 +232,14 @@ class LoanFigures:
             schedule, the back-projection clip admitted its whole 360-row
             contractual walk and drew **$197,049.32** of debt the borrower does not
             owe, on the same page as an equity hero reporting ``$0.00``.
+        has_own_plan: Whether the loan has a plan of ITS OWN to compare with
+            its contract: a payment in its record, a recurring definition
+            paying into it, or a projected payment row its forward plan folds
+            (:func:`_has_own_plan`).  A loan with none of the three folds the
+            contract's own installments forward, so a "plan against the
+            contract" figure would compare the contract with itself and read
+            "on track, $0.00 saved".  The payoff calculator gates that line,
+            and its plan-aware target-date answer, on it.
     """
 
     terms: LoanTerms
@@ -220,6 +247,7 @@ class LoanFigures:
     closing_date: date | None
     is_retired: bool
     is_paid_off: bool
+    has_own_plan: bool
 
 
 def loan_terms(
@@ -279,6 +307,7 @@ def _terms_from(resolved: ResolvedLoan, as_of: date) -> LoanTerms:
         is_originated=_is_originated(resolved, as_of),
         is_arm=bool(resolved.params.is_arm),
         recorded_start=resolved.recorded_start,
+        convention=loan_resolver.accrual_convention(resolved.params),
     )
 
 
@@ -327,14 +356,17 @@ def loan_figures(
     # Derived ONCE and threaded: :func:`_is_retired` folds the walk at
     # ``as_of``, and the WALK is memoized on the pass while the FOLD is not, so
     # each extra call re-sorts the dated deltas and re-runs the prefix sum.
-    # ``/savings`` builds this bundle per loan.
+    # ``/savings`` builds this bundle per loan.  Whether the record holds a
+    # payment is threaded the same way, to both checks that ask it.
     retired = _is_retired(resolved, account, ctx)
+    recorded = _has_recorded_payment(account, ctx)
     return LoanFigures(
         terms=_terms_from(resolved, ctx.as_of),
         payoff_date=memoized_payoff(account, ctx),
         closing_date=_closing_date(account, ctx, retired),
         is_retired=retired,
-        is_paid_off=_is_paid_off(resolved, account, ctx),
+        is_paid_off=_is_paid_off(retired, recorded),
+        has_own_plan=_has_own_plan(resolved, account, ctx, recorded),
     )
 
 
@@ -486,21 +518,94 @@ def _is_retired(
     )
 
 
-def _is_paid_off(
+def _has_recorded_payment(account: Account, ctx: BalanceContext) -> bool:
+    """Return whether the loan's record holds a payment: one whose cash has moved.
+
+    Read off the pass's facts walk (:meth:`BalanceContext.loan_walk`), the
+    stream the loan's balance is folded from, so "a payment stands behind this
+    loan" and the balance beside it come from one set of facts.  The walk holds
+    a payment from the day it is visible (ruling **R-R91**), so a pass pinned
+    to an earlier day counts only what had happened by that day, exactly as
+    :func:`_is_retired`'s fold does.  A payment whose money moved is visible
+    from its settled day, which the write doors refuse in the future (ruling
+    **R-EJ**).  A ``$0.00`` close stores no settle day: it is visible from the
+    installment it skips (ruling **R-R107**), so one stated before that
+    installment counts from it, as the balance does, where the payment list
+    counted it the day it was stated.
+
+    It read the confirmed half of the loan's payment LIST until plan step
+    recurrence:R16-e (ruling **R-R93**), a second load of the same settled
+    payments that existed only to feed a walk that step deleted.
+
+    Args:
+        account: The loan account, for the pass's memoized walk.
+        ctx: The read pass's :class:`~app.services.balance_at.BalanceContext`.
+
+    Returns:
+        ``True`` when the walk holds at least one recorded payment.
+    """
+    return bool(ctx.loan_walk(account).settled_splits)
+
+
+def _has_own_plan(
     resolved: ResolvedLoan, account: Account, ctx: BalanceContext,
+    recorded: bool,
 ) -> bool:
+    """Return whether the loan has a plan of its own to compare with its contract.
+
+    :attr:`LoanFigures.has_own_plan`.  Three things make one, each read where
+    the seam already holds it: a payment in the loan's record (*recorded*,
+    :func:`_has_recorded_payment`), a recurring definition paying into the loan
+    (:attr:`~app.services.balance_at._resolution.ResolvedLoan.definitions` --
+    the forward plan prices its every occurrence, rows or not, ruling
+    **R-R64**), or a PLANNED payment in the pass's forward plan: a projected
+    payment row, the plan's tier that is not an estimate
+    (:attr:`~app.services.balance_at._plan_records.PlannedPayment.is_estimated`).
+    The plan is read last because the first two cost nothing more.
+
+    **A projected row the loan's latest balance assertion already covers does
+    not count**, where the payment list counted it: the plan does not fold a
+    payment due at or before that assertion (ruling **R-R72**), so with nothing
+    else the plan IS the contract's own installments, and a comparison would
+    say "on track, $0.00 saved" of it.  The payoff calculator read the list and
+    a second query for the definitions until plan step recurrence:R16-e
+    (ruling **R-R93**); the definitions are that query's own answer, loaded
+    once by the resolution.
+
+    Args:
+        resolved: The loan's
+            :class:`~app.services.balance_at._resolution.ResolvedLoan`.
+        account: The loan account, for the pass's memoized plan.
+        ctx: The read pass's :class:`~app.services.balance_at.BalanceContext`.
+        recorded: Whether the loan's record holds a payment
+            (:func:`_has_recorded_payment`), read once by the caller.
+
+    Returns:
+        ``True`` when any of the three stands behind the loan.
+    """
+    if recorded or resolved.definitions:
+        return True
+    return any(
+        not payment.is_estimated
+        for payment in memoized_plan(account, ctx).payments
+    )
+
+
+def _is_paid_off(retired: bool, recorded: bool) -> bool:
     """Return whether the loan is retired AND has a confirmed payment behind it.
 
     Strictly narrower than :func:`_is_retired`, and BUILT ON IT so the two cannot
-    drift.  The extra guard is a BADGING rule, not a debt rule: it keeps a
+    drift: *retired* is that predicate's answer, threaded by the caller.  The
+    extra guard is a BADGING rule, not a debt rule: it keeps a
     brand-new loan with a degenerate ``$0`` opening anchor -- a misconfiguration,
     not an achievement -- from being badged "paid off" on the /savings tile.
 
     This replaced a ``resolve_loan(inputs, date.max)`` probe that could not have
-    consulted the ledger even in principle -- the confirmed view returns
-    ``None`` for any ``as_of`` after today -- and so answered from the
-    pre-read-switch anchor replay, which is BLIND TO MONEY: it advances one
-    SCHEDULED step per confirmed payment and discards the cash.  A loan retired
+    consulted the ledger even in principle -- the confirmed view returned
+    ``None`` for any ``as_of`` after today until plan step recurrence:R16-e --
+    and so answered from the pre-read-switch anchor replay, which was BLIND TO
+    MONEY: it advanced one SCHEDULED step per confirmed payment and discarded
+    the cash (that step deleted it).  A loan retired
     by one lump-sum payment read as still-owing (no badge, still active debt on
     the Horizon), and a loan paid SHORT could read as retired and VANISH from the
     debt card's total.  Both are regression-tested
@@ -515,14 +620,11 @@ def _is_paid_off(
     hero correctly reporting ``$0.00`` on the same page.
 
     Args:
-        resolved: The loan's
-            :class:`~app.services.balance_at._resolution.ResolvedLoan`.
-        account: The loan account, threaded to :func:`_is_retired`'s fold.
-        ctx: The read pass's :class:`~app.services.balance_at.BalanceContext`.
+        retired: :func:`_is_retired`'s answer for this loan and pass.
+        recorded: Whether the loan's record holds a payment
+            (:func:`_has_recorded_payment`).
 
     Returns:
         ``True`` when the loan is retired and at least one payment is confirmed.
     """
-    if not _is_retired(resolved, account, ctx):
-        return False
-    return any(p.dates.is_confirmed for p in resolved.context.payments)
+    return retired and recorded

@@ -6,9 +6,12 @@ pass's reads) and the ``code`` fixture's real git.
 
 What the update told is as GitHub answered it on 2026-11-13 (PR 667, 668, 669 of the code
 repository and #676): the App's comments word for word, its login ``shekel-updates``, and the
-workflow bot's ``github-actions``.
+workflow bot's ``github-actions``.  The image scan's issue is as its report writes one
+(:func:`tools.update.scan.issue`), which no red scan had opened by then.
 """
 from __future__ import annotations
+
+from datetime import date
 
 import pytest
 
@@ -16,7 +19,7 @@ from tools.quill import _waits
 from tools.quill._fake import FakeTracker, run
 from tools.quill._tracker import Comment
 from tools.quill.setup_tracker import FILING
-from tools.update import app
+from tools.update import app, scan
 
 #: PR 669's one comment of the App's, word for word as read 2026-11-13: two clauses, two
 #: markers.
@@ -524,3 +527,122 @@ def test_only_quills_comments_hold_and_the_lowest_open_card_takes_a_later_thing(
         "put the update's PR 667, told at 2026-11-16T23:09:14Z, on plan#2955, the card open "
         "for it (ruling plan#3722)\n")
     assert [write[:2] for write in tracker.writes] == [("comment", 2955)]
+
+
+#: The interpreter's CRITICAL CVE as the recorded scan found it on dev's image 2026-11-13
+#: (``tools/update/test_scan.py``), and a HIGH one in a Debian package beside it.
+_CRITICAL = scan.Fixed("CVE-2026-1999903", "binary", "python", "3.14.8",
+                       ("3.14.10", "3.15.2"), scan.RATINGS.index("critical"))
+_HIGH = scan.Fixed("CVE-2026-40001", "deb", "libssl3t64", "3.5.4-1", ("3.5.5-1",),
+                   scan.RATINGS.index("high"))
+#: Where each is told (:func:`_waits._scanned`), spelled here apart, so a test pins its form.
+_CRITICAL_ON = "image scan of CVE-2026-1999903 in python (binary)"
+_HIGH_ON = "image scan of CVE-2026-40001 in libssl3t64 (deb)"
+#: The scan issue's title as each card's title holds it after where it was told: cut, as each
+#: whole is 106 characters (:func:`_waits._title`).
+_CUT = "The weekly image scan found fixed CVEs..."
+
+
+def _scanned(number, *found, day=date(2026, 11, 17), by=(app.ACTIONS, "Bot")):
+    """The issue the scan's report opens on ``day`` listing ``found``, word for word as
+    :func:`tools.update.scan.issue` writes it, as :data:`_waits.ISSUES` reads it: open, numbered
+    ``number``, by the actor ``by`` names, the workflow's bot unless a test says another."""
+    opened = scan.issue(day, "https://github.com/o/Shekel/actions/runs/7", found)
+    return {"number": number, "title": opened["title"], "body": opened["body"],
+            "author": _by(*by), "createdAt": f"{day:%Y-%m-%d}T14:20:00Z",
+            "url": f"https://github.com/o/Shekel/issues/{number}"}
+
+
+def test_a_scan_issue_files_a_card_for_each_cve_the_most_severe_on_top(code, capsys):
+    """The scan's issue listing two CVEs, the CRITICAL first: each is filed a card of its own,
+    told on the scan of it in its package, the HIGH first so the CRITICAL sits at the top, its
+    line quoted under the issue's title and its marker in the card's last line; the next pass
+    files nothing (ruling plan#3710)."""
+    tracker = FakeTracker()
+    tracker.github.issues = [_scanned(690, _CRITICAL, _HIGH)]
+    title = "The weekly image scan found fixed CVEs 2026-11-17"
+    assert run(tracker, code, "sync") == 0
+    assert capsys.readouterr().out == (
+        _filed_lines(1, f"Shekel {_HIGH_ON}: {_CUT}", _HIGH_ON, "2026-11-17T14:20:00Z")
+        + _filed_lines(2, f"Shekel {_CRITICAL_ON}: {_CUT}", _CRITICAL_ON,
+                       "2026-11-17T14:20:00Z"))
+    assert tracker.board.items == [2, 1]
+    assert tracker.bodies[2] == "\n".join([
+        f"The weekly update told this on Shekel's {_CRITICAL_ON} at 2026-11-17T14:20:00Z: "
+        "`https://github.com/o/Shekel/issues/690`. The title there, then what was told:", "",
+        "```text", title, "",
+        "- `CVE-2026-1999903` in `python` (`binary`) `3.14.8`, rated CRITICAL, fixed in "
+        "`3.14.10`, `3.15.2`", "```", "",
+        "`quill sync` filed this card for it (ruling plan#3619), holding Priority High at the "
+        "top of the board (ruling plan#3620). The words above say what waits; the session that "
+        "claims this card takes it, and sets the card's Effort.", "",
+        _line(_CRITICAL_ON, app.marker("scan CVE-2026-1999903 binary python"))])
+    assert tracker.bodies[1].endswith("\n\n" + _line(_HIGH_ON, _HIGH.marker))
+    _todo(tracker, 1, 2)
+    assert run(tracker, code, "sync") == 0
+    assert capsys.readouterr().out == ""
+
+
+@pytest.mark.parametrize("state", [{}, {"is_open": False, "state_reason": "COMPLETED"},
+                                   {"is_open": False, "state_reason": "NOT_PLANNED"}],
+                         ids=["open", "shipped", "dropped"])
+def test_a_cve_next_weeks_scan_lists_again_files_no_second_card(code, capsys, state):
+    """A card holding the CRITICAL's line, open, shipped or dropped; the next week's scan opens
+    a new issue, closing the last, listing it again at a later version beside a CVE no card
+    holds: the new one alone is filed, and nothing is put on the card holding the old."""
+    tracker = FakeTracker()
+    tracker.add(2444, body="Move the base image.\n\n" + _line(_CRITICAL_ON, _CRITICAL.marker),
+                **state)
+    _todo(tracker, 2444)
+    later = scan.Fixed(_CRITICAL.vulnerability, "binary", "python", "3.14.9", ("3.14.10",),
+                       _CRITICAL.rating)
+    tracker.github.issues = [_scanned(700, later, _HIGH, day=date(2026, 11, 24))]
+    assert run(tracker, code, "sync") == 0
+    assert capsys.readouterr().out == _filed_lines(2445, f"Shekel {_HIGH_ON}: {_CUT}", _HIGH_ON,
+                                                   "2026-11-24T14:20:00Z")
+    assert [write[:2] for write in tracker.writes if write[0] in ("create", "comment")] == [
+        ("create", 2445)]
+
+
+def test_a_cve_in_a_package_installed_at_two_versions_is_one_card_quoting_both(code, capsys):
+    """One CVE in one package at two versions, two lines under one marker: one card, quoting
+    both lines, holding the marker once."""
+    tracker = FakeTracker()
+    other = scan.Fixed(_HIGH.vulnerability, "deb", "libssl3t64", "3.5.3-1", ("3.5.5-1",),
+                       _HIGH.rating)
+    tracker.github.issues = [_scanned(690, other, _HIGH)]
+    assert run(tracker, code, "sync") == 0
+    assert capsys.readouterr().out.count("filed plan#") == 1
+    assert ("\n- `CVE-2026-40001` in `libssl3t64` (`deb`) `3.5.3-1`, rated HIGH, fixed in "
+            "`3.5.5-1`\n- `CVE-2026-40001` in `libssl3t64` (`deb`) `3.5.4-1`, rated HIGH, fixed "
+            "in `3.5.5-1`\n```\n") in tracker.bodies[1]
+    assert tracker.bodies[1].endswith("\n\n" + _line(_HIGH_ON, _HIGH.marker))
+
+
+def test_an_issue_of_another_title_or_author_is_not_read_as_the_scans(code, capsys):
+    """The scan's words in an issue of another title by the workflow's bot, the release-due
+    one's, and the scan's issue as opened by a stranger, or by a user holding the bot's login
+    (:func:`tools.update.app.bot_of`): none is read as the scan's, so nothing is filed and no
+    card's text read."""
+    tracker = FakeTracker()
+    release = {**_scanned(676, _CRITICAL),
+               "title": "A release is due: dev and main pin different versions"}
+    tracker.github.issues = [release, _scanned(691, _CRITICAL, by=("someone", "User")),
+                             _scanned(692, _CRITICAL, by=(app.ACTIONS, "User"))]
+    assert run(tracker, code, "sync") == 0
+    assert capsys.readouterr().out == ""
+    assert tracker.github.queries == [_waits.PULLS, _waits.ISSUES]
+
+
+def test_a_where_too_long_for_any_title_is_cut_inside_it(code, capsys):
+    """A CVE in a package whose name leaves no room for the issue's title: the card's title is
+    cut inside where it was told, at the cap, and the card is filed."""
+    long = scan.Fixed("CVE-2026-40002", "go-module", "github.com/" + "x" * 80, "v1.2.3",
+                      ("v1.2.4",), scan.RATINGS.index("high"))
+    tracker = FakeTracker()
+    tracker.github.issues = [_scanned(690, long)]
+    assert run(tracker, code, "sync") == 0
+    assert "filed plan#1\n" in capsys.readouterr().out
+    title = tracker.cards_by_number[1].title
+    assert title == f"Shekel image scan of CVE-2026-40002 in github.com/{'x' * 80}"[:97] + "..."
+    assert len(title) == 100

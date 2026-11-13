@@ -421,3 +421,18 @@ def test_main_closes_the_open_issue_on_a_clean_scan_end_to_end(tmp_path, monkeyp
     assert capsys.readouterr().out == (
         f"update scan: closed {_LINK}\n"
         "update scan: CVEs with a fix rated HIGH or CRITICAL: 0\n")
+
+
+def test_each_line_the_issue_lists_is_read_back_naming_its_cve_and_package():
+    """``quill sync``'s read of the issue (:func:`scan.lines_of`): each line listing a match, in
+    its order, its CVE, package and type as it begins with them, and the line whole, its marker
+    last; the issue's other lines, and a line naming a CVE otherwise, list nothing."""
+    other = scan.Fixed("CVE-2026-40001", "deb", "libssl3t64", "3.5.4-1", (), 4)
+    body = scan.issue(_DAY, _RUN, [_CRITICAL, other])["body"]
+    critical, = (line for line in body.splitlines() if "CVE-2026-1999903" in line)
+    assert scan.lines_of(body + "\n- CVE-2026-40003 in `python` (`binary`) `3.14.8`") == [
+        ("CVE-2026-1999903", "python", "binary", critical),
+        ("CVE-2026-40001", "libssl3t64", "deb",
+         "- `CVE-2026-40001` in `libssl3t64` (`deb`) `3.5.4-1`, rated HIGH, fixed in no version "
+         f"Grype names {other.marker}")]
+    assert critical.endswith(_CRITICAL.marker)

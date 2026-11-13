@@ -33,9 +33,10 @@ stranger's is neither read nor closed.  Then:
 Its issue mentions no one: the card ``quill sync`` files for each CVE it lists is what reaches
 the developer, at the top of the board (rulings plan#3619, plan#3620), as for the update's other
 waits, and a mention each week a CVE stays unfixed would be the noise plan#3552 removed.  Each
-line it lists ends with a marker (:func:`tools.update.app.marker`) naming the CVE and the
-package (:attr:`Fixed.marker`), so a CVE still unfixed the next week is the same thing told
-again and files no second card.
+line it lists begins naming the CVE and the package in one form, which ``quill sync`` reads
+back (:func:`lines_of`) as what its card is for, and ends with a marker
+(:func:`tools.update.app.marker`) naming them (:attr:`Fixed.marker`), so a CVE still unfixed
+the next week, listed in a new issue, is the same thing told again and files no second card.
 
 **It imports the standard library alone.**  Its job installs the lock's interpreter and no
 package (``install: python``, as every job's Python comes from the lock, ruling
@@ -93,6 +94,11 @@ FIX_STATES = frozenset({FIXED, "not-fixed", "wont-fix", "unknown", ""})
 #: backtick, ``<``, ``>`` or ``@``, so nothing it holds can end the code span it is listed in,
 #: mention anyone or spell a marker; and no comma, which parts the fixed versions.
 _LISTABLE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._+~:!/-]*")
+#: How each line the issue lists begins (:func:`_line`): the match's CVE, then its package's
+#: name and its type, each in a code span; and the expression reading it back at a line's
+#: start, made from it, each value as :data:`_LISTABLE` holds one (:func:`lines_of`).
+_NAMED = "- `{}` in `{}` (`{}`) "
+_NAMED_READ = re.compile(re.escape(_NAMED).replace(r"\{\}", f"({_LISTABLE.pattern})"))
 
 
 class NotAScan(ValueError):
@@ -205,8 +211,17 @@ def read(path: Path) -> object:
 def _line(item: Fixed) -> str:
     """``item`` as its issue lists it, each value in a code span, its marker last."""
     fixes = ", ".join(f"`{version}`" for version in item.fixes) or "no version Grype names"
-    return (f"- `{item.vulnerability}` in `{item.package}` (`{item.kind}`) `{item.installed}`, "
+    return (_NAMED.format(item.vulnerability, item.package, item.kind) + f"`{item.installed}`, "
             f"rated {RATINGS[item.rating].upper()}, fixed in {fixes} {item.marker}")
+
+
+def lines_of(body: str) -> list[tuple[str, str, str, str]]:
+    """Each line of ``body``, the text of an issue this module opened (:func:`issue`), that
+    lists a match, in its order: the CVE, the package's name and its type, as the line begins
+    with them (:data:`_NAMED`), and the line whole, its marker last.  ``quill sync``'s read of
+    the issue (``tools/quill/_waits.py``); a line beginning otherwise lists nothing."""
+    return [(*named.groups(), line) for line in body.splitlines()
+            if (named := _NAMED_READ.match(line)) is not None]
 
 
 def issue(day: date, link: str, found: Sequence[Fixed]) -> dict[str, str]:

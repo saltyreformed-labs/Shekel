@@ -1,24 +1,7 @@
-"""The paycheck engine's owner-level input: a salary profile and its calendar.
+""":class:`PayrollBasis`: one owner's salary contract bound to their pay calendar.
 
-Plan step **R-F16** (shipped at ``4258ce28``).
-Its own module rather than a type inside
-:mod:`app.services.paycheck_calculator`, which sits at the 1000-line ceiling
-this step's own additions pushed it past -- and because nine modules outside
-that one CONSTRUCT this value while only it computes a paycheck, so the input
-has more consumers than the producer does.  Every one of the nine imports it
-from HERE; an earlier draft of this sentence made the consumer argument while
-all nine still reached the type through the engine, which is a claim its own
-import graph refuted.
-
-No Flask, no clock, no database access of its own.  What it reads off the
-profile it is handed -- the raise rows, since plan step salary:R15-b each
-deduction's recurrence rule, and since salary:X-av-3a the pay list -- it reads
-as ATTRIBUTES the caller loaded (the engine's loader eager-loads all three;
-``test_projection_inputs`` counts the
-statements a walk issues and finds none), converting each to a value through
-the reader that owns its vocabulary: :func:`~app.services.salary_raises
-.terms_of` for a raise, :func:`~app.services.recurrence.recurrence_spec` for
-a rule.  The profile is typed loosely on purpose (see the class).
+A leaf of :mod:`app.services.payroll_basis` (task plan#3576); the package's
+docstring states what the value is and why it holds what it holds.
 """
 from collections import Counter
 from dataclasses import dataclass
@@ -38,7 +21,6 @@ from app.services.pay_calendar import (
 )
 from app.services.recurrence import (
     ResolvedRecurrence,
-    projected_occurrence_placements,
     recurrence_spec,
     resolve,
 )
@@ -51,241 +33,18 @@ from app.services.salary_raises import (
     raise_pay,
     terms_of,
 )
-from app.utils.business_days import SATURDAY
 from app.utils.money import ZERO, round_money
 
-#: How far past an ask a cadence is walked before it is asked again: every
-#: walk reaches at least a year past the payday asked, and each later
-#: extension also doubles the span walked so far, so a projection that asks
-#: ascending paydays for twenty years re-walks about five times and never
-#: walks past twice its horizon.  A walk to the application's last date was
-#: the first shape and it cost 800 ms per basis on the developer's eleven
-#: lines (measured 2026-09-13): past the saved schedule the ceiling arm
-#: re-projects the month for every occurrence, so the walk must reach only
-#: what is asked of it.  **The year past the ask is load-bearing, not
-#: slack** (an adversarial review of this step): under ``CONTAINING_DATE`` an
-#: occurrence up to a full period AFTER a payday places on that payday, so a
-#: reach set exactly at the payday asked stops the walk before the
-#: occurrence that admits it and caches the wrong ``False``.
-_REACH_PAST_ASK = timedelta(days=366)
-
-@dataclass
-class _WalkedCadence:
-    """One resolved cadence's admitted paydays, walked as far as it has been asked.
-
-    Mutable, and private to :class:`PayrollBasis`: a memo, not a value.
-    Every line that resolves to the same :class:`ResolvedRecurrence` shares
-    one of these -- the developer's eleven 24-per-year lines are ONE walk --
-    because the occurrence set is a function of the cadence and the calendar
-    alone.
-
-    Attributes:
-        resolved: The cadence walked.
-        through: The last day the walk has reached, or ``None`` before it is
-            asked anything.
-        admitted: Every payday the walk placed an occurrence on, through
-            :attr:`through`.
-    """
-
-    resolved: ResolvedRecurrence
-    through: date | None = None
-    admitted: frozenset[date] = frozenset()
-
-    def admits(self, calendar: PayCalendar, payday: date) -> bool:
-        """Whether an occurrence lands on the paycheck of *payday*, walking further if needed.
-
-        Refuses nothing: a payday this calendar cannot place is simply not in
-        the set.  The engine's refusal of such a payday is
-        :func:`~app.services.paycheck_calculator._calendar_questions
-        ._month_ordinal`'s, read before any line is priced.
-        """
-        if self.through is None or payday > self.through:
-            self._walk(calendar, payday)
-        return payday in self.admitted
-
-    def _walk(self, calendar: PayCalendar, payday: date) -> None:
-        """Re-walk from the cadence's first occurrence to a year past *payday* at least.
-
-        A later walk also doubles the span walked so far, so the reach grows
-        geometrically with the asks; the set is REPLACED by the longer walk's,
-        which is a superset of the shorter's (the same cadence over a longer
-        window).
-        """
-        through = payday + _REACH_PAST_ASK
-        if self.through is not None:
-            through = max(through, self.through + (self.through - self.resolved.starts_on))
-        self.admitted = frozenset(
-            placement.period.start_date
-            for placement in projected_occurrence_placements(
-                self.resolved, calendar, through=through,
-            )
-            if placement.period is not None
-        )
-        self.through = through
-
-
-@dataclass(frozen=True)
-class RhythmChangeWithoutPay:
-    """A change of rhythm whose pay on one side is carried, as the salary page names it.
-
-    Plan step **salary:X-av-3a**, ruling **R-SAL82** ("Yearly pay carries,
-    said"): where the owner's rhythm changes and no entry is recorded from the
-    new rhythm's first paycheck, the pay from then is the yearly pay carried
-    across the change -- the pay before it times the old count, over the new
-    count -- and the salary page says so rather than believing the figure
-    silently.
-
-    **And a rhythm before the first entry, when no pay is recorded at it**
-    (tasks plan#3171 and plan#3575, finding plan#1586): every paycheck before
-    the first entry is priced from it (ruling **R-SAL59**), so when the first
-    entry is dated after a change of count, the paychecks of each rhythm
-    before it paid at another count are that entry's yearly pay carried BACK
-    to their count, and the page names the change ending each such rhythm:
-    :attr:`before_the_change`.
-
-    Attributes:
-        first_payday: The payday of the first paycheck at the new rhythm
-            (:func:`~app.services.pay_calendar.first_paycheck_at`): the
-            change.
-        per_paycheck: The carried pay: at the new rhythm, in force from the
-            first day its first paycheck pays for; or, before the change, at
-            the rhythm before it, in force on the last day before it.
-        carried_annual: The yearly pay carried across: the pay just before
-            the change times the paychecks a year it was paid at; before the
-            change, the first entry's yearly pay.
-        before_the_change: ``True`` when the carried pay is the rhythm's
-            before the change, carried back from the first entry; ``False``
-            when it is the new rhythm's, from the change on.
-    """
-
-    first_payday: date
-    per_paycheck: Decimal
-    carried_annual: Decimal
-    before_the_change: bool = False
-
-
-@dataclass(frozen=True)
-class _Seam:
-    """One change of rhythm as the walk reads it: an era after the first.
-
-    Private to :class:`PayrollBasis`.
-
-    Attributes:
-        payday: The payday of the era's first paycheck
-            (:func:`~app.services.pay_calendar.first_paycheck_at`).
-        first: The first day that paycheck pays for: the change takes effect
-            from it, so every day one paycheck pays for is paid at that
-            paycheck's rhythm and a pay period never straddles one.
-        index: The era's index in the calendar's eras.
-    """
-
-    payday: date
-    first: date
-    index: int
-
-
-@dataclass(frozen=True)
-class _Entry:
-    """One pay entry as the walk reads it.
-
-    Private to :class:`PayrollBasis`.
-
-    Attributes:
-        opens: The first day the entry's paycheck pays for: the entry is the
-            pay in force from then (ruling **plan#3091**).
-        payday: The entry's payday.
-        amount: What one paycheck pays, as recorded.
-    """
-
-    opens: date
-    payday: date
-    amount: Decimal
-
-
-@dataclass(frozen=True)
-class _InForce:
-    """The pay in force on one day, and what the walk to it read.
-
-    Private to :class:`PayrollBasis`.
-
-    Attributes:
-        rate: The day's :class:`PayRate`.
-        entry: The entry the pay was walked from.
-        carried: ``(day, yearly pay)`` of the LAST change of count the walk
-            carried the pay across, or ``None`` when it crossed none.
-        raised: ``(landing day, raise)`` of every forecast application the
-            walk raised the pay by, in the order it applied them: what a
-            paycheck's banner names (:meth:`PayrollBasis.banner_on`).
-    """
-
-    rate: PayRate
-    entry: _Entry
-    carried: "tuple[date, Decimal] | None"
-    raised: "tuple[tuple[date, RaiseTerms], ...]"
-
-
-def _carry(pay: Decimal, paid_at: PayCadence, to: PayCadence) -> Decimal:
-    """Return *pay* at rhythm *paid_at* carried to rhythm *to*, keeping its yearly pay.
-
-    Ruling **R-SAL82**: at a change of rhythm with no pay recorded from it,
-    the paycheck becomes the yearly pay (pay x paychecks a year) over the new
-    count, rounded to the cent.
-
-    Args:
-        pay: The per-paycheck pay before the change, cent-exact.
-        paid_at: The rhythm it was paid at.
-        to: The rhythm it is carried to.
-
-    Returns:
-        The carried pay, quantized to the cent.
-    """
-    return round_money(PayRate(pay, paid_at).annual / to.periods_per_year)
-
-
-def _at_rhythm(rate: PayRate, rhythm: PayCadence) -> PayRate:
-    """Return *rate* paid at *rhythm*: carried across a change of count, else as it is.
-
-    "A change of rhythm" is a change of COUNT, the test the walk's own carry
-    turns on: a new phase paying as often keeps the pay.
-
-    Args:
-        rate: The rate to restate.
-        rhythm: The rhythm to state it at.
-
-    Returns:
-        The :class:`PayRate` at *rhythm*.
-    """
-    if rate.periods_per_year == rhythm.periods_per_year:
-        return PayRate(rate.per_paycheck, rhythm)
-    return PayRate(_carry(rate.per_paycheck, rate.cadence, rhythm), rhythm)
-
-
-def _priced_days(paid: PaidDays) -> "list[date]":
-    """Return the days a paycheck's base is priced over: its pay period's weekdays.
-
-    Ruling **plan#3089**: a paycheck pays its pay period's Monday-to-Friday
-    days, a holiday or a vacation day included (the 07-16 stub paid 07-03, a
-    holiday, at the new pay), each at the pay in force that day.  **A period
-    holding no weekday is priced on its last day**, at the pay in force then:
-    only a rhythm of one or two days can hold such a period, a weekend, and
-    with no weekday to share the pay over it pays its rate, as a paycheck no
-    change reaches does.  The pricing (:meth:`PayrollBasis.base_pay_on`) and
-    the banner (:meth:`PayrollBasis.banner_on`) both read these days, so a
-    raise is announced on the paycheck that first PAYS a day of it (task
-    plan#3122).
-
-    Args:
-        paid: The paycheck's pay period.
-
-    Returns:
-        The days, ascending; never empty.
-    """
-    span = (paid.last - paid.first).days + 1
-    weekdays = [
-        day for day in (paid.first + timedelta(days=offset) for offset in range(span))
-        if day.weekday() < SATURDAY
-    ]
-    return weekdays or [paid.last]
+from ._line_cadence import _WalkedCadence
+from ._values import (
+    RhythmChangeWithoutPay,
+    _at_rhythm,
+    _carry,
+    _Entry,
+    _InForce,
+    _priced_days,
+    _Seam,
+)
 
 
 @dataclass(frozen=True)
@@ -985,6 +744,3 @@ class PayrollBasis:
                     before_the_change=True,
                 ))
         return changes
-
-
-__all__ = ["PayrollBasis", "RhythmChangeWithoutPay"]

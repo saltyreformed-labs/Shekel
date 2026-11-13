@@ -6,9 +6,20 @@ say *start from a prepared world*.  So a module whose every test needed the
 same world rebuilt it per test: measured on the ``url_map`` sweep, 302 ms of
 setup to make 22 ms of requests, 236 times over, 93% of that file.
 
-``@pytest.mark.seeded_start_state("name")`` says it instead.  The world is
-built ONCE per xdist worker and frozen into a snapshot database; every test
-that declares it still gets its own private clone of that snapshot.
+``@pytest.mark.seeded_start_state("name")`` says it instead.  Every world the
+run's tests declare is built ONCE per xdist worker, in one pass, and frozen into
+a snapshot database of its own; every test that declares one still gets its own
+private clone of that snapshot.
+
+**No test here counts builds across tests** (plan#2954, ruling plan#3767).
+:func:`tests._seeded_start_states.built_worlds` is the only place a world is
+built, it builds the list :func:`tests._seeded_start_states.declared_worlds`
+names, which holds each world once, and it runs inside a session-scoped fixture.
+The list and the pass are ours, and each is graded by one test below; that
+pytest runs a session fixture once per process is the contract the ``app``
+fixture already relies on.  This file once counted builds across the declaring
+tests, which only meant something with those tests in one process, in order,
+and so needed an ``xdist_group``.
 
 **The two halves are tested apart because only one of them is new.**  That a
 test starts from the world is the FEATURE.  That the test still cannot see
@@ -24,7 +35,9 @@ way, whichever runs second is the one that fails if the copies are shared, so
 the control cannot pass by scheduling luck.
 """
 
+import ast
 from decimal import Decimal
+from pathlib import Path
 
 import pytest
 
@@ -32,6 +45,7 @@ from sqlalchemy import text
 
 from app.models.category import Category
 from app.models.user import User
+from tests import _app_fixtures as app_fixtures
 from tests import _seeded_start_states as seeded_states
 from tests import _worker_database as worker_database
 from tests._seed_owner_fixtures import SEED_USER_EMAIL, build_seed_user
@@ -39,14 +53,6 @@ from tests._seeded_start_states import (
     _build_seeded_snapshot,
     register_seeded_state,
 )
-
-
-#: How many times this file's world has been BUILT in this process, and how
-#: many tests have DECLARED it.  Both are needed: "built once" is vacuously
-#: true for whichever declaring test runs first, so the arm below asserts one
-#: build against at least two declarations rather than against a count of one.
-_BUILDS = []
-_DECLARERS = set()
 
 
 def _build_arch_probe_world(db):
@@ -58,7 +64,6 @@ def _build_arch_probe_world(db):
     Returns:
         dict with the owner's ``user_id`` and default ``account_id``.
     """
-    _BUILDS.append(1)
     seed_user = build_seed_user(db)
     return {
         "user_id": seed_user["user"].id,
@@ -104,15 +109,28 @@ def _write_isolation_marker(db, user_id):
     db.session.commit()
 
 
-@pytest.mark.xdist_group("x_be_2_seeded_start_state")
+class _CollectedTest:
+    """A stand-in for a collected test: its node id and the one marker it carries.
+
+    What the marker reader and the build pass ask of a test, and nothing more,
+    so a test of them needs no collection and adds no marker to a real node.
+    """
+
+    def __init__(self, nodeid, decorator=None):
+        """Carry *decorator*'s mark, ``pytest.mark.seeded_start_state(...)``, or none."""
+        self.nodeid = nodeid
+        self._mark = None if decorator is None else decorator.mark
+
+    def get_closest_marker(self, name):
+        """The carried mark when *name* is its name, as a node answers."""
+        if self._mark is not None and self._mark.name == name:
+            return self._mark
+        return None
+
+
 @pytest.mark.seeded_start_state("arch_probe")
 class TestADeclaredWorldIsPresentAndPrivate:
-    """A declared world arrives built, and each test's copy is its own.
-
-    Pinned to one xdist worker so the build-count arm below is measuring one
-    process.  Without that, two arms on two workers each legitimately build
-    once and the arm could never see a rebuild it was meant to catch.
-    """
+    """A declared world arrives built, and each test's copy is its own."""
 
     def test_the_world_is_there_without_the_test_building_it(
         self, db, seeded_world,
@@ -125,14 +143,22 @@ class TestADeclaredWorldIsPresentAndPrivate:
         )
         assert user.email == SEED_USER_EMAIL
 
-    @pytest.fixture(autouse=True)
-    def _record_this_declarer(self, request):
-        """Count every test in this class that declares the world.
+    def test_this_world_is_the_one_declared_not_the_other(
+        self, db, seeded_world,
+    ):
+        """World one's owner, not the one world two renamed.
 
-        An autouse fixture rather than a line in each test, so a test added
-        later is counted without anyone remembering to.
+        Both worlds are built in one pass before either's tests run, so if the
+        two shared one snapshot database, the one built second would have
+        overwritten the first: this test or its twin in
+        :class:`TestTwoWorldsCoexistOnOneWorker` fails on every run.
         """
-        _DECLARERS.add(request.node.nodeid)
+        user = db.session.get(User, seeded_world["user_id"])
+        assert user.display_name == "Test User", (
+            f"a test declaring 'arch_probe' was given {user.display_name!r} "
+            f"-- the second world's build overwrote this world's snapshot, so "
+            f"the two are sharing one database"
+        )
 
     def test_the_worlds_own_audit_rows_are_not_a_tests_to_see(
         self, db, seeded_world,
@@ -182,38 +208,6 @@ class TestADeclaredWorldIsPresentAndPrivate:
         )
         _write_isolation_marker(db, seeded_world["user_id"])
 
-    def test_zz_it_was_built_once_for_all_of_them(self, db, seeded_world):
-        """The builder ran ONCE on this worker, for every test above.
-
-        **This is the entire claim of the step**; every other arm here would
-        pass equally against a fixture that rebuilt the world each time.
-
-        It asserts one build against MORE THAN ONE declaring test, because
-        ``builds == 1`` alone is vacuously true for whichever declaring test
-        runs first -- on its own it would wave through a rebuild-per-test
-        regression whenever it happened to be scheduled first.  The declarer
-        count comes from an autouse fixture on the class, so it counts tests
-        added later too.
-
-        Named ``zz`` and placed last so it runs after its siblings: pytest
-        runs a class's methods in definition order, ``--dist=loadgroup`` plus
-        this class's ``xdist_group`` keeps them in one process, and
-        ``pytest-randomly`` is not installed.  If that ever stops holding, the
-        declarer assertion FAILS rather than passing vacuously, which is the
-        safe direction for an arm whose whole job is to notice a rebuild.
-        """
-        assert len(_DECLARERS) > 1, (
-            f"only {len(_DECLARERS)} test declared this world before the "
-            f"build count was judged, so 'built once' says nothing -- one "
-            f"build for one declaring test is what a rebuild-per-test "
-            f"regression also produces. Declarers seen: {sorted(_DECLARERS)}"
-        )
-        assert len(_BUILDS) == 1, (
-            f"the world was built {len(_BUILDS)} times on this worker for "
-            f"{len(_DECLARERS)} declaring tests. Once is the point: a rebuild "
-            f"per test is the cost this seam removes"
-        )
-
 
 class TestAnUndeclaredTestIsUntouched:
     """A test that declares no world still starts from an empty database."""
@@ -221,8 +215,8 @@ class TestAnUndeclaredTestIsUntouched:
     def test_no_world_leaks_into_a_test_that_did_not_ask(self, db):
         """The 11,700 tests that have not adopted this seam are unaffected.
 
-        The world's owner is written by a builder this file registered at
-        import, so it exists in this PROCESS; what must not exist is the row,
+        The worlds' owners exist in their snapshots on this cluster once any
+        declaring test has run on this worker; what must not exist is the row,
         in a database this test was given.
         """
         assert db.session.query(User).count() == 0, (
@@ -243,19 +237,20 @@ class TestAnUndeclaredTestIsUntouched:
         with pytest.raises(LookupError, match="without declaring one"):
             request.getfixturevalue("seeded_world")
 
-    def test_a_marker_naming_no_world_says_which_test_forgot(self, request, db):
+    def test_a_marker_naming_no_world_says_which_test_forgot(self):
         """The marker written with no argument names the test, not IndexError.
 
-        Applied here by hand rather than as a decorator: the point is the
-        refusal, and a class-level marker would change what every other test
-        in it starts from.
+        Asked of a stand-in rather than of this test's own node: a marker added
+        to a real node would be read by the build pass over every collected
+        test, and would refuse every declaring test on this worker.
         """
-        request.node.add_marker(pytest.mark.seeded_start_state)
-        with pytest.raises(ValueError, match="no world named"):
-            seeded_states.declared_seeded_state(request)
+        forgot = _CollectedTest(
+            "tests/x.py::test_forgot", pytest.mark.seeded_start_state,
+        )
+        with pytest.raises(ValueError, match="test_forgot.*no world named"):
+            seeded_states.declared_seeded_state(forgot)
 
 
-@pytest.mark.xdist_group("x_be_2_seeded_start_state")
 @pytest.mark.seeded_start_state("arch_probe_2")
 class TestTwoWorldsCoexistOnOneWorker:
     """A second world on the same worker is a second snapshot, not a clash.
@@ -263,11 +258,10 @@ class TestTwoWorldsCoexistOnOneWorker:
     **The case the whole design exists for.**  The seam's argument against a
     module- or class-scoped fixture is that one database cannot hold two
     modules' states while xdist interleaves them; a snapshot per world is the
-    answer, and nothing graded that until this class existed -- the cache is a
-    dict keyed by name and only one key was ever asserted on.
-
-    Pinned to the same worker as the first world's class so both are built in
-    one process, which is what makes "coexist" the thing being measured.
+    answer.  Every worker that runs a declaring test builds both of this file's
+    worlds in one pass, before either's tests run, so "coexist" holds on every
+    worker this class runs on, and the first world's class checks the other
+    direction.
     """
 
     def test_this_world_is_the_one_declared_not_the_other(
@@ -292,61 +286,30 @@ class TestTwoWorldsCoexistOnOneWorker:
         ).count() == 0
 
 
-@pytest.mark.xdist_group("x_be_2_seeded_start_state")
-@pytest.mark.seeded_start_state("arch_probe")
-class TestTheFirstWorldSurvivesTheSecondBeingBuilt:
-    """Declaring world one AFTER world two was built still gives world one.
+@pytest.fixture()
+def restore_registry():
+    """Undo any world a test registers.
 
-    **The arm that catches two worlds sharing one snapshot database**, which
-    the class above cannot: with a single shared snapshot each world's tests
-    still pass, because every class runs to completion before the next world
-    is built and overwrites it.  Only a test that declares the FIRST world
-    after the second exists can see the collision -- measured, by mutating
-    the snapshot name to a constant, which left all sixteen arms green until
-    this class existed.
-
-    Placed after ``TestTwoWorldsCoexistOnOneWorker`` and pinned to the same
-    worker, which is what makes "after" true.
+    The build pass reads the registry by name, so a world a test registered
+    and left behind would be built by every later pass that named it.
     """
-
-    def test_the_first_world_is_still_itself(self, db, seeded_world):
-        """World one's owner, not the one world two renamed."""
-        user = db.session.get(User, seeded_world["user_id"])
-        assert user.display_name == "Test User", (
-            f"a test declaring 'arch_probe' was given {user.display_name!r} "
-            f"-- the second world's build overwrote this world's snapshot, so "
-            f"the two are sharing one database"
-        )
+    builders = dict(seeded_states._SEEDED_STATE_BUILDERS)
+    yield
+    seeded_states._SEEDED_STATE_BUILDERS.clear()
+    seeded_states._SEEDED_STATE_BUILDERS.update(builders)
 
 
+@pytest.mark.usefixtures("restore_registry")
 class TestTheSeamRefusesWhatItCannotDeliver:
     """The registry's own preconditions, which fire at import time."""
 
-    @pytest.fixture()
-    def restore_registry(self):
-        """Undo anything a test in this class registers or builds.
-
-        Both dicts, not only the builders: a test that registered a world and
-        then caused it to be built would leave a snapshot name cached under a
-        builder this fixture had already removed.
-        """
-        builders = dict(seeded_states._SEEDED_STATE_BUILDERS)
-        snapshots = dict(seeded_states._SEEDED_STATE_SNAPSHOTS)
-        yield
-        seeded_states._SEEDED_STATE_BUILDERS.clear()
-        seeded_states._SEEDED_STATE_BUILDERS.update(builders)
-        seeded_states._SEEDED_STATE_SNAPSHOTS.clear()
-        seeded_states._SEEDED_STATE_SNAPSHOTS.update(snapshots)
-
-    def test_two_worlds_may_not_share_one_name(self, restore_registry):
+    def test_two_worlds_may_not_share_one_name(self):
         """One name is one world: two would share one snapshot database."""
         register_seeded_state("x_be_2_dupe", lambda db: {})
         with pytest.raises(ValueError, match="already registered"):
             register_seeded_state("x_be_2_dupe", lambda db: {})
 
-    def test_registering_the_same_builder_twice_is_not_a_conflict(
-        self, restore_registry,
-    ):
+    def test_registering_the_same_builder_twice_is_not_a_conflict(self):
         """Re-import must not raise: a module can be imported more than once."""
         def builder(db):
             return {}
@@ -354,9 +317,7 @@ class TestTheSeamRefusesWhatItCannotDeliver:
         register_seeded_state("x_be_2_same", builder)
         register_seeded_state("x_be_2_same", builder)
 
-    def test_a_name_too_long_to_survive_postgres_is_refused(
-        self, restore_registry,
-    ):
+    def test_a_name_too_long_to_survive_postgres_is_refused(self):
         """PostgreSQL truncates at 63 bytes, and two truncated names collide.
 
         Refused at REGISTRATION, which runs on every session, rather than at
@@ -388,9 +349,7 @@ class TestTheSeamRefusesWhatItCannotDeliver:
         flat = {"a": 1, "b": "x", "c": None, "d": Decimal("1.00")}
         assert seeded_states._plain_data_or_raise("w", flat) is flat
 
-    def test_the_refusal_is_WIRED_into_the_build(
-        self, app, db, restore_registry,
-    ):
+    def test_the_refusal_is_WIRED_into_the_build(self, app, db):
         """A real build of a bad world is refused, not just the checker.
 
         The arm above grades the predicate; this grades that the predicate is
@@ -415,44 +374,117 @@ class TestTheSeamRefusesWhatItCannotDeliver:
             _build_seeded_snapshot("x_be_2_wired", app)
 
 
-class TestASnapshotDoesNotOutliveItsSession:
-    """The load-bearing half of "never persisted between runs".
+#: Two worlds the pass tests register, named so they sort ``_a`` before ``_z``.
+_PASS_FIRST = "x_be_2_pass_a"
+_PASS_SECOND = "x_be_2_pass_z"
 
-    A world holds rows dated from ``display_today()``, so a snapshot that
-    survived its session would be a start state no code describes -- finding
-    **N-385**'s shape. The code that prevents it had no test.
+
+def _register_counting_worlds(builds, second=None):
+    """Register the pass tests' two worlds, each recording its name in *builds*.
+
+    Args:
+        builds: The list each build appends its world's name to.
+        second: The second world's builder, when it must do more than record.
+
+    Returns:
+        The collected tests the pass reads: two declaring the first world, one
+        the second, and one declaring none.
+    """
+    def recorded(name):
+        def build(_db):
+            builds.append(name)
+            return {}
+        return build
+
+    register_seeded_state(_PASS_FIRST, recorded(_PASS_FIRST))
+    register_seeded_state(_PASS_SECOND, second or recorded(_PASS_SECOND))
+    return [
+        _CollectedTest("t.py::a1", pytest.mark.seeded_start_state(_PASS_FIRST)),
+        _CollectedTest("t.py::a2", pytest.mark.seeded_start_state(_PASS_FIRST)),
+        _CollectedTest("t.py::z", pytest.mark.seeded_start_state(_PASS_SECOND)),
+        _CollectedTest("t.py::none"),
+    ]
+
+
+@pytest.mark.usefixtures("restore_registry")
+class TestTheOnePass:
+    """The list of a run's worlds and the pass that builds it, the build's only caller.
+
+    **The pass tests release the engine first, and must**, for the reason
+    :meth:`TestTheSeamRefusesWhatItCannotDeliver.test_the_refusal_is_WIRED_into_the_build`
+    gives: a build drops the worker database this test is holding.
     """
 
-    def test_session_finish_drops_the_snapshots_it_recorded(self, db):
-        """``_drop_seeded_snapshots`` really drops, and forgets.
+    def test_the_pass_runs_once_per_worker(self):
+        """The fixture that runs the pass is session-scoped: once per worker process.
 
-        Operates on a THROWAWAY database registered into the cache under a
-        name no test declares, so the real worlds this worker built are left
-        alone; the cache is restored either way.
+        The one word "built once" rests on, beside the list the next arm
+        grades.  Read from the source because no test can watch a session's
+        cache without depending on which tests ran before it in its process,
+        and pytest keeps a fixture's scope only in private attributes.  Measured
+        2026-11-13: with the fixture made function-scoped, every other arm in
+        this file stayed green, the run merely slower.
         """
-        throwaway = f"{worker_database._WORKER_DB_NAME}__world_x_be_2_probe"
-        worker_database._clone_worker_database(
-            throwaway, worker_database._WORKER_ADMIN_URL,
+        tree = ast.parse(Path(app_fixtures.__file__).read_text(encoding="utf-8"))
+        fixture = next(
+            node for node in ast.walk(tree)
+            if isinstance(node, ast.FunctionDef) and node.name == "_seeded_snapshots"
         )
-        assert worker_database.database_exists(throwaway)
+        scopes = [
+            keyword.value.value
+            for decorator in fixture.decorator_list if isinstance(decorator, ast.Call)
+            for keyword in decorator.keywords if keyword.arg == "scope"
+        ]
+        assert scopes == ["session"], (
+            f"_seeded_snapshots is declared with scope {scopes}, not 'session': "
+            f"the pass would build every declared world again for each test "
+            f"that declares one"
+        )
 
-        real = dict(seeded_states._SEEDED_STATE_SNAPSHOTS)
-        seeded_states._SEEDED_STATE_SNAPSHOTS.clear()
-        seeded_states._SEEDED_STATE_SNAPSHOTS["x_be_2_probe"] = (
-            throwaway, {},
+    def test_each_declared_world_is_named_once(self):
+        """Two tests declaring one world name it once; a test declaring none, nothing."""
+        items = _register_counting_worlds([])
+        assert seeded_states.declared_worlds(items) == [_PASS_FIRST, _PASS_SECOND]
+
+    def test_the_pass_builds_each_world_once_and_drops_every_snapshot(self, app, db):
+        """Each declared world is built once, and no snapshot outlives the pass.
+
+        A world holds rows dated from ``display_today()``, so a snapshot that
+        outlived its session would be a start state no code describes --
+        finding **N-385**'s shape.  The ``_seeded_snapshots`` fixture runs this
+        pass, so its exit is the session's end.
+        """
+        builds = []
+        items = _register_counting_worlds(builds)
+        db.session.remove()
+        db.engine.dispose()
+        with seeded_states.built_worlds(items, app) as worlds:
+            snapshots = [snapshot for snapshot, _ids in worlds.values()]
+            assert builds == [_PASS_FIRST, _PASS_SECOND], (
+                f"the pass built {builds} for two tests declaring {_PASS_FIRST} "
+                f"and one declaring {_PASS_SECOND}: each world is built once"
+            )
+            assert sorted(worlds) == [_PASS_FIRST, _PASS_SECOND]
+            assert all(map(worker_database.database_exists, snapshots))
+        left = [name for name in snapshots if worker_database.database_exists(name)]
+        assert not left, (
+            f"the pass ended and left {left} on the cluster; their rows are "
+            f"dated from a session that has ended"
         )
-        try:
-            seeded_states._drop_seeded_snapshots()
-            assert not worker_database.database_exists(throwaway), (
-                "session finish left a world snapshot on the cluster; its "
-                "rows are dated from a session that has ended"
-            )
-            assert not seeded_states._SEEDED_STATE_SNAPSHOTS, (
-                "the cache still names a snapshot that no longer exists, so "
-                "a later build would clone from a database that is gone"
-            )
-        finally:
-            seeded_states._SEEDED_STATE_SNAPSHOTS.update(real)
-            worker_database._drop_worker_database(
-                throwaway, worker_database._WORKER_ADMIN_URL,
-            )
+
+    def test_a_build_that_raises_leaves_no_snapshot(self, app, db):
+        """The first world's snapshot is dropped when the second world's build raises."""
+        def refuses(_db):
+            raise RuntimeError("the second world's builder refuses")
+
+        items = _register_counting_worlds([], second=refuses)
+        db.session.remove()
+        db.engine.dispose()
+        with pytest.raises(RuntimeError, match="second world's builder refuses"):
+            with seeded_states.built_worlds(items, app):
+                pass
+        first = seeded_states._seeded_snapshot_name(_PASS_FIRST)
+        assert not worker_database.database_exists(first), (
+            f"a pass whose second build raised left {first}, the first world's "
+            f"snapshot, on the cluster with nothing left to drop it"
+        )

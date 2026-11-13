@@ -76,7 +76,6 @@ os.environ.setdefault(
 
 from tests._fixture_profile import _FIXTURE_PROFILE_ENABLED, _profile_print_summary
 from tests._worker_database import _BOOTSTRAP_RESULT
-from tests._seeded_start_states import _drop_seeded_snapshots
 from tests._shard import SHARD_ENV, apply_shard, parse_shard
 # Every fixture, imported by name: pytest registers each fixture it finds in this
 # module's namespace with this conftest's directory as its base, so each keeps the
@@ -86,6 +85,7 @@ from tests._shard import SHARD_ENV, apply_shard, parse_shard
 # pylint: disable=unused-import
 from tests._app_fixtures import (
     _calendar_sweep,
+    _seeded_snapshots,
     app,
     below_the_transfer_column_drop,
     client,
@@ -227,25 +227,19 @@ def pytest_sessionfinish(session, exitstatus):  # pylint: disable=unused-argumen
     """
     if _BOOTSTRAP_RESULT is not None:
         db_name, admin_url = _BOOTSTRAP_RESULT
-        # ``try``/``finally`` so the NEW cleanup can never strand the old one.
-        # Worlds go first -- a snapshot is a database of its own, and one left
-        # behind would be a start state dated from a session that has ended --
-        # but a snapshot drop that raised must not take the worker database's
-        # drop with it, which is the cleanup this suite has always relied on.
+        # The worlds' snapshots are not dropped here: the ``_seeded_snapshots``
+        # fixture's teardown drops them, as pytest tears session fixtures down.
+        admin_conn = psycopg.connect(admin_url)
         try:
-            _drop_seeded_snapshots()
+            admin_conn.autocommit = True
+            with admin_conn.cursor() as cur:
+                cur.execute(
+                    sql.SQL(
+                        "DROP DATABASE IF EXISTS {} WITH (FORCE)"
+                    ).format(sql.Identifier(db_name))
+                )
         finally:
-            admin_conn = psycopg.connect(admin_url)
-            try:
-                admin_conn.autocommit = True
-                with admin_conn.cursor() as cur:
-                    cur.execute(
-                        sql.SQL(
-                            "DROP DATABASE IF EXISTS {} WITH (FORCE)"
-                        ).format(sql.Identifier(db_name))
-                    )
-            finally:
-                admin_conn.close()
+            admin_conn.close()
 
     # Only the xdist controller / single-process run aggregates and
     # prints.  Workers (PYTEST_XDIST_WORKER set) are write-only: they

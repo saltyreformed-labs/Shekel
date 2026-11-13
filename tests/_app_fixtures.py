@@ -35,9 +35,8 @@ from tests._seed_owner_fixtures import log_in_seed_user
 from tests._seeded_start_states import (
     _SEEDED_STATE_BUILDERS,
     _refresh_ref_cache_and_jinja_globals,
+    built_worlds,
     declared_seeded_state,
-    seeded_state_for,
-    seeded_state_ids,
 )
 from tests._test_helpers import (
     bind_db_clock_rewriter,
@@ -229,6 +228,43 @@ def setup_database(app):
     yield
 
 
+@pytest.fixture(scope="session")
+def _seeded_snapshots(request, app, setup_database):  # pylint: disable=unused-argument
+    """Every world this run's tests declare, built ONCE on this worker, in one pass.
+
+    Requested only by :func:`_declared_world`, from inside the ``db`` fixture of
+    the first test on this worker that declares a world, so it runs with that
+    test's engine released and its environment fixtures applied, which a build
+    needs (:func:`tests._seeded_start_states.built_worlds`).  A test that named
+    it as an argument would set it up before those fixtures, and the build
+    would refuse.  A run whose tests declare no world never builds one.
+
+    Returns:
+        ``{name: (snapshot_database_name, ids)}``, every snapshot dropped at
+        this worker's session end.
+    """
+    with built_worlds(request.session.items, app) as worlds:
+        yield worlds
+
+
+def _declared_world(request):
+    """``(snapshot_database_name, ids)`` of the world *request*'s test declared.
+
+    The first call for a declaring test on this worker builds every declared
+    world (:func:`_seeded_snapshots`); each later one reads what that built.
+
+    Args:
+        request: The test's pytest request.
+
+    Returns:
+        The pair, or ``None`` when the test declared no world.
+    """
+    name = declared_seeded_state(request.node)
+    if name is None:
+        return None
+    return request.getfixturevalue("_seeded_snapshots")[name]
+
+
 @pytest.fixture(autouse=True)
 def db(app, setup_database, request, set_totp_key, disable_hibp_check):  # pylint: disable=unused-argument
     """Provide a freshly-cloned database for each test.
@@ -358,12 +394,14 @@ def db(app, setup_database, request, set_totp_key, disable_hibp_check):  # pylin
 
         # WHICH database this test is cloned from -- the empty template, or
         # the snapshot of a world it declared (plan step balance:X-be-2).
-        # Resolved BEFORE the drop because building a world for the first time
-        # on this worker needs a blank worker database of its own, and it takes
-        # the one it is standing in; resolving after the clone would throw that
-        # clone away.  The engine is already released above, which is what lets
-        # the build freeze the worker database into a snapshot.
-        clone_source, _ = seeded_state_for(request, app)
+        # Resolved BEFORE the drop because the first declaring test on this
+        # worker builds every declared world, and a build needs a blank worker
+        # database of its own, taking the one it is standing in; resolving
+        # after the clone would throw that clone away.  The engine is already
+        # released above, which is what lets the build freeze the worker
+        # database into a snapshot.  ``None`` clones the empty template.
+        world = _declared_world(request)
+        clone_source = None if world is None else world[0]
 
         with _profile_step(timings, "setup_drop_db"):
             _drop_worker_database(_WORKER_DB_NAME, _WORKER_ADMIN_URL)
@@ -448,11 +486,14 @@ def seeded_world(request, app, db):  # pylint: disable=unused-argument
     """The world this test declared, as the plain data its builder returned.
 
     Depends on ``db`` so it can only be read after this test's own copy of the
-    world exists; the lookup itself is the cached one the ``db`` fixture
-    already performed, so asking twice costs nothing.
+    world exists; the worlds it reads were built before ``db`` cloned it, so
+    asking costs nothing.
 
     Returns:
-        A per-test copy of the builder's dict -- ids and scalars.
+        A per-test copy of the builder's dict -- ids and scalars.  A copy, as
+        the dict is built once and shared, and a test that mutated it would be
+        editing every later test's view of the world;
+        ``_plain_data_or_raise`` is what makes a SHALLOW copy sufficient.
 
     Raises:
         LookupError: The test asked for a world without declaring one.  Not a
@@ -460,15 +501,16 @@ def seeded_world(request, app, db):  # pylint: disable=unused-argument
             asked for would get ``KeyError`` on a name that IS registered, and
             the marker it is missing would be nowhere in that traceback.
     """
-    name = declared_seeded_state(request)
-    if name is None:
+    world = _declared_world(request)
+    if world is None:
         raise LookupError(
             f"{request.node.nodeid} asked for `seeded_world` without "
             f"declaring one. Add @pytest.mark.seeded_start_state(\"<name>\") "
             f"to the test or its class; known worlds: "
             f"{sorted(_SEEDED_STATE_BUILDERS)}"
         )
-    return seeded_state_ids(name)
+    _snapshot, ids = world
+    return dict(ids)
 
 
 @pytest.fixture()

@@ -580,11 +580,12 @@ def reject_payday_before_calendar(earliest: date) -> None:
 
     **Asked of "Add earlier paychecks" alone** (plan step
     ``pay_calendar:C18-b``), because it is the one door that COMPUTES a day
-    below the record rather than taking one from a form:
-    ``app.schemas.validation.pay_periods.payday_field`` holds every STATED
-    payday to :data:`~app.utils.dates.CALENDAR_DATE_MIN` ..
-    :data:`~app.utils.dates.CALENDAR_DATE_MAX`, and so is a stated history
-    (``ck_pay_schedule_history_opens_range``), while
+    below the record rather than taking one from a form: every STATED payday
+    is held to :data:`~app.utils.dates.CALENDAR_DATE_MIN` ..
+    :data:`~app.utils.dates.CALENDAR_DATE_MAX` by the one payday window,
+    ``app.schemas.validation._helpers._PAYDAY_RANGE`` (which
+    ``pay_periods.payday_field`` carries onto the pay-period doors), and so
+    is a stated history (``ck_pay_schedule_history_opens_range``), while
     ``budget.pay_periods.start_date`` carries no CHECK of its own.  A long
     cadence times a large count reaches past it -- 27 paychecks 365 days
     apart below a record opening 2026-01-02 reach 1999-01-09 -- so the door

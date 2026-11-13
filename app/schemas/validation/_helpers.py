@@ -100,8 +100,10 @@ _DAY_OF_MONTH_RANGE = validate.Range(min=1, max=31)
 # **R-EY**).
 #
 # The ceiling is named once (plan step salary:X-av-3b, finding SAL-586) because
-# the one-paycheck bound below takes the same one: a comment saying two bounds
-# share a ceiling is an agreement, and a name is one value.
+# more than one bound takes it: the one-paycheck bound below, and the raise
+# form's flat raise (``salary.RaiseCreateSchema.flat_amount``, task plan#3577),
+# each read this name.  A comment saying two bounds share a ceiling is an
+# agreement, and a name is one value.
 _MONETARY_INPUT_CEILING = Decimal("10000000")
 _NON_NEGATIVE_MONETARY = validate.Range(
     min=Decimal("0"), max=_MONETARY_INPUT_CEILING,
@@ -145,11 +147,15 @@ _EFFECTIVE_DATE_RANGE = validate.Range(
 )
 
 # The window a PAYDAY may be typed in, wherever one is: a pay entry's, a pay
-# stub's, and the stub dates a job learns its pay period from.  It is the
-# calendar's own reach (``app.utils.dates``, which owns the numbers): an HTML
-# date input accepts a five-digit-year typo, and ``9999-12-31`` overflows the
-# calendar's forward projection.  One home since plan step salary:X-av-3b
-# (finding **SAL-586**), for the reason the pay bound above has one.
+# stub's, the stub dates a job learns its pay period from, and the four
+# pay-period doors' through ``pay_periods.payday_field`` (registration's last
+# payday, generate's start date, regenerate's and reset's corrected first
+# payday; task plan#3577).  It is the calendar's own reach
+# (``app.utils.dates``, which owns the numbers): an HTML date input accepts a
+# five-digit-year typo, and ``9999-12-31`` overflows the calendar's forward
+# projection.  One home since plan step salary:X-av-3b (finding **SAL-586**),
+# for the reason the pay bound above has one.  A stated pay-history opening is
+# not a payday, and keeps its own window, ``pay_periods._HISTORY_OPENS_RANGE``.
 _PAYDAY_RANGE = validate.Range(min=CALENDAR_DATE_MIN, max=CALENDAR_DATE_MAX)
 
 # The window a salary raise's YEAR -- effective or terminal -- may fall in, as

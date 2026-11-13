@@ -4,7 +4,10 @@ Finding **SAL-586** (plan step salary:X-av-3b): the salary schemas and the
 pay-stub schemas each spelled the bound on what one paycheck's base pays, and
 the window a payday may be typed in, so the pay list and the stub door could
 come to accept different pay, or different paydays, for one fact (CLAUDE.md
-rule 14).  Each has one home now, in ``app.schemas.validation._helpers``.
+rule 14).  Each has one home now, in ``app.schemas.validation._helpers``.  Task
+plan#3577 brought the four pay-period doors' paydays (``pay_periods.payday_field``)
+onto the one window, and the raise form's flat raise onto the one ceiling the
+pay bound takes.
 
 Two spellings that agree today are still two spellings, so agreement at the
 edges cannot grade this: the identity tests below can, because a field that
@@ -17,8 +20,15 @@ from datetime import date, timedelta
 import pytest
 from marshmallow import validate
 
+from app.schemas.validation.auth import RegisterSchema
+from app.schemas.validation.pay_periods import (
+    PayPeriodGenerateSchema,
+    PayPeriodRegenerateSchema,
+    PayPeriodResetSchema,
+)
 from app.schemas.validation.pay_stubs import PayStubPaydaySchema, PayStubSchema
 from app.schemas.validation.salary import (
+    RaiseCreateSchema,
     SalaryPayEntryFixSchema,
     SalaryProfileCreateSchema,
     SalaryProfileUpdateSchema,
@@ -35,7 +45,8 @@ _PAY_FIELDS = [
 ]
 
 #: Every field that types a payday, or the stub dates a job learns its pay
-#: period from (ruling plan#3096).
+#: period from (ruling plan#3096).  The last four are ``payday_field``'s, the
+#: pay-period doors' (task plan#3577).
 _PAYDAY_FIELDS = [
     (SalaryProfileCreateSchema, "pay_payday"),
     (SalaryProfileCreateSchema, "stub_pay_date"),
@@ -45,6 +56,10 @@ _PAYDAY_FIELDS = [
     (SalaryPayEntryFixSchema, "payday"),
     (PayStubPaydaySchema, "payday"),
     (PayStubSchema, "payday"),
+    (RegisterSchema, "last_payday"),
+    (PayPeriodGenerateSchema, "start_date"),
+    (PayPeriodRegenerateSchema, "new_start_date"),
+    (PayPeriodResetSchema, "new_start_date"),
 ]
 
 
@@ -111,6 +126,27 @@ class TestThePayBoundHasOneHome:
         ``ck_pay_stubs_positive_base_pay``).
         """
         assert _refuses(schema_cls, field, value) is refused
+
+
+class TestTheMonetaryCeilingHasOneHome:
+    """A flat raise's ceiling is the one the pay bound takes,
+    ``_helpers._MONETARY_INPUT_CEILING``."""
+
+    def test_a_flat_raise_reads_the_named_ceiling(self):
+        """The raise form's ``flat_amount`` holds the named ceiling itself.
+
+        Input: ``RaiseCreateSchema.flat_amount``'s ``Range``, beside the first
+        pay field's (the profile form's ``pay_amount``, whose bound is
+        ``_PAY_AMOUNT_RANGE`` over ``_MONETARY_INPUT_CEILING``).
+        Expected: the very same ``Decimal`` object as each bound's ``max``, by
+        identity.
+        Why: ``Decimal("10000000")`` spelled again equals the ceiling and
+        passes every edge test of either field, but is a second home that a
+        change to the named one would leave behind (task plan#3577).  The
+        edges themselves are ``test_c24_range_check_sweep``'s.
+        """
+        assert (_range_of(RaiseCreateSchema, "flat_amount").max
+                is _range_of(*_PAY_FIELDS[0]).max)
 
 
 class TestThePaydayWindowHasOneHome:

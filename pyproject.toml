@@ -19,8 +19,9 @@
 # ``.python-version`` under it, and uv.lock's header copies it, which
 # ``--locked`` refuses to find stale (both measured 2026-11-01, uv 0.13.6).
 # The Dockerfile's two FROM tags name the minor too, held equal to it by
-# tests/test_deploy/test_image_supply_chain.py; the build holds the builder
-# image's own Python to it, as uv there fetches no other interpreter.
+# tests/test_deploy/test_image_supply_chain/test_dockerfile.py; the build
+# holds the builder image's own Python to it, as uv there fetches no other
+# interpreter.
 #
 # Install:  uv sync --locked              (the local venv: runtime + dev)
 # Image:    the Dockerfile installs ``--no-default-groups --group server``.

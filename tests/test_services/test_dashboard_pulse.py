@@ -1049,9 +1049,6 @@ class TestPulseStillDue:
             assert result["still_due"]["current_period"] == Decimal("0.00")
 
 
-# ── Street: period day-span and today's offset, shared basis ────────
-
-
 class TestTheBillsAreThePaychecksAcrossTheSet:
     """The upcoming bills read the owner's cash-flow set (plan step CC-4-3).
 
@@ -1363,6 +1360,9 @@ class TestTheBillsAreLegsReadOffTheParent:
             result = dashboard_service.compute_pulse_section(section)
             assert result["still_due"]["current_period"] == Decimal("0.00")
             assert result["due_soon"] == []
+
+
+# ── Street: period day-span and today's offset, shared basis ────────
 
 
 class TestPulseStreet:
@@ -1893,6 +1893,29 @@ class TestPulseSectionDegraded:
 # ── One clock and one period per render (plan step C2-f2e) ─────────
 
 
+# **``TestPeriodIsDerivedNotStored`` was deleted whole at plan step
+# ``pay_calendar:C4-c``, and it is worth saying what it did rather than
+# leaving a gap.**  Its one case rewrote period 5's stored ``end_date`` to
+# the day before the frozen today and asserted the hero region still
+# rendered -- where the pre-cutover query matched
+# ``start_date <= today <= end_date`` against that column, found no period
+# covering today, and blanked the region to a "No pay period covers today"
+# CTA for an owner mid-paycheck.  It was plan step C2-f2e's grade.
+#
+# C4-c dropped the column, so the disagreement it planted is not merely
+# unreachable, it is SILENT: assigning to an attribute the model no longer
+# maps sets a plain Python attribute, writes no UPDATE, and survives
+# ``expire_all`` -- the *born dead* shape ``docs/plans/lessons.md`` names.
+# The case and its own premise assertion both went on passing while
+# measuring nothing, so it is deleted rather than left green.
+#
+# The class had documented that only ONE of the disagreement's two
+# directions was covered, the other needing hand-edited or legacy rows
+# (ledger row **P35**'s owner).  Neither direction exists now: there is one
+# span, computed on every read.  The hero's period is graded on ordinary
+# schedules by the classes above.
+
+
 class TestOneClockPerRender:
     """Every day-sensitive figure in the region reads the READ PASS's day.
 
@@ -2002,29 +2025,6 @@ class TestOneClockPerRender:
 
             assert fresh["hero"]["is_stale"] is False
             assert stale["hero"]["is_stale"] is True
-
-
-# **``TestPeriodIsDerivedNotStored`` was deleted whole at plan step
-# ``pay_calendar:C4-c``, and it is worth saying what it did rather than
-# leaving a gap.**  Its one case rewrote period 5's stored ``end_date`` to
-# the day before the frozen today and asserted the hero region still
-# rendered -- where the pre-cutover query matched
-# ``start_date <= today <= end_date`` against that column, found no period
-# covering today, and blanked the region to a "No pay period covers today"
-# CTA for an owner mid-paycheck.  It was plan step C2-f2e's grade.
-#
-# C4-c dropped the column, so the disagreement it planted is not merely
-# unreachable, it is SILENT: assigning to an attribute the model no longer
-# maps sets a plain Python attribute, writes no UPDATE, and survives
-# ``expire_all`` -- the *born dead* shape ``docs/plans/lessons.md`` names.
-# The case and its own premise assertion both went on passing while
-# measuring nothing, so it is deleted rather than left green.
-#
-# The class had documented that only ONE of the disagreement's two
-# directions was covered, the other needing hand-edited or legacy rows
-# (ledger row **P35**'s owner).  Neither direction exists now: there is one
-# span, computed on every read.  The hero's period is graded on ordinary
-# schedules by the classes above.
 
 
 # ── Tracks: savings goal trajectory passthrough + debt fraction ─────

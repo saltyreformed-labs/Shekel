@@ -33,8 +33,11 @@ class _EnabledFormControls(FormControls):
     control is not posted, and nor are a disabled select's options.  A disabled
     ``<fieldset>`` or ``<optgroup>`` still fails, since a browser's rule there
     has an exception (a fieldset's first legend) these forms do not need.
-    Here rather than in the shared module, which is over the 1,000-line
-    ceiling (ruling R-IR).
+    Written here while the shared reader lived in ``tests/_test_helpers.py``,
+    then over the 1,000-line ceiling (ruling R-IR), and left here when task
+    plan#3125 moved the reader to ``tests/_form_controls.py``.  One test in
+    this package is :func:`_enabled_form_controls`'s only caller, so the
+    subclass lives beside it.
     """
 
     def handle_starttag(self, tag, attrs):

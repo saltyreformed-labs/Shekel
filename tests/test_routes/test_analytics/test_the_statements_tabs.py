@@ -218,12 +218,15 @@ class TestTheWindowIsAnsweredByTheDerivation:
     chosen period's dates for the heading, that last one issued again inside
     ``ledger_report_service``.
 
-    **Two of the three cases below FAIL on the merge base**, which is what
-    makes them a regression gate rather than a pin: the retired reader read
-    the STORED span and the PROCESS clock, and each case moves exactly one of
-    those away from what the paydays say.  The third pins that the heading and
-    the ``<option>`` the reader picked it from cannot drift apart, which is
-    ledger row **P47**'s duplicate half made a predicate.
+    **Two of the three cases plan step C2-f3a wrote in this class FAILED on its
+    merge base**, which made them a regression gate rather than a pin: the
+    retired reader read the STORED span and the PROCESS clock, and each of the
+    two moved exactly one of those away from what the paydays say.  Plan step
+    ``pay_calendar:C4-c`` dropped the stored end date and deleted its case (the
+    comment below says why), so one gate remains, the case that moves the
+    process clock.  The other case below pins that the heading and the
+    ``<option>`` the reader picked it from cannot drift apart, which is ledger
+    row **P47**'s duplicate half made a predicate.
 
     ``seed_periods`` is ten biweekly periods from 2026-01-02, and this package's
     ``conftest.py`` freezes today to 2026-03-20 -- inside period 5, which runs 2026-03-13

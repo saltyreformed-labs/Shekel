@@ -11,7 +11,8 @@
 # are the one home of what the image pins, so no comment restates it: an
 # update moves them with nothing else to re-measure (ruling plan#2443),
 # and both move in one change, the builder and the runtime in lockstep
-# (tests/test_deploy/test_image_supply_chain.py holds them to one digest).
+# (tests/test_deploy/test_image_supply_chain/test_dockerfile.py holds them
+# to one digest).
 #
 # OPENSSL DEFENSE-IN-DEPTH
 # ------------------------

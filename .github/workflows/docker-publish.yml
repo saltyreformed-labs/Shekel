@@ -23,13 +23,14 @@
 # hour, when GitHub may drop queued scheduled runs.
 #
 # One build at a time (``concurrency`` below): a rebuild and a release
-# build never run together, and GitHub keeps one run waiting, so the run
-# made last finishes last.  The build's second step refuses a run whose
-# commit is no longer main's tip, so "latest" never names an older commit
-# than main's, whatever order runs are made in (a re-run of an older run
-# among them).  A failed scheduled run opens the update alert's issue
-# mentioning the developer (the ``alert`` job); a release watches its own
-# build.
+# build never run together, and no run cancels another, each waiting its
+# turn.  GitHub does not guarantee the order they wait in, so the build's
+# second step is what holds "latest" to main: it refuses a run whose commit
+# is no longer main's tip when its turn comes, whatever order runs are made
+# in (a re-run of an older run among them), so "latest" only ever moves
+# forward along main.  A scheduled run whose build failed opens the update
+# alert's issue mentioning the developer (the ``alert`` job); a release
+# watches its own build.
 #
 # Audit Commit C-36 (findings F-060, F-155):
 #   - Image is digest-pinned downstream by deploy/docker-compose.prod.yml
@@ -52,14 +53,18 @@ on:
   schedule:
     - cron: "23 8 * * 1"
 
-# One run at a time, each waiting for the one before rather than cancelling
-# it (the header's THE WEEKLY REBUILD).  GitHub keeps one run waiting, so a
-# third cancels the one waiting, which then builds nothing and opens no
-# alert: the newer run builds main's newer tip.  One group, as every run is
-# of main and pushes "latest".
+# One run at a time, and none cancelled (the header's THE WEEKLY REBUILD).
+# ``queue: max`` lets up to 100 runs wait.  GitHub's default keeps one
+# waiting and cancels it for the next, so a re-run of an older run could
+# cancel the waiting build of main's newest commit and then refuse at the
+# tip step, leaving nothing built and no alert.  The waiting runs go first
+# in, first out, by when each began to wait, an order GitHub does not
+# guarantee; the build's tip step holds a run that comes out of it.  One
+# group, as every run is of main and pushes "latest".
 concurrency:
   group: release-image
   cancel-in-progress: false
+  queue: max
 
 env:
   REGISTRY: ghcr.io
@@ -174,12 +179,13 @@ jobs:
       # ``shekel-deploy`` deploys when handed no digest, so it must never
       # name an older commit than main's, and every run pushes it: a push to
       # main and the schedule (the header's Triggers).  The concurrency group
-      # runs builds one at a time, the one made last finishing last; this
-      # step holds a run made out of that order, a re-run of an older run
-      # among them.  A tip that cannot be read refuses: ``set -e`` fails the
-      # assignment, and an empty answer is no match.
-      # tools/ci/test_release_image_workflow.py RUNS this text with a
-      # stand-in ``git``.
+      # runs builds one at a time and cancels none, in an order GitHub does
+      # not guarantee; this step holds a run that is no longer of main's tip
+      # when its turn comes, a re-run of an older run among them, whose
+      # commit's newer successor has a run of its own.  A tip that cannot be
+      # read refuses: ``set -e`` fails the assignment, and an empty answer is
+      # no match.  tools/ci/test_release_image_workflow.py RUNS this text
+      # with a stand-in ``git``.
       - name: Is this still main's newest commit?
         shell: bash
         env:
@@ -300,21 +306,30 @@ jobs:
               echo "\`\`\`"
           } >> "$GITHUB_STEP_SUMMARY"
 
-  # A failed weekly rebuild, told to the developer (ruling plan#3724): the
-  # update alert's issue (tools/update/alert.py, which updates.yml's alert
-  # opens too), mentioning him, linking the run and naming each job's result:
-  # the issue plan#3552 has ``quill sync`` file as a card (rulings plan#3619,
-  # plan#3622).  Only a scheduled run's: a release watches its own build.  It installs nothing,
-  # so an install's failure cannot stop it: main's own code on the runner's
-  # Python with the standard library alone, the issue sent by the runner's
-  # gh.  It publishes nothing and holds only the workflow's own token,
-  # widened to issues for this job alone, so it needs no tax-law check of
-  # its own.  ``failure()`` is true only when a job it needs failed: a build
-  # cut off at GitHub's own 360 minutes is cancelled and opens none, as no
-  # job here carries a time limit yet (plan#2361's to rule).
+  # A failed weekly rebuild, told to the developer (rulings plan#3724,
+  # plan#3742): the update alert's issue (tools/update/alert.py, which
+  # updates.yml's alert opens too), mentioning him, linking the run and
+  # naming each job's result: the issue plan#3552 has ``quill sync`` file as
+  # a card (rulings plan#3619, plan#3622).  Only a scheduled run's, as a
+  # release watches its own build, and only when the build failed: the
+  # tax-law job's refusal skips the build and opens none, as the in-app
+  # banner, tax-law.yml's weekly email and ci.yml's refusal of every pull
+  # request report a missing tax law already (ruling plan#3742).  So the
+  # tax-law job failing on an outside fault, its install's, opens none
+  # either.  Two failed builds open one that is no fault in the image: a
+  # scheduled run overtaken by a push to main while it waited, which its
+  # tip step refuses, and a re-run by hand after December 1 that the
+  # build's own tax-law step refuses.  A build cancelled, by hand or at
+  # GitHub's own 360 minutes (the build carries no time limit of its own,
+  # plan#2361's to rule), opens none: ``failure()`` is true only when a job
+  # it needs failed.  It installs nothing, so an install's failure cannot
+  # stop it: main's own code on the runner's Python with the standard
+  # library alone, the issue sent by the runner's gh.  It publishes nothing
+  # and holds only the workflow's own token, widened to issues for this job
+  # alone, so it needs no tax-law check of its own.
   alert:
     needs: [tax-law, build-and-push]
-    if: failure() && github.event_name == 'schedule'
+    if: failure() && github.event_name == 'schedule' && needs.build-and-push.result == 'failure'
     runs-on: ubuntu-26.04
     timeout-minutes: 5
     permissions:

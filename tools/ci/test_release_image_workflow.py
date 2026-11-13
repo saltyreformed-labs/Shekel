@@ -39,8 +39,9 @@ class TestTheWeeklyRebuild:
         """A push to ``main``, and Mondays at 08:23 UTC, off the top of the hour when GitHub may
         drop queued scheduled runs; no dispatch, which would build a branch's copy of this file,
         and no git tag (ruling plan#3741), whose build ``shekel-deploy`` refuses to deploy, so
-        no tag pattern either.  One run at a time, each waiting for the one before and never
-        cancelling it, in one group, as every run is of ``main`` and pushes ``latest``."""
+        no tag pattern either.  One run at a time, in one group, as every run is of ``main``
+        and pushes ``latest``, and none cancelled: none in progress, and ``queue: max`` keeps
+        every run waiting where GitHub's default keeps one and cancels it for the next."""
         workflow = _workflow()
         # PyYAML reads the bare key ``on`` as the boolean True (YAML 1.1).
         on = workflow.get(True, workflow.get("on"))
@@ -50,7 +51,7 @@ class TestTheWeeklyRebuild:
         assert meta["with"]["tags"].split() == [
             "type=raw,value=latest,enable={{is_default_branch}}", "type=sha"]
         assert workflow["concurrency"] == {"group": "release-image",
-                                           "cancel-in-progress": False}
+                                           "cancel-in-progress": False, "queue": "max"}
 
     def test_the_tip_check_runs_second_before_any_checkout_or_login(self):
         """Straight after the tax-law gate and before the checkout, with exactly its keys: no
@@ -95,8 +96,9 @@ class TestTheWeeklyRebuild:
             assert calls.read_text() == f"ls-remote --exit-code {remote} refs/heads/main\n"
 
     def test_a_failed_scheduled_run_opens_the_update_alert_s_issue(self):
-        """The alert runs when a scheduled run's check or build failed, and on no other run,
-        a release watching its own build; it holds no secret or variable and only the
+        """The alert runs when a scheduled run's build failed, and on no other run: never for
+        the tax-law job's refusal, which skips the build (ruling plan#3742), and never for a
+        release, which watches its own build.  It holds no secret or variable and only the
         workflow's token, widened to issues, so it can publish nothing; in two steps, the
         checkout and the alert, so it installs nothing and runs on the standard library alone
         (``-S``; plan#2481), handed each job's result (ruling plan#3724)."""
@@ -104,7 +106,8 @@ class TestTheWeeklyRebuild:
         assert set(alert) == {"needs", "if", "runs-on", "timeout-minutes", "permissions",
                               "steps"}
         assert alert["needs"] == ["tax-law", "build-and-push"]
-        assert alert["if"] == "failure() && github.event_name == 'schedule'"
+        assert alert["if"] == ("failure() && github.event_name == 'schedule'"
+                               " && needs.build-and-push.result == 'failure'")
         assert alert["permissions"] == {"contents": "read", "issues": "write"}
         text = yaml.safe_dump(alert)
         assert "secrets." not in text and "vars." not in text

@@ -184,7 +184,7 @@ def _side_leg(transfer_id, account_id):
     ``balance:X-bi-6-4d-2`` (ruling **R-BAL167** class 4): a side's payment
     record hangs off the TRANSFER and nothing keeps a twin's status or figure,
     so a settled side is the transfer's status and the side's record, where
-    these cases read the twin row until then.  ``test_transfer_settle_freeze``
+    these cases read the twin row until then.  ``test_transfer_settle_freeze/``
     imports it.  The leg reads its record off the transfer's list since ruling
     **plan#1984** and can no longer be handed one, so the independent SQL over
     the side links (``transfer_side_record``, never ``transfer_legs``' own

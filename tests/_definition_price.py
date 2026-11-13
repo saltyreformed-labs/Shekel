@@ -7,8 +7,8 @@ that read the copy reads the series here instead, with its figure kept
 (:func:`newest_price`), and a payload standing in for an edit form posts the
 Amount box as the form renders it (:func:`amount_box_payload`).
 
-Its own module rather than ``tests/_test_helpers.py``: that module is over the
-1,000-line ceiling, so nothing new goes into it (ruling R-IR).
+Its own module rather than ``tests/_test_helpers.py``: that module was over the
+1,000-line ceiling, so nothing new went into it (ruling R-IR).
 """
 from decimal import Decimal
 

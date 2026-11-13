@@ -47,7 +47,7 @@ class TestFreshLoginRequiredMisuse:
 
         # Just verify the wrap succeeded and the wrapper is callable;
         # behavior is exercised in the integration tests in
-        # ``tests/test_adversarial/test_step_up.py``.
+        # ``tests/test_adversarial/test_step_up/test_fresh_login_and_reauth.py``.
         assert callable(view)
 
     def test_explicit_max_age_works(self):
@@ -172,8 +172,8 @@ class TestFreshLoginRequiredDecorator:
     def test_htmx_request_returns_204_with_hx_redirect(self):
         """HTMX requests get ``204 + HX-Redirect``, not 302.
 
-        See the integration test in ``test_step_up.py`` for the
-        rationale: a 302 would render /reauth's HTML into whatever
+        See the integration test in ``test_step_up/test_fresh_login_and_reauth.py``
+        for the rationale: a 302 would render /reauth's HTML into whatever
         fragment slot the original request targeted.
         """
         app = self._make_test_app()

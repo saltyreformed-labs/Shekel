@@ -11,8 +11,8 @@ point of the module existing: these three rules were private inside a
 database-heavy service and could only be reached through
 ``get_month_detail``, so the boundary that matters -- a NEGATIVE amount on an
 expense row -- had no cheap case.  ``TestARefundedDayOnTheRealCalendar`` in
-``test_calendar_service`` drives the same rules through the producer chain, so
-the chain and the arithmetic are graded separately.
+``test_calendar_service/test_daily_view.py`` drives the same rules through the
+producer chain, so the chain and the arithmetic are graded separately.
 """
 
 from datetime import date

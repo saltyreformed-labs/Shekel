@@ -65,7 +65,7 @@ from tests._test_helpers import (
     make_expense_template,
     owner_lock_key,
 )
-from tests.conftest import SEED_USER_EMAIL, SEED_USER_PASSWORD
+from tests._seed_owner_fixtures import SEED_USER_EMAIL, SEED_USER_PASSWORD
 
 #: How long a thread is given to reach the lock and wait on it, and to finish
 #: once the holder lets go.  Generous: the arm polls and moves on the moment

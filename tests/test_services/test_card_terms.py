@@ -212,7 +212,8 @@ class TestTheReadAndTheWrite:
                 assert getattr(versions[1], column) == value, column
             # MOVED, not "later": this module freezes PostgreSQL's ``now()`` for
             # a query (``set_terms`` stamps with it) while a column DEFAULT reads
-            # the real clock (``tests/conftest.py``'s clock note), so the two
+            # the real clock (``_calendar_sweep``'s clock note,
+            # ``tests/_app_fixtures.py``), so the two
             # stamps are on different clocks here.  What is graded is that the
             # ``ON CONFLICT`` arm stamps at all -- it runs no ORM ``onupdate``.
             assert versions[1].updated_at != march_updated

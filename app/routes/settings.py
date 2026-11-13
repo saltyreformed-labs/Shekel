@@ -7,12 +7,15 @@ Settings dashboard consolidating all configuration sections.
 
 import logging
 
-from flask import Blueprint, abort, flash, redirect, render_template, request, url_for
+from flask import (
+    Blueprint, Response, abort, flash, redirect, render_template, request, url_for,
+)
 from flask_login import current_user
 
 from app import ref_cache, tax_law
 from app.enums import RoleEnum
 from app.exceptions import RequiredRecordMissing
+from app.routes._trusted_devices import forget_device_or_404, trusted_device_rows
 from app.utils.auth_helpers import fresh_login_required, require_owner
 from app.utils.digit_strings import parse_row_id
 
@@ -25,30 +28,31 @@ from app.schemas.validation import (
     rhythm_to_wire,
 )
 from app.models.category import Category
-from app.models.known_device import TRUST_LIFETIME
 from app.models.ref import AccountType, AccountTypeCategory
-from app.models.user import MfaConfig, User, UserSettings
+from app.models.user import User, UserSettings
 from app.services import (
     account_resolver,
     account_service,
-    known_device_service,
     pay_period_gates,
     pay_period_locks,
     pay_schedule_service,
 )
+from app.services import mfa_service
 from app.services.auth_service import hash_password
 from app.services.pay_calendar import calendar_at_schedule
-from app.utils.browser_label import browser_label
 from app.utils.dates import display_today
-from app.utils.device_cookie import device_token
+from app.utils.log_events import AUTH, EVT_MFA_RESET, log_event
 
 logger = logging.getLogger(__name__)
 
 settings_bp = Blueprint("settings", __name__)
 
+# No "security": the Security page is every user's own and lives outside
+# Settings (``auth.security``, ruling plan#3435); ``show`` redirects the old
+# section link there.
 _VALID_SECTIONS = [
     "general", "categories", "pay-periods", "tax", "account-types",
-    "companions", "security",
+    "companions",
 ]
 
 
@@ -125,6 +129,11 @@ def show():
     # retirement page.
     if section == "retirement":
         return redirect(url_for("retirement.dashboard"))
+    # The Security section became a page of its own for every user, out of
+    # Settings (ruling plan#3435); old bookmarks and links land there, as the
+    # retired Retirement section's land on its page above.
+    if section == "security":
+        return redirect(url_for("auth.security"))
     if section not in _VALID_SECTIONS:
         section = "general"
     return render_settings_dashboard(section)
@@ -148,7 +157,6 @@ def _section_context(section):
         "tax": _load_tax_context,
         "account-types": _load_account_types_context,
         "companions": lambda: _load_companions_context(request.args.get("edit")),
-        "security": _load_security_context,
         "pay-periods": lambda: _load_pay_periods_context(current_user.id),
     }
     loader = loaders.get(section)
@@ -383,13 +391,9 @@ def _empty_section_context():
         "archived_categories": [],
         "group_names": [],
         "icon_choices": [],
-        "mfa_enabled": False,
-        # Not a default but the one value: how long a trusted device stays
-        # trusted, which the Security section states in its sentences.
-        "trust_days": TRUST_LIFETIME.days,
-        "trusted_devices": [],
         "active_companions": [],
         "inactive_companions": [],
+        "companion_devices": {},
         "edit_companion_id": None,
         "form_values": {},
         "pp_periods": [],
@@ -469,48 +473,10 @@ def _load_account_types_context():
     }
 
 
-def _load_security_context():
-    """Load the security section: MFA's state and the live trusted devices.
-
-    Each trusted device (plan#2173, ruling plan#2406) is a row the template
-    only displays: the browser's name read from its stored User-Agent, the
-    two instants it is dated by (stored UTC; the template's
-    ``local_datetime`` filter shows each as a display-timezone day), and
-    whether it is the browser this page is rendered on, judged against the
-    list already read rather than by a second lookup.
-
-    Returns:
-        ``mfa_enabled``, and ``trusted_devices``: one dict per live device,
-        most recently trusted first, with ``id``, ``browser``, ``trusted_at``,
-        ``expires_at`` and ``is_this_browser``.
-    """
-    mfa_config = (
-        db.session.query(MfaConfig)
-        .filter_by(user_id=current_user.id)
-        .first()
-    )
-    devices = known_device_service.list_trusted_devices(current_user.id)
-    this_browser = known_device_service.device_named_by(
-        devices, device_token(current_user.id),
-    )
-    return {
-        "mfa_enabled": mfa_config.is_enabled if mfa_config else False,
-        "trusted_devices": [
-            {
-                "id": device.id,
-                "browser": browser_label(device.user_agent),
-                "trusted_at": device.trusted_at,
-                "expires_at": device.trust_expires_at,
-                "is_this_browser": device is this_browser,
-            }
-            for device in devices
-        ],
-    }
-
-
 # --- Companion account management ----------------------------------------
 #
-# Companions are created, edited, deactivated, and reactivated here.
+# Companions are created, edited, deactivated, and reactivated here, their
+# trusted devices forgotten and their two-factor reset.
 # Every route below applies two guards on top of the application's login
 # gate and the @require_owner decorator:
 #   1. Target user must have role_id == COMPANION.  This rejects any
@@ -549,7 +515,11 @@ def _load_companions_context(raw_edit_id):
 
     Returns:
         A dict with keys ``active_companions``, ``inactive_companions``,
-        ``edit_companion_id``, and ``form_values``.  The form_values
+        ``companion_devices``, ``edit_companion_id``, and ``form_values``.
+        ``companion_devices`` maps each active companion's id to her live
+        trusted devices, built by the one builder the Security page lists a
+        user's own with (ruling plan#3439); an inactive companion has none,
+        since deactivating her ended every trust.  The form_values
         dict pre-populates the edit form with the matching companion's
         email and display name when a valid ``edit`` id is supplied.
     """
@@ -585,6 +555,7 @@ def _load_companions_context(raw_edit_id):
     return {
         "active_companions": active,
         "inactive_companions": inactive,
+        "companion_devices": {c.id: trusted_device_rows(c.id) for c in active},
         "edit_companion_id": edit_id,
         "form_values": values,
     }
@@ -609,6 +580,7 @@ def _render_companions_section(errors=None, form_values=None,
         "errors": errors or {},
         "active_companions": ctx["active_companions"],
         "inactive_companions": ctx["inactive_companions"],
+        "companion_devices": ctx["companion_devices"],
         "edit_companion_id": edit_companion_id,
         "form_values": form_values or {},
     })
@@ -795,6 +767,95 @@ def companion_reactivate(companion_id):
 
     flash(
         f"Companion account '{companion.display_name}' reactivated.",
+        "success",
+    )
+    return redirect(url_for("settings.show", section="companions"))
+
+
+@settings_bp.route(
+    "/settings/companions/<int:companion_id>/devices/<int:device_id>/forget",
+    methods=["POST"],
+)
+@require_owner
+def companion_forget_device(companion_id: int, device_id: int) -> Response:
+    """Forget one of a companion's trusted devices (ruling plan#3439).
+
+    The owner's Forget beside each device Settings > Companions lists for her:
+    the act a user's own Forget on their Security page runs
+    (:func:`~app.routes._trusted_devices.forget_device_or_404`), so only the
+    trust goes and her browser stays known, as when she forgets it herself.
+    Her next sign-in on it asks for her code again.
+
+    Another owner's companion, the owner's own id and any user who is not a
+    companion are refused by :func:`_load_companion_or_404` before a device is
+    looked up; a device of another user and an id no device holds are refused
+    by the act.  All are one 404, the security response rule.
+
+    No step-up re-auth, unlike the routes above that create, change or lock
+    out a companion's account, and for the reason the Security page's Forget
+    asks none: forgetting a device takes a privilege away and grants none.
+    """
+    companion = _load_companion_or_404(companion_id)
+    forget_device_or_404(companion.id, device_id)
+    flash(
+        f"Device forgotten. Signing in on it as "
+        f"{companion.display_name or companion.email} will ask for the "
+        f"two-factor code again.",
+        "success",
+    )
+    return redirect(url_for("settings.show", section="companions"))
+
+
+@settings_bp.route(
+    "/settings/companions/<int:companion_id>/reset-two-factor",
+    methods=["POST"],
+)
+@require_owner
+@fresh_login_required()
+def companion_reset_two_factor(companion_id: int) -> Response:
+    """Reset a companion's two-factor, for a lost or replaced phone (ruling plan#3441).
+
+    The one reset act ``scripts/reset_mfa.py`` runs too
+    (:func:`~app.services.mfa_service.reset_two_factor`): her secret and
+    backup codes are cleared, every session of hers ends and every trusted
+    device of hers is forgotten.  Every companion must have two-factor
+    (ruling plan#3434), so at her next sign-in the login gate holds her at
+    setup until she enrols her authenticator again.
+
+    A re-confirmed password first, as the other doors that change a
+    companion's account ask.  **A companion whose two-factor is not on is
+    told there is nothing to reset, and nothing is written** (plan#3515):
+    :attr:`~app.models.user.User.has_two_factor`, the button's own
+    condition, so that is a page left open across a reset or a form posted
+    by hand.  It includes a companion midway through setup, which every
+    companion held there is after her first page: her row holds the pending
+    key she may just have scanned, which
+    :func:`~app.services.mfa_service.reset_two_factor` counts as material,
+    and resetting her would end her sessions and kill that key.  Leftover
+    material on a row that is off is ``scripts/reset_mfa.py``'s to clear.
+
+    Args:
+        companion_id: The ``auth.users.id`` of the owner's companion; another
+            owner's companion or a user who is not a companion is a 404
+            (:func:`_load_companion_or_404`).
+    """
+    companion = _load_companion_or_404(companion_id)
+    name = companion.display_name or companion.email
+    if not companion.has_two_factor:
+        flash(f"{name} has no two-factor authentication to reset.", "info")
+        return redirect(url_for("settings.show", section="companions"))
+    # Her row is on, so the act always clears it: its False (nothing to
+    # clear) cannot come back here.
+    mfa_service.reset_two_factor(companion)
+    db.session.commit()
+    log_event(
+        logger, logging.WARNING, EVT_MFA_RESET, AUTH,
+        "MFA reset by the owner", user_id=current_user.id,
+        reset_user_id=companion.id,
+    )
+    flash(
+        f"Two-factor authentication reset for {name}. They are signed out "
+        f"everywhere and will set it up again the next time they use Shekel.",
         "success",
     )
     return redirect(url_for("settings.show", section="companions"))

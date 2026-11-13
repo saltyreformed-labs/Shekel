@@ -15,7 +15,7 @@ Called from two places:
   1. ``app.create_app()`` once per app construction, after
      ``ref_cache.init(...)`` succeeds, so templates rendered by a
      normal request can read the constants without a database hit.
-  2. ``tests/conftest.py::_refresh_ref_cache_and_jinja_globals``
+  2. ``tests/_seeded_start_states.py::_refresh_ref_cache_and_jinja_globals``
      once per test, after the per-test drop+reclone has truncated
      ``ref.account_types`` (Phase 3b / C-28 / F-044) and the seed
      has been re-run with fresh sequence IDs.  Without this re-seat

@@ -22,8 +22,9 @@ programming bugs).
 The retirement and investment routes use ``except InvalidOperation``
 to narrow a ``Decimal(str) / Decimal("100")`` pre-validation step;
 those handlers are covered by the existing
-``test_update_settings_invalid_swr`` family in ``test_retirement.py``
-plus a new test for ``investment._convert_percentage_inputs``.
+``test_update_settings_invalid_swr`` family in
+``test_retirement/test_negative_paths_and_validation.py`` plus a new
+test for ``investment._convert_percentage_inputs``.
 
 Cross-references: F-145 (Low), C-46.
 """

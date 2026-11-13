@@ -104,7 +104,7 @@ for a fence, the kind is this record's reading.
 | T-98 | `tests/test_routes/test_recurrence_picker.py:415` (its property half) | a script reading a property the server stopped sending | a Python and JS contract |
 | T-204 | `tests/test_deploy/test_proxy_trust_and_headers.py:310` and five more sites | trusted-proxy ranges disagreeing across nginx, compose and gunicorn | one network fact in three formats |
 | T-222 | `tests/test_routes/test_url_id_converter.py:53` | an integer route rule that escaped the row-id converter | it grades that the converter reached every rule |
-| T-223 | `tests/test_routes/test_no_baseline_policy.py:787`, `:944` | a page that fails for an owner with no baseline scenario | a state the rulings keep legal (`recurrence:R-R30`) |
+| T-223 | `tests/test_routes/test_no_baseline_policy/test_the_sweep.py:31`, `:189` | a page that fails for an owner with no baseline scenario | a state the rulings keep legal (`recurrence:R-R30`) |
 
 ### Regression locks of a removed spelling that stays writable (3)
 

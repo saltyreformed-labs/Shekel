@@ -3,7 +3,7 @@
 pytest rewrites the asserts of a test module (``python_files = test_*.py``), of a
 ``conftest.py``, of a module named on the command line and of a module registered with
 ``pytest.register_assert_rewrite``.  The repository-root ``conftest.py`` registers the
-``tests`` package, so a helper module under it (``tests/_test_helpers.py``, a split
+``tests`` package, so a helper module under it (``tests/_test_helpers/_rows.py``, a split
 package's ``_helpers.py``) is rewritten too: a failing assert there reports the values it
 compared, and a passing one reaches pytest's ``pytest_assertion_pass`` hook, which
 ``tools/testrecord`` records to prove a split.  Without the registration a helper's failing

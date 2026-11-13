@@ -92,7 +92,7 @@
 #     are gone entirely -- a private cluster holds exactly one template and
 #     one run's worker databases, so there is nothing to rename them away
 #     from.  Their single spellings now live as constants in
-#     ``tests/conftest.py``, ``scripts/build_test_template.py`` and
+#     ``tests/_worker_database.py``, ``scripts/build_test_template.py`` and
 #     ``scripts/build_test_db_image.py``, which must agree.
 #     LC_ALL is EXPORTED too, over any value the caller had: ``create_app``
 #     refuses to start under anything but production's locale (ruling
@@ -470,7 +470,7 @@ unset _start_out _start_status
 
 # The URLs are the one home's (``private_cluster.py url``): the image's user
 # and password, the database, and the socket directory as libpq's host.
-# tests/conftest.py rewrites only the PATH of these URLs to reach a
+# tests/_worker_database.py rewrites only the PATH of these URLs to reach a
 # per-worker database, and urlparse/urlunparse preserve the query, so the
 # socket survives that rewrite.
 TEST_ADMIN_DATABASE_URL="$("$_PYTHON" "${_REPO_ROOT}/scripts/private_cluster.py" \

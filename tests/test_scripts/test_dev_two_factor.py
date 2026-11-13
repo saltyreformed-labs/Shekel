@@ -21,7 +21,7 @@ from app.config import DevConfig
 from app.extensions import db
 from app.models.user import MfaConfig
 from app.services import mfa_service
-from tests.conftest import SEED_USER_EMAIL, SEED_USER_PASSWORD
+from tests._seed_owner_fixtures import SEED_USER_EMAIL, SEED_USER_PASSWORD
 from tools import dev_two_factor
 
 #: The dev key the tests write, made the way ``.env``'s is made, so no secret

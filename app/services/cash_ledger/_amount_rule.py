@@ -334,8 +334,9 @@ def is_loan_payment_definition(template) -> bool:
 # to :class:`~app.enums.AmountSourceEnum` -- ``credit_card:CC4c``'s finance
 # charge is the one already known to need one (finding **N-264**) -- raises at
 # this lookup instead of silently taking whichever branch an ``if`` chain happened
-# to end on.  ``tests/test_services/test_amount_source.py`` grades the table
-# against the enum, so the completeness is a predicate rather than a comment.
+# to end on.  ``tests/test_services/test_amount_source/test_which_rule_prices_a_row.py``
+# grades the table against the enum, so the completeness is a predicate rather
+# than a comment.
 _RELATION_RULES = {
     AmountSourceEnum.TEMPLATE: _rule_within_definition,
 }

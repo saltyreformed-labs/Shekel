@@ -168,8 +168,8 @@ def sum_projected(transactions, basis: AmountBasis):
     pass's basis was built and resolved a derive-mode loan-payment shadow's
     P&I against it (finding **N-40**).  Ruling **R-IJ** put that P&I on the
     installment's own due date, which left the package with no ``date.today()``
-    call at all (a control asserts it:
-    ``test_amount_source.TestTheAmountModelReadsNoClock``).
+    call at all (a control asserts it: ``test_amount_source
+    .test_what_the_rules_do_not_read.TestTheAmountModelReadsNoClock``).
 
     Args:
         transactions: The plan items for a single pay period or landing day:

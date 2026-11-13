@@ -22,8 +22,9 @@ Each case builds the state through the app's own doors -- the loan door's
 start sync, the generate pass, the soft-delete door, the transfer create door
 -- and reads the plan back, so a fixture cannot describe a state the app
 cannot reach.  The companion ``test_loan_plan_assembly.py`` pins the
-contract-only arm and the PLANNED tier; ``test_amount_source.py`` pins the
-price a row and its estimate share.
+contract-only arm and the PLANNED tier;
+``test_amount_source/test_what_each_rule_answers.py`` pins the price a row and
+its estimate share.
 """
 
 from datetime import date, timedelta

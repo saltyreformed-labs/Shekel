@@ -705,7 +705,8 @@ class BalanceContext(RecurrenceMemosMixin):  # pylint: disable=too-many-instance
         DOWN instead: a loan's contractual terms resolve on the installment
         they govern, so the derivation takes no date at all and ``cash_ledger``
         makes no clock call anywhere (``test_amount_source
-        .TestTheAmountModelReadsNoClock``).  X-i2 keeps every other loader.
+        .test_what_the_rules_do_not_read.TestTheAmountModelReadsNoClock``).
+        X-i2 keeps every other loader.
 
         **The derivation is imported outright**, so like :meth:`calendar` beside
         it this memo is filled here rather than by the seam: ``cash_ledger`` is

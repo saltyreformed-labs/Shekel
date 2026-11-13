@@ -70,7 +70,8 @@ def _state_price(template, figure):
     generates.  Dated at the epoch the suite's periods sit after, so every
     generated row resolves to it whatever its own due date -- these cases grade
     a MODE, not the series' time dimension, which
-    ``test_amount_source.TestTheTransferRule`` already owns.
+    ``test_amount_source.test_what_each_rule_answers.TestTheTransferRule``
+    already owns.
 
     Args:
         template: The TransferTemplate to price.

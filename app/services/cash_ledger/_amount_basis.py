@@ -174,7 +174,8 @@ def amount_basis(
     ``loan_pricing(scenario_id, date.today())`` and resolved every loan-payment
     shadow's P&I against that one date -- finding **N-40**, and the last
     ``date.today()`` call anywhere in this package (a control asserts the
-    absence: ``test_amount_source.TestTheAmountModelReadsNoClock``).  Ruling
+    absence: ``test_amount_source.test_what_the_rules_do_not_read
+    .TestTheAmountModelReadsNoClock``).  Ruling
     **R-IJ** closed it STRUCTURALLY rather than by threading a different date: a
     loan's contractual terms resolve on the installment they govern, so
     :class:`._loan_pricing.LoanPricing` has no date to take.  Plan step

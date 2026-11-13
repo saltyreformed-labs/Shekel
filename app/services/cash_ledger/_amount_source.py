@@ -765,8 +765,9 @@ def _loan_payment_cash(xfer, basis: AmountBasis) -> Decimal:
     sum already resolved on the payment's own due date.  Ruling **R-IJ** put
     both on the installment (as ruling D5 had put the escrow), so the
     derivation takes no date and the whole package makes no clock call --
-    an AST census over all thirteen modules, asserted by
-    ``test_amount_source.TestTheAmountModelReadsNoClock``.
+    an AST census over every module in it, asserted by
+    ``test_amount_source.test_what_the_rules_do_not_read
+    .TestTheAmountModelReadsNoClock``.
     Dormant on production (``budget.loan_payment_settings`` is empty), so this
     rule prices ``$0.00`` there and is graded only on a seeded loan.
 
@@ -801,7 +802,8 @@ def _loan_payment_cash(xfer, basis: AmountBasis) -> Decimal:
 # rather than a chain of ``if``s so that adding a member to :class:`AmountRule`
 # without an answer for it raises at the lookup instead of falling through to
 # whichever branch happens to be last -- which is how a three-rule dispatch
-# silently becomes a two-rule one.  ``tests/test_services/test_amount_source.py``
+# silently becomes a two-rule one.
+# ``tests/test_services/test_amount_source/test_which_rule_prices_a_row.py``
 # grades the table against the enum, so the completeness is a predicate rather
 # than a comment.
 _RULE_ANSWERS = {
@@ -813,7 +815,8 @@ _RULE_ANSWERS = {
 # The same table for the OTHER row table, and the two are what make the four
 # rules total across both.  A transfer takes rule 1, rule 3 or rule 4; a
 # transaction takes any but rule 4, which stopped being a shadow rule at plan
-# step X-au-f-2 (ruling **R-BAL10**).  ``tests/test_services/test_amount_source.py``
+# step X-au-f-2 (ruling **R-BAL10**).
+# ``tests/test_services/test_amount_source/test_which_rule_prices_a_row.py``
 # grades the UNION of the two against the enum -- so a rule with an answer in
 # neither table is caught -- and each table's own key set besides, so a member
 # added to :class:`AmountRule` has to arrive with a decision about BOTH rather

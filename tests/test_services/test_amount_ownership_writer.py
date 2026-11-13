@@ -4,7 +4,7 @@ Plan step **X-au-g-2c-2**.  ``app.services.amount_ownership`` is the write half
 of ruling **R-FI**: a row either STATES ITS OWN figure or DECLARES the relation
 that prices it, and the two columns that say which move together or not at all.
 :mod:`app.services.cash_ledger._amount_source` is the read half, graded in
-``tests/test_services/test_amount_source.py``; the schema's own refusals are
+``tests/test_services/test_amount_source/``; the schema's own refusals are
 graded in ``tests/test_models/test_amount_ownership/test_the_constraints.py``.
 
 **What is asserted here is that the SEAM cannot express the half-write**, not

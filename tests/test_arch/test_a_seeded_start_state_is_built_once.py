@@ -26,7 +26,6 @@ the control cannot pass by scheduling luck.
 
 from decimal import Decimal
 
-import psycopg
 import pytest
 
 from sqlalchemy import text
@@ -95,30 +94,6 @@ register_seeded_state("arch_probe_2", _build_arch_second_world)
 #: The marker row both isolation arms write.  One name, because the point is
 #: that each arm finds the table WITHOUT it.
 _ISOLATION_MARKER = "x-be-2 isolation marker"
-
-
-def _database_exists(name):
-    """Whether *name* is a database on the test cluster right now.
-
-    Asked through a fresh admin connection rather than the app's engine: the
-    subject is the catalog, not this session's database.
-
-    Args:
-        name: The database name to look for.
-
-    Returns:
-        ``True`` when it exists.
-    """
-    conn = psycopg.connect(worker_database._WORKER_ADMIN_URL)
-    try:
-        conn.autocommit = True
-        with conn.cursor() as cur:
-            cur.execute(
-                "SELECT 1 FROM pg_database WHERE datname = %s", (name,),
-            )
-            return cur.fetchone() is not None
-    finally:
-        conn.close()
 
 
 def _write_isolation_marker(db, user_id):
@@ -459,7 +434,7 @@ class TestASnapshotDoesNotOutliveItsSession:
         worker_database._clone_worker_database(
             throwaway, worker_database._WORKER_ADMIN_URL,
         )
-        assert _database_exists(throwaway)
+        assert worker_database.database_exists(throwaway)
 
         real = dict(seeded_states._SEEDED_STATE_SNAPSHOTS)
         seeded_states._SEEDED_STATE_SNAPSHOTS.clear()
@@ -468,7 +443,7 @@ class TestASnapshotDoesNotOutliveItsSession:
         )
         try:
             seeded_states._drop_seeded_snapshots()
-            assert not _database_exists(throwaway), (
+            assert not worker_database.database_exists(throwaway), (
                 "session finish left a world snapshot on the cluster; its "
                 "rows are dated from a session that has ended"
             )

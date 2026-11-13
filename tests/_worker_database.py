@@ -171,27 +171,27 @@ def _bootstrap_worker_database():
             # Unescaped, ``shekel_test_gw1_%`` matches ``shekel_test_gw11`` --
             # worker gw1 sweeping gw10's and gw11's databases, which is a real
             # drop whenever the victim sits between tests with its engine
-            # disposed, and pytest-xdist restarts a crashed worker (up to
-            # ``numprocesses * 4``), so a restart re-runs this sweep mid-session
-            # rather than only at startup.  Verified on the cluster:
+            # disposed.  Workers start together, and pytest-xdist also starts a
+            # replacement for each crashed worker (up to ``numprocesses * 4``)
+            # mid-session, under a NEW id (``xdist/dsession.py``,
+            # ``_clone_node``), so this sweep runs while its siblings are live.
+            # Verified on the cluster:
             # ``'shekel_test_gw11' LIKE 'shekel_test_gw1\_%'`` is false and
             # ``'shekel_test_gw1__world_x' LIKE 'shekel_test_gw1\_%'`` is true.
             #
-            # The second pattern collects WORLD SNAPSHOTS left by a run at any
-            # ``-n``: a killed ``-n 0`` run leaves ``{prefix}_main__world_*``
-            # that no later ``-n 12`` run would otherwise ever name, because
-            # the first pattern only ever sweeps the ids the CURRENT
-            # invocation happens to use.
+            # **Only this worker's own names, never another's** (plan#3639,
+            # ruling plan#3660).  A third pattern once took every world
+            # snapshot on the cluster, ``{prefix}_%__world_%``, to collect
+            # snapshots a killed run of another ``-n`` had left.  Every run now
+            # has a cluster of its own (``scripts/test.sh``, ``balance:X-br-4``),
+            # so any snapshot on it belongs to THIS run, and the pattern could
+            # only ever take a live one: a replacement worker's sweep dropped
+            # each sibling's snapshot whose owner was between tests, and every
+            # later test declaring that world failed at its clone.
             cur.execute(
                 "SELECT datname FROM pg_database "
-                r"WHERE datname = %s OR datname LIKE %s ESCAPE '\' "
-                r"   OR datname LIKE %s ESCAPE '\'",
-                (
-                    db_name,
-                    f"{_like_escape(db_name)}\\_%",
-                    f"{_like_escape(_TEST_DATABASE_PREFIX)}\\_%"
-                    f"{_like_escape(_SNAPSHOT_INFIX)}%",
-                ),
+                r"WHERE datname = %s OR datname LIKE %s ESCAPE '\'",
+                (db_name, f"{_like_escape(db_name)}\\_%"),
             )
             candidate_orphans = [row[0] for row in cur.fetchall()]
             if candidate_orphans:
@@ -313,6 +313,30 @@ if _BOOTSTRAP_RESULT is not None:
 else:
     _WORKER_DB_NAME = None
     _WORKER_ADMIN_URL = None
+
+
+def database_exists(name):
+    """Whether *name* is a database on this run's cluster right now.
+
+    Asked through a fresh admin connection rather than the app's engine: the
+    subject is the catalog, not any one test's database.
+
+    Args:
+        name: The database name to look for.
+
+    Returns:
+        ``True`` when it exists.
+    """
+    conn = psycopg.connect(_WORKER_ADMIN_URL)
+    try:
+        conn.autocommit = True
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT 1 FROM pg_database WHERE datname = %s", (name,),
+            )
+            return cur.fetchone() is not None
+    finally:
+        conn.close()
 
 
 def _drop_worker_database(db_name, admin_url):

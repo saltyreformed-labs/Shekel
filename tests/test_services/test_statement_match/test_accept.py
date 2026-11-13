@@ -56,7 +56,7 @@ from tests._test_helpers import (
     typed,
 )
 
-from ._builders import (
+from tests.test_services.test_statement_match._builders import (
     accepted_acts,
     a_bank_line,
     a_purchase,

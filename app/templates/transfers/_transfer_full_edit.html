@@ -115,7 +115,13 @@
     <div class="row g-2 mb-2">
       <div class="col">
         <label class="form-label mb-0 small">Amount</label>
-        <input type="number" step="0.01" min="0.01" name="amount"
+        {#- ``min`` is $0.00, the schema's bound on what this box may post (task
+            plan#3699, finding plan#3028): a card's worked-out payment with
+            nothing to pay renders $0.00 here, and a box under its own floor
+            blocks every Save of the form.  A $0.00 TYPED over another figure
+            reaches the door, which refuses it with its own words
+            (``routes/transfers/_gates._reject_a_typed_amount_of_nothing``). -#}
+        <input type="number" step="0.01" min="0" name="amount"
                value="{{ budgets[xfer.id] }}"
                class="form-control form-control-sm"
                placeholder="Amount"
@@ -316,7 +322,7 @@
        sites (every caller of ``_render_helpers.transfer_budgets``) carry no
        ``AmountUnresolvable`` handler, which on the
        transaction side was measured taking out the grid, the dashboard and the
-       companion from one row.  ``routes/transfers/mutations
+       companion from one row.  ``routes/transfers/_gates
        ._reject_generated_due_date_edit`` is the backstop for a crafted request
        or a stale form; this is what stops the form offering the act at all.
 

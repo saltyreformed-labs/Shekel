@@ -143,7 +143,7 @@ def _fallback_day(transfer: Transfer) -> date:
     that moves a ``$0.00`` pair's due date AND corrects its figure would date
     the pair by the old due date, because ``_update`` applies the status arm
     before the due-date arm.  No door sends both: the PATCH refuses a
-    due-date edit on a settled transfer (``routes/transfers/mutations``'
+    due-date edit on a settled transfer (``routes/transfers/_gates``'
     ``_LOCKED_EDIT_FIELDS``, unlocked only by a revert, which carries no
     figure), and the service's other callers edit Projected transfers or
     state only days (the cp2a review's p19, decided under ruling **R-BAL207**

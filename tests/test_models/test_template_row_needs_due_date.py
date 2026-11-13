@@ -352,7 +352,7 @@ class TestATransferOfADefinitionIsDated:
         """The UPDATE direction, the backstop of the transfer's PATCH door.
 
         The door refuses the field through
-        ``routes/transfers/mutations._reject_generated_due_date_edit`` with a
+        ``routes/transfers/_gates._reject_generated_due_date_edit`` with a
         designed 400 (keyed on ``recurs`` and ``is_placed`` since plan step
         balance:X-ci-1; the second door went at X-bi-6-1); this is what a
         writer that is not the application meets instead.

@@ -7,22 +7,33 @@ create door makes it (plan task plan#2933): through the door itself
 (:func:`add_card_by_its_door`), or by its acts on a calendar fixed in the past
 (:func:`add_card_with_its_payoff`).
 And the one way left to keep a BILL's payment on a card under a row that is
-not the card's (:func:`move_definition_to_checking`).
+not the card's (:func:`move_definition_to_checking`).  A card owing $0.00 with
+one charge put on it this paycheck, and its payoff row in each paycheck from
+this one on (:func:`payoffs_around_a_charge`).
 """
 
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 
+from app import ref_cache
+from app.enums import TxnTypeEnum
 from app.extensions import db
 from app.models.account import Account
 from app.models.ref import AccountType
 from app.models.transaction import Transaction
+from app.models.transfer import Transfer
+from app.models.transfer_template import TransferTemplate
 from app.models.user import UserSettings
 from app.services import card_payoff, recurrence_engine
 from app.services.account_resolver import resolve_grid_account
 from app.services.balance_at import BalanceContext
 from app.services.generation_schedule import GenerationSchedule
-from tests._test_helpers import create_account_of_type
+from tests._test_helpers import (
+    create_account_of_type,
+    current_pay_period,
+    derived_span,
+    one_off_row_of,
+)
 
 
 def add_card(seed_user, name: str = "Visa") -> Account:
@@ -119,6 +130,64 @@ def add_card_with_its_payoff(
         card, payoff, BalanceContext.build(user_id, as_of=added_on),
     )
     return card
+
+
+def payoffs_around_a_charge(
+    auth_client, seed_user, seed_periods_today,
+) -> "tuple[Account, list[Transfer]]":
+    """Add the Visa owing $0.00 and put $75.00 on it this paycheck; return it and its payoff rows.
+
+    Moved out of ``tests/test_routes/test_grid/test_a_payoff_with_nothing_to_pay.py``
+    (task plan#3699), whose example it is: the Visa is added by its door owing
+    $0.00 the day before this paycheck began, and a $75.00 Restaurant row in
+    this paycheck goes on it by Credit.  So this paycheck's payoff pays the
+    $0.00 owed the day before it began, the next paycheck's the $75.00, and
+    every one after $0.00 again.
+
+    Args:
+        auth_client: The owner's logged-in client.
+        seed_user: The ``seed_user`` fixture dict (the owner).
+        seed_periods_today: The ``seed_periods_today`` fixture's periods.
+
+    Returns:
+        ``(card, rows)``: the card, and its payoff transfer in each paycheck
+        from this one on, in paycheck order.
+    """
+    current = current_pay_period(seed_user["user"].id)
+    card = add_card_by_its_door(
+        auth_client, seed_user, owed_on=current.start_date - timedelta(days=1),
+    )
+    restaurant = one_off_row_of(
+        current,
+        name="Restaurant",
+        amount=Decimal("75.00"),
+        user_id=current.user_id,
+        account_id=seed_user["account"].id,
+        scenario_id=seed_user["scenario"].id,
+        transaction_type_id=ref_cache.txn_type_id(TxnTypeEnum.EXPENSE),
+        category_id=seed_user["categories"]["Groceries"].id,
+    )
+    db.session.commit()
+    assert auth_client.post(
+        f"/transactions/{restaurant.id}/mark-credit",
+    ).status_code == 200
+
+    template = db.session.query(TransferTemplate).filter_by(
+        to_account_id=card.id,
+    ).one()
+    row_in = {
+        row.pay_period_id: row
+        for row in db.session.query(Transfer).filter_by(
+            transfer_template_id=template.id,
+        )
+    }
+    index = derived_span(current).period_index
+    from_now = sorted(
+        (period for period in seed_periods_today
+         if derived_span(period).period_index >= index),
+        key=lambda period: derived_span(period).period_index,
+    )
+    return card, [row_in[period.id] for period in from_now]
 
 
 def add_savings(seed_user, name: str = "Savings", *, observed_on=None) -> Account:

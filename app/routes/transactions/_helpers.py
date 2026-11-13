@@ -462,7 +462,7 @@ def _finalised_edit_response(txn, data):
     (``mutations._apply_regular_update``), the one user edit entry point
     since leaf ``balance:X-bi-6-1`` (the transfer-shadow path it shared
     the guard with is gone; a transfer's PATCH has its own,
-    ``routes/transfers/mutations._reject_finalised_transfer_edit``); the
+    ``routes/transfers/_gates._reject_finalised_transfer_edit``); the
     system mutation paths (recurrence, carry-forward, mark-done, cancel)
     deliberately bypass this lock.
 

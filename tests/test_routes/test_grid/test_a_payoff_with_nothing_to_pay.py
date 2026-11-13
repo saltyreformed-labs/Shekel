@@ -26,16 +26,10 @@ from app import ref_cache
 from app.enums import StatusEnum, TxnTypeEnum
 from app.extensions import db
 from app.models.transfer import Transfer
-from app.models.transfer_template import TransferTemplate
 from app.services.grid_view_service import draws_blank
 from app.services.transfer_legs import cell_key, leg_of
-from tests._cards import add_card_by_its_door
-from tests._test_helpers import (
-    create_transfer,
-    current_pay_period,
-    derived_span,
-    one_off_row_of,
-)
+from tests._cards import payoffs_around_a_charge
+from tests._test_helpers import create_transfer, one_off_row_of
 
 _ZERO = Decimal("0.00")
 
@@ -45,46 +39,6 @@ _BLANK_OPENER = '<span class="font-mono invisible" aria-hidden="true">$0</span> 
 
 #: The label a screen reader reads on the $0.00 payoff, blank or not.
 _ZERO_LABEL = 'aria-label="Transfer to Visa: $0.00 -- Projected"'
-
-
-def _payoffs(auth_client, seed_user, seed_periods_today):
-    """Add the Visa and put $75.00 on it this paycheck; return the card and its payoff rows.
-
-    Returns:
-        ``(card, now, next_, after)``: the card, and its payoff transfer in
-        this paycheck ($0.00), the next ($75.00) and the one after ($0.00).
-    """
-    current = current_pay_period(seed_user["user"].id)
-    card = add_card_by_its_door(
-        auth_client, seed_user, owed_on=current.start_date - timedelta(days=1),
-    )
-    restaurant = one_off_row_of(
-        current,
-        name="Restaurant",
-        amount=Decimal("75.00"),
-        user_id=current.user_id,
-        account_id=seed_user["account"].id,
-        scenario_id=seed_user["scenario"].id,
-        transaction_type_id=ref_cache.txn_type_id(TxnTypeEnum.EXPENSE),
-        category_id=seed_user["categories"]["Groceries"].id,
-    )
-    db.session.commit()
-    assert auth_client.post(
-        f"/transactions/{restaurant.id}/mark-credit",
-    ).status_code == 200
-
-    period_at = {derived_span(p).period_index: p.id for p in seed_periods_today}
-    index = derived_span(current).period_index
-    template = db.session.query(TransferTemplate).filter_by(
-        to_account_id=card.id,
-    ).one()
-    row_in = {
-        row.pay_period_id: row
-        for row in db.session.query(Transfer).filter_by(
-            transfer_template_id=template.id,
-        )
-    }
-    return (card, *(row_in[period_at[index + step]] for step in (0, 1, 2)))
 
 
 def _collapsed(text):
@@ -132,7 +86,9 @@ def test_the_grid_draws_a_payoff_with_nothing_to_pay_blank(
     is still there.  The arrow goes with the figure.
     """
     with app.app_context():
-        _card, now, next_, after = _payoffs(auth_client, seed_user, seed_periods_today)
+        _card, (now, next_, after, *_) = payoffs_around_a_charge(
+            auth_client, seed_user, seed_periods_today,
+        )
         checking = seed_user["account"].id
 
         html = auth_client.get("/grid?periods=3").data.decode()
@@ -157,7 +113,9 @@ def test_the_mobile_card_and_the_plan_row_draw_it_blank_too(
     has no label of its own, keeps its `$0` for a screen reader alone.
     """
     with app.app_context():
-        _card, now, next_, after = _payoffs(auth_client, seed_user, seed_periods_today)
+        _card, (now, next_, after, *_) = payoffs_around_a_charge(
+            auth_client, seed_user, seed_periods_today,
+        )
         checking = seed_user["account"].id
 
         html = auth_client.get("/grid?periods=3").data.decode()
@@ -184,7 +142,9 @@ def test_marked_paid_it_draws_its_zero_and_reverted_it_draws_blank_again(
     ``leg_account_id``): Mark Paid's, and the revert's, which is blank again.
     """
     with app.app_context():
-        _card, now, _next, _after = _payoffs(auth_client, seed_user, seed_periods_today)
+        _card, (now, *_) = payoffs_around_a_charge(
+            auth_client, seed_user, seed_periods_today,
+        )
         checking = str(seed_user["account"].id)
 
         resp = auth_client.post(
@@ -220,7 +180,9 @@ def test_a_blank_cell_draws_no_due_caption(
     published for both.
     """
     with app.app_context():
-        _card, now, next_, _after = _payoffs(auth_client, seed_user, seed_periods_today)
+        _card, (now, next_, *_) = payoffs_around_a_charge(
+            auth_client, seed_user, seed_periods_today,
+        )
 
         def drawn(xfer, shown):
             """*xfer*'s cell on checking, showing *shown* and captioned."""
@@ -254,7 +216,9 @@ def test_only_a_projected_card_payoff_showing_zero_draws_blank(
     Paid is graded by the test above.
     """
     with app.app_context():
-        card, now, _next, _after = _payoffs(auth_client, seed_user, seed_periods_today)
+        card, (now, *_) = payoffs_around_a_charge(
+            auth_client, seed_user, seed_periods_today,
+        )
         checking = seed_user["account"].id
         projected = ref_cache.status_id(StatusEnum.PROJECTED)
         payoff = leg_of(now, checking)

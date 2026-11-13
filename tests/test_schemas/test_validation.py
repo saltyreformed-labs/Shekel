@@ -461,13 +461,29 @@ class TestTransferUpdateSchema:
         })
         assert data["amount"] == Decimal("250.00")
 
-    def test_zero_amount_rejected(self):
-        """amount=0 fails Range(min=0, min_inclusive=False)."""
-        with pytest.raises(ValidationError) as exc:
-            TransferUpdateSchema().load({
-                "amount": "0",
-            })
-        assert "amount" in exc.value.messages
+    def test_an_echoed_zero_loads_and_a_negative_amount_is_refused(self):
+        """$0.00 shown and posted back loads; a negative figure in either field is refused.
+
+        Task plan#3699 (finding plan#3028): a card's worked-out payment with
+        nothing to pay renders $0.00 in the popover's Amount box, and every Save
+        posts that box back.  The exclusive minimum this schema held refused the
+        echo, so no Save of such a row went through.  A $0.00 a person TYPES is
+        still refused, by the door, where the one answer to whether a figure was
+        typed is given (``tests/test_routes/test_transfers/test_a_payoff_row_put_off.py``).
+        """
+        data = TransferUpdateSchema().load({
+            "amount": "0.00", "amount_as_rendered": "0.00",
+        })
+        assert (data["amount"], data["amount_as_rendered"]) == (
+            Decimal("0.00"), Decimal("0.00"),
+        )
+        for payload, refused in (
+            ({"amount": "-1.00", "amount_as_rendered": "0.00"}, "amount"),
+            ({"amount": "0.00", "amount_as_rendered": "-1.00"}, "amount_as_rendered"),
+        ):
+            with pytest.raises(ValidationError) as exc:
+                TransferUpdateSchema().load(payload)
+            assert refused in exc.value.messages
 
 
 # ── SavingsGoalCreateSchema ──────────────────────────────────────────

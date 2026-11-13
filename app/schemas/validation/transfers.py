@@ -192,8 +192,18 @@ class TransferUpdateSchema(BaseSchema):
         """Drop empty inputs; map empties on nullable fields to None."""
         return _normalize_empty_inputs(self, data)
 
+    # **Bounded at $0.00 and not above it, because a figure here may be an ECHO**
+    # (task plan#3699, finding plan#3028).  The popovers post the Amount box on
+    # every Save, and a card's worked-out payment with nothing to pay renders
+    # $0.00 there: a figure the app works out may be $0.00 (ruling plan#3854).
+    # This field's exclusive minimum refused that echo, so the row's notes, its
+    # status and its untouched Save all answered 422.  A figure a person TYPES
+    # must still be above $0.00, and whether it was typed has ONE producer,
+    # the door's (``routes._authored_figure.figure_was_authored``), which no
+    # schema imports, so that bound is graded there:
+    # ``routes/transfers/_gates._reject_a_typed_amount_of_nothing``.
     amount = fields.Decimal(
-        places=2, as_string=True, validate=validate.Range(min=0, min_inclusive=False)
+        places=2, as_string=True, validate=validate.Range(min=0),
     )
     # WHAT THE FORM SHOWED in the Amount box, posted back beside whatever came
     # out of it (ruling **R-JR**, plan step X-au-h).  The transfer twin of
@@ -222,8 +232,11 @@ class TransferUpdateSchema(BaseSchema):
     # which fails on the code that edit replaced.  What survives is the refusal
     # itself: this field still rejects ``"None"``, so a template that regressed
     # to the column would fail loudly at the door rather than silently.
+    #
+    # **$0.00 is a figure the form can show** (task plan#3699): a card's
+    # worked-out payment with nothing to pay, ``amount`` above says.
     amount_as_rendered = fields.Decimal(
-        places=2, as_string=True, validate=validate.Range(min=0, min_inclusive=False),
+        places=2, as_string=True, validate=validate.Range(min=0),
     )
 
     @validates_schema

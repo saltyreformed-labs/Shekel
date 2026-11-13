@@ -484,6 +484,30 @@ class TestTheRestate:
             ]
             assert newest_price(xfer.template) == Decimal("525.00")
 
+    def test_a_typed_zero_is_refused_and_the_price_stands(
+        self, app, auth_client, seed_user, seed_periods_today,
+    ):
+        """`$0.00` typed over the `$500.00` definition: 422, and the price is still `$500.00`.
+
+        Task plan#3699: on this arm the door's refusal is the only one the app
+        has, as ``routes/transfers/_gates._reject_a_typed_amount_of_nothing``
+        says; the restate would meet a CHECK, which nothing on this path
+        catches.
+        """
+        with app.app_context():
+            savings = _savings(seed_user)
+            xfer = _one_time(
+                auth_client, seed_user, savings, _future(seed_periods_today)[0],
+            )
+            resp = _submit(auth_client, xfer, amount="0.00")
+            assert resp.status_code == 422, resp.data
+            assert "amount: Must be greater than 0." in resp.data.decode()
+            db.session.expire_all()
+            assert [v.amount for v in amount_versions(xfer.template)] == [
+                Decimal("500.00"),
+            ]
+            assert newest_price(xfer.template) == Decimal("500.00")
+
     def test_a_transfer_the_old_flip_detached_is_re_attached_by_its_next_figure(
         self, app, auth_client, seed_user, seed_periods_today,
     ):

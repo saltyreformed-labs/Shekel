@@ -874,7 +874,7 @@ and @validates_schema cross-field rules.
 | `TemplateUpdateSchema` (3)      | All optional; Date parsing; invalid date                 |
 | `TransferTemplateCreateSchema` (3) | `from != to` validator; `default_amount > 0`          |
 | `TransferCreateSchema` (2)      | `from != to` validator; valid data                       |
-| `TransferUpdateSchema` (2)      | `amount > 0`; partial update                             |
+| `TransferUpdateSchema` (2)      | an echoed `0.00` loads, negatives refused; partial update |
 | `SavingsGoalCreateSchema` (3)   | `target_amount > 0`; required fields                     |
 | `SavingsGoalUpdateSchema` (2)   | @pre_load strips; Boolean coercion                       |
 | `SalaryProfileCreateSchema` (4) | Required fields; OneOf pay_periods; state_code length    |

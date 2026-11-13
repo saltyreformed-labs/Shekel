@@ -11,6 +11,10 @@
    accepts nor submits a value, matching the route guard #26) and a hint
    directs the user to the full-edit popover, where the Status dropdown
    reverts the transfer to Projected so it can be edited.
+
+   The box's ``min`` is $0.00, as the full-edit popover's is, which says why
+   (task plan#3699): a $0.00 figure the app worked out must be dismissable as it
+   is, and a $0.00 typed over another figure is the door's to refuse.
 #}
 {% set locked = xfer.status and xfer.status.is_immutable %}
 <form class="txn-quick-edit d-flex flex-wrap align-items-center gap-1"
@@ -22,7 +26,7 @@
   <input type="hidden" name="version_id" value="{{ xfer.version_id }}">
   <input type="number"
          step="0.01"
-         min="0.01"
+         min="0"
          name="amount"
          value="{{ budgets[xfer.id] }}"
          class="form-control form-control-sm txn-quick-input flex-1-min-0"

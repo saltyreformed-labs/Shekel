@@ -126,7 +126,7 @@ class Transfer(
         # branch of ``routes/transfers/_instances`` writes the chosen
         # paycheck's start.  The one PATCH door left that could clear the date
         # on a linked transfer refuses it first
-        # (``routes/transfers/mutations._reject_generated_due_date_edit``,
+        # (``routes/transfers/_gates._reject_generated_due_date_edit``,
         # reading ``recurs`` and ``is_placed`` since plan step X-ci-1); this is
         # its backstop for a writer that is not the application.
         # An AD-HOC transfer is untouched: it owns its figure, nothing prices

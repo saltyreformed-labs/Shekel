@@ -51,15 +51,17 @@ reviewer remembers it. A gate is a floor: rules 2, 3, 6, 8, 10 and 13 are judgme
     nobody asked for, no handling of impossible cases. Propose a simpler approach before building
     the complex one.
 14. **One source of truth for any value.** A value is derived or stored, and each kind has one home.
-    Derived: one producer, which every caller reaches; two spellings that agree today are still two
-    (a fifth spelling of one interest expression agreed over 200,000 random draws and parted at
-    500,000, `$565.37` against `$565.36`). Where a layer puts the shared code out of reach, move it:
-    the placement is the root cause. Stored: the same fact in two columns is two sources, so delete
-    one; a value both derived and stored leaves the stored copy a stale cache. The tell is an
-    invariant: where two places must always agree, delete one rather than keep them in step. So the
-    goal of every arc is a defect made unrepresentable and its fence (a checker, an allowlist, a
-    reconciler) deleted; the fences ruled kept are listed in
-    `docs/audits/fence_census_2026-10-11.md`, and deleting one is the developer's call.
+    Derived: one walk, one producer, and every caller reaches it. Two spellings that agree today are
+    still two spellings (a fifth spelling of one interest expression agreed over 200,000 random
+    draws and parted at 500,000, `$565.37` against `$565.36`). Where a layer puts the shared leaf
+    out of reach, move the leaf: the placement is the root cause. Stored: the same fact in two
+    columns is two sources, so delete one; a value both derived and stored leaves the stored copy a
+    stale cache. The tell is an invariant: where a rule says two places must always agree, they are
+    one value with two homes and a maintenance contract, and the remedy is to delete a home rather
+    than keep them in step. An invariant that cannot be violated because there is nothing to violate
+    is worth more than one a reconciler enforces. So the goal of every arc is a defect made
+    unrepresentable and its fence (a checker, an allowlist, a reconciler) deleted; the fences ruled
+    kept are in `docs/audits/fence_census_2026-10-11.md`, and deleting one is the developer's call.
 
 ## Multi-session operation
 
@@ -176,16 +178,17 @@ the rule covers (measured 2026-11-12).
 
 A task is not complete until all of these hold:
 
-1. The code is implemented in full: no TODOs, no placeholders, and docstrings and comments per the
-   coding rules.
-2. The lint command above passes, with no new messages.
-3. Targeted tests pass for the changed files, then the full suite, and the pass and fail counts are
-   shown to the developer.
-4. A migration is tested in both directions, upgrade and downgrade.
-5. A neutral adversarial review of the design and the diff ran (the card's "Adversarial review"
+1. The code is implemented in full: no TODOs, no placeholders.
+2. Docstrings and comments follow the coding rules.
+3. The lint command above passes, with no new messages.
+4. Targeted tests pass for the changed files.
+5. The full suite passes.
+6. The pass and fail counts are shown to the developer.
+7. A migration is tested in both directions, upgrade and downgrade.
+8. A neutral adversarial review of the design and the diff ran (the card's "Adversarial review"
    task): a fresh subagent grading the change's claims about itself hardest, since its tests cannot
    grade them. Each finding is fixed or filed.
-6. Each commit message reads `<type>(<scope>): <what changed>`.
+9. Each commit message reads `<type>(<scope>): <what changed>`.
 
 ## Style
 

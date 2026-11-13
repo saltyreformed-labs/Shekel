@@ -13,8 +13,8 @@
 #   The production deployment runs cloudflared as a Docker container
 #   (cloudflare/cloudflared image) defined in the host-level compose
 #   stack, NOT as a host systemd service -- this project's deployment
-#   rules are no systemd and no exposed ports (see CLAUDE.md
-#   "Deployment").  The maintainer's instance lives in
+#   rules are no systemd and no exposed ports (see
+#   .claude/rules/deploy.md).  The maintainer's instance lives in
 #   /opt/docker/docker-compose.yml with its config directory bind-
 #   mounted read-only.
 #

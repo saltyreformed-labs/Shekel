@@ -47,7 +47,7 @@ PREFIX = "shekel-"
 #: A lane's name: lowercase letters and digits, words joined by single hyphens, so the
 #: worktree's name is one path component that no shell or git reads as anything else.
 _NAME = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*")
-#: How a session runs the plan's command, as CLAUDE.md's Common Commands spell it.
+#: How a session runs the plan's command, as CLAUDE.md's Commands spell it.
 _QUILL = "python -m tools.quill.quill"
 #: What a lane's worktree holds its venv in, where uv builds a project's by default.
 _VENV = ".venv"

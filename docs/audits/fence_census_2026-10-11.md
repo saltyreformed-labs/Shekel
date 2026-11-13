@@ -29,7 +29,7 @@ for a fence, the kind is this record's reading.
 | id | where | what it guards | why it stays |
 |---|---|---|---|
 | T-09 | `.pylintrc:26` and the `--fail-on` lists in CI, pre-commit and the per-edit hook | loads the shekel checkers and hard-fails their messages | wiring; each message leaves with its checker |
-| T-11 | `tools/pylint/tests/test_shekel_checkers.py` | the checkers' own behaviour | a checker's tests leave with it |
+| T-11 | `tools/pylint/tests/test_shekel_checkers/` | the checkers' own behaviour | a checker's tests leave with it |
 | T-12 | `scripts/hooks/post-edit-python.sh` | E, F and the shekel messages on every edit | lint wiring |
 | T-19 | `scripts/hooks/stop-check.sh`, `scripts/hooks/ENFORCE_PYLINT_FLOOR` | the 10.00 floor and cross-file duplicate code at turn end | lint wiring; the only local catch for cross-file duplicates |
 | T-20 | `scripts/hooks/stop-check.sh` (informational greps) | TODO markers, new disables, `except Exception` | informational; it exits 0 |

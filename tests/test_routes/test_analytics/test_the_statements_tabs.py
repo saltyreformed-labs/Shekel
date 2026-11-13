@@ -225,8 +225,8 @@ class TestTheWindowIsAnsweredByTheDerivation:
     the ``<option>`` the reader picked it from cannot drift apart, which is
     ledger row **P47**'s duplicate half made a predicate.
 
-    ``seed_periods`` is ten biweekly periods from 2026-01-02, and this module
-    freezes today to 2026-03-20 -- inside period 5, which runs 2026-03-13
+    ``seed_periods`` is ten biweekly periods from 2026-01-02, and this package's
+    ``conftest.py`` freezes today to 2026-03-20 -- inside period 5, which runs 2026-03-13
     through 2026-03-26 because period 6's payday is 2026-03-27.
     """
 

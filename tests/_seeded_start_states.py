@@ -53,7 +53,7 @@ from tests._worker_database import (
 #
 # **It is not a suite-level speedup and was not measured as one.**  Full suite
 # before 11,770 tests in 278.25 s, after 11,781 in 281.64 s: unchanged, since
-# this file is ~2% of the suite's work and the expected saving sits inside a
+# the sweep's tests are ~2% of the suite's work and the expected saving sits inside a
 # run-to-run variance measured at 18 s.
 #
 # What this seam separates is ISOLATION from CONTENT.  The per-test drop and

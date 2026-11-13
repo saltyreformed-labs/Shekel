@@ -28,7 +28,8 @@ class TestTheDatabaseSeesWhatTheOrmCannot:
     """The constraint trigger, graded on the writers no ORM guard reaches.
 
     Each case here goes through raw SQL or a bulk ``UPDATE`` on purpose: an ORM
-    call would prove only that the service refusal fires, which the class above
+    call would prove only that the service refusal fires, which
+    ``test_the_boundary_and_its_writers.py``'s :class:`TestTheOneOrmWriter`
     already grades.
     """
 

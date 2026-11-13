@@ -16,8 +16,10 @@ def _plan_worth(txn):
     """What a REVERTED (Projected) row contributes -- its plan, resolved.
 
     Asked of :func:`~app.services.cash_ledger.contribution_of` because the row
-    is out of the settled band: the two revert cases below assert that a row
-    which has been reverted is worth its PLAN again, and since plan step X-bx
+    is out of the settled band: the two revert cases of
+    ``test_the_dropdown_settle.py``'s ``TestARevertTakesBackWhatTheSettleDerived``
+    assert that a row which has been reverted is worth its PLAN again, and
+    since plan step X-bx
     ``row_valuation.settled_contribution`` refuses exactly that row rather than
     pricing its plan column by hand (finding **BAL-465**).  The figures those
     cases assert are unchanged, and so is the rule -- the STATUS decides which

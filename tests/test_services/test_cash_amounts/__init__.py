@@ -49,7 +49,7 @@ The reservation formula under test::
 **Which bucket a debit falls in is whether the BANK HAS TAKEN IT** (plan step
 X-f3b, ruling **R-FM**), and its history is four answers deep -- each a
 narrowing, and the last one a deletion.  It was a stored ``is_cleared``
-boolean, carried in every fixture below as a third bool in a triple: an
+boolean, carried in every fixture of this package's tests as a third bool in a triple: an
 unconditional claim that a purchase was inside the anchor, which its own
 account could not always support.  Ruling R-DH (d) replaced it with a DATE
 comparison against the account's latest asserted day, and the triples took the
@@ -58,13 +58,14 @@ falsified that comparison (33 of 110 matched movements carry the day the bank
 posted them), so ruling R-FL made it the RECORDED statement, with the date rule
 as the fallback.
 
-**R-FM then removed the question from this module entirely**, which is the
+**R-FM then removed the question from this package entirely**, which is the
 simplification rather than a fifth answer.  A purchase carrying a posting day
 is now a cash movement of its OWN in the walk, so the reservation asks what it
 always should have -- has this money left -- and *which statement cleared it*
 is asked once, where the money is replayed (see the `_STATEMENT_DAY` comment
-below for the two tests that grade it).  Two consequences are re-ruled test cases rather than
-renames, and both are marked as such below: a purchase the bank took AFTER the
+in `_helpers.py` for the two tests that grade it).  Two consequences are re-ruled test cases
+rather than renames, and both are marked as such in `test_the_posting_day.py`: a purchase the
+bank took AFTER the
 balance was read now releases the reservation, and the account's assertion
 history is not an input at all.  A NULL posting day is still OUTSTANDING, which
 is the arm that never moved.

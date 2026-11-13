@@ -361,7 +361,8 @@ class TestAReSubmittedDayDoesNotRestateItsBASIS:
     and it is where the cost was measured -- **59 of 66 linked purchases, `$4,173.07`** on
     production.  These are the two doors that share the rule through
     ``status_seam.settle_day_for_status``: the transaction PATCH here, and the
-    SHADOW branch below, which grades the transfer PATCH's copy of it.
+    transfer PATCH, whose copy of it ``test_transfers/test_settle_day.py``'s
+    ``test_a_RE_SUBMITTED_day_does_not_restate_its_basis`` grades.
     """
 
     @staticmethod

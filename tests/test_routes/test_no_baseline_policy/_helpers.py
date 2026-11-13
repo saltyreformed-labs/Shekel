@@ -39,7 +39,7 @@ from tests._seeded_start_states import register_seeded_state
 
 #: The PAGE endpoints measured to raise before plan step X-v1 shipped its
 #: handler, with the door each reaches the seam through.  Named individually
-#: because the sweep below proves only "nothing 5xx"; these prove the ANSWER is
+#: because the sweep (``test_the_sweep.py``) proves only "nothing 5xx"; these prove the ANSWER is
 #: the repair card, which is the part a future refactor could quietly turn back
 #: into a 404 or an empty page while the sweep stayed green.
 _MEASURED_PAGE_DOORS = [
@@ -91,7 +91,8 @@ _ACCOUNT_CONVERTER = "account_id"
 #: before the colon and the name after it.
 #:
 #: **It does not match every token Werkzeug accepts**, and that is why
-#: ``"<" not in url`` is asserted beside ``unfilled`` in the case below rather
+#: ``"<" not in url`` is asserted beside ``unfilled`` in ``test_the_sweep.py``'s
+#: ``test_no_get_route_returns_5xx`` rather
 #: than trusted to be implied by it: ``werkzeug.routing.rules._part_re`` admits
 #: a converter ARGUMENT containing a colon (``<any("a:b"):x>``), which this
 #: refuses to parse.  Such a token is left in the path, and that assertion is
@@ -102,7 +103,7 @@ _CONVERTER_TOKEN = re.compile(r"<(?:[^<>:]+:)?([^<>:]+)>")
 #: What fills every converter but the account axis: ``(blueprint, name)`` ->
 #: the key into the world dict holding a row of exactly that kind.  **It is
 #: TOTAL over the GET route table and graded BOTH WAYS against it**, which is
-#: what replaced the ``_UNREACHED_RULES`` allowlist this file carried until
+#: what replaced the ``_UNREACHED_RULES`` allowlist the sweep's file carried until
 #: plan step balance:X-be-3 (finding **N-388**).  Seventeen GET rules -- 17.5%
 #: of the app's 97 -- were pinned in that list and graded by NOBODY: a rule
 #: whose converter the fixture could not fill was skipped, and the sweep's own
@@ -377,13 +378,15 @@ def _build_baseline_less_owner(db):
         "transfer_template": xfer_template.id,
         "transaction": transaction.id,
         "transfer": transfer.id,
-        # The transfer-create arm below files against a real category, and a
+        # The transfer-create arm (``test_the_handler.py``'s
+        # ``test_a_transfer_create_refuses_instead_of_reporting_success``)
+        # files against a real category, and a
         # world hands out ids rather than the ORM rows ``seed_user`` returned.
         "rent_category": seed_user["categories"]["Rent"].id,
     }
 
 
-#: The world's name, which every marker below reads rather than spelling: a
+#: The world's name, which every marker in this package reads rather than spelling: a
 #: test carrying the marker then imports this registration wherever it sits.
 _BASELINE_LESS_OWNER = register_seeded_state(
     "baseline_less_owner", _build_baseline_less_owner,
@@ -393,8 +396,10 @@ _BASELINE_LESS_OWNER = register_seeded_state(
 def _get_rules(app):
     """Every GET rule in *app*'s route table, in rule order.
 
-    The sweep's subject, as one expression, so the enumeration below and the
-    coverage claim above it read the SAME definition of "a GET route" rather
+    The sweep's subject, as one expression, so the enumeration below
+    (:func:`_sweep_cases`) and the coverage claim (``test_the_sweep.py``'s
+    ``test_the_sweep_still_covers_the_whole_url_map``) read the SAME definition
+    of "a GET route" rather
     than each spelling their own.
 
     Args:
@@ -402,7 +407,7 @@ def _get_rules(app):
 
     **Flask's own static route is excluded BY ENDPOINT, not by path prefix.**
     ``startswith("/static")`` also swallows a future ``/statistics`` or
-    ``/static-report``, which would leave a real route ungraded while this file
+    ``/static-report``, which would leave a real route ungraded while the sweep
     claimed to grade every one -- the same silent-shrink defect N-388 was.
     Censused 2026-08-30: exactly one rule's path starts with ``/static``, and
     its endpoint is ``static``, so the two predicates agree today and only the
@@ -561,7 +566,8 @@ def _route_table_app():
     run at COLLECTION here, where a database failure is a collection ERROR:
     under xdist a collection that DIFFERS BETWEEN WORKERS aborts the whole run
     rather than failing one test.  The two are not the same event and the
-    difference matters: a uniform outage errors this file and lets the rest of
+    difference matters: a uniform outage errors the two test modules that
+    import this one and lets the rest of
     the suite finish, while an INTERMITTENT one -- the shape two concurrent
     runs produce here -- aborts everything.  Seen once, 2026-08-29, against a
     DRAFT of this design that did build through ``create_app``:
@@ -573,7 +579,7 @@ def _route_table_app():
     differ between workers whatever happened.  It is now derived, once per
     worker, from an app built at import: nothing in `_register_blueprints` is
     non-deterministic today, but the failure mode is no longer structurally
-    impossible, and its blast radius is the suite rather than this file.
+    impossible, and its blast radius is the suite rather than this package.
 
     ``register_url_converters`` is called FIRST because `create_app` documents
     that order as required (its URL converters comment): a rule naming a converter
@@ -639,10 +645,10 @@ def _route_table_app():
 #: step, and pytest-timeout's cap goes back to being the hang detector
 #: `pytest.ini` calibrated it as.  Measured CI-shaped (4 cores, ``-n 12``,
 #: 2026-08-29): the largest single arm read 2.16 s split by account kind, and
-#: no case's CALL reaches a `--durations` report ahead of this file's own
+#: no case's CALL reaches a `--durations` report ahead of the sweep's own
 #: setup entries -- a case's two requests are a 0.020 s median.
 #:
-#: **TWO STANDING CONSTRAINTS ON WHOEVER EDITS THIS FILE NEXT, stated here
+#: **TWO STANDING CONSTRAINTS ON WHOEVER EDITS THIS PACKAGE NEXT, stated here
 #: because the code is the only home that survives a planning document being
 #: archived.**  Both were `X-bd`'s and `X-be-2`'s, whose README entries were
 #: condensed to pointers on 2026-08-30 under conventions rule 5; an obligation
@@ -667,10 +673,10 @@ def _route_table_app():
 #: the absolute seconds are not.
 #:
 #: That 0.270 s splits, on matched serial probes of 30 items each the same day:
-#: **0.160 s (59%) is this module's own seven-account fixture** and 0.110 s
+#: **0.160 s (59%) is this package's own seven-account fixture** and 0.110 s
 #: (41%) is the per-test chain it inherits, whose floor is the autouse ``db``
 #: fixture dropping and re-cloning the per-worker database.  Two earlier
-#: readings of this file blamed the clone for the whole of it; both were
+#: readings of the sweep blamed the clone for the whole of it; both were
 #: confounded -- one divided an xdist wall clock by an item count, charging the
 #: fixed worker bootstrap to the items, and one compared against items that
 #: turned out to use the same fixture.
@@ -681,7 +687,7 @@ def _route_table_app():
 #: sized against: sharing a database alone recovers the 41%, so the shared
 #: state has to carry the seven accounts too.  It is not done here, and the
 #: obvious remedy is measured WRONG: a module-scoped clone is re-cloned out
-#: from under this module by the next test from ANY other module landing on the
+#: from under the sweep's module by the next test from ANY other module landing on the
 #: same worker, observed on three workers under ``-n 12`` (2026-08-29).
 #:
 #: Building an app at import is what a per-route test id costs -- ids are fixed

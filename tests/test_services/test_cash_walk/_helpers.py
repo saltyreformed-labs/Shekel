@@ -63,7 +63,8 @@ def _opened_at(account, at, books_open_on=None):
             bounds them before every day a row could land on
             (``open_books_before_the_first_assertion``), which is
             backward-only.  A case whose SUBJECT is the books' own day names
-            it -- the two below that grade a movement dated on or before them
+            it -- the two in ``test_the_sources.py``'s
+            ``TestASourceCannotPredateTheBooks`` that grade a movement dated on or before them
             do, because the day is the thing under test rather than a
             by-product.
 
@@ -96,7 +97,7 @@ def _money_facts(facts):
     Plan step **X-bi-3a**: a settled bill's money sits on the covering
     movement the seam writes for it, so the fold emits the bill's own fact at
     ``0.00`` beside the movement's fact carrying the figure on the same day.
-    Every day and every delta a case below asserts is unchanged; what the
+    Every day and every delta a case in this package asserts is unchanged; what the
     shape assertions read is the steps that move the balance.
     ``balance:X-bi-4`` re-points the fold onto movements and the zero step
     goes with the row's leg.
@@ -116,8 +117,8 @@ def _corrections(account, scenario):
     RESET replay since plan step X-f3c-1 -- the walk states the facts and the
     fold states what an assertion does to a running total (ruling R-FO gives
     the modelled kinds one answer and plan step X-f3c gives the PLAIN ones
-    another, so a kind-blind walk could state neither).  Every figure below is
-    unchanged by that move, which is what makes it a move.
+    another, so a kind-blind walk could state neither).  Every figure this
+    package's cases assert is unchanged by that move, which is what makes it a move.
     """
     walk = walk_cash_ledger(account.id, scenario.id)
     return {

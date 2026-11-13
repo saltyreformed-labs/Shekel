@@ -114,7 +114,7 @@ def _seed_taxes_profile(seed_user, db):
 
     The T-P4 route-test fixture: 130,000 / 26 = 5,000.00 gross per period
     exactly (no rounding residue), no deductions, no pay stub -- so every
-    figure asserted below is hand-computable from the 2026 law.
+    figure ``test_the_taxes_tab.py`` asserts on it is hand-computable from the 2026 law.
     """
     from app.extensions import db as _db
     from app.models.ref import FilingStatus

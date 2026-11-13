@@ -41,7 +41,7 @@ class TestNoRouteCrashesWithoutABaseline:
         balance:X-be-3, finding **N-388**).  Until it shipped this test
         asserted a hand-maintained list of the routes the sweep did NOT reach:
         seventeen of them, and the assertion held them there rather than
-        closing them.  The two arms below say the thing the file's title claims
+        closing them.  The two arms below say the thing this package's title claims
         instead -- every GET rule in ``url_map`` is a case, and every case
         resolves to a real URL -- and neither can be satisfied by adding a
         route to a list.

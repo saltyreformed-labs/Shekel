@@ -459,8 +459,8 @@ def cross_page_loan_off_schedule_ctx(db, seed_user):
     four-surface set agrees on the real balance (see
     ``test_all_surfaces_read_the_ledger_off_schedule``).
     """
-    # Pylint: ``import-outside-toplevel`` -- the app services / test helpers are
-    # loaded lazily, the convention every fixture in this module follows.
+    # Pylint: ``import-outside-toplevel`` -- the fixture imports its two test
+    # helpers where it uses them, as it did in ``tests/conftest.py``.
     # pylint: disable=import-outside-toplevel
     from tests._test_helpers import (
         create_loan_with_trueup,

@@ -100,7 +100,8 @@ class TestTheProjectedValuation:
     # one-line forward that existed only for symmetry with ``income_amount`` --
     # went too.  ``sum_projected``'s expense leg calls
     # ``_entry_aware_amount`` directly now, which is exactly what
-    # ``TestTheEntryAwareReservation`` below grades, so the successor case this
+    # ``test_the_reservation.py``'s ``TestTheEntryAwareReservation`` grades, so
+    # the successor case this
     # note used to point at has no separate subject left and is deleted with
     # the wrapper.  A test whose only possible outcome is a pass is not a test
     # (finding **N-184**'s rule).

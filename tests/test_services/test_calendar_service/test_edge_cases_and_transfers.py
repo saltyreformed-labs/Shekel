@@ -109,7 +109,9 @@ class TestATransferIsALegOfItsParent:
     shadow -- then one leg per transfer the set touches, on the side the
     set shows, as one list (plan step plan#2130), and the day fold prices a
     leg through ``contributions_by_key`` keyed by ``cell_key``.  The money
-    cases above (R-CC23, the far leg) already grade what a transfer is WORTH
+    cases of ``test_cash_flow_set_and_month_end.py``'s
+    ``TestTheCalendarReadsTheCashFlowSet`` (R-CC23, the far leg) already grade
+    what a transfer is WORTH
     here; these grade what it IS, and the two states a display leg adds to
     the fold's: settled with a record, and excluded.
     """

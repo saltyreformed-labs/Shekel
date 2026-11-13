@@ -412,7 +412,8 @@ def pay_periods_hydrated():
         instances, appended to as the block runs.
     """
     # Pylint: ``import-outside-toplevel`` -- this module imports no app or ORM
-    # symbols at top level (its collection-time-safety convention).
+    # symbol at top level but ``pay_era_write`` and ``pay_schedule_service``
+    # (its collection-time-safety convention).
     # pylint: disable=import-outside-toplevel
     from sqlalchemy import event
     from sqlalchemy.orm import Session

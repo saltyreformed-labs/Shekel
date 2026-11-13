@@ -8,7 +8,7 @@ import pytest
 
 @pytest.fixture()
 def baseline_less_owner(seeded_world):
-    """The ids of the world this file's tests declare.
+    """The ids of the world this package's tests declare.
 
     A thin alias for :data:`seeded_world` so the tests keep naming the state
     they are in rather than the mechanism that delivers it.

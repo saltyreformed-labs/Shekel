@@ -17,7 +17,7 @@ of the 2026-04-15 security remediation plan:
     keeps sessions non-permanent so Flask-Login ``strong`` session
     protection (F-038 / C-07) still wipes the session on identifier
     drift, so the effective bound on an open session is the idle
-    timeout below.
+    timeout (F-006 above, graded in ``test_idle_timeout.py``).
 
   * F-045 (CWE-306): no step-up re-auth for high-value operations.
     Closed by the ``fresh_login_required`` decorator in

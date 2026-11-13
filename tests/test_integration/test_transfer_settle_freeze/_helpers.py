@@ -98,7 +98,7 @@ def _plain_transfer(
 def _sides(xfer_id):
     """Return *xfer_id*'s two side accounts, the from (expense) side first.
 
-    What this file asks a settle about since plan step
+    What this package's tests ask a settle about since plan step
     ``balance:X-bi-6-4d-2`` (ruling **R-BAL167** class 4): a side's payment
     record hangs off the TRANSFER and nothing keeps a twin's status, day or
     figure, so each side is read as the transfer and its record, never as its

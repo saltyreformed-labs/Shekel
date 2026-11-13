@@ -36,7 +36,8 @@ def repriced_by_the_owner(row, figure):
         *row*, flushed, owning *figure*.
     """
     # Pylint: ``import-outside-toplevel`` -- this module imports no app
-    # symbols at top level (its collection-time-safety convention).
+    # symbol at top level but ``AmountOwnership`` (its collection-time-safety
+    # convention).
     # pylint: disable=import-outside-toplevel
     from app.extensions import db
     from app.services.amount_ownership import state_own_amount
@@ -70,7 +71,8 @@ def transfer_repriced_by_the_owner(xfer, figure):
         *xfer*, flushed, owning *figure*.
     """
     # Pylint: ``import-outside-toplevel`` -- this module imports no app
-    # symbols at top level (its collection-time-safety convention).
+    # symbol at top level but ``AmountOwnership`` (its collection-time-safety
+    # convention).
     # pylint: disable=import-outside-toplevel
     from app.services import transfer_service
 
@@ -105,7 +107,8 @@ def moved_by_the_owner(row, *, into):
         *row*, flushed, in *into*.
     """
     # Pylint: ``import-outside-toplevel`` -- this module imports no app
-    # symbols at top level (its collection-time-safety convention).
+    # symbol at top level but ``AmountOwnership`` (its collection-time-safety
+    # convention).
     # pylint: disable=import-outside-toplevel
     from app.extensions import db
 

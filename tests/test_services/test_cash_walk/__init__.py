@@ -7,7 +7,7 @@ account's balance folds over (step X-b)
 and the posting writer will project (step X-d).  The walk is ADDITIVE at X-a: no
 production surface reads it yet, so nothing here can move a shipped balance.
 
-Every expected figure below is HAND-COMPUTED and written out in the test that
+Every expected figure in this package's tests is HAND-COMPUTED and written out in the test that
 asserts it.  None is taken from another producer: the whole point of the leaf is
 that the shipping projection is WRONG about these cases (findings cash D1-D3), so
 grading it against that projection would prove the defect rather than the fix

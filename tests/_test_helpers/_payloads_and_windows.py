@@ -352,7 +352,7 @@ def derived_window(paydays, cadence_days):
 
     The PURE test-side door onto the pay calendar, added at plan step **C2-e**,
     when ``growth_engine`` stopped accepting a hand-built list of period-shaped
-    objects.  :func:`period_window` above is its database-backed sibling: use
+    objects.  :func:`period_window` below is its database-backed sibling: use
     that one when the test has real ``budget.pay_periods`` rows, and this one
     for the unit tests that have no database at all.
 

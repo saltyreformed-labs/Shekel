@@ -59,7 +59,7 @@ class TestGridPageEntrySums:
             # plan step C4-a-3).  The two purchases are dated on the payday and
             # the day before it, so exactly ONE is out of period -- and the
             # route resolves its spans by a different construction from the
-            # unit tests above (``_build_entry_maps`` over
+            # unit tests in ``test_entry_dicts.py`` (``_build_entry_maps`` over
             # ``ctx.all_periods``), which nothing else exercises.  Before this,
             # the whole route-level evidence for the warning was one assertion
             # on the entries FRAGMENT.

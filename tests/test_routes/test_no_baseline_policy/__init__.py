@@ -25,7 +25,7 @@ than it does is this arc's most expensive recurring lesson:
 * it cannot see a route that answers with a **fabricated figure**.  A ``$0.00``
   hero over balances that are all ``None`` returns 200 and passes every arm
   here, and so did a balance sheet asserting ``in_balance`` over a ledger it
-  could not read -- which is exactly how X-v1's first draft of this file
+  could not read -- which is exactly how X-v1's first draft of these tests
   graded that page green.  Both were deleted at plan step X-v2 rather than
   gated, because there is no mechanical predicate for "this number is
   invented";
@@ -45,7 +45,7 @@ than it does is this arc's most expensive recurring lesson:
   door were re-run against a SETTLED transaction, a settled transfer and an
   envelope transaction carrying an entry, and all twelve answered 200 exactly
   as the projected rows do.  A door whose answer turns on a row's status is
-  therefore not something this file has evidence of, and a future one would
+  therefore not something these tests have evidence of, and a future one would
   need its own axis the way ``_ACCOUNT_KINDS`` is one;
 * it could not see a fill that names the WRONG KIND of row, **for eight of
   the eleven pairs the map held on 2026-08-30**, while the test database

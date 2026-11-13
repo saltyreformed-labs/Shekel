@@ -71,7 +71,8 @@ def _envelope(db_session, seed_user, period, estimated, entries=()):
     re-queried with ``selectinload``; the re-query is not reproduced because
     the rule under test reads ``txn.entries`` through the relationship
     descriptor, which resolves either way -- a property
-    :class:`TestTheEntriesRelationshipIsNotASeam` below pins explicitly rather
+    ``test_the_reservation.py``'s :class:`TestTheEntriesRelationshipIsNotASeam`
+    pins explicitly rather
     than leaving it implied in 18 setups.
 
     Args:
@@ -110,8 +111,10 @@ def _in_flight(txn):
     Ruling **R-BAL77** (plan step ``balance:X-bi-4a``) split the three-bucket
     reservation in two: :func:`_entry_aware_amount` holds the envelope's
     UNSPENT budget and the plan's in-flight tier holds each un-dated non-card
-    purchase at its own figure, ``-delta`` under an expense.  The cases below
-    assert both halves and their sum, which is the figure each asserted of
+    purchase at its own figure, ``-delta`` under an expense.  The cases that
+    read it through :func:`_held_back`, in ``test_the_reservation.py`` and
+    ``test_the_posting_day.py``, assert both halves and their sum, which is
+    the figure each asserted of
     the one function through ``X-bi-3e``.
     """
     return sum(

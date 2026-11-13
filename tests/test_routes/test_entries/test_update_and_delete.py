@@ -251,7 +251,7 @@ class TestTheDerivedPostedIndicator:
     stored flag a user could flip let the indicator and the projection be set
     against each other, and when it is wrong the fact that is actually wrong is
     the POSTING DAY -- which the edit form carries, and which
-    :class:`TestTheSettledOnEditPath` below grades.
+    ``test_settled_on_and_mutation_surfaces.py``'s :class:`TestTheSettledOnEditPath` grades.
 
     So the entry row shows a DERIVED answer, and since plan step X-f3b (ruling
     **R-FM**) it is the SAME fact the reservation buckets on: has this

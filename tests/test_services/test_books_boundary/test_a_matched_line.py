@@ -141,7 +141,8 @@ class TestAMatchedLineBoundsTheBooksToo:
     ):  # pylint: disable=unused-argument
         """The structural half, on the client with no door.
 
-        Raw SQL on purpose, exactly as the class above it argues: an ORM call
+        Raw SQL on purpose, exactly as ``test_the_database_trigger.py``'s
+        :class:`TestTheDatabaseSeesWhatTheOrmCannot` argues: an ORM call
         would prove only that the service refusal fires.  A match member is
         written by ``statement_match._accept._record`` today, and the whole
         point of the constraint is the writer nobody enumerated.

@@ -39,7 +39,8 @@ def seam_confirmed_view(loan_account_id, scenario_id, as_of):
         a configured loan, no scenario, a future date, or not yet originated).
     """
     # Pylint: import-outside-toplevel -- helper-local, matching this module's
-    # convention of importing app symbols inside the helper that needs them.
+    # convention of importing app symbols inside the helper that needs them,
+    # ``AmountOwnership`` alone excepted.
     from app.extensions import db  # pylint: disable=import-outside-toplevel
     from app.models.account import Account  # pylint: disable=import-outside-toplevel
     from app.models.scenario import Scenario  # pylint: disable=import-outside-toplevel
@@ -85,7 +86,8 @@ def contract_forward_references(loan_params, scenario_id, as_of, extra):
         contract-plus-extra rows (``AmortizationRow``, in date order).
     """
     # Pylint: import-outside-toplevel -- helper-local, matching this module's
-    # convention of importing app symbols inside the helper that needs them.
+    # convention of importing app symbols inside the helper that needs them,
+    # ``AmountOwnership`` alone excepted.
     from app.services import (  # pylint: disable=import-outside-toplevel
         loan_loaders, loan_payment_service, loan_resolver,
     )
@@ -160,7 +162,8 @@ def seam_cash_balance_at(account, scenario_id, as_of):
         The cent-quantized ``Decimal`` cash-flow balance at *as_of*.
     """
     # Pylint: import-outside-toplevel -- helper-local, matching this module's
-    # convention of importing app symbols inside the helper that needs them.
+    # convention of importing app symbols inside the helper that needs them,
+    # ``AmountOwnership`` alone excepted.
     from app.services import balance_at  # pylint: disable=import-outside-toplevel
 
     ctx = balance_at.BalanceContext.build(account.user_id)
@@ -218,7 +221,8 @@ def create_transfer(
         The created (Projected) :class:`~app.models.transfer.Transfer`.
     """
     # pylint: disable=import-outside-toplevel  -- same lazy-app-import
-    # convention every helper in this module follows.
+    # convention every helper in this module follows, ``AmountOwnership``
+    # alone excepted.
     from app import ref_cache
     from app.enums import StatusEnum
     from app.services import transfer_service
@@ -327,7 +331,8 @@ def create_settled_transfer(
         The settled (Paid) parent :class:`~app.models.transfer.Transfer`.
     """
     # pylint: disable=import-outside-toplevel  -- same lazy-app-import
-    # convention every helper in this module follows.
+    # convention every helper in this module follows, ``AmountOwnership``
+    # alone excepted.
     from unittest import mock
 
     from app import ref_cache

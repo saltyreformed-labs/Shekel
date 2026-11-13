@@ -65,7 +65,7 @@ from app.routes._commit_helpers import (
 )
 from app.routes._redirect_target import RedirectTarget
 from app.routes.salary._bp import salary_bp
-from app.routes.salary._helpers import _regenerate_salary_transactions
+from app.routes.salary._helpers import _edit_page, _regenerate_salary_transactions
 from app.schemas.validation import (
     PayStubFigureSchema,
     PayStubLineSchema,
@@ -302,7 +302,7 @@ def set_stub_pricing(stub_id: int) -> ResponseReturnValue:
                 log_message="user_id=%d failed to switch pay stub %d's pricing",
                 log_args=(user_id, stub_id),
                 flash_message="Failed to switch the pay stub. Please try again.",
-                redirect=RedirectTarget("salary.edit_profile", {"profile_id": profile_id}),
+                redirect=_edit_page(profile_id),
             ),
         )
         if failed is not None:
@@ -312,7 +312,7 @@ def set_stub_pricing(stub_id: int) -> ResponseReturnValue:
         )
     state = "is used for pricing" if wanted == "on" else "is kept but not used for pricing"
     flash(f"Your {stub.payday.isoformat()} stub {state}.", "info")
-    return redirect(url_for("salary.edit_profile", profile_id=profile_id))
+    return _edit_page(profile_id).to_response()
 
 
 # ── Helpers ────────────────────────────────────────────────────────
@@ -325,7 +325,7 @@ def _record_failed(user_id: int, profile_id: int) -> ResponseReturnValue:
         log_message="user_id=%d failed to record a pay stub for profile %d",
         log_args=(user_id, profile_id),
         flash_message="Failed to save the pay stub. Please try again.",
-        redirect=RedirectTarget("salary.edit_profile", {"profile_id": profile_id}),
+        redirect=_edit_page(profile_id),
     ))
 
 
@@ -363,7 +363,7 @@ def _stale_ctx(
 ) -> StaleConflictContext:
     """The stale-conflict report: back to the stub, or to the profile's card."""
     redirect_to = (
-        RedirectTarget("salary.edit_profile", {"profile_id": to_profile})
+        _edit_page(to_profile)
         if to_profile is not None
         else RedirectTarget("salary.view_stub", {"stub_id": stub_id})
     )

@@ -12,7 +12,7 @@ classes here had no reference left to compare against and went with them; what
 they measured is recorded in ``archive/cash_arc_as_built_2026-07-27.md``.
 
 **What SURVIVES is the half that never graded against the incumbent**, and it is
-kept as its own file rather than folded into ``test_asset_fold.py`` because it
+kept as its own file rather than folded into the ``test_asset_fold`` package because it
 is a different KIND of evidence (plan Section 7.2's independence rule):
 
 * :class:`TestTheGrainIsARegroupingNotADifferentModel` grades the replay against
@@ -29,8 +29,8 @@ is a different KIND of evidence (plan Section 7.2's independence rule):
   ALONE: a scalar at a date, a daily series and the per-period map are three
   readings of ONE resolved step list.
 
-``test_asset_fold.py`` beside this grades the replay on HAND-COMPUTED figures.
-Neither file grades it against a shipping producer, which is finding N-7's rule.
+The ``test_asset_fold`` package beside this grades the replay on HAND-COMPUTED figures.
+Neither grades it against a shipping producer, which is finding N-7's rule.
 
 No sampling: the every-day class walks all 140 days of the seeded horizon
 (a 14-day sample once scored perfect while wrong by $178,103.41 on 22% of days).

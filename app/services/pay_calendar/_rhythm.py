@@ -8,7 +8,9 @@ COUNT of paydays rather than a period, a window or a stream, and the two
 questions below are the only two shapes of it anything asks.  Beside them,
 since plan step salary:X-av-2, is the count per YEAR the rhythm in force on a
 day pays (:func:`cadence_on`) -- the era's count, where
-:attr:`~._calendar.PayCalendar.cadence` answers the latest era's.
+:attr:`~._calendar.PayCalendar.cadence` answers the latest era's -- and,
+since task plan#3171, the paycheck a later era's rhythm is first paid on
+(:func:`first_paycheck_at`), the first that count is read at.
 
 **Why it is a count and not a window, which is the whole point of the module.**
 Its consumers do not want a pay period.  A 24-per-year deduction skips the
@@ -130,7 +132,7 @@ from itertools import takewhile
 
 from ._cadence import PayCadence
 from ._calendar import PayCalendar
-from ._eras import grid_below_record, matched_planned, projected_payday
+from ._eras import first_payday_of, grid_below_record, matched_planned, projected_payday
 from ._grid import cadence_steps_to
 from ._searches import paydays_between
 from ._views import projected_paychecks
@@ -578,8 +580,51 @@ def cadence_on(calendar: PayCalendar, payday: date) -> PayCadence:
     return PayCadence(calendar.eras[index].rhythm.cadence)
 
 
+def first_paycheck_at(calendar: PayCalendar, index: int) -> date:
+    """Return the payday of era *index*'s first paycheck: the first :func:`cadence_on` reads at it.
+
+    **The paycheck that stands for the era's first PLANNED payday**
+    (:func:`~._eras.matched_planned`, the match :func:`cadence_on` reads a
+    paycheck's rhythm by): the one covering :func:`~._eras.first_payday_of`
+    the era, or, when a record paid the era's first paycheck LATE, so that
+    the paycheck covering that day is still the earlier era's, the paycheck
+    after it.  A paycheck paid EARLY covers the day and stands for the era
+    already.  ``first_payday_of`` already moves the planned day under the
+    era's own convention, so the two part only at a RECORD paid on another
+    day.  Made-up: biweekly records 2026-01-02 and 01-16, weekly from 02-02;
+    a record of 02-01, paid a day early, or of 02-03, a day late, is the
+    weekly rhythm's first paycheck, and this answers it where
+    ``first_payday_of`` answers 02-02.
+
+    The one statement of where a change of rhythm begins (task plan#3171):
+    the paycheck engine's seams take effect from the first day this
+    paycheck pays for, and the salary page's rhythm notice names this day.
+    It was ``first_day_paid_at`` until then, which found this paycheck and
+    returned only its first paid day, so the notice dated a change by the
+    planned payday instead (finding plan#1587).
+
+    Args:
+        calendar: The owner's calendar.
+        index: An era after the first: the earliest era has no first
+            paycheck, because its rhythm also runs backward below the record.
+            Every later era's first payday is at or above the record's
+            opening (ruling **R-PC75**, which :func:`~._derive.validate_eras`
+            enforces, and ruling **R-PC110** at the door that retires the
+            first paydays), so a paycheck covers it.
+
+    Returns:
+        The paycheck's payday, saved or projected.
+    """
+    eras = calendar.eras
+    paycheck = calendar.span_containing(first_payday_of(eras[index]))
+    if matched_planned(eras, paycheck.start_date)[0] < index:
+        paycheck = calendar.span_containing(paycheck.end_date + timedelta(days=1))
+    return paycheck.start_date
+
+
 __all__ = [
     "cadence_on",
+    "first_paycheck_at",
     "paydays_in_month_through",
     "paydays_in_year_before",
     "saved_paydays_in_month_through",

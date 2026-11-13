@@ -39,7 +39,8 @@ def _priced(amount, payday, *, is_confirmed=False, account_id=1):
     and with them the risk of a fake drifting from the model it imitated.
 
     The rules those fakes exercised did not disappear with them; they MOVED,
-    and their tests moved with them to ``test_projection_inputs.py``, where the
+    and their tests moved with them to
+    ``test_projection_inputs/test_the_contribution_boundary.py``, where the
     boundary is exercised against real rows: a settled shadow whose actual
     differs from its estimate is priced at the actual, and a Cancelled or
     Credit row is DROPPED rather than carried at zero.
@@ -114,7 +115,8 @@ def _feed(periods=(), *, employee=None, gross=None):
     TABLE keyed by the period's ``start_date`` -- the same figures the real
     one would read off the engine, without the engine -- and a figure given
     as a scalar answers every payday of *periods*.  The loader's real
-    resolvers are graded against real rows in ``test_projection_inputs.py``.
+    resolvers are graded against real rows in
+    ``test_projection_inputs/test_the_payroll_feeds.py``.
 
     Args:
         periods: The periods whose paydays the tables cover.
@@ -173,7 +175,7 @@ class TestAccountPayrollFeed:
     raise, the inflation escalation, the cadence, the calendar-year cap -- is
     the paycheck engine's, graded in the ``test_paycheck_calculator/`` package; the
     resolvers the loader builds over the engine's pricer are graded in
-    ``test_projection_inputs.py`` against real rows, including the one thing
+    ``test_projection_inputs/test_the_payroll_feeds.py`` against real rows, including the one thing
     this step exists for, a period PAST the saved schedule priced rather
     than held.  What is left for the value itself is small and stated here:
     it hands a resolver the PERIOD, and it derives both presence facts from
@@ -641,8 +643,8 @@ class TestCalculateInvestmentInputs:
 
 
 # The ESTIMATED-vs-EFFECTIVE alignment class (deep-quality-hunt #11) lived
-# here and MOVED WHOLE to
-# ``test_projection_inputs.TestAContributionIsValuedAndScreenedAtTheBoundary``
+# here and MOVED WHOLE to ``test_projection_inputs.test_the_contribution_boundary``'s
+# ``TestAContributionIsValuedAndScreenedAtTheBoundary``
 # at plan step X-au-c2, with its four cases and their hand-computed figures
 # intact.  It pinned that a settled shadow whose ``actual_amount`` differs from
 # its ``estimated_amount`` is read at the ACTUAL by the averaged inputs feed,
@@ -965,8 +967,8 @@ class TestBuildContributionTimeline:
     # The Cancelled / Credit skip that used to be pinned here moved with the
     # rule (plan step X-au-c2): this module no longer screens by status, the
     # boundary loader does, and it DROPS such a row rather than pricing it at
-    # zero.  Its replacement is
-    # ``test_projection_inputs.TestAContributionIsValuedAndScreenedAtTheBoundary
+    # zero.  Its replacement is ``test_projection_inputs.test_the_contribution_boundary
+    # .TestAContributionIsValuedAndScreenedAtTheBoundary
     # .test_excluded_status_rows_are_dropped_not_zeroed``, which grades the
     # same rule against real rows and additionally pins why dropping and
     # zeroing are not interchangeable here.

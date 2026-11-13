@@ -75,33 +75,32 @@ CK_ORDERED = "ck_salary_raises_terminal_year_not_before_effective"
 CK_WINDOW = "ck_salary_raises_valid_terminal_year"
 CK_RECURRING = "ck_salary_raises_terminal_year_only_on_a_recurring_raise"
 
-#: The developer's own profile, read off the dev database 2026-09-05 and
-#: used because the figures below are the ones the ruling was decided on:
-#: ``$91,675.00`` a year then, and since plan step salary:X-av-3a the ONE pay
-#: entry migration ``70680a4a7405`` writes for it -- ``91,675.00 / 26 =
-#: 3,525.9615...``, half-up to the cent.
-BASE = Decimal("3525.96")
+#: A made-up pay entry (ruling salary:R-SAL98: test figures are made up).
+#: The ruling this file grades was decided on the owner's own figures, which
+#: these tests repeated until plan step salary:X-av-3b swapped them out.
+BASE = Decimal("2847.53")
 MERIT_PCT = Decimal("0.0250")
 
 #: What that merit raise compounds ONE PAYCHECK to at 2040-12-01, both ways
 #: -- the pay list's walk (:meth:`PayrollBasis.base_pay_on`), each 2.5% step
 #: rounded half-up to the cent (ruling R-SAL60), from the entry on the
 #: owner's first saved payday (2024-01-05, before the raise's first landing
-#: on 2027-01-01).  By hand, from 3,525.96: 2027 3,614.11 (3,614.109);
-#: 2028 3,704.46 (3,704.46275); 2029 3,797.07 (3,797.0715); 2030 3,892.00
-#: (3,891.99675); 2031 3,989.30 (3,989.3); 2032 4,089.03 (4,089.0325);
-#: 2033 4,191.26 (4,191.25575); 2034 4,296.04 (4,296.0415); 2035 4,403.44
-#: (4,403.441); 2036 4,513.53 (4,513.526); 2037 4,626.37 (4,626.36825);
-#: 2038 4,742.03 (4,742.02925); 2039 4,860.58 (4,860.58075); 2040 4,982.09
-#: (4,982.0945).  The yearly figures they were until X-av-3a --
-#: ``103,721.85`` and ``129,534.38``, the annual salary compounded and
-#: rounded once -- are ``3,989.30 x 26 = 103,721.80`` and ``4,982.09 x 26 =
-#: 129,534.34`` now.  Named absolutely rather than compared side to side: an
-#: equality whose two sides run ONE producer passes when that producer is
-#: wrong identically on both, which is the hole an adversarial review of
-#: this step found in the identity assertion below.
-TERMINATED_2031_AT_2040 = Decimal("3989.30")     # 2027..2031, five times
-UNTERMINATED_AT_2040 = Decimal("4982.09")        # 2027..2040, fourteen
+#: on 2027-01-01).  By hand, from 2,847.53: 2027 2,918.72 (2,918.71825);
+#: 2028 2,991.69 (2,991.688); 2029 3,066.48 (3,066.48225); 2030 3,143.14
+#: (3,143.142); 2031 3,221.72 (3,221.7185); 2032 3,302.26 (3,302.263);
+#: 2033 3,384.82 (3,384.8165); 2034 3,469.44 (3,469.4405); 2035 3,556.18
+#: (3,556.176); 2036 3,645.08 (3,645.0845); 2037 3,736.21 (3,736.207);
+#: 2038 3,829.62 (3,829.61525); 2039 3,925.36 (3,925.3605); 2040 4,023.49
+#: (4,023.494).  The yearly walk this replaced at X-av-3a compounded the
+#: annual salary and rounded once: from 2,847.53 x 26 = 74,035.78 that is
+#: ``83,764.69`` and ``104,610.62``, where the pay list's figures are
+#: ``3,221.72 x 26 = 83,764.72`` and ``4,023.49 x 26 = 104,610.74``.  Named
+#: absolutely rather than compared side to side: an equality whose two sides
+#: run ONE producer passes when that producer is wrong identically on both,
+#: which is the hole an adversarial review of this step found in the
+#: identity assertion below.
+TERMINATED_2031_AT_2040 = Decimal("3221.72")     # 2027..2031, five times
+UNTERMINATED_AT_2040 = Decimal("4023.49")        # 2027..2040, fourteen
 
 
 def _merit_type_id() -> int:
@@ -126,7 +125,7 @@ def _make_profile(seed_user) -> SalaryProfile:
         name="S3-b",
     )
     db.session.add(profile)
-    start_test_pay_list(profile, BASE)  # $91,675.00 a year / 26
+    start_test_pay_list(profile, BASE)
     db.session.commit()
     return profile
 
@@ -453,8 +452,8 @@ class TestTheColumnIsLiveAndNullIsTheIdentity:
         measuring nothing.  2027..2031 is five applications of 2.5%, each
         rounded to the cent on the paycheck (ruling R-SAL60, plan step
         salary:X-av-3a; quantized once at the end of ``apply_raises``'s
-        yearly walk until then): 3,525.96 -> 3,614.11 -> 3,704.46 ->
-        3,797.07 -> 3,892.00 -> 3,989.30, and nothing after 2031.
+        yearly walk until then): 2,847.53 -> 2,918.72 -> 2,991.69 ->
+        3,066.48 -> 3,143.14 -> 3,221.72, and nothing after 2031.
         """
         with app.app_context():
             profile = _make_profile(seed_user)

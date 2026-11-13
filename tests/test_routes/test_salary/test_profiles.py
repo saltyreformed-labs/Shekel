@@ -3,12 +3,16 @@
 Split from ``tests/test_routes/test_salary.py`` by ``tools/split`` (ruling R-BAL301).
 """
 
-from datetime import date
+import re
+from datetime import date, timedelta
 from decimal import Decimal
 
 from app.extensions import db
+from app.models.pay_period import PayPeriod
 from app.models.salary_profile import SalaryProfile
-from app.services import pay_list_service
+from app.services import (
+    pay_era_write, pay_list_service, pay_period_write, pay_schedule_service,
+)
 from app.models.transaction import Transaction
 from app.models.transaction_template import TransactionTemplate
 from app.models.account import Account
@@ -19,8 +23,12 @@ from app.services.payroll_basis import PayrollBasis
 
 from app.services import account_service
 
+from tests._form_controls import rendered_form_controls
+from tests._salary_forms import create_through_the_form
 from tests._stub_period import stub_period_on
-from tests._test_helpers import create_account_of_type, create_loan_account, NO_TAX_LAW
+from tests._test_helpers import (
+    create_account_of_type, create_loan_account, era_of, rhythm_of, NO_TAX_LAW,
+)
 
 from ._helpers import _create_profile, _create_other_user_profile, _respace_paydays
 from app.services.balance_at import BalanceContext
@@ -60,6 +68,191 @@ class TestProfileList:
             assert b'name="pay_payday"' in response.data
             assert b'name="filing_status_id"' in response.data
             assert b"New Salary Profile" in response.data
+
+
+#: What the count's slot says for an owner with no payday to default to.
+POINTER = "Generate a pay schedule first"
+
+
+def _paychecks_slot(body):
+    """Return the words the new-profile form's "Paychecks / Year" slot renders, tags dropped."""
+    label = "Paychecks / Year</span>"
+    start = body.index(label) + len(label)
+    end = body.index("</div>", start)
+    return " ".join(re.sub(r"<[^>]+>", " ", body[start:end]).split())
+
+
+def _new_form(client):
+    """GET the new-profile form: ``(the count's slot, the payday box's value)``."""
+    page = client.get("/salary/new")
+    assert page.status_code == 200
+    body = page.get_data(as_text=True)
+    return (
+        _paychecks_slot(body),
+        rendered_form_controls(body, "/salary")["pay_payday"],
+    )
+
+
+def _reschedule(user_id, first_payday, num_periods):
+    """Re-record the owner's schedule as *num_periods* biweekly paydays from *first_payday*."""
+    pay_period_write.record_paydays(
+        user_id=user_id,
+        first_payday=first_payday,
+        num_periods=num_periods,
+        rhythm=rhythm_of(14),
+        retiring_ids={
+            pid for (pid,) in db.session.query(PayPeriod.id)
+            .filter_by(user_id=user_id)
+        },
+    )
+    db.session.commit()
+
+
+class TestTodaysRhythmsCount:
+    """The new-profile form states the count in force on its default payday (R-SAL97).
+
+    "The new-profile form shows the count in force on today's payday, the
+    payday its pay defaults to ... The edit page drops its separate count,
+    because each pay-list row already states its own."  Made-up throughout;
+    today is 2026-03-20 (this package's freeze).  The default payday is the
+    owner's current one, saved or projected, and before the first payday the
+    first (``salary_paydays.first_entry_payday``, task plan#3170).
+    """
+
+    @staticmethod
+    def _weekly_later(user_id, seed_periods):
+        """Record a weekly rhythm four weeks after the saved record: 2026-06-05."""
+        switch = max(period.start_date for period in seed_periods) + timedelta(days=28)
+        pay_era_write.mint_era(user_id, era_of(switch, 7))
+        db.session.commit()
+        return switch
+
+    def test_a_later_rhythm_leaves_todays_count(
+        self, app, auth_client, seed_user, seed_periods,
+    ):
+        """Every two weeks today, weekly from 06-05: the form says 26, not 52.
+
+        Input: the seeded biweekly schedule (03-13 the current payday) and a
+        weekly rhythm recorded from 2026-06-05.
+        Expected: the payday box holds 2026-03-13 and the count beside it is
+        26, the count a pay from 03-13 is multiplied by.
+        Why: the form showed the LATEST rhythm's count until task plan#3170,
+        52 here, beside a pay list that prices the same pay at 26 (the
+        ruling's own example).
+        """
+        with app.app_context():
+            user_id = seed_user["user"].id
+            self._weekly_later(user_id, seed_periods)
+            # The premise: the latest rhythm is the weekly one, so the old
+            # count reads 52 for this owner.
+            assert calendar_for(user_id).cadence.periods_per_year == Decimal("52")
+
+            assert _new_form(auth_client) == (
+                "26 from your pay schedule", ["2026-03-13"],
+            )
+
+    def test_the_edit_page_leaves_the_count_to_the_pay_list(
+        self, app, auth_client, seed_user, seed_periods,
+    ):
+        """The edit page states no count of its own; its pay-list row says 26.
+
+        Input: the two-rhythm owner above, a profile created through the form
+        at its default payday, $2,000.00 a paycheck.
+        Expected: the edit page holds no "Paychecks / Year" and its one pay
+        row's yearly cell reads "$52,000.00 (26 paychecks)", 2,000.00 x 26,
+        the count the new-profile form stated for the same payday.
+        """
+        with app.app_context():
+            self._weekly_later(seed_user["user"].id, seed_periods)
+            assert _new_form(auth_client)[0] == "26 from your pay schedule"
+            profile = create_through_the_form(
+                auth_client, seed_user, "2000.00", "2026-03-13",
+            )
+
+            page = auth_client.get(f"/salary/{profile.id}/edit")
+
+            assert page.status_code == 200
+            text = " ".join(page.get_data(as_text=True).split())
+            assert "Paychecks / Year" not in text
+            assert (
+                '$52,000.00 <small class="text-muted">(26 paychecks)</small>'
+            ) in text
+
+    def test_past_the_saved_schedule_the_projected_payday(
+        self, app, auth_client, seed_user,
+    ):
+        """Paydays saved through 02-27: the form offers the projected 03-13, which saves.
+
+        Input: five biweekly paydays from 2026-01-02 (the last 02-27, its
+        paycheck through 03-12), today 03-20.
+        Expected: the payday box holds 2026-03-13, the paycheck the calendar
+        projects over today, and the count is 26; a create at that payday
+        stores the entry there.
+        Why: the box read the SAVED period covering today until task
+        plan#3170 and was empty here, though the create door takes a
+        projected payday (``salary_paydays.payday_refusal_for_door``).
+        """
+        with app.app_context():
+            _reschedule(seed_user["user"].id, date(2026, 1, 2), 5)
+
+            assert _new_form(auth_client) == (
+                "26 from your pay schedule", ["2026-03-13"],
+            )
+            profile = create_through_the_form(
+                auth_client, seed_user, "2000.00", "2026-03-13",
+            )
+            assert [(e.payday, e.amount) for e in profile.pay_entries] == [
+                (date(2026, 3, 13), Decimal("2000.00")),
+            ]
+
+    def test_before_the_first_payday_the_first_payday(
+        self, app, auth_client, seed_user,
+    ):
+        """First payday 04-10, today 03-20: the form offers 04-10, which saves.
+
+        Input: five biweekly paydays from 2026-04-10, today 03-20.
+        Expected: the payday box holds 2026-04-10, the owner's first and next
+        payday, and the count is 26; a create at that payday stores the entry
+        there.
+        Why: no pay has come yet, so the pay typed is the first paycheck's.
+        The box was empty here until task plan#3170.
+        """
+        with app.app_context():
+            _reschedule(seed_user["user"].id, date(2026, 4, 10), 5)
+
+            assert _new_form(auth_client) == (
+                "26 from your pay schedule", ["2026-04-10"],
+            )
+            profile = create_through_the_form(
+                auth_client, seed_user, "2000.00", "2026-04-10",
+            )
+            assert [(e.payday, e.amount) for e in profile.pay_entries] == [
+                (date(2026, 4, 10), Decimal("2000.00")),
+            ]
+
+    def test_an_owner_with_no_schedule_is_pointed_not_refused(
+        self, app, bare_auth_client,
+    ):
+        """No schedule row: the form renders, the pointer in the count's place.
+
+        Expected: 200, the pointer to the pay-period settings, an empty
+        payday box.  ``calendar_for`` refuses this owner, so a form deriving
+        the calendar through it would 500 on the state it points to the fix
+        for.
+        """
+        with app.app_context():
+            assert _new_form(bare_auth_client) == (POINTER, [""])
+
+    def test_an_owner_whose_schedule_holds_no_payday_is_pointed(
+        self, app, bare_auth_client, bare_user_with_cadence,
+    ):
+        """A schedule row and no payday: the pointer, an empty payday box."""
+        with app.app_context():
+            user_id = bare_user_with_cadence["user"].id
+            assert pay_schedule_service.resolve_schedule(user_id) is not None
+            assert calendar_for(user_id).opening_bound() is None
+
+            assert _new_form(bare_auth_client) == (POINTER, [""])
 
 
 class TestProfileCreate:

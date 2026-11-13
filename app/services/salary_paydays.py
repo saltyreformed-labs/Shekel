@@ -9,6 +9,8 @@ it is both's: it lived in the stub door's module until plan step
 **salary:S11-c-2a**, and the pay list imported a stub module for a rule about
 paydays.  What each door SAYS is its own (ruling **R-SAL93**, "Each door names
 its own"), passed in as :func:`payday_refusal_for_door`'s ``door_words``.
+The day the create form offers its first entry, :func:`first_entry_payday`,
+lives here beside the rule it must satisfy (task plan#3170).
 
 Flask-free, and no query of its own: everything is asked of the owner's
 :class:`~app.services.pay_calendar.PayCalendar`, which the caller's
@@ -113,4 +115,41 @@ def paycheck_on(calendar: PayCalendar, day: date) -> "DerivedPeriod | None":
     return span
 
 
-__all__ = ["not_a_payday", "paycheck_on", "payday_refusal_for_door"]
+def first_entry_payday(calendar: PayCalendar, today: date) -> date | None:
+    """Return the payday the create form's first pay entry defaults to, or ``None``.
+
+    **The owner's current payday** (ruling **R-SAL90**, "defaults to your
+    current one"): the paycheck covering *today*, saved or projected past the
+    saved schedule, because the pay the owner types is what they are paid
+    now.  **Before the first payday, the first payday**: no pay has come yet,
+    the first is the one the typed pay will be, and it is the owner's next
+    payday, the latest the doors take.  Either way a day
+    :func:`payday_refusal_for_door` takes: it opens a paycheck the app holds
+    or projects and is no later than the next payday.
+
+    ``span_containing`` answers ``None`` only for an empty calendar or a day
+    before :meth:`~app.services.pay_calendar.PayCalendar.opening_bound`, so
+    the opening covers both: the first payday, or ``None`` for an owner
+    holding no payday, whom the form points to the pay-period settings.
+
+    *Until task plan#3170 the form read the SAVED period covering today*
+    (``period_containing``), *and left the box empty past the saved
+    schedule's last paycheck, where the doors take the projected one; and
+    empty before the first payday.*
+
+    Args:
+        calendar: The owner's :class:`~app.services.pay_calendar.PayCalendar`.
+        today: The owner's civil today, the day the doors' rule reads.
+
+    Returns:
+        The payday, or ``None`` when the calendar holds none.
+    """
+    current = calendar.span_containing(today)
+    if current is not None:
+        return current.start_date
+    return calendar.opening_bound()
+
+
+__all__ = [
+    "first_entry_payday", "not_a_payday", "paycheck_on", "payday_refusal_for_door",
+]

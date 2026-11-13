@@ -29,6 +29,7 @@ from app.extensions import db
 from app.models.salary_profile import SalaryProfile
 from app.services.balance_at import BalanceContext
 from app.services import salary_cockpit_service
+from app.services.pay_banner import PayBanner
 from app.routes.salary._bp import salary_bp
 from app.routes.salary._helpers import _get_owned_profile_and_period
 
@@ -52,7 +53,7 @@ def _base_cockpit_context():
         "current_period": None,
         "focused_period": None,
         "is_third_paycheck": False,
-        "raise_event": "",
+        "banner": PayBanner(),
         "chips": None,
         "composition": None,
         "line_rows": [],
@@ -151,10 +152,12 @@ def _anatomy_context(profile, period, periods, paychecks):
 
     Returns:
         A dict with ``profile``, ``focused_period``, ``is_third_paycheck``,
-        ``raise_event``, ``composition``, ``line_rows``,
-        ``prev_period_id``, and ``next_period_id``.  ``raise_event`` is the
-        focused paycheck's banner as the engine states it: a raise shows on
-        the one paycheck it first reaches (ruling **plan#3092**).  It was
+        ``banner``, ``composition``, ``line_rows``,
+        ``prev_period_id``, and ``next_period_id``.  ``banner`` is the
+        focused paycheck's :class:`~app.services.pay_banner.PayBanner` as the
+        engine states it: a raise shows on the one paycheck it first reaches
+        (ruling **plan#3092**), and each change in its own direction (task
+        plan#3168).  It was
         collapsed here against the paycheck before it until task plan#3111,
         when the engine badged every paycheck of a raise's month (P-SA1);
         that read priced a second paycheck on every anatomy fragment and hid
@@ -169,7 +172,7 @@ def _anatomy_context(profile, period, periods, paychecks):
         "profile": profile,
         "focused_period": period,
         "is_third_paycheck": breakdown.period.is_third_paycheck,
-        "raise_event": breakdown.period.raise_event,
+        "banner": breakdown.period.banner,
         "composition": salary_cockpit_service.build_composition(breakdown),
         "line_rows": salary_cockpit_service.build_line_rows(breakdown),
         "prev_period_id": prev_id,

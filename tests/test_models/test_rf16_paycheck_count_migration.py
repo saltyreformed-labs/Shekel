@@ -192,7 +192,7 @@ def _profile(db, seed_user, name="R-F16"):
     )
     db.session.add(profile)
     db.session.flush()
-    start_test_pay_list(profile, Decimal("3525.96"))  # $91,675.00 a year / 26
+    start_test_pay_list(profile, Decimal("3019.23"))  # $78,500.00 a year / 26, made up
     return profile
 
 

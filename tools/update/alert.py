@@ -1,15 +1,19 @@
 """A failed run of the weekly update, told to the developer (ruling plan#2466): an issue in this
 repository titled for the day, which mentions him, links the run and names each job's result.
+The weekly update is the dependency update and the weekly rebuild of production's image, each
+with an ``alert`` job of its own: ``.github/workflows/updates.yml``'s, run when the refresh, the
+publish, the queue or the release-due job failed, and
+``.github/workflows/docker-publish.yml``'s, run when a scheduled rebuild's tax-law check or
+build failed (ruling plan#3724).
 
-**It installs nothing** (plan#2481).  Its job (``.github/workflows/updates.yml``'s ``alert``,
-run when the refresh, the publish, the queue or the release-due job failed) runs this module on
-the runner's own Python with the standard library alone (``python3 -S``, which puts no installed
-package on the path), and the runner's own ``gh`` sends the issue.  The other jobs each install
-the lock, a pull of uv from ghcr.io and downloads of its Python and the packages, so a failure
-there would otherwise stop the one job that reports it.  The ubuntu-26.04 image holds Python
-3.14.4 and GitHub CLI 2.103.2 (runner-images ``ubuntu26/20261026.180``'s list, read
-2026-11-01).  It holds only the workflow's own token, widened to ``issues: write`` for its one
-job, and runs no package code.
+**It installs nothing** (plan#2481).  Each ``alert`` job runs this module on the runner's own
+Python with the standard library alone (``python3 -S``, which puts no installed package on the
+path), and the runner's own ``gh`` sends the issue.  The other jobs each install the lock, a
+pull of uv from ghcr.io and downloads of its Python and the packages, or build the image, so
+a failure there would otherwise stop the one job that reports it.  The ubuntu-26.04 image
+holds Python 3.14.4 and GitHub CLI 2.103.2 (runner-images ``ubuntu26/20261026.180``'s list,
+read 2026-11-01).  Each holds only its workflow's own token, widened to ``issues: write`` for
+that one job, and runs no package code.
 
 A mention is what reaches him (measured 2026-10-27, on the tracker), and an issue is a
 mention's home that a failed run always has; he closes it once what failed is fixed.  Each
@@ -37,7 +41,7 @@ from datetime import UTC, date, datetime
 
 from tools.update.app import DEVELOPER, REPOSITORY_VARIABLE, unset
 
-#: The variable holding the workflow's own token, which the alert's job and the due job each
+#: The variable holding the workflow's own token, which each ``alert`` job and the due job
 #: widen to ``issues: write``: the one ``gh`` reads first.
 ISSUE_TOKEN_VARIABLE = "GH_TOKEN"
 #: How the title of each issue the alert opens begins, the failed run's day after it: what

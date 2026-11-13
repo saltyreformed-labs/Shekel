@@ -301,8 +301,10 @@ class _TestTheRailSavesARaisesEndYearMembers:
         first year moves TODAY's paycheck -- only where the caller's calendar
         opens before its first landing; see
         :meth:`test_an_end_year_is_written_and_the_paychecks_regenerated`.
-        Every other caller grades the row's write, which the pricing does
-        not touch.
+        Every other caller grades the row's write, saving ``effective + 2`` or
+        later: the entry can hold every landing through ``effective + 1``,
+        and the Save refuses an end year that leaves no paycheck the raise
+        (ruling plan#3492).
 
         Returns:
             ``(raise id, effective year, profile id)``.

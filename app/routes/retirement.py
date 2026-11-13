@@ -6,6 +6,7 @@ and retirement planning settings.
 """
 
 import logging
+from dataclasses import replace
 from datetime import date
 
 from flask import Blueprint, abort, flash, redirect, render_template, request, url_for
@@ -48,8 +49,9 @@ from app.services import (
     salary_regeneration,
 )
 from app.services.balance_at import BalanceContext
+from app.services.payroll_basis import PayrollBasis
 from app.services.retirement_dashboard_service import RetirementRows
-from app.services.salary_raises import EndYearError, end_year_of
+from app.services.salary_raises import EndYearError, RaiseTerms, end_year_of
 
 logger = logging.getLogger(__name__)
 
@@ -617,6 +619,7 @@ def _refused_probes_by_control(
 def _resolve_end_year_saves(
     raise_probes: dict[int, tuple[str, int | None]],
     salary_profiles: list[SalaryProfile],
+    ctx: BalanceContext,
 ) -> tuple[list[tuple[SalaryRaise, int | None]], dict[str, list[str]]]:
     """Resolve the rail's posted end-year pairs against the rows the rail lists.
 
@@ -636,10 +639,25 @@ def _resolve_end_year_saves(
     with :func:`~app.utils.auth_helpers.log_refused_lookup` leaving the trail
     a cross-user probe must leave.
 
+    **An end year the rule accepts is refused when it leaves the raise
+    reaching no paycheck** (task plan#3500, ruling **plan#3492**): every year
+    it is then believed is already in recorded pay.  One rule for every door
+    that writes a raise -- the salary form's add and edit refuse the same
+    state (task plan#3169) -- asked of the one producer they and the Raises
+    card read, :meth:`~app.services.payroll_basis.PayrollBasis.raise_in_pay`,
+    over the ROW'S terms with the posted end year, so nothing is staged
+    before the refusal, and said in the words fitted to this page
+    (:attr:`~app.services.raise_in_pay.RaiseInPay.end_year_refusal`), on the
+    row's year control.  Only a stated end year can be refused: a raise
+    believed with no end year always has a later year reaching pay.  The
+    probe refuses nothing of the kind: a what-if writes nothing.
+
     Args:
         raise_probes: ``{raise_id: (mode, year)}`` off the settings schema --
             every pair the POST carried; a rail row's form carries one.
         salary_profiles: The owner's active profiles, the rail's set.
+        ctx: The request's read pass, whose calendar each raise's pay list
+            is walked over.
 
     Returns:
         ``(writes, errors)``: *writes* is one ``(row, terminal_year)`` per
@@ -664,9 +682,17 @@ def _resolve_end_year_saves(
             log_refused_lookup("SalaryRaise", raise_id)
             abort(404)
         try:
-            writes.append((row, end_year_of(mode, year, row.effective_date.year)))
+            terminal_year = end_year_of(mode, year, row.effective_date.year)
         except EndYearError as exc:
             refusals[raise_id] = (exc.field, exc.message)
+            continue
+        unreached = PayrollBasis(row.salary_profile, ctx.calendar()).raise_in_pay(
+            replace(RaiseTerms.of(row), terminal_year=terminal_year),
+        ).end_year_refusal
+        if unreached is None:
+            writes.append((row, terminal_year))
+        else:
+            refusals[raise_id] = ("year", unreached)
     return writes, _refused_probes_by_control(refusals)
 
 
@@ -860,9 +886,11 @@ def update_settings():
     what-if sends, the schema gathers it as the readiness query does, and
     :func:`_resolve_end_year_saves` grades it against the ROW -- 404 for an
     id the rail does not list, a designed 422 with the message on that row's
-    control for an answer the ONE end-year rule refuses.  The write is the
-    column on ``salary.salary_raises`` (audit triggers, the row's optimistic
-    lock), and it is followed by what EVERY raise write is followed by:
+    control for an answer the ONE end-year rule refuses, or for an end year
+    that leaves the raise reaching no paycheck (ruling **plan#3492**).  The
+    write is the column on ``salary.salary_raises`` (audit triggers, the
+    row's optimistic lock), and it is followed by what EVERY raise write is
+    followed by:
     :func:`~app.services.salary_regeneration.regenerate_salary_transactions`
     on the raise's profile (ruling **R-SAL24** put that walk below both
     routes), so the template's per-paycheck amount and the row set the
@@ -924,7 +952,7 @@ def update_settings():
     rail_errors: dict[str, list[str]] = {}
     if "raise_probes" in data:
         end_year_writes, rail_errors = _resolve_end_year_saves(
-            data.pop("raise_probes"), salary_profiles,
+            data.pop("raise_probes"), salary_profiles, ctx,
         )
     if not rail_errors:
         rail_errors = _pension_date_write(data, pensions, settings)

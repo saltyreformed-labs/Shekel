@@ -131,6 +131,6 @@ class TestTwoRaisesOnOneDay:
             profile, _merit, _cola = _two_raises_the_first_corrected(seed_user)
             calendar = calendar_for(profile.user_id)
             basis = PayrollBasis(profile, calendar)
-            assert basis.pay_event_on(calendar.span_containing(date(2026, 2, 13))) == (
-                "MERIT +3.0000%, COLA +2.0000%"
+            assert basis.banner_on(calendar.span_containing(date(2026, 2, 13))).text == (
+                "Merit +3%, Cola +2%"
             )

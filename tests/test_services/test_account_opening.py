@@ -5,8 +5,9 @@ Grades ``budget.account_openings`` and the one loader that reads it
 whole step exists for: a BACK-DATED assertion no longer redefines the level
 every historical balance rests on.
 
-The fold's own arithmetic over that level is graded in ``test_cash_fold.py``
-(:class:`~tests.test_services.test_cash_fold.TestTheOpeningEquityIsTheSeed`) and
+The fold's own arithmetic over that level is graded in
+``test_cash_fold/test_the_opening_equity_is_the_seed.py``
+(``TestTheOpeningEquityIsTheSeed``) and
 the worked-out ledger's use of it in
 ``tests/test_services/test_ledger_lines/test_an_accounts_corrections/``; this file
 is about the RECORD.

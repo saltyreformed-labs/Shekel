@@ -154,7 +154,8 @@ def _running_balance(account, scenario):
     an assertion resets the total, so what preceded it cannot survive -- and it
     is exactly why "the figures did not move" is NOT evidence that this step
     moved no money.  A control on the SEED has to read a date BEFORE the first
-    assertion, which is what ``test_cash_fold.py``'s
+    assertion, which is what
+    ``test_cash_fold/test_the_opening_equity_is_the_seed.py``'s
     :class:`TestTheOpeningEquityIsTheSeed` does.
 
     :class:`TestTheStepsReconstructTheReplay` proves this equals the replay's

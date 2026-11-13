@@ -22,8 +22,9 @@ Two questions this file does NOT answer, and their homes:
 * what one row is WORTH -- ``test_cash_amounts/``;
 * which STARTING balance the reduction is added to, and how it rolls forward
   period after period -- the cash fold's (``balance_at._cash_fold``), graded
-  in ``test_cash_fold.py`` (``TestTheOpeningEquityIsTheSeed``,
-  ``TestEveryAssertionIsReplayed``, ``TestTheDriftOracleWalksFiftyTwoPeriods``).
+  in ``test_cash_fold/`` (``TestTheOpeningEquityIsTheSeed``,
+  ``TestEveryAssertionIsReplayed``, ``TestTheDriftOracleWalksFiftyTwoPeriods``,
+  in three of its parts).
   It was ``balance_at._calculator``'s roll-forward, graded in
   ``test_balance_calculator.py``, until plan step X-g4b deleted both.
 

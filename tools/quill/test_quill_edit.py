@@ -262,8 +262,9 @@ def test_edit_keeps_the_lines_holding_what_the_weekly_update_told(code, tmp_path
         assert run(tracker, code, "edit", "plan#1", "--body-file", path) == 1
         err = capsys.readouterr().err
         assert err.startswith(
-            "refused: plan#1's text ends with lines holding what the weekly update told, which "
-            "`quill sync` reads (ruling plan#3619), and this text drops ")
+            "refused: plan#1's text ends with lines holding what the weekly update told or the "
+            "image scan found, which `quill sync` and `quill scan` read (rulings plan#3619, "
+            "plan#3787), and this text drops ")
         assert f"one to a line:\n  {TOLD[0]}\n" in err
         assert not tracker.writes
     assert run(tracker, code, "edit", "plan#1", "--body-file", _text(tmp_path, kept)) == 0

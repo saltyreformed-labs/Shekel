@@ -308,17 +308,18 @@ def told(github: GitHub) -> list[Told]:
 def edit_refusal(label: str, old: str, new: str) -> str | None:
     """Why ``new`` may not replace ``old`` as the text of the card ``label`` names: it drops a
     line holding a thing told (:func:`holds`) that ``old`` holds, which renders as nothing, so
-    the next pass would file that thing again while it is still told (finding 5 of
-    plan#3613's review); None when it keeps each one.  ``quill edit``'s refusal
-    (``quill._text_refusal``), fail closed: a refusal costs a re-run, a dropped line a second
-    card at the top of the board."""
+    the next pass, ``quill sync``'s or ``quill scan``'s, would file that thing again while it
+    is still told or found (finding 5 of plan#3613's review); None when it keeps each one.
+    ``quill edit``'s refusal (``quill._text_refusal``), fail closed: a refusal costs a re-run,
+    a dropped line a second card at the top of the board."""
     if not (dropped := holds(old) - holds(new)):
         return None
     lines = "\n  ".join(told_line(*thing) for thing in sorted(dropped))
-    return (f"{label}'s text ends with lines holding what the weekly update told, which `quill "
-            f"sync` reads (ruling plan#3619), and this text drops {len(dropped)} of them, so "
-            "the next pass would file each again: end the new text with them as they stand, "
-            f"one to a line:\n  {lines}")
+    return (f"{label}'s text ends with lines holding what the weekly update told or the image "
+            "scan found, which `quill sync` and `quill scan` read (rulings plan#3619, "
+            f"plan#3787), and this text drops {len(dropped)} of them, so the next pass would "
+            "file each again: end the new text with them as they stand, one to a line:\n  "
+            f"{lines}")
 
 
 def _held(github: GitHub, place: Place) -> dict[int, frozenset[Thing]]:

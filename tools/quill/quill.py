@@ -414,7 +414,8 @@ def _text_refusal(card: Card, path: str, body: str, old: str) -> str | None:
     text in a ruling's shape is what only its conversion writes: ``_filing``
     reads such an edit of quill's as an earlier conversion's
     (``_Asked.converted_before``).  A text dropping a line that holds what the weekly update
-    told is one ``quill sync`` would file again (:func:`_waits.edit_refusal`).
+    told or the image scan found is one ``quill sync`` or ``quill scan`` would file again
+    (:func:`_waits.edit_refusal`).
     """
     if not body.strip():
         return f"{path} holds no text: edit never blanks a card's text"

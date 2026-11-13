@@ -5,7 +5,7 @@ A made-up year (:func:`tests._test_helpers.made_up_year`) carries one set of
 per-child credits once (:class:`~app.tax_law.FederalCredits`), as the law
 states them (ruling plan#3340).  These builders lived in
 ``tests/_test_helpers.py`` until plan step plan#3206 took the credits off the
-per-status rules; that module is over the 1,000-line ceiling (ruling
+per-status rules; that module was over the 1,000-line ceiling (ruling
 R-BAL301), so the federal builders moved here rather than add lines to it.
 """
 

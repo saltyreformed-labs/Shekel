@@ -52,6 +52,20 @@ or ``display_today()``, so these pass identically under
 ``TZ=Pacific/Kiritimati`` and under the weekly ``SHEKEL_FAKE_TODAY`` sweep
 (``docs/test-suite-clocks.md``).  The derivation has no clock, and a test that
 gave it one would be testing the fixture.
+
+**The boundary-arithmetic cases reach a package-PRIVATE module on purpose.**
+``covering_projection`` and ``project_period_after`` live in
+``pay_calendar._projection`` and have no caller outside the PACKAGE, so
+exporting them would widen its curated surface for a test's convenience.
+The predicate that surface is drawn on is the package boundary, which is also
+what the W9910 gate (``shekel-private-module-import``) enforces; that gate
+runs over ``app/``, ``scripts/`` and ``tools/pylint/shekel_checkers/``, not
+over ``tests/`` (``tests/manual/`` is held to E and F alone), and three parts
+of the ``tests/test_services/test_spending_report_service/`` package reach a
+sibling package's ``_window`` the same way.  ``projected_payday`` was
+package-private too until plan step ``C14-d`` gave it an application caller;
+it is imported publicly, and ``pay_period_batch.requested_paydays`` and
+``registration_service._reject_impossible_first_payday`` call it.
 """
 
 from datetime import date, datetime, timedelta
@@ -74,25 +88,6 @@ from app.services.pay_calendar import (
     projected_payday,
     schedule_for,
 )
-
-# Package-PRIVATE on purpose, and this is the one import in the suite that
-# takes it.  ``covering_projection`` and ``project_period_after`` have no
-# caller outside the PACKAGE, so exporting them would widen its curated
-# surface for a test's convenience.  *An adversarial review of ``C14-d``
-# corrected this line: it said "outside :mod:`app.services.pay_calendar._derive`",
-# which is false of ``project_period_after`` -- ``_calendar`` and ``_views``
-# both call it.  The predicate the curated surface is drawn on is the PACKAGE
-# boundary, which is also what the W9910 gate enforces.*  The W9910 gate (``shekel-private-module-import``) runs over
-# ``app/``, ``scripts/`` and ``tests/manual/`` -- not this tree -- and
-# ``tests/test_services/test_spending_report_service.py`` reaches a sibling
-# package's ``_window`` the same way.
-#
-# ``projected_payday`` was in this list until plan step ``C14-d``, which gave
-# it the application caller the list is drawn on:
-# ``pay_period_batch.reject_backward_payday`` asks it where the last paycheck
-# ends rather than restating the arithmetic.  It is imported publicly above,
-# and the entry is corrected rather than dropped because the sentence it used
-# to carry -- *no application caller* -- was a measurement that expired.
 from app.services.pay_calendar import _projection
 from app.services.pay_calendar._projection import covering_projection
 from app.utils.business_days import (

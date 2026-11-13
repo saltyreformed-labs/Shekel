@@ -45,7 +45,7 @@ class TestInvestmentDashboard:
         # X-g2b the anchor period earns its own days (ruling R-Y), so the
         # headline is that basis PLUS the accrual -- read here from the seam
         # rather than pinned, because the arithmetic belongs to
-        # tests/test_services/test_asset_fold.py's hand-computed oracles.
+        # tests/test_services/test_asset_fold/test_the_accrual.py's hand-computed oracles.
         _create_investment_params(db.session, acct.id)
         headline = balance_at.balance_map(
             acct, BalanceContext.build(seed_user["user"].id),

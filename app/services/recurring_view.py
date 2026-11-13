@@ -303,10 +303,10 @@ class RecurringSection:
     filter+sum ``obligations_aggregator.committed_monthly`` makes, rounded
     once, over the rows that do not pay a card.  So it equals that aggregator
     for the income and expense sections by construction, and for the
-    transfers section less any transfer into a card, which this leaves out
-    (ruling plan#3527) and the aggregator keeps: its emergency-fund floor on
-    ``/savings`` reads checking's definitions alone, the card's payment among
-    them and none of the card's bills, so each counts a bill on the card once.
+    transfers section over the rows that do not pay a card, which this leaves
+    out (ruling plan#3527), as the emergency-fund floor on ``/savings`` does
+    before it calls the aggregator, counting the card's bills instead (plan
+    task plan#3700).
     """
 
     rows: tuple[RecurringRow, ...]
@@ -598,8 +598,8 @@ def _build_section(
     full-precision total once.  A transfer definition into a card is a row
     with its monthly figure and adds nothing to that total (ruling plan#3527,
     :attr:`RecurringRow.pays_a_card`), so the subtotal equals
-    ``committed_monthly`` for the section less such rows; :class:`RecurringSection`
-    says why the aggregator keeps them.
+    ``committed_monthly`` for the section less such rows, the set the
+    emergency-fund floor hands it too (:class:`RecurringSection`).
 
     **Each rule is READ once** (plan step R7a).  A row's cadence phrase, its
     next date and its monthly equivalent are three questions about one reading,

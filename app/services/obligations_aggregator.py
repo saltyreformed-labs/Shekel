@@ -621,12 +621,13 @@ def committed_monthly(
     ``/obligations`` page's kernel, ``recurring_view._build_section``, which
     holds each row's figure for its share).  Per E-24 / HIGH-05, every
     consumer must call this function or that per-row filter rather than
-    inline its own.  **The two part at a transfer into a card** (ruling
-    plan#3527, plan task plan#3530): the Recurring surface leaves one out of
-    its totals, the card's bills being in them, and this counts one, its
-    emergency-fund caller reading checking's definitions alone -- the card's
-    payment and none of the card's bills -- so each counts a bill on the
-    card once.
+    inline its own.  **Both count a bill on a card and not a payment into a
+    card** (ruling plan#3527; plan tasks plan#3530 and plan#3700): the
+    Recurring surface lists a payment into a card and leaves it out of its
+    totals, and the emergency-fund floor hands this the bills on each card
+    checking pays and none of checking's payments into a card.  This sums
+    what it is handed: a fixed amount sent to a card counts here if a caller
+    passes it, and a card's worked-out payment never does (filter step 3).
 
     Args:
         templates: Iterable of ORM template instances (``TransactionTemplate``,

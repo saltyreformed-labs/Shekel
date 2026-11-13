@@ -26,6 +26,7 @@ from app.models.transfer_template import TransferTemplate
 from app.services import (
     obligations_aggregator,
 )
+from app.services.account_projection import pays_a_card
 from app.services.balance_at import BalanceContext
 from app.services.cash_ledger import (
     template_pricing_load_options,
@@ -404,6 +405,26 @@ def _committed_expense_floor(
     -- so the same skip-non-repeating / skip-expired filter the
     Recurring surface applies governs the emergency-fund baseline.
 
+    **A bill on a card that checking pays counts, and no payment into a card**
+    (plan task plan#3700, the Recurring page's rule, ruling plan#3527): the
+    card's bills leave checking through its payment, one paycheck later, and
+    the payment carries nothing else that commits.  It read the payment
+    instead, at its next row times its repeats, which made one purchase a
+    monthly commitment and an unmarked $0.00 row none.  $1,500 rent from
+    checking and a $100 phone each paycheck on the card read 1,500 + 100 x 26 /
+    12 = $1,716.67, whatever the card owes; a single $2,000 balance on the card
+    with its payment each payday had read 1,500 + 2,000 x 26 / 12 = $5,833.33
+    while that row was next, and $1,500 while an unmarked $0.00 row before it
+    was, the phone counting in neither.
+    A purchase on a card counts no more than one from checking: neither
+    repeats.  A card checking pays is the destination of an active transfer
+    definition from checking (:func:`~app.services.account_projection.pays_a_card`),
+    so an archived card's bills, whose payment is archived with it, are not
+    counted.  The cost is the ruling's: a fixed amount sent to the card, or a
+    balance carried and paid down, is not in this floor, while the operand
+    :func:`_compute_avg_monthly_expenses` sets it beside still counts every
+    payment that left checking.
+
     **It hands the aggregator the READ PASS** (plan step R7d-e), where it
     threaded the pass's calendar and day separately until then.  The expired
     filter now asks what stops a definition through the composed door --
@@ -438,19 +459,8 @@ def _committed_expense_floor(
     # The aggregator prices each definition on the pass's day
     # (``obligations_aggregator.todays_price``, ruling plan#2693), so each
     # query loads what pricing reads with the definitions: without it the
-    # page's statements grew with every definition (plan#2733).
-    expense_type_id = ref_cache.txn_type_id(TxnTypeEnum.EXPENSE)
-    active_expense_templates = (
-        db.session.query(TransactionTemplate)
-        .options(*template_pricing_load_options())
-        .filter(
-            TransactionTemplate.user_id == ctx.user_id,
-            TransactionTemplate.account_id.in_(checking_ids),
-            TransactionTemplate.transaction_type_id == expense_type_id,
-            TransactionTemplate.is_active.is_(True),
-        )
-        .all()
-    )
+    # page's statements grew with every definition (plan#2733).  The
+    # destination ``pays_a_card`` reads is a joined load on the definition.
     active_transfer_templates = (
         db.session.query(TransferTemplate)
         .options(*transfer_template_pricing_load_options())
@@ -461,8 +471,29 @@ def _committed_expense_floor(
         )
         .all()
     )
+    cards_checking_pays = sorted({
+        template.to_account_id for template in active_transfer_templates
+        if pays_a_card(template)
+    })
+    expense_type_id = ref_cache.txn_type_id(TxnTypeEnum.EXPENSE)
+    active_expense_templates = (
+        db.session.query(TransactionTemplate)
+        .options(*template_pricing_load_options())
+        .filter(
+            TransactionTemplate.user_id == ctx.user_id,
+            TransactionTemplate.account_id.in_(
+                [*checking_ids, *cards_checking_pays],
+            ),
+            TransactionTemplate.transaction_type_id == expense_type_id,
+            TransactionTemplate.is_active.is_(True),
+        )
+        .all()
+    )
     return obligations_aggregator.committed_monthly(
-        list(active_expense_templates) + list(active_transfer_templates),
+        list(active_expense_templates) + [
+            template for template in active_transfer_templates
+            if not pays_a_card(template)
+        ],
         ctx,
     )
 

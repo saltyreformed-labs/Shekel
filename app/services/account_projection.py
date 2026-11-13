@@ -191,14 +191,17 @@ def pays_a_card(transfer: Transfer | TransferTemplate) -> bool:
     The ONE test of "this transfer pays a card's bills off rather than moving
     money anywhere else", asked of a transfer and of the definition that makes
     its rows alike, since both name the account the money goes to
-    (``to_account``).  Two screens leave such a payment out of a total because
+    (``to_account``).  Three readers leave such a payment out of a total because
     the card's bills are already in it, so counting the payment too counted
     one purchase twice: the Spending report, of a settled leg
     (``spending_analysis._pays_a_card``, plan task plan#2932, ruling
-    plan#2926), and the Recurring page, of a definition
-    (``recurring_view``, plan task plan#3530, ruling plan#3527).  A fixed
-    amount sent to the card is such a payment too, which is the cost ruling
-    plan#3527 states.
+    plan#2926), the Recurring page, of a definition
+    (``recurring_view``, plan task plan#3530, ruling plan#3527), and the
+    emergency-fund floor on ``/savings``, which counts the bills on each card
+    it finds checking paying this way
+    (``savings_dashboard_service._metrics._committed_expense_floor``, plan task
+    plan#3700).  A fixed amount sent to the card is such a payment too, which
+    is the cost ruling plan#3527 states.
 
     Args:
         transfer: A :class:`~app.models.transfer.Transfer` or a

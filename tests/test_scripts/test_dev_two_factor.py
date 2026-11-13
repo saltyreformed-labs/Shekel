@@ -67,6 +67,12 @@ def _copy_of_productions_two_factor(user_id):
 class TestRefuseUnlessLoopback:
     """The writer reaches only a database on this host's loopback."""
 
+    @pytest.fixture(autouse=True)
+    def _no_redirecting_variables(self, monkeypatch):
+        """An environment that moves no connection off the URL's host, whatever ran this."""
+        for name in ("PGHOSTADDR", "PGSERVICE"):
+            monkeypatch.delenv(name, raising=False)
+
     @pytest.mark.parametrize("uri", [
         "postgresql://shekel_user:pw@127.0.0.1:5432/shekel_copy",
         "postgresql://shekel_user:pw@localhost:5432/shekel_copy",
@@ -75,6 +81,39 @@ class TestRefuseUnlessLoopback:
     def test_a_loopback_database_passes(self, uri):
         """A database at a loopback address, where the dev database binds, passes."""
         assert dev_two_factor.refuse_unless_loopback(uri) is None
+
+    @pytest.mark.parametrize("query", [
+        "host=172.18.0.2", "hostaddr=172.18.0.2", "service=prod", "sslmode=disable",
+    ])
+    def test_a_url_with_a_query_is_refused_naming_its_keys(self, query):
+        """A query is refused, whatever its keys: libpq reads each as a connection setting.
+
+        ``host=172.18.0.2`` on a loopback URL hands psycopg that host, so the
+        URL's own host would decide nothing.
+        """
+        with pytest.raises(SystemExit) as refused:
+            dev_two_factor.refuse_unless_loopback(
+                f"postgresql://shekel_user:pw@127.0.0.1:5432/shekel_copy?{query}",
+            )
+        key = query.split("=", 1)[0]
+        assert f"carries a query ({key})" in str(refused.value)
+
+    @pytest.mark.parametrize("name", ["PGHOSTADDR", "PGSERVICE"])
+    def test_a_redirecting_variable_is_refused_naming_it(self, monkeypatch, name):
+        """``PGHOSTADDR`` or ``PGSERVICE`` in the environment is refused, on a loopback URL."""
+        monkeypatch.setenv(name, "172.18.0.2" if name == "PGHOSTADDR" else "prod")
+        with pytest.raises(SystemExit) as refused:
+            dev_two_factor.refuse_unless_loopback(
+                "postgresql://shekel_user:pw@127.0.0.1:5432/shekel_copy",
+            )
+        assert f"Refused: {name} is set" in str(refused.value)
+
+    def test_pghost_is_not_refused_as_the_url_names_its_host(self, monkeypatch):
+        """``PGHOST`` passes: a URL that names its host overrides it."""
+        monkeypatch.setenv("PGHOST", "172.18.0.2")
+        assert dev_two_factor.refuse_unless_loopback(
+            "postgresql://shekel_user:pw@127.0.0.1:5432/shekel_copy",
+        ) is None
 
     @pytest.mark.parametrize("uri, host", [
         # Production's own address for its database, on its docker network

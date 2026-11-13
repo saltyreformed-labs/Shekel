@@ -66,6 +66,13 @@ ENV_FILE = Path(__file__).resolve().parents[1] / ".env"
 #: loopback, where the dev database binds and production's does not.
 LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
 
+#: libpq's environment variables that move a connection off a URL's named
+#: host: ``PGHOSTADDR`` is connected to in its place, and an entry of the
+#: service ``PGSERVICE`` names can set that address.  The service file's own
+#: variables (``PGSERVICEFILE``, ``PGSYSCONFDIR``) are read only once a service
+#: is named, which this and the refusal of a URL's query rule out.
+_REDIRECTING_VARIABLES = ("PGHOSTADDR", "PGSERVICE")
+
 #: The sign-in form, the code form a password leads to, and the prefix of every
 #: two-factor page: a page under it (the code form, or the setup an account
 #: without two-factor is held at) is not signed in yet, whatever the cookie says.
@@ -252,19 +259,40 @@ def refuse_unless_loopback(database_uri: str) -> None:
     A unix socket, a docker network address or a remote host is refused, as
     nothing the writer is for lives there.
 
+    The URL's host decides where libpq connects only when nothing else names
+    one, so two more things are refused.  A query on the URL: psycopg hands
+    every query key to libpq as a connection setting, and ``host``,
+    ``hostaddr`` or ``service`` there sends the connection elsewhere (a dev
+    copy's URL carries none).  And :data:`_REDIRECTING_VARIABLES` in the
+    environment, which libpq reads for a setting the URL does not give.
+    ``PGHOST`` is not among them, as the URL's own host overrides it.
+
     Args:
         database_uri: The SQLAlchemy URI the writer would write through.
 
     Raises:
-        SystemExit: When its host is not a loopback address, naming the host.
+        SystemExit: When its host is not a loopback address, when it carries a
+            query, or when a redirecting variable is set, naming which.
     """
-    host = make_url(database_uri).host
-    if host not in LOOPBACK_HOSTS:
+    url = make_url(database_uri)
+    if url.host not in LOOPBACK_HOSTS:
         raise SystemExit(
-            f"Refused: the database is at host {host!r}, not this host's loopback "
-            f"({', '.join(sorted(LOOPBACK_HOSTS))}).  The dev key is written only "
-            "onto a dev copy, which binds 127.0.0.1; production's database is "
-            "never reached from here."
+            f"Refused: the database is at host {url.host!r}, not this host's "
+            f"loopback ({', '.join(sorted(LOOPBACK_HOSTS))}).  The dev key is "
+            "written only onto a dev copy, which binds 127.0.0.1; production's "
+            "database is never reached from here."
+        )
+    if url.query:
+        raise SystemExit(
+            f"Refused: the database URL carries a query ({', '.join(sorted(url.query))}), "
+            "which libpq reads as connection settings that can name another host.  "
+            "A dev copy's URL needs none: drop it."
+        )
+    redirecting = [name for name in _REDIRECTING_VARIABLES if os.environ.get(name)]
+    if redirecting:
+        raise SystemExit(
+            f"Refused: {', '.join(redirecting)} is set, which moves libpq's "
+            "connection off the URL's host.  Unset it to write the dev key."
         )
 
 

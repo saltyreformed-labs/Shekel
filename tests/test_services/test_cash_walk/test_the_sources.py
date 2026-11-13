@@ -543,7 +543,8 @@ class TestASourceCannotPredateTheBooks:
         violating one, using the same governing-row rule the constraint uses.
         It could only have failed if the SQL and Python lookups disagreed,
         which is graded properly and from both sides by
-        ``test_books_boundary.TestTheTwoGoverningLookupsElectTheSameRow``.  As
+        ``test_books_boundary.test_the_governing_row``'s
+        ``TestTheTwoGoverningLookupsElectTheSameRow``.  As
         a control over what the walk EMITS, which is what its name promised, it
         was a tautology (found by adversarial review, 2026-08-28).
 

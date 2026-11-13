@@ -62,20 +62,13 @@ from app.services.statement_match import (
     ReviewedBatch,
     RowKind,
 )
-
-# Pylint: protected-access -- ``MintedEnvelopes`` is an internal collaboration
-# between two PRIVATE modules of this package and has no importer outside it,
-# so exporting it would be the surface rule 13 forbids; a test for a module
-# reaches into it, which is the allowance every sibling here takes.
-from app.services.statement_match import _create  # pylint: disable=protected-access
-from app.services.statement_match._release import (  # pylint: disable=protected-access
-    planned_removals,
-)
+from app.services.statement_match import _create
+from app.services.statement_match._release import planned_removals
 
 from tests._ledger_reads import account_net
 from tests._test_helpers import an_entered_day, typed
 
-from ._builders import (
+from tests.test_services.test_statement_match._builders import (
     a_bank_line,
     a_later_period,
     a_purchase,
@@ -511,7 +504,6 @@ class TestWhatTheUndoLEAVESStanding:
 
 def _a_submission(seed_user, line, txn):
     """Return a one-to-one submission naming *line* and *txn*."""
-    from ._builders import a_submission  # pylint: disable=import-outside-toplevel
     return a_submission(
         a_scope(seed_user), lines=[line], transactions=[txn],
     )

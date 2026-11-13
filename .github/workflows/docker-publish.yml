@@ -2,10 +2,12 @@
 #
 # Triggers:
 #   - Push to main → tags as "latest"
-#   - Git tag v* → tags as version + "latest" (metadata-action's
-#     ``latest=auto`` flavor adds it to a semver tag that is no prerelease)
 #   - Mondays at 08:23 UTC → main's newest commit rebuilt, tagged "latest"
 #     (metadata-action reads a schedule as the default branch's)
+#   - No git tag (ruling plan#3741): shekel-deploy accepts only an image
+#     signed by this file at refs/heads/main, so a tag's build was an image
+#     nothing deploys, and metadata-action's ``latest=auto`` flavor tagged
+#     it "latest" too.
 #
 # THE WEEKLY REBUILD (ruling plan#3724).  Each build takes Debian's newest
 # OpenSSL, libpq and Postgres client (the Dockerfile's apt-get lines, with no
@@ -47,15 +49,14 @@ name: Build & Publish Docker Image
 on:
   push:
     branches: [main]
-    tags: ["v*"]
   schedule:
     - cron: "23 8 * * 1"
 
 # One run at a time, each waiting for the one before rather than cancelling
 # it (the header's THE WEEKLY REBUILD).  GitHub keeps one run waiting, so a
 # third cancels the one waiting, which then builds nothing and opens no
-# alert: the newer run builds main's newer tip.  One group for every ref, as
-# a tag's build pushes "latest" too.
+# alert: the newer run builds main's newer tip.  One group, as every run is
+# of main and pushes "latest".
 concurrency:
   group: release-image
   cancel-in-progress: false
@@ -72,10 +73,11 @@ jobs:
   # pull request, judged when the PR is pushed and again on the merge-queue
   # group that lands it (main's included, measured 2026-10-23), but a group
   # is judged before it lands: one judged green on November 30 could land on
-  # December 1, and a v* tag skips pull requests altogether.  This check is
-  # judged when the release is BUILT, so neither can ship one.  A December
-  # merge without next year leaves production on the previous image until the
-  # law is added (R-SAL88); the code on main runs ahead of it meanwhile.
+  # December 1, and the weekly rebuild runs on no pull request at all.  This
+  # check is judged when the release is BUILT, so neither can ship one.  A
+  # December merge without next year leaves production on the previous image
+  # until the law is added (R-SAL88); the code on main runs ahead of it
+  # meanwhile.
   #
   # "Re-run failed jobs" re-runs only the build and REUSES this job's result,
   # so a check that passed on November 28 would otherwise wave through a
@@ -171,13 +173,13 @@ jobs:
       # is no longer main's tip (ruling plan#3724).  "latest" is what
       # ``shekel-deploy`` deploys when handed no digest, so it must never
       # name an older commit than main's, and every run pushes it: a push to
-      # main, the schedule, and a v* tag's (the header's Triggers), so a tag
-      # builds only on main's tip.  The concurrency group runs builds one at
-      # a time, the one made last finishing last; this step holds a run made
-      # out of that order, a re-run of an older run among them.  A tip that
-      # cannot be read refuses: ``set -e`` fails the assignment, and an empty
-      # answer is no match.  tools/ci/test_release_image_workflow.py RUNS
-      # this text with a stand-in ``git``.
+      # main and the schedule (the header's Triggers).  The concurrency group
+      # runs builds one at a time, the one made last finishing last; this
+      # step holds a run made out of that order, a re-run of an older run
+      # among them.  A tip that cannot be read refuses: ``set -e`` fails the
+      # assignment, and an empty answer is no match.
+      # tools/ci/test_release_image_workflow.py RUNS this text with a
+      # stand-in ``git``.
       - name: Is this still main's newest commit?
         shell: bash
         env:
@@ -226,8 +228,6 @@ jobs:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
             type=raw,value=latest,enable={{is_default_branch}}
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
             type=sha
 
       - name: Build and push image

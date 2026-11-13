@@ -36,15 +36,19 @@ class TestTheWeeklyRebuild:
     commit under ``latest``, and tells the developer when a scheduled build fails."""
 
     def test_main_is_built_on_each_push_and_weekly_one_run_at_a_time(self):
-        """A push to ``main`` or a ``v*`` tag, and Mondays at 08:23 UTC, off the top of the
-        hour when GitHub may drop queued scheduled runs; no dispatch, which would build a
-        branch's copy of this file.  One run at a time, each waiting for the one before and
-        never cancelling it, in one group for every ref, as every run pushes ``latest``."""
+        """A push to ``main``, and Mondays at 08:23 UTC, off the top of the hour when GitHub may
+        drop queued scheduled runs; no dispatch, which would build a branch's copy of this file,
+        and no git tag (ruling plan#3741), whose build ``shekel-deploy`` refuses to deploy, so
+        no tag pattern either.  One run at a time, each waiting for the one before and never
+        cancelling it, in one group, as every run is of ``main`` and pushes ``latest``."""
         workflow = _workflow()
         # PyYAML reads the bare key ``on`` as the boolean True (YAML 1.1).
         on = workflow.get(True, workflow.get("on"))
-        assert on == {"push": {"branches": ["main"], "tags": ["v*"]},
-                      "schedule": [{"cron": "23 8 * * 1"}]}
+        assert on == {"push": {"branches": ["main"]}, "schedule": [{"cron": "23 8 * * 1"}]}
+        meta = next(step for step in workflow["jobs"]["build-and-push"]["steps"]
+                    if step.get("id") == "meta")
+        assert meta["with"]["tags"].split() == [
+            "type=raw,value=latest,enable={{is_default_branch}}", "type=sha"]
         assert workflow["concurrency"] == {"group": "release-image",
                                            "cancel-in-progress": False}
 

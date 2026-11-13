@@ -159,7 +159,9 @@ ENV LC_ALL=C.UTF-8
 # in the image, every container of the app runs it, a bundled install's too.
 # The zone is ``app.utils.dates.DISPLAY_TIMEZONE``'s, which
 # tests/test_deploy/test_image_supply_chain/test_dockerfile.py holds this line
-# to; tzdata ships in python:3.14-slim (/usr/share/zoneinfo/America/New_York).
+# to; tzdata ships in python:3.14-slim (/usr/share/zoneinfo/America/New_York),
+# and ci.yml's ``image`` job reads the built image's clock against the zone
+# (ruling plan#3852).
 # deploy/docker-compose.prod.yml and docker-compose.dev.yml pin the same value
 # until plan#2166 deletes them.  The clock rework, plan#1068, deletes this
 # line once each user's own zone answers every civil-day read (ruling

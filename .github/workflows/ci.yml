@@ -697,6 +697,41 @@ jobs:
           test -z "${found}"
           '
 
+      # The Dockerfile's ENV TZ pins the image's process clock to the app's
+      # zone (rulings plan#3807, plan#3852; parity audit finding M01), and
+      # test_dockerfile.py holds the line to DISPLAY_TIMEZONE.  But the line
+      # works only while the image holds the zone's tzdata file: glibc runs a
+      # TZ it cannot find as UTC, silently, the line still there.  The app's
+      # zoneinfo then refuses DISPLAY_TIMEZONE at import, so the image would
+      # fail first when production boots it, and silently once a tzdata
+      # wheel reached it (the image holds none: psycopg and faker require one
+      # only on Windows).  So the image's own clock is read here, before a
+      # merge: its UTC offset (time.localtime, glibc's reading) at one January
+      # and one July instant must each equal DISPLAY_TIMEZONE's (zoneinfo's),
+      # so the zone, its winter offset and its summer one are the app's.
+      # Measured 2026-11-13 on the rootless daemon: the built image passes;
+      # one without the line, and one with /usr/share/zoneinfo deleted, each
+      # fail.  The runner's TZ above reaches no container.  The clock rework,
+      # plan#1068, deletes this step with the pin (ruling plan#3857).
+      - name: The image's clock runs the app's zone
+        shell: bash
+        run: |
+          docker run --rm --network none --entrypoint python "${IMAGE}" -c '
+          import sys
+          import time
+          from datetime import datetime, timezone
+          from app.utils.dates import DISPLAY_TIMEZONE
+          wrong = False
+          for month in (1, 7):
+              instant = datetime(2026, month, 15, 12, tzinfo=timezone.utc)
+              process = time.localtime(instant.timestamp()).tm_gmtoff
+              app = int(instant.astimezone(DISPLAY_TIMEZONE).utcoffset().total_seconds())
+              print(f"{instant:%B}: the process clock at UTC{process / 3600:+g}, "
+                    f"{DISPLAY_TIMEZONE.key} at UTC{app / 3600:+g}")
+              wrong = wrong or process != app
+          sys.exit(wrong)
+          '
+
   lint-and-test:
     needs: [landing, tools, tax-law, lint, test, image]
     if: always()

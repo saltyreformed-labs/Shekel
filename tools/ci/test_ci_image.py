@@ -5,8 +5,9 @@ before task plan#2366 a change that broke the build landed in ``dev`` and failed
 release.  The
 job builds the image on every pull request, queue group and push to ``main`` by the release's
 own recipe (:mod:`tools.ci.test_build_image_action`), never pushes it, and checks that it runs
-psycopg's C implementation, holds exactly the lock's runtime set and its ``server`` group, and
-holds no pip and no uv; ``lint-and-test`` grades it (:mod:`tools.ci.ci_verdict`).
+psycopg's C implementation, holds exactly the lock's runtime set and its ``server`` group,
+holds no pip and no uv, and runs its process clock in the app's zone; ``lint-and-test`` grades
+it (:mod:`tools.ci.ci_verdict`).
 """
 from __future__ import annotations
 
@@ -18,6 +19,7 @@ from pathlib import Path
 
 import yaml
 
+from app.utils.dates import DISPLAY_TIMEZONE
 from tools.ci import arcs
 from tools.ci.test_build_image_action import USES as BUILD_IMAGE
 from tools.ci.test_ci_workflow import _jobs, _run_step, _steps, _workflows
@@ -29,10 +31,10 @@ class TestTheImageIsBuiltAndCheckedBeforeAMerge:
     queue group and push to ``main``, never pushed, and what it holds checked (task
     plan#2366).
 
-    Its three ``run`` steps are RUN here with a stand-in ``docker``, and its uv is the one
-    recipe's (:mod:`tools.ci.test_dockerfile_uv_action`); that each check refuses a wrong
-    image is measured against real images, each measurement dated in ``ci.yml``'s comments
-    on the job, and is graded on every run by the job itself.
+    Its four ``run`` steps in the image are RUN here with a stand-in ``docker``, and its uv
+    is the one recipe's (:mod:`tools.ci.test_dockerfile_uv_action`); that each check refuses
+    a wrong image is measured against real images, each measurement dated in ``ci.yml``'s
+    comments on the job, and is graded on every run by the job itself.
     """
 
     BUILD = "Build the image"
@@ -41,6 +43,7 @@ class TestTheImageIsBuiltAndCheckedBeforeAMerge:
     IMPL = "The image runs psycopg's C implementation"
     PACKAGES = "The image holds exactly the lock's runtime and server set"
     INSTALLERS = "The image holds no pip and no uv"
+    CLOCK = "The image's clock runs the app's zone"
     #: The local name the image is loaded under.
     IMAGE = "shekel:ci"
 
@@ -98,7 +101,7 @@ class TestTheImageIsBuiltAndCheckedBeforeAMerge:
         assert job["env"] == {"IMAGE": self.IMAGE}
         assert [step["name"] for step in job["steps"]] == [
             "Checkout code", self.BUILD, self.DIGEST, self.UV, self.IMPL, self.PACKAGES,
-            self.INSTALLERS,
+            self.INSTALLERS, self.CLOCK,
         ]
         steps = _steps("image")
         assert steps["Checkout code"]["with"] == {"persist-credentials": False}
@@ -220,3 +223,30 @@ class TestTheImageIsBuiltAndCheckedBeforeAMerge:
                 "/", "-xdev", "(", "-name", "pip", "-o", "-name", "pip[0-9]*", "-o", "-name",
                 "pip-*", "-o", "-name", "uv", "-o", "-name", "uvx", "-o", "-name", "uv-*", ")",
                 "-print"]
+
+    def test_the_clock_check_passes_the_app_s_zone_alone(self, tmp_path):
+        """The clock step, RUN: in the image, offline, it reads the process clock's UTC offset
+        at one January and one July instant and passes only where each equals
+        ``DISPLAY_TIMEZONE``'s.  The stand-in ``docker`` runs the step's code under this
+        Python with ``TZ`` set as the image would set it, so glibc reads each case: the app's
+        zone passes, saying both offsets for each month; UTC (the base image's default),
+        another zone, ``EST`` (New York's winter offset with no summer one), and a zone glibc
+        cannot find (as an image without its tzdata file runs one, as UTC) each fail; and so
+        does a run where the app's zone cannot be imported."""
+        env = self._docker(tmp_path)
+        run = _steps("image")[self.CLOCK]["run"]
+        for zone, expected in ((DISPLAY_TIMEZONE.key, 0), ("UTC", 1), ("America/Chicago", 1),
+                               ("EST", 1), ("America/Nowhere", 1)):
+            result = _run_step(run, {**env, "TZ": zone}, cwd=arcs.REPO)
+            assert result.returncode == expected, (zone, result.stdout, result.stderr)
+            assert self._called(tmp_path)[:8] == [
+                "run", "--rm", "--network", "none", "--entrypoint", "python", self.IMAGE,
+                "-c"], zone
+        passed = _run_step(run, {**env, "TZ": DISPLAY_TIMEZONE.key}, cwd=arcs.REPO)
+        said = re.findall(rf"^(\w+): the process clock at UTC([+-][\d.]+), "
+                          rf"{re.escape(DISPLAY_TIMEZONE.key)} at UTC\2$",
+                          passed.stdout, re.MULTILINE)
+        assert [month for month, _offset in said] == ["January", "July"], passed.stdout
+        unimportable = _run_step(run, {**env, "TZ": DISPLAY_TIMEZONE.key}, cwd=tmp_path)
+        assert unimportable.returncode == 1
+        assert "ModuleNotFoundError: No module named 'app'" in unimportable.stderr

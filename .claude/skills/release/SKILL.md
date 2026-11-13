@@ -591,15 +591,16 @@ a file the tracker switch deleted is settled by CLAUDE.md's resync rule (Git Wor
 
 ```bash
 . ~/projects/shekel-handoffs/releases/current.sh && cd "${W:?}" || exit 1
-: "${R:?}"
-shekel-deploy --dry-run > "$R/dryrun.txt" 2>&1; echo "exit=$?"
+: "${R:?}" "${DIGEST:?}"
+shekel-deploy --dry-run "$DIGEST" > "$R/dryrun.txt" 2>&1; echo "exit=$?"
 ```
 
-Read it, not its exit alone:
+The dry run and the deploy are handed `$DIGEST`, the image step 7 built, never `:latest` (ruling
+plan#3740): the weekly rebuild moves `:latest` every Monday (ruling plan#3724), so the release
+deploys exactly the image it checked, and a rebuild newer than it waits for the next release or a
+`shekel-deploy` by hand, WUD reporting it meanwhile. Read it, not its exit alone:
 
-- `current pin` is production now; `target pin` must be `$DIGEST`, the image step 7 built. A
-  Monday rebuild that finished after step 7 has moved `:latest` (ruling plan#3724), which stops
-  the release here.
+- `current pin` is production now; `target pin` must be `$DIGEST`.
 - The stamp line, `database is stamped at: <revision>`, is a real check. With `ADDED` migrations:
   `plan.txt` lists them in PATH order, not chain order, so take the one whose `down_revision`
   (`git show "$CUT":<its path>`) is not itself an `ADDED` revision; the stamp must be that
@@ -627,9 +628,9 @@ not apply, STOP and ask Josh, with the ways out 2.6 names, before anything else.
 
 ```bash
 . ~/projects/shekel-handoffs/releases/current.sh && cd "${W:?}" || exit 1
-: "${R:?}" "${C:?}"
+: "${R:?}" "${C:?}" "${DIGEST:?}"
 date -Iseconds > "$R/deploy_since.txt"
-shekel-deploy > "$R/deploy.txt" 2>&1; echo "exit=$?"
+shekel-deploy "$DIGEST" > "$R/deploy.txt" 2>&1; echo "exit=$?"
 ~/projects/Shekel/deploy/verify_prod_deploy.sh "$(cat "$R/deploy_since.txt")" > "$R/verify.txt" 2>&1; echo "exit=$?"
 docker inspect "$C" --format '{{.Config.Image}} {{.State.Health.Status}} {{.RestartCount}}'
 ```

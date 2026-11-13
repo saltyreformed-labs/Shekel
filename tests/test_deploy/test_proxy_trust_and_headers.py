@@ -48,10 +48,10 @@ from pathlib import Path
 import pytest
 import yaml
 
+from tests._repo_root import REPO_ROOT
 from tests.test_deploy._compose import BASE_COMPOSE, NGINX_TEST_IMAGE
 
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
 DEPLOY_DIR = REPO_ROOT / "deploy"
 
 GUNICORN_CONF = REPO_ROOT / "gunicorn.conf.py"

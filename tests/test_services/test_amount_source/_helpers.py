@@ -74,9 +74,6 @@ _DUE_UNDER_OLD_PRICE = date(2026, 2, 14)
 _PAYCHECK_UNDER_OLD_PRICE = 0
 
 
-_PAYCHECK_UNDER_NEW_PRICE = 5
-
-
 _PAYCHECK_STRADDLING_THE_PRICE_FALL = 4
 
 
@@ -242,7 +239,8 @@ def _generated_transfer(
     any of the three answers ``None`` against an asserted ``Decimal``.  It is
     dated by the engine: on the paycheck's start under the every-paycheck
     *cadence* it carries by default, so WHICH paycheck selects the price
-    (``_PAYCHECK_UNDER_OLD_PRICE`` / ``_PAYCHECK_UNDER_NEW_PRICE``), or on
+    (``_PAYCHECK_UNDER_OLD_PRICE`` opens before ``_PRICE_FELL_ON`` and takes
+    the first; a paycheck opening on or after that day takes the later), or on
     the day a MONTHLY *cadence* names inside the paycheck, for the one case
     whose subject is the date being the row's OWN and not its period's.  It
     built the transfer through the ad-hoc door, dated it by hand and linked

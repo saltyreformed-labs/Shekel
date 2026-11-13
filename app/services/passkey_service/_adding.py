@@ -94,6 +94,7 @@ from app.services.passkey_service._refusals import (
 from app.services.passkey_service._responses import (
     UNREADABLE,
     read_assertion,
+    read_credential,
     read_registration,
 )
 
@@ -358,10 +359,47 @@ def _refuse_a_held_credential(credential_id: bytes) -> None:
     Raises:
         PasskeyRefused: ``ALREADY_ADDED``.
     """
-    if db.session.execute(
-        select(exists().where(Passkey.credential_id == credential_id))
-    ).scalar_one():
+    if _credential_kept(credential_id):
         raise PasskeyRefused(PasskeyRefusal.ALREADY_ADDED)
+
+
+def _credential_kept(credential_id: bytes) -> bool:
+    """Return whether any account keeps a passkey whose id is *credential_id*.
+
+    Args:
+        credential_id: A passkey's id.
+
+    Returns:
+        True while a row of ``auth.passkeys`` holds it.
+    """
+    return db.session.execute(
+        select(exists().where(Passkey.credential_id == credential_id))
+    ).scalar_one()
+
+
+def may_be_kept(response_json: str) -> bool:
+    """Return whether the passkey a refused add's answer names may be one an account keeps.
+
+    Asked before the page is told that the device's new passkey is kept
+    nowhere, which lets the device delete it, so the answer errs to "may":
+    true when any account keeps a passkey of that id (one the device
+    answered with although the options excluded it, or one a replayed
+    keeping finds already kept), and true when the answer names no id this
+    service can read, since then nothing shows it is not kept.  Only a
+    readable answer naming an id no account keeps is false.
+
+    Args:
+        response_json: The browser's answer to one of the add's steps, a
+            registration's or a sign-in's, as JSON.
+
+    Returns:
+        False only when no account keeps the passkey the answer names.
+    """
+    try:
+        credential_id, _ = read_credential(response_json)
+    except PasskeyRefused:
+        return True
+    return _credential_kept(credential_id)
 
 
 def _checked_name(name: str) -> str:

@@ -1,9 +1,10 @@
 {% from "_form_macros.html" import form_card %}
+{% from "auth/_passkey.html" import passkey_summary %}
 {% from "auth/_trusted_device.html" import device_summary %}
 
 {# The Security page's body (auth/security.html; ruling plan#3435): one
    form_card per concern (Change Password / Two-Factor Authentication /
-   Trusted Devices / Sessions), replacing the bare h5 + hr + fields anatomy
+   Passkeys / Trusted Devices / Sessions), replacing the bare h5 + hr + fields anatomy
    (polish audit P-ST3; the missing Active Sessions separator was P-ST6).
    gap-3 spaces the stack.  Every user's, whatever their role: a companion
    changes her own password here too (ruling plan#3437). #}
@@ -75,6 +76,46 @@
 
   {% call form_card("Two-Factor Authentication", "bi-shield-lock") %}
   {% include "auth/_two_factor_card.html" %}
+  {% endcall %}
+
+  {# Passkeys (plan#2538): the route hands the user's own, most recently
+     added first, and passkey_summary draws each.  A passkey signs in beside
+     the password and code, which stay (ruling plan#3541).  Adding one asks
+     the re-confirm, on its own page; removing one asks none, as forgetting
+     a trusted device asks none. #}
+  {% call form_card("Passkeys", "bi-person-lock") %}
+  <p class="text-muted small">
+    A passkey signs you in with Face ID, Touch ID or your device's passcode,
+    with no password or code to type. Signing in with your password still
+    works too.
+  </p>
+  {% if passkeys %}
+  <div class="list-group mb-3">
+    {% for passkey in passkeys %}
+    <div class="list-group-item">
+      <div class="d-flex justify-content-between align-items-start flex-wrap gap-2">
+        <div>{{ passkey_summary(passkey) }}</div>
+        <form method="POST"
+              action="{{ url_for('auth.remove_passkey', passkey_id=passkey.id) }}"
+              class="d-inline"
+              data-confirm="Remove this passkey? It will no longer sign you in.">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          {# Amber outline per the D5 convention, as Forget is: removing a
+             passkey takes a way in away and destroys no data. #}
+          <button type="submit" class="btn btn-sm btn-outline-warning">
+            <i class="bi bi-x-circle"></i> Remove
+          </button>
+        </form>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}
+  <p class="small">No passkeys yet.</p>
+  {% endif %}
+  <a href="{{ url_for('auth.passkey_add_form') }}" class="btn btn-outline-primary btn-sm">
+    <i class="bi bi-plus-circle"></i> Add a Passkey
+  </a>
   {% endcall %}
 
   {# Trusted devices (plan#2173, ruling plan#2406): the route hands each

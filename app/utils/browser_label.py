@@ -6,7 +6,9 @@ on (plan#2173, ruling plan#2406).  The record keeps the raw User-Agent header
 (``auth.known_devices.user_agent``), which is a string like
 ``Mozilla/5.0 (X11; Linux x86_64; rv:131.0) Gecko/20100101 Firefox/131.0``
 and names nothing a person would recognise.  This module turns it into
-``Firefox on Linux``.
+``Firefox on Linux``.  And it suggests a new passkey's name (plan#2538): the
+system alone, ``iPhone``, since a passkey is the device's or its password
+manager's, never one browser's (:func:`system_label`).
 
 **Presentation only.**  The label decides nothing: trust is the token's, and
 a browser may send any User-Agent it likes.  So the reading is deliberately
@@ -65,6 +67,23 @@ def _first_match(
     return None
 
 
+def system_label(user_agent: str) -> str | None:
+    """Return a person's name for the system *user_agent* runs on.
+
+    The Security page's suggestion for a new passkey's name (plan#2538), which
+    the person may change before the passkey is made.
+
+    Args:
+        user_agent: A User-Agent header, ``""`` when the browser sent none.
+
+    Returns:
+        The system's name (``"iPhone"``), or ``None`` when none is
+        recognised.  An iPad whose Safari asks for desktop sites, as it does
+        by default, sends a Mac's header and reads ``"Mac"``.
+    """
+    return _first_match(user_agent, _SYSTEMS)
+
+
 def browser_label(user_agent: str) -> str:
     """Return a person's name for the browser *user_agent* describes.
 
@@ -78,7 +97,7 @@ def browser_label(user_agent: str) -> str:
         the browser when none is (``"Unknown browser on Windows"``).
     """
     browser = _first_match(user_agent, _BROWSERS) or _UNKNOWN_BROWSER
-    system = _first_match(user_agent, _SYSTEMS)
+    system = system_label(user_agent)
     if system is None:
         return browser
     return f"{browser} on {system}"

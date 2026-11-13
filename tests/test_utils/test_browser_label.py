@@ -6,11 +6,14 @@ the ones whose header claims an ancestor's name too: Edge, Opera and Samsung
 Internet carry ``Chrome/``, every Chromium browser carries ``Safari/``, and an
 Android phone carries ``Linux``.  Each of those would read as the ancestor if
 the module's tables were out of order.
+
+A new passkey's suggested name is the system alone (plan#2538), read by the
+same table, so an iPhone's header suggests ``iPhone`` and not ``Mac``.
 """
 
 import pytest
 
-from app.utils.browser_label import browser_label
+from app.utils.browser_label import browser_label, system_label
 
 _FIREFOX_LINUX = (
     "Mozilla/5.0 (X11; Linux x86_64; rv:131.0) Gecko/20100101 Firefox/131.0"
@@ -95,3 +98,27 @@ def test_an_unknown_browser_still_names_its_system():
 def test_a_known_browser_with_no_system_is_named_alone():
     """No system token: the browser's name with nothing after it."""
     assert browser_label("Firefox/131.0") == "Firefox"
+
+
+@pytest.mark.parametrize(
+    ("user_agent", "system"),
+    [
+        (_SAFARI_IPHONE, "iPhone"),
+        (_CHROME_IPHONE, "iPhone"),
+        (_FIREFOX_IPAD, "iPad"),
+        (_SAFARI_MAC, "Mac"),
+        (_CHROME_ANDROID, "Android"),
+        (_FIREFOX_LINUX, "Linux"),
+        (_CHROME_WINDOWS, "Windows"),
+        (_CHROME_CHROMEOS, "ChromeOS"),
+    ],
+)
+def test_a_passkeys_suggested_name_is_its_system(user_agent, system):
+    """Each header suggests its own system, not an ancestor's (an iPhone's carries Mac OS X)."""
+    assert system_label(user_agent) == system
+
+
+@pytest.mark.parametrize("user_agent", ["", "curl/8.10.1", "Firefox/131.0"])
+def test_no_system_suggests_nothing(user_agent):
+    """A header naming no system suggests no name, rather than a guess."""
+    assert system_label(user_agent) is None

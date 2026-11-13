@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+{% from "_form_macros.html" import form_card %}
+{% block title %}Add a Passkey -- Shekel{% endblock title %}
+
+{# Adding a passkey (plan#2538), reached from the Passkeys card on the
+   Security page and behind the re-confirm.  Two steps, each its own tap:
+   the device makes the passkey, then signs in with it, and only then is it
+   kept (ruling plan#3525).  passkey.js runs both: it asks the add's options
+   when the page opens, posts the new passkey and the name to
+   ``data-registration-url``, then posts the sign-in to the form's action,
+   which keeps it and answers where the page goes next.  The form is never
+   submitted by the browser itself. #}
+{% block content %}
+<h4 class="mb-3"><i class="bi bi-person-lock"></i> Add a Passkey</h4>
+
+<div class="row">
+  <div class="col-lg-9 col-xl-8">
+    {% call form_card("New Passkey", "bi-person-lock") %}
+    <p class="text-muted small">
+      Your device asks for Face ID, Touch ID or its passcode twice: once to
+      make the passkey, then once to sign in with it, which shows it works
+      before Shekel keeps it.
+    </p>
+    <form method="POST" action="{{ url_for('auth.passkey_add') }}"
+          data-passkey-add
+          data-options-url="{{ url_for('auth.passkey_add_options') }}"
+          data-registration-url="{{ url_for('auth.passkey_add_registration') }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <input type="hidden" name="credential" value="">
+      <div class="mb-3">
+        <label for="passkey_name" class="form-label">Name</label>
+        {# A name only labels the passkey on the Security page.  The pattern
+           asks for one character that is not a space, as the service does. #}
+        <input type="text" class="form-control" id="passkey_name" name="name"
+               value="{{ suggested_name }}" required
+               maxlength="{{ name_max_length }}" pattern=".*\S.*"
+               autocomplete="off" placeholder="iPhone">
+        <div class="form-text">So you can tell your passkeys apart.</div>
+      </div>
+      <div data-passkey-add-make>
+        <button type="button" class="btn btn-primary" data-action="passkey-add">
+          <i class="bi bi-person-lock" aria-hidden="true"></i> Make the Passkey
+        </button>
+      </div>
+      <div data-passkey-add-sign-in hidden>
+        <p class="small mb-2">
+          Your device has made the passkey. Sign in with it once to finish
+          adding it.
+        </p>
+        <button type="button" class="btn btn-primary"
+                data-action="passkey-add-sign-in">
+          <i class="bi bi-person-check" aria-hidden="true"></i> Sign In With It
+        </button>
+      </div>
+      <div class="alert alert-warning small mt-3 mb-0" role="alert"
+           data-passkey-message hidden></div>
+      {# Inside the form, so passkey.js can tell the device of a passkey it
+         made that Shekel did not keep before the page goes. #}
+      <div class="mt-3">
+        <a href="{{ url_for('auth.security') }}" class="small text-muted"
+           data-passkey-add-cancel>Cancel</a>
+      </div>
+    </form>
+    {% endcall %}
+  </div>
+</div>
+{% endblock content %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/passkey.js') }}"></script>
+{% endblock scripts %}

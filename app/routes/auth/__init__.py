@@ -38,6 +38,10 @@ Module map:
 * :mod:`app.routes.auth.passkeys` -- signing in and re-confirming with a
   passkey (``passkey_sign_in_options``, ``passkey_sign_in``,
   ``passkey_re_confirm_options``, ``passkey_re_confirm``; plan#2538).
+* :mod:`app.routes.auth.security_passkeys` -- the Security page's passkeys:
+  adding one (``passkey_add_form``, ``passkey_add_options``,
+  ``passkey_add_registration``, ``passkey_add``) and removing one
+  (``remove_passkey``; plan#2538).
 """
 
 # Re-export ``auth_bp`` from the leaf declaration module so consumers
@@ -52,6 +56,7 @@ from app.routes.auth._bp import auth_bp
 from app.routes.auth import credentials  # noqa: F401, E402
 from app.routes.auth import mfa  # noqa: F401, E402
 from app.routes.auth import passkeys  # noqa: F401, E402
+from app.routes.auth import security_passkeys  # noqa: F401, E402
 from app.routes.auth import session_security  # noqa: F401, E402
 
 

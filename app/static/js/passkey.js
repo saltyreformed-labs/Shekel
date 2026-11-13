@@ -1,5 +1,5 @@
 /**
- * Shekel Budget App -- Signing In and Re-confirming With a Passkey
+ * Shekel Budget App -- Signing In, Re-confirming and Adding With a Passkey
  *
  * A passkey signs in on its own (plan#2538), and re-confirms a signed-in
  * account before a sensitive change (/reauth, beside the password and code,
@@ -53,6 +53,24 @@
  * redirected (to the sign-in page, once the session has ended) reloads the
  * page, which then shows that page.
  *
+ * Adding a passkey (the Security page's "Add a Passkey", behind the
+ * re-confirm) asks the device twice, each at a tap of its own: to make the
+ * passkey, and then to sign in with it, and only a passkey that so signs is
+ * kept (ruling plan#3525).  Its form, data-passkey-add, is never submitted by
+ * the browser: the add's options are fetched when the page opens, the new
+ * passkey and its name are posted to data-registration-url, whose answer is
+ * the sign-in's options, and the sign-in is posted to the form's action,
+ * whose answer is where the page goes next.  The second ask has its own tap
+ * because the first spent the person's gesture and a request lies between
+ * them.  A refusal says the server's sentence; one that leaves the add in
+ * flight (another passkey chose) asks again, and any other begins a new add.
+ * A passkey the device made and Shekel did not keep is reported to the device
+ * as unknown, where the browser can, so its pickers stop offering it: when a
+ * refusal says to (the server finds no account keeping it), and when the add
+ * is left after its registration was accepted (Cancel, a reload, the page
+ * closed, its sign-in lapsed), the last two as the page goes, which it may
+ * not finish.  A passkey whose keeping went unanswered is never reported.
+ *
  * WebAuthn wants bytes where its JSON carries unpadded base64url text, both
  * ways.  This module converts them itself rather than through
  * PublicKeyCredential.parseRequestOptionsFromJSON() and toJSON(), which not
@@ -66,10 +84,46 @@
  *     <input name="credential">       where the device's answer is written
  *     <button data-action="passkey-sign-in">   ("passkey-re-confirm")
  *     <div data-passkey-message hidden>   where a plain message is shown
+ *
+ * or data-passkey-add:
+ *
+ *   <form data-passkey-add action="..." data-options-url="..."
+ *         data-registration-url="...">
+ *     <input name="csrf_token">, <input name="credential">, as above
+ *     <input name="name">                the passkey's name
+ *     <div data-passkey-add-make>        the first step, holding
+ *       <button data-action="passkey-add">
+ *     <div data-passkey-add-sign-in hidden>   the second, holding
+ *       <button data-action="passkey-add-sign-in">
+ *     <div data-passkey-message hidden>
  */
 
 (function () {
   "use strict";
+
+  /** The status the add's requests answer a refusal with. */
+  var REFUSED = 422;
+
+  /**
+   * How long leaving the add page waits, at most, for the device to be told
+   * that the passkey it made is kept nowhere, in milliseconds.
+   */
+  var LEAVE_WAIT = 1000;
+
+  /** What the add form tells the person, in plain words, where it cannot go on. */
+  var ADD_MESSAGES = {
+    unsupported: "This browser cannot make a passkey. " +
+      "Your password still signs you in.",
+    alreadyHere: "This device already holds one of your passkeys for " +
+      "Shekel. Your Security page lists it.",
+    makeCancelled: "Making the passkey did not finish. You can try again.",
+    signInCancelled: "Signing in with the new passkey did not finish. " +
+      "You can try again.",
+    failed: "Your device could not be asked just then. Please try again.",
+    lapsed: "That took too long. Please make the passkey again.",
+    unknown: "Shekel could not be reached to finish adding the passkey. " +
+      "Your Security page shows whether it was added."
+  };
 
   /**
    * The two passkey forms, and what each does that the other does not.
@@ -159,13 +213,39 @@
     var publicKey = Object.assign({}, json.publicKey);
     publicKey.challenge = toBytes(publicKey.challenge);
     if (publicKey.allowCredentials) {
-      publicKey.allowCredentials = publicKey.allowCredentials.map(
-        function (descriptor) {
-          return Object.assign({}, descriptor, { id: toBytes(descriptor.id) });
-        }
-      );
+      publicKey.allowCredentials = descriptors(publicKey.allowCredentials);
     }
     return publicKey;
+  }
+
+  /**
+   * Return the options navigator.credentials.create() takes, from the server's JSON.
+   *
+   * @param {Object} json  The server's options: {publicKey: {...}}.
+   * @returns {Object} The publicKey options, their binary members as bytes.
+   */
+  function creationOptions(json) {
+    var publicKey = Object.assign({}, json.publicKey);
+    publicKey.challenge = toBytes(publicKey.challenge);
+    publicKey.user = Object.assign({}, publicKey.user, {
+      id: toBytes(publicKey.user.id)
+    });
+    if (publicKey.excludeCredentials) {
+      publicKey.excludeCredentials = descriptors(publicKey.excludeCredentials);
+    }
+    return publicKey;
+  }
+
+  /**
+   * Return passkey descriptors with their ids as bytes.
+   *
+   * @param {Array<Object>} list  Descriptors as the server's JSON writes them.
+   * @returns {Array<Object>} The same descriptors, each id as bytes.
+   */
+  function descriptors(list) {
+    return list.map(function (descriptor) {
+      return Object.assign({}, descriptor, { id: toBytes(descriptor.id) });
+    });
   }
 
   /**
@@ -196,6 +276,94 @@
       answer.response.userHandle = toText(response.userHandle);
     }
     return JSON.stringify(answer);
+  }
+
+  /**
+   * Return the new passkey navigator.credentials.create() made, as the JSON the server reads.
+   *
+   * @param {PublicKeyCredential} credential  What create() resolved to.
+   * @returns {string} The registration's JSON.
+   */
+  function registrationJSON(credential) {
+    var id = toText(credential.rawId);
+    return JSON.stringify({
+      id: id,
+      rawId: id,
+      type: credential.type,
+      response: {
+        clientDataJSON: toText(credential.response.clientDataJSON),
+        attestationObject: toText(credential.response.attestationObject)
+      },
+      clientExtensionResults: {}
+    });
+  }
+
+  /**
+   * POST to *url* for JSON: a ceremony's options, or the add's next step.
+   *
+   * A request the server redirected wants the page reloaded, which then
+   * shows where the server sent it: the sign-in page once a signed-in page's
+   * session has ended, or the re-confirm once the add's has lapsed.  A 400 is
+   * the form token's check, so once *renewable* (options have arrived on
+   * this page, so its token was good) it is the token lapsing, and a reload
+   * brings a new one.  Either way the promise is rejected with an error whose
+   * reload is true, and the caller reloads: the add page first tells the
+   * device of a passkey it made that Shekel did not keep.
+   *
+   * @param {string} url  Where to post.
+   * @param {string} token  The page's form token.
+   * @param {FormData|undefined} body  The form's controls, or none.
+   * @param {boolean} renewable  Whether a 400 is the token lapsing.
+   * @returns {Promise<Object>} {answer} for a success's JSON, or {refusal}
+   *   for the add's refusal (REFUSED): its message, and its retry and forget.
+   */
+  function post(url, token, body, renewable) {
+    return fetch(url, {
+      method: "POST",
+      headers: { "X-CSRFToken": token, "Accept": "application/json" },
+      body: body,
+      credentials: "same-origin"
+    }).then(function (response) {
+      if (response.redirected || (response.status === 400 && renewable)) {
+        const reload = new Error("passkey request wants the page reloaded");
+        reload.reload = true;
+        throw reload;
+      }
+      if (response.status === REFUSED) {
+        return response.json().then(function (refusal) {
+          return { refusal: refusal };
+        });
+      }
+      if (!response.ok) {
+        throw new Error("passkey request answered " + response.status);
+      }
+      return response.json().then(function (answer) {
+        return { answer: answer };
+      });
+    });
+  }
+
+  /**
+   * Tell the device a passkey it made is kept nowhere, where the browser can.
+   *
+   * PublicKeyCredential.signalUnknownCredential() lets the device or its
+   * password manager hide or delete it, so its pickers stop offering a
+   * passkey that cannot sign in.  Not every browser has it, and nothing
+   * waits on it.
+   *
+   * @param {Object} passkey  {rpId, credentialId}: the site the passkey is
+   *   for, and its id as base64url text.
+   * @returns {Promise} Settled once the device is told, or could not be.
+   */
+  function forgetPasskey(passkey) {
+    if (typeof PublicKeyCredential.signalUnknownCredential !== "function") {
+      return Promise.resolve(null);
+    }
+    return PublicKeyCredential.signalUnknownCredential(passkey).catch(function () {
+      // The device could not be told: it keeps offering the passkey, and a
+      // sign-in with it is refused as one no account holds.
+      return null;
+    });
   }
 
   /**
@@ -313,45 +481,38 @@
       ready = null;
       button.disabled = true;
       var asked = Date.now();
-      fetching = fetch(form.dataset.optionsUrl, {
-        method: "POST",
-        headers: { "X-CSRFToken": token, "Accept": "application/json" },
-        credentials: "same-origin"
-      }).then(function (response) {
-        if (response.redirected) {
-          // The signed-in page's session has ended: the login gate sent the
-          // request to sign in, and a reload shows that page.
-          window.location.reload();
-          throw new Error("passkey options were redirected");
-        }
-        if (!response.ok) {
-          if (response.status === 400 && arrived) {
-            // The form token has lapsed: a reload brings a new one, and
-            // the sign-in form would be refused for it too.
-            window.location.reload();
+      // Once options have arrived, a 400 is the form token lapsing, and the
+      // sign-in form would be refused for it too.
+      fetching = post(form.dataset.optionsUrl, token, undefined, arrived)
+        .then(function (result) {
+          if (!result.answer) {
+            throw new Error("passkey options were refused");
           }
-          throw new Error("passkey options answered " + response.status);
-        }
-        return response.json();
-      }).then(function (options) {
-        fetching = null;
-        if (submitted) {
-          return;
-        }
-        arrived = true;
-        ready = { options: options, asked: asked };
-        button.disabled = false;
-        if (kind.timed) {
-          window.setTimeout(refresh, options.publicKey.timeout);
-        }
-        if (autofill) {
-          wait();
-        }
-      }, function () {
-        // The button is left on: a tap says so and asks again.
-        fetching = null;
-        button.disabled = false;
-      });
+          return result.answer;
+        })
+        .then(function (options) {
+          fetching = null;
+          if (submitted) {
+            return;
+          }
+          arrived = true;
+          ready = { options: options, asked: asked };
+          button.disabled = false;
+          if (kind.timed) {
+            window.setTimeout(refresh, options.publicKey.timeout);
+          }
+          if (autofill) {
+            wait();
+          }
+        }, function (error) {
+          if (error && error.reload) {
+            window.location.reload();
+            return;
+          }
+          // The button is left on: a tap says so and asks again.
+          fetching = null;
+          button.disabled = false;
+        });
     }
 
     button.addEventListener("click", function () {
@@ -414,6 +575,344 @@
     }).then(prepare);
   }
 
+  /**
+   * Wire the add form: its options, then its two steps, each at its own tap.
+   *
+   * @param {HTMLFormElement} form  The form carrying data-passkey-add.
+   */
+  function initAdd(form) {
+    var makeButton = form.querySelector('[data-action="passkey-add"]');
+    var signInButton = form.querySelector('[data-action="passkey-add-sign-in"]');
+    var makeStep = form.querySelector("[data-passkey-add-make]");
+    var signInStep = form.querySelector("[data-passkey-add-sign-in]");
+    var message = form.querySelector("[data-passkey-message]");
+    var cancel = form.querySelector("[data-passkey-add-cancel]");
+    var name = form.elements.namedItem("name");
+    var field = form.elements.namedItem("credential");
+    var token = form.elements.namedItem("csrf_token").value;
+
+    // The add's options in hand, {options, asked}, asked being when they
+    // were requested, so their age is never under-counted; null while none
+    // are.  An add's options are answered once: the next add needs its own.
+    var ready = null;
+    // The fetch of options in flight, so two callers share one.
+    var fetching = null;
+    // Whether options have ever arrived on this page (post's renewable).
+    var arrived = false;
+    // The passkey the device made in this add, {rpId, credentialId}, from
+    // the moment it is made until the add keeps it or ends; null otherwise.
+    var made = null;
+    // Its sign-in's options, {options, asked}, once the server checked it.
+    var signIn = null;
+    // Whether the device is being asked, or a step's answer posted.
+    var asking = false;
+    // Set once the passkey is kept, or its keeping's outcome is unknown:
+    // nothing begins after it.
+    var finished = false;
+
+    function say(text) {
+      message.textContent = text;
+      message.hidden = false;
+    }
+
+    function lapsed(held) {
+      return Date.now() - held.asked >= held.options.publicKey.timeout;
+    }
+
+    function remaining(held) {
+      // What is left of the challenge's life, so the device gives up before
+      // the server would refuse its answer.
+      return Math.max(0, held.options.publicKey.timeout - (Date.now() - held.asked));
+    }
+
+    function showSignIn(shown) {
+      makeStep.hidden = shown;
+      signInStep.hidden = !shown;
+      signInButton.disabled = !shown;
+      // The name went with the new passkey: it is the one that is kept.
+      name.readOnly = shown;
+    }
+
+    function prepare() {
+      if (fetching !== null || asking || finished || signIn !== null) {
+        return;
+      }
+      ready = null;
+      makeButton.disabled = true;
+      var asked = Date.now();
+      fetching = post(form.dataset.optionsUrl, token, undefined, arrived)
+        .then(function (result) {
+          fetching = null;
+          makeButton.disabled = false;
+          if (result.refusal) {
+            // An account holding the most passkeys it may, in the server's
+            // words.
+            say(result.refusal.message);
+            return;
+          }
+          arrived = true;
+          ready = { options: result.answer, asked: asked };
+        }, function (error) {
+          if (error && error.reload) {
+            leave(reload);
+            return;
+          }
+          // The button is left on: a tap says so and asks again.
+          fetching = null;
+          makeButton.disabled = false;
+        });
+    }
+
+    function startOver(text, forget) {
+      // The add has ended: the passkey the device made, if it made one, is
+      // kept nowhere unless the server said an account keeps it.
+      if (forget && made !== null) {
+        forgetPasskey(made);
+      }
+      made = null;
+      signIn = null;
+      showSignIn(false);
+      say(text);
+      prepare();
+    }
+
+    function keeping() {
+      // The keeping is posted and unanswered: it may keep the passkey.
+      return asking && signIn !== null;
+    }
+
+    function checked() {
+      // The device's new passkey passed its registration, so the server has
+      // found no account keeping a passkey of its id; the page reports no
+      // other passkey on its own word, only on a refusal's forget.
+      return made !== null && signIn !== null;
+    }
+
+    function leave(next) {
+      // The page is going, and an add it began cannot finish once it has:
+      // a checked() passkey, which Shekel has not kept, is reported first,
+      // waiting at most LEAVE_WAIT.  Never called while keeping().
+      var passkey = checked() ? made : null;
+      made = null;
+      var gone = false;
+      function go() {
+        if (!gone) {
+          gone = true;
+          next();
+        }
+      }
+      if (passkey === null) {
+        go();
+        return;
+      }
+      forgetPasskey(passkey).then(go);
+      window.setTimeout(go, LEAVE_WAIT);
+    }
+
+    function reload() {
+      window.location.reload();
+    }
+
+    function register(credential, held) {
+      made = {
+        rpId: held.options.publicKey.rp.id,
+        credentialId: toText(credential.rawId)
+      };
+      field.value = registrationJSON(credential);
+      var body = new FormData(form);
+      field.value = "";
+      var asked = Date.now();
+      post(form.dataset.registrationUrl, token, body, true).then(function (result) {
+        asking = false;
+        if (result.refusal) {
+          startOver(result.refusal.message, result.refusal.forget);
+          return;
+        }
+        signIn = { options: result.answer, asked: asked };
+        showSignIn(true);
+      }, function (error) {
+        asking = false;
+        if (error && error.reload) {
+          // Refused before the route ran (the re-confirm lapsed, the session
+          // ended, the form token lapsed): nothing was kept, nor checked().
+          leave(reload);
+          return;
+        }
+        // Whatever the server did, nothing is kept until the sign-in, and
+        // the new add replaces this one.  The device is not told: the
+        // passkey is not checked().
+        startOver(ADD_MESSAGES.failed, false);
+      });
+    }
+
+    function keep(credential) {
+      field.value = answerJSON(credential);
+      var body = new FormData(form);
+      field.value = "";
+      post(form.action, token, body, true).then(function (result) {
+        asking = false;
+        if (result.answer) {
+          finished = true;
+          window.location.assign(result.answer.location);
+          return;
+        }
+        if (result.refusal.retry) {
+          // The add is still in flight: the same options ask again.
+          signInButton.disabled = false;
+          say(result.refusal.message);
+          return;
+        }
+        startOver(result.refusal.message, result.refusal.forget);
+      }, function (error) {
+        asking = false;
+        if (error && error.reload) {
+          // Refused before the route ran: nothing was kept.
+          leave(reload);
+          return;
+        }
+        // The server may have kept the passkey: it is never reported unknown,
+        // and the Security page says whether it is listed.
+        finished = true;
+        say(ADD_MESSAGES.unknown);
+      });
+    }
+
+    function madeNothing(error) {
+      // Why create() made nothing, in the person's words.  InvalidStateError
+      // is the device holding a passkey the options excluded, one of the
+      // account's own, which a retry cannot get past.
+      if (error && error.name === "InvalidStateError") {
+        return ADD_MESSAGES.alreadyHere;
+      }
+      return error && error.name === "NotAllowedError"
+        ? ADD_MESSAGES.makeCancelled : ADD_MESSAGES.failed;
+    }
+
+    // The form is never the browser's to submit: Enter in the name does not
+    // post an empty answer.
+    form.addEventListener("submit", function (event) {
+      event.preventDefault();
+    });
+
+    makeButton.addEventListener("click", function () {
+      message.hidden = true;
+      if (!supported()) {
+        say(ADD_MESSAGES.unsupported);
+        return;
+      }
+      if (asking || finished) {
+        return;
+      }
+      if (!name.checkValidity()) {
+        name.reportValidity();
+        return;
+      }
+      if (ready === null || lapsed(ready)) {
+        say(ADD_MESSAGES.failed);
+        prepare();
+        return;
+      }
+      var held = ready;
+      var publicKey = creationOptions(held.options);
+      publicKey.timeout = remaining(held);
+      asking = true;
+      makeButton.disabled = true;
+      // Asked here, inside the tap, with nothing awaited first: Safari shows
+      // the passkey sheet only in answer to the person's own gesture.
+      navigator.credentials.create({ publicKey: publicKey })
+        .then(function (credential) {
+          if (!credential) {
+            throw new Error("no passkey was made");
+          }
+          return credential;
+        })
+        .then(function (credential) {
+          ready = null;
+          register(credential, held);
+        }, function (error) {
+          asking = false;
+          makeButton.disabled = false;
+          say(madeNothing(error));
+          // The server's add was never answered, so the same options serve
+          // the next try while they live.
+          if (lapsed(held)) {
+            prepare();
+          }
+        });
+    });
+
+    signInButton.addEventListener("click", function () {
+      message.hidden = true;
+      if (asking || finished || signIn === null) {
+        return;
+      }
+      if (lapsed(signIn)) {
+        // Never kept (a keeping that kept it ends the page), and checked().
+        startOver(ADD_MESSAGES.lapsed, true);
+        return;
+      }
+      var publicKey = requestOptions(signIn.options);
+      publicKey.timeout = remaining(signIn);
+      asking = true;
+      signInButton.disabled = true;
+      // Its own tap, for the same reason as the first.
+      navigator.credentials.get({ publicKey: publicKey })
+        .then(function (credential) {
+          if (!credential) {
+            throw new Error("no passkey was chosen");
+          }
+          return credential;
+        })
+        .then(keep, function (error) {
+          asking = false;
+          signInButton.disabled = false;
+          say(error && error.name === "NotAllowedError"
+            ? ADD_MESSAGES.signInCancelled : ADD_MESSAGES.failed);
+        });
+    });
+
+    // Cancel leaves an add the page cannot finish once it is gone, so the
+    // device is told first; while the keeping is unanswered it may keep the
+    // passkey, so the link goes as it is.
+    cancel.addEventListener("click", function (event) {
+      if (!checked() || finished || keeping()) {
+        return;
+      }
+      event.preventDefault();
+      leave(function () {
+        window.location.assign(cancel.href);
+      });
+    });
+
+    // Any other way off the page (a reload, another link, the tab closed):
+    // the device is told as the page goes, which it may not finish.  The add
+    // is put back to its first step, for a page the browser restores.
+    window.addEventListener("pagehide", function () {
+      if (!checked() || finished || keeping()) {
+        return;
+      }
+      forgetPasskey(made);
+      made = null;
+      signIn = null;
+      showSignIn(false);
+    });
+
+    if (!supported() || typeof navigator.credentials.create !== "function") {
+      say(ADD_MESSAGES.unsupported);
+      makeButton.disabled = true;
+      return;
+    }
+    // A signed-in page fetches on no timer (a request is the session's
+    // activity): on return to a page hidden while its options lapsed, and
+    // at a tap that finds them lapsed.
+    document.addEventListener("visibilitychange", function () {
+      if (!document.hidden && (ready === null ? fetching === null : lapsed(ready))) {
+        prepare();
+      }
+    });
+    prepare();
+  }
+
   function initAll() {
     FORMS.forEach(function (kind) {
       var forms = document.querySelectorAll("form[" + kind.attribute + "]");
@@ -421,6 +920,10 @@
         init(forms[i], kind);
       }
     });
+    var adds = document.querySelectorAll("form[data-passkey-add]");
+    for (let i = 0; i < adds.length; i++) {
+      initAdd(adds[i]);
+    }
   }
 
   if (document.readyState === "loading") {

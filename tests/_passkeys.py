@@ -539,7 +539,7 @@ def ask_options(client, page, form, **request):
     return response.get_json()
 
 
-def post_answer(client, page, form, answer, *, action=None, **request):
+def post_answer(client, page, form, answer, *, action=None, typed=None, **request):
     """Post a passkey form's controls with *answer* in ``credential``, as passkey.js does.
 
     Args:
@@ -547,8 +547,12 @@ def post_answer(client, page, form, answer, *, action=None, **request):
         page: The page's text, whose form controls are posted.
         form: The page's passkey form: its ``action``.
         answer: The device's answer, as a dict, or text posted as it is.
-        action: Where to post instead of the form's own ``action``, for a
-            case about what the route itself accepts.
+        action: Where to post instead of the form's own ``action``: the URL
+            the add form's first step posts to (its
+            ``data-registration-url``), or, for a case about what the route
+            itself accepts, another.
+        typed: What the person typed, ``{name: value}``, each in place of the
+            value a control the form renders holds: the add's name.
         **request: Passed to the client's ``post``.
 
     Returns:
@@ -557,4 +561,7 @@ def post_answer(client, page, form, answer, *, action=None, **request):
     controls = rendered_form_controls(page, form.action)
     assert controls["credential"] == [""], "the form renders the answer's field empty"
     controls["credential"] = [answer if isinstance(answer, str) else json.dumps(answer)]
+    for name, value in (typed or {}).items():
+        assert name in controls, f"the form renders no control named {name}"
+        controls[name] = [value]
     return client.post(action or form.action, data=controls, **request)

@@ -200,6 +200,22 @@ EVT_PASSKEY_SIGN_IN_FAILED = _register(
     "an answer that names no passkey, readable or not), and user_id is the "
     "account the passkey named, when it named one.",
 )
+EVT_PASSKEY_ADDED = _register(
+    "passkey_added", AUTH,
+    "User added a passkey on their Security page, once it signed in (plan#2538, "
+    "ruling plan#3525); passkey_id names which.",
+)
+EVT_PASSKEY_ADD_REFUSED = _register(
+    "passkey_add_refused", AUTH,
+    "The passkey service refused a step of adding a passkey; step says which "
+    "(options, registration or keeping) and refusal why.  A name it refuses "
+    "is the form's error, and is not logged.",
+)
+EVT_PASSKEY_REMOVED = _register(
+    "passkey_removed", AUTH,
+    "A passkey was removed on its user's Security page. user_id is who pressed "
+    "Remove, passkey_user_id whose passkey it was.",
+)
 EVT_MFA_ENABLED = _register(
     "mfa_enabled", AUTH,
     "User enrolled an authenticator and confirmed the first TOTP.",

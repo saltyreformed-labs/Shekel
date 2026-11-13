@@ -63,11 +63,11 @@ logger = logging.getLogger(__name__)
 def security() -> str:
     """Display the signed-in user's Security page (ruling plan#3435).
 
-    Each user's own sign-in: password, two-factor, trusted devices and
-    sessions.  No owner gate: every route the page posts to acts on the
-    signed-in user alone, and a companion manages her own here, her password
-    included (ruling plan#3437).  It lived in Settings, which is the
-    household's and the owner's alone, until that ruling.
+    Each user's own sign-in: password, two-factor, passkeys (plan#2538),
+    trusted devices and sessions.  No owner gate: every route the page posts
+    to acts on the signed-in user alone, and a companion manages her own
+    here, her password included (ruling plan#3437).  It lived in Settings,
+    which is the household's and the owner's alone, until that ruling.
 
     Returns:
         The rendered page.
@@ -79,6 +79,7 @@ def security() -> str:
         # its sentences: the one value, never a second spelling of it.
         trust_days=TRUST_LIFETIME.days,
         trusted_devices=trusted_device_rows(current_user.id),
+        passkeys=passkey_service.list_passkeys(current_user.id),
     )
 
 

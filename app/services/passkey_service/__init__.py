@@ -77,7 +77,8 @@ act, and a challenge an act issues is issued at that same reading.
 **Where each part lives.**  :mod:`._ceremony` holds what every ceremony
 shares: the relying party, the user handle, the clock, a ceremony's state,
 and the checks every assertion meets.  :mod:`._adding` holds the add's three
-acts; this module, the sign-in and the re-confirm, and listing, removing and
+acts, and whether a refused add's passkey may be one an account keeps
+(:func:`may_be_kept`); this module, the sign-in and the re-confirm, and listing, removing and
 holding a passkey.  :mod:`._responses` reads what the browser sent, and
 :mod:`._refusals` names each refusal.
 
@@ -102,6 +103,7 @@ from app.services.passkey_service import _ceremony
 from app.services.passkey_service._adding import (
     add_passkey,
     complete_registration,
+    may_be_kept,
     registration_options,
 )
 from app.services.passkey_service._ceremony import CHALLENGE_LIFETIME, Ceremony
@@ -123,6 +125,7 @@ __all__ = [
     "complete_sign_in",
     "has_passkey",
     "list_passkeys",
+    "may_be_kept",
     "passkey_held_by",
     "re_confirm_options",
     "registration_options",

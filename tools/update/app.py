@@ -1,11 +1,20 @@
 """The update App as the workflow's keyed jobs hand it to the queue (:mod:`tools.update.queue`)
 and the publish (:mod:`tools.update.publish`), ruling plan#2448: the variables holding its
-token and naming the repository it acts on, and the branch every update merges into; and the
-developer every alert of the update mentions (rulings plan#2466, plan#2467).
+token and naming the repository it acts on, and the branch every update merges into; the
+developer every alert of the update mentions (rulings plan#2466, plan#2467); and the one home
+of what the update's record is read by (ruling plan#3619): each bot the update acts as, by the
+login GitHub's GraphQL names it, and the marker the App's comments hold for each thing they
+tell, which the queue writes and reads back and ``quill sync`` files a card for
+(``tools/quill/_waits.py``).
+
+A leaf of the standard library and :mod:`tools.ci.gitcmd`: the alert, which runs with no
+installed package (``python3 -S``), imports it, and so does quill.
 """
 from __future__ import annotations
 
+import hashlib
 import os
+import re
 
 from tools.ci.gitcmd import DEV
 
@@ -18,8 +27,33 @@ INTO = DEV.partition("/")[2]
 #: The developer's GitHub login, whom every alert of the update mentions: a mention is what
 #: reaches him (measured 2026-10-27, on the tracker).
 DEVELOPER = "SaltyReformed"
+#: The update App's slug, the login GraphQL names the bot it acts as by, which opens its pull
+#: requests and writes its comments (measured 2026-11-12 on PR 668; REST names it
+#: ``shekel-updates[bot]``).
+APP = "shekel-updates"
+#: The login GraphQL names the bot of the workflow's own token by, which opens the alert's
+#: and the release-due job's issues (measured 2026-11-13 on #676; REST names it
+#: ``github-actions[bot]``).
+ACTIONS = "github-actions"
+
+#: A marker in a comment of the App's, naming by its digest one thing it told
+#: (:func:`marker`), so nothing a pull request carries is spelled inside an HTML comment; and
+#: the expression finding each in a text, made from it.
+_MARKER = "<!-- update: mention {} -->"
+_MARKED = re.compile(re.escape(_MARKER).replace(r"\{\}", "([0-9a-f]{64})"))
 
 
 def unset(*names: str) -> list[str]:
     """Each of the variables ``names`` that is unset or empty, in their order."""
     return [name for name in names if not os.environ.get(name, "")]
+
+
+def marker(told: str) -> str:
+    """The marker naming ``told``, one thing the update tells, by its digest: the one form of
+    it, which the queue writes and every reader of the record finds (:func:`markers`)."""
+    return _MARKER.format(hashlib.sha256(told.encode()).hexdigest())
+
+
+def markers(text: str) -> tuple[str, ...]:
+    """Each marker (:func:`marker`) ``text`` holds, in its order, each once."""
+    return tuple(dict.fromkeys(_MARKER.format(digest) for digest in _MARKED.findall(text)))

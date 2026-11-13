@@ -35,7 +35,7 @@ from datetime import UTC, datetime
 from tools.ci.gitcmd import DEV, tracking
 from tools.ci.scratch import commit_files, elsewhere
 from tools.ci.scratch import run as _run
-from tools.quill import _git, quill
+from tools.quill import _git, _waits, quill
 from tools.quill._arcs import ARC_FIELD, ArcCard
 from tools.quill._board_fields import STATUS_OPTIONS
 from tools.quill._command import on_board as goes_on_board
@@ -163,6 +163,39 @@ class FakeSuggestions:
         del self.held[card.number]
 
 
+#: The page info of a connection's last page.
+_LAST_PAGE = {"hasNextPage": False, "endCursor": None}
+
+
+class FakeGitHub:
+    """The client ``quill sync``'s pass over the update's waits reads through (``_waits``), in
+    memory: every card's text, as :func:`_waits.every_text` lists it, from the tracker's own
+    cards, so a card the pass filed holds its markers at the next pass; and the code
+    repository's open pull requests and issues, which a test puts in :attr:`pulls` and
+    :attr:`issues` as GraphQL answers each node, a pull request's comments one page whole
+    (paging is graded in ``test__waits.py``).  Any other query is a read the tool must never
+    send, so it fails loudly; each query it answers is logged in :attr:`queries`."""
+
+    def __init__(self, tracker):
+        """No pull request and no issue open, the cards ``tracker``'s."""
+        self.tracker = tracker
+        self.pulls: list[dict] = []
+        self.issues: list[dict] = []
+        self.queries: list[str] = []
+
+    def graphql(self, query, **_variables):
+        """GraphQL's answer to ``query``, one of the pass's reads, all on one page."""
+        self.queries.append(query)
+        if query == _waits.every_text(self.tracker.place):
+            nodes = [{"number": number, "body": self.tracker.bodies[number]}
+                     for number in sorted(self.tracker.cards_by_number)]
+            return {"repository": {"issues": {"nodes": nodes, "pageInfo": _LAST_PAGE}}}
+        if query == _waits.PULLS:
+            return {"repository": {"pullRequests": {"nodes": self.pulls, "pageInfo": _LAST_PAGE}}}
+        assert query == _waits.ISSUES, f"no read the fake answers: {query!r}"
+        return {"repository": {"issues": {"nodes": self.issues, "pageInfo": _LAST_PAGE}}}
+
+
 class FakeTracker:  # pylint: disable=too-many-public-methods,too-many-instance-attributes
     """The tracker in memory: cards, bodies, comments, its board, and every write.
 
@@ -171,10 +204,12 @@ class FakeTracker:  # pylint: disable=too-many-public-methods,too-many-instance-
     reads and writes but ``connect`` (its own disable says why there are so many),
     ``blocking``, which that class takes from :class:`_tracker.CardReader`, and ``add``
     and ``add_task``, which put a card or a task in.
-    ``too-many-instance-attributes`` (9/7, measured at plan#2798, whose suggestions it keeps)
+    ``too-many-instance-attributes`` (10/7, measured at plan#3626, whose client it keeps)
     -- **one per kind of fact it keeps**: eight a command reads back (cards, bodies, saved
     versions, comments, the board, the cards' suggested Priorities, the milestones that exist,
-    and each card's milestone) and the log of writes the tests read.  The claims and the merged
+    and each card's milestone), the client ``sync``'s pass over the update's waits reads the
+    cards' texts and the code repository through (:class:`FakeGitHub`), and the log of writes
+    the tests read.  The claims and the merged
     pull requests it kept left it at X-cx's M1, when a claim became a branch of
     the code repository (R-BAL359); the deleted numbers and how GitHub renders a
     text, which only X-cx's migration read, left with it at X-cx's S3b.
@@ -194,6 +229,7 @@ class FakeTracker:  # pylint: disable=too-many-public-methods,too-many-instance-
         self.writes: list[tuple] = []
         self.board = FakeBoard(self.writes, self.cards_by_number)
         self.suggestions = FakeSuggestions(self.writes)
+        self.github = FakeGitHub(self)
 
     def add(self, number, kind="step", body="", on_board=True, **fields):
         """Put a card in the tracker (open, unclaimed, and by default on the board's bottom when

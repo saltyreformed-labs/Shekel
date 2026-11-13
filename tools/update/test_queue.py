@@ -504,13 +504,14 @@ def test_a_listing_github_refuses_fails_the_run_reading_nothing(world, capsys):
 
 
 def test_the_queue_starts_only_with_each_of_its_variables(monkeypatch, capsys, world):
-    """An unset or empty variable stops the run before any read, naming each one."""
-    monkeypatch.setenv(queue.TOKEN_VARIABLE, "token")
-    monkeypatch.setenv(queue.APP_VARIABLE, "")
+    """An unset or empty variable stops the run before any read, naming each one.  The App's
+    slug is no variable: it is :data:`tools.update.app.APP`, its one home (ruling plan#3619's
+    card, plan#3626)."""
+    monkeypatch.setenv(queue.TOKEN_VARIABLE, "")
     monkeypatch.delenv(queue.REPOSITORY_VARIABLE, raising=False)
     assert queue.main([], root=world.work) == 1
     assert capsys.readouterr().err == (
-        "update queue: UPDATE_APP_SLUG, GITHUB_REPOSITORY unset, so nothing was read\n")
+        "update queue: UPDATE_TOKEN, GITHUB_REPOSITORY unset, so nothing was read\n")
 
 
 # -- what reaches the developer (rulings plan#2450, plan#2467, plan#2468) ------------------

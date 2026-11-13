@@ -10,8 +10,8 @@ it is used by code already released and never by a pull request's.
 
 **Which pull requests**: each open one of this repository (none from a fork) opened by
 Dependabot or by the App, as GraphQL names a bot: by its slug, ``dependabot``, where REST says
-``dependabot[bot]`` (measured on #626, 2026-10-31); the App's is its token's mint's
-``app-slug``.
+``dependabot[bot]`` (measured on #626, 2026-10-31); the App's is
+:data:`tools.update.app.APP`.
 
 - **Into ``main``**: a Dependabot security update, which ignores the config's
   ``target-branch``, is retargeted to ``dev`` (:func:`_retarget`) and judged on a later run,
@@ -53,9 +53,11 @@ did), written once for each thing it tells (:func:`_told`):
   passes (a re-run), or judged afresh at its next head.
 
 Each comment holds a marker for each thing it tells, a digest of it, so nothing a pull
-request carries is spelled inside an HTML comment.  The App's own comments are the one record
-of what was told, read only when there is something to tell (:func:`_markers`); a marker in
-anyone else's comment counts for nothing.
+request carries is spelled inside an HTML comment (:func:`tools.update.app.marker`, its one
+form).  The App's own comments are the one record of what was told, read here only when there
+is something to tell (:func:`_markers`), and read by ``quill sync`` too, which files a card for
+each comment holding a marker no card holds (ruling plan#3619); a marker in anyone else's
+comment counts for nothing.
 
 **Why the queue and not auto-merge** (measured 2026-10-31): GitHub's ``AutoMergeRequest`` holds
 no head commit, and its documentation turns auto-merge off on a push only when the pusher has
@@ -73,8 +75,7 @@ judged once the rounds end, after the others.
 Usage, at the root of a checkout whose ``origin`` is this repository, which serves each trial
 merge with no credential, being public::
 
-    UPDATE_TOKEN=<token> UPDATE_APP_SLUG=<slug> GITHUB_REPOSITORY=<owner>/<name> \\
-        python -m tools.update.queue
+    UPDATE_TOKEN=<token> GITHUB_REPOSITORY=<owner>/<name> python -m tools.update.queue
 
 It prints a line for each pull request it reads, what it did and why.  Exit status: 0 each one
 read and done; 1 a read or a write failed, each other pull request still tried, or a variable
@@ -83,9 +84,7 @@ is unset, saying which.
 from __future__ import annotations
 
 import argparse
-import hashlib
 import os
-import re
 import sys
 import time
 from collections.abc import Callable, Sequence
@@ -106,10 +105,17 @@ from tools.quill.door import (
     reading,
     unversioned_between,
 )
-from tools.update.app import DEVELOPER, INTO, REPOSITORY_VARIABLE, TOKEN_VARIABLE, unset
+from tools.update.app import (
+    APP,
+    DEVELOPER,
+    INTO,
+    REPOSITORY_VARIABLE,
+    TOKEN_VARIABLE,
+    marker,
+    markers,
+    unset,
+)
 
-#: The variable holding the App's slug, as GraphQL names the bot it acts as.
-APP_VARIABLE = "UPDATE_APP_SLUG"
 #: Dependabot, as GraphQL names its bot (measured on #626, 2026-10-31).
 DEPENDABOT = "dependabot"
 #: The branch a security update is moved off.
@@ -130,10 +136,6 @@ _FAILED = frozenset({"FAILURE", "ERROR"})
 #: own trial merge, its second parent the head it tested (measured 2026-11-01 on #589 and #592,
 #: each removed for ``failed_checks``).
 _REMOVED = "RemovedFromMergeQueueEvent"
-#: A marker in a comment of the App's, naming by its digest one thing it told the developer,
-#: and the expression finding each in a comment's text, made from it.
-_MARKER = "<!-- update: mention {} -->"
-_MARKED = re.compile(re.escape(_MARKER).replace(r"\{\}", "([0-9a-f]{64})"))
 
 #: What the run reads of each pull request.
 _FIELDS = """number id headRefName isDraft isCrossRepository isInMergeQueue baseRefName
@@ -315,29 +317,24 @@ def _onto(root: Path, pull: Pull) -> str | None:
     return parents[0] if len(parents) == 2 and parents[1] == pull.head else None
 
 
-def _marker(told: str) -> str:
-    """The marker naming ``told``, one thing the App tells the developer, by its digest."""
-    return _MARKER.format(hashlib.sha256(told.encode()).hexdigest())
-
-
 def _markers(queue: Queue, pull: Pull) -> frozenset[str]:
-    """Each marker (:func:`_marker`) in a comment the App wrote on ``pull``, read page by
-    page."""
+    """Each marker (:func:`tools.update.app.marker`) in a comment the App wrote on ``pull``,
+    read page by page."""
     owner, name = queue.repository.split("/", 1)
     nodes, _ = paged(partial(queue.github.graphql, _COMMENTS, owner=owner, name=name,
                              number=pull.number),
                      lambda answer: answer["repository"]["pullRequest"]["comments"],
                      f"the comments of pull request #{pull.number} of {queue.repository}")
-    return frozenset(_MARKER.format(digest) for node in nodes
+    return frozenset(found for node in nodes
                      if (node["author"] or {}).get("login") == queue.app
-                     for digest in _MARKED.findall(node["body"]))
+                     for found in markers(node["body"]))
 
 
 def _told(queue: Queue, pull: Pull, told: Sequence[str], text: str) -> str:
     """Mention the developer on ``pull`` in a comment saying ``text``, marked with each of
-    ``told`` (:func:`_marker`), unless the App's comments hold every one of those marks
-    already: what was done, for the pull request's line."""
-    marks = [_marker(thing) for thing in told]
+    ``told`` (:func:`tools.update.app.marker`), unless the App's comments hold every one of
+    those marks already: what was done, for the pull request's line."""
+    marks = [marker(thing) for thing in told]
     if set(marks) <= _markers(queue, pull):
         return "the developer was mentioned already"
     queue.github.rest("POST", f"/repos/{queue.repository}/issues/{pull.number}/comments",
@@ -531,16 +528,17 @@ def run(github: GitHub, repository: str, app: str, root: Path,
 
 def main(argv: Sequence[str] | None = None, root: Path = REPO,
          sleep: Callable[[float], None] = time.sleep) -> int:
-    """Run the queue over the repository and with the token the environment names."""
+    """Run the queue over the repository and with the token the environment names, as the App
+    :data:`tools.update.app.APP`."""
     argparse.ArgumentParser(prog="python -m tools.update.queue",
                             description="The daily update queue (ruling plan#2449).",
                             ).parse_args(argv)
-    if missing := unset(TOKEN_VARIABLE, APP_VARIABLE, REPOSITORY_VARIABLE):
+    if missing := unset(TOKEN_VARIABLE, REPOSITORY_VARIABLE):
         print(f"update queue: {', '.join(missing)} unset, so nothing was read",
               file=sys.stderr)
         return 1
-    return run(GitHub(os.environ[TOKEN_VARIABLE]), os.environ[REPOSITORY_VARIABLE],
-               os.environ[APP_VARIABLE], root, sleep)
+    return run(GitHub(os.environ[TOKEN_VARIABLE]), os.environ[REPOSITORY_VARIABLE], APP, root,
+               sleep)
 
 
 if __name__ == "__main__":

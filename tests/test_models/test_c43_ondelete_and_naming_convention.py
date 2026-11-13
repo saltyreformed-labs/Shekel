@@ -96,13 +96,13 @@ shekel-audits/security-2026-04-15/remediation-plan.md.
 from __future__ import annotations
 
 import importlib.util
-import pathlib
 from unittest.mock import patch
 
 import pytest
 from sqlalchemy import inspect, text
 from sqlalchemy.exc import IntegrityError
 
+from tests._repo_root import REPO_ROOT
 from tests._rewind_tax_tables import rewind_the_per_user_tax_tables
 from tests._test_helpers import make_salary_profile, rewind_paycheck_lines_rename
 
@@ -153,9 +153,7 @@ def _c43_schema(app, db):
 # ---------------------------------------------------------------------------
 
 
-_MIGRATIONS_DIR = (
-    pathlib.Path(__file__).resolve().parents[2] / "migrations" / "versions"
-)
+_MIGRATIONS_DIR = REPO_ROOT / "migrations" / "versions"
 
 
 def _load_migration(filename: str):

@@ -10,6 +10,9 @@ Covers audit findings:
     BAL-653  Compose images pinned by tag alone (ledger finding, plan step X-em;
              :class:`TestEveryComposeImageIsPinnedByDigest`, which lists the
              compose files with ``git ls-files``)
+    M01    The process clock runs UTC while the screens run New York (parity
+           audit finding; :class:`TestDockerfilePinsTheAppsTimezone`, rulings
+           plan#3807, plan#3811)
 
 The artifacts under audit are the multi-stage Dockerfile, the
 production compose override at ``deploy/docker-compose.prod.yml``,

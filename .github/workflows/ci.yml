@@ -704,11 +704,13 @@ jobs:
       # TZ it cannot find as UTC, silently, the line still there.  The app's
       # zoneinfo then refuses DISPLAY_TIMEZONE at import, so the image would
       # fail first when production boots it, and silently once a tzdata
-      # wheel reached it (the image holds none: psycopg and faker require one
-      # only on Windows).  So the image's own clock is read here, before a
-      # merge: its UTC offset (time.localtime, glibc's reading) at one January
-      # and one July instant must each equal DISPLAY_TIMEZONE's (zoneinfo's),
-      # so the zone, its winter offset and its summer one are the app's.
+      # wheel reached it (the image holds none: the lock takes one only on
+      # Windows).  So the image's own clock is read here, before a merge: its
+      # UTC offset (time.localtime, glibc's reading) at one January and one
+      # July instant must each equal DISPLAY_TIMEZONE's (zoneinfo's), so the
+      # zone resolves and its winter and summer offsets are the app's.  Which
+      # zone it names is the Dockerfile test's to hold: another zone with New
+      # York's offsets, America/Toronto, passes this step.
       # Measured 2026-11-13 on the rootless daemon: the built image passes;
       # one without the line, and one with /usr/share/zoneinfo deleted, each
       # fail.  The runner's TZ above reaches no container.  The clock rework,

@@ -230,13 +230,14 @@ class TestTheImageIsBuiltAndCheckedBeforeAMerge:
         ``DISPLAY_TIMEZONE``'s.  The stand-in ``docker`` runs the step's code under this
         Python with ``TZ`` set as the image would set it, so glibc reads each case: the app's
         zone passes, saying both offsets for each month; UTC (the base image's default),
-        another zone, ``EST`` (New York's winter offset with no summer one), and a zone glibc
-        cannot find (as an image without its tzdata file runs one, as UTC) each fail; and so
-        does a run where the app's zone cannot be imported."""
+        another zone, ``EST`` (New York's winter offset with no summer one), ``Etc/GMT+4``
+        (its summer offset with no winter one, so each month's comparison is graded alone),
+        and a zone glibc cannot find (as an image without its tzdata file runs one, as UTC)
+        each fail; and so does a run where the app's zone cannot be imported."""
         env = self._docker(tmp_path)
         run = _steps("image")[self.CLOCK]["run"]
         for zone, expected in ((DISPLAY_TIMEZONE.key, 0), ("UTC", 1), ("America/Chicago", 1),
-                               ("EST", 1), ("America/Nowhere", 1)):
+                               ("EST", 1), ("Etc/GMT+4", 1), ("America/Nowhere", 1)):
             result = _run_step(run, {**env, "TZ": zone}, cwd=arcs.REPO)
             assert result.returncode == expected, (zone, result.stdout, result.stderr)
             assert self._called(tmp_path)[:8] == [

@@ -505,8 +505,9 @@ class TestDockerfilePinsTheAppsTimezone:
 
     The app still reads the process clock as its civil day in places
     (``date.today()``), and the base image's default zone is UTC, so an image
-    without the pin turns the user's day over at 20:00 New York (parity audit
-    finding M01; rulings plan#3807, plan#3811).  The zone is the one
+    without the pin turns the user's day over at 19:00 New York in winter and
+    20:00 in summer (parity audit finding M01; rulings plan#3807, plan#3811).
+    The zone is the one
     ``app.utils.dates.DISPLAY_TIMEZONE`` names, read here rather than spelled
     a second time, so a move of the app's zone that leaves this line behind
     fails.  The clock rework, plan#1068, deletes the pin and this class once
@@ -514,16 +515,23 @@ class TestDockerfilePinsTheAppsTimezone:
     """
 
     def test_the_runtime_stage_sets_tz_to_the_display_timezone(self) -> None:
-        """``ENV TZ=`` the zone's key is an instruction of the LAST stage, the one the
-        image runs (:func:`_stages`), in the one-line ``ENV NAME=value`` form the
-        rehearsal kit reads (``tools/rehearsal/bench.py``'s ``_IMAGE_ENV``).
+        """The LAST stage, the one the image runs (:func:`_stages`), sets ``TZ`` by
+        exactly one instruction, ``ENV TZ=`` the zone's key, in the one-line
+        ``ENV NAME=value`` form the rehearsal kit reads (``tools/rehearsal/bench.py``'s
+        ``_IMAGE_ENV``).
 
-        A line in the builder stage would not reach the image that runs.
+        Every ``ENV`` of the stage that names ``TZ`` is read, in each form Docker takes
+        (one pair, several pairs, ``ENV TZ value``), so a second one that sets another
+        zone after the pin fails, as does the pin in the builder stage alone, which would
+        not reach the image that runs.
         """
         wanted = f"ENV TZ={DISPLAY_TIMEZONE.key}"
         runtime = _stages(DOCKERFILE.read_text(encoding="utf-8"))[-1]
-        assert wanted in runtime, (
-            f"the Dockerfile's runtime stage does not set ``{wanted}``; the "
-            "image's processes would run on UTC and turn the user's day over "
-            "hours early each night (parity audit finding M01)."
+        setting = [one for one in runtime
+                   if re.match(r"ENV\s(.*\s)?TZ[=\s]", one, re.IGNORECASE | re.DOTALL)]
+        assert setting == [wanted], (
+            f"the Dockerfile's runtime stage sets TZ by {setting}, not by ``{wanted}`` "
+            "alone, so its processes would not run the app's zone: with no TZ they run "
+            "UTC and turn the user's day over hours early each night (parity audit "
+            "finding M01)."
         )

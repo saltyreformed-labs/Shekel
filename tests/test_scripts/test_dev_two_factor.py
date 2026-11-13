@@ -22,7 +22,7 @@ import pyotp
 import pytest
 
 import app as app_package
-from app.config import DevConfig
+import app.config as app_config
 from app.extensions import db
 from app.models.user import MfaConfig
 from app.services import mfa_service
@@ -89,20 +89,29 @@ class TestRefuseUnlessLoopback:
         assert f"at host {host!r}, not this host's loopback" in str(refused.value)
 
     def test_the_cli_refuses_before_building_the_app(self, monkeypatch):
-        """``main`` judges the database before ``create_app``, whose startup writes DDL to it."""
+        """``main`` judges the database before ``create_app``, whose startup writes DDL to it.
+
+        The class patched is ``app.config.DevConfig`` as it is when the test
+        runs, the one ``main`` imports when it runs.  A test that reloads
+        ``app.config`` makes a new ``DevConfig``, so one bound when this file
+        was imported is not always the one ``main`` reads (plan#3766).
+        """
         monkeypatch.setenv(dev_two_factor.SECRET_VARIABLE, _DEV_KEY)
         monkeypatch.setattr(
-            DevConfig, "SQLALCHEMY_DATABASE_URI",
+            app_config.DevConfig, "SQLALCHEMY_DATABASE_URI",
             "postgresql://shekel_user:pw@db:5432/shekel",
         )
-        built = []
-        monkeypatch.setattr(app_package, "create_app", lambda *a, **k: built.append(a))
+
+        def built_the_app(*_args, **_kwargs):
+            """Stand in for ``create_app``: reaching it fails the test, naming why."""
+            raise AssertionError("main built the app though its database is off the loopback")
+
+        monkeypatch.setattr(app_package, "create_app", built_the_app)
 
         with pytest.raises(SystemExit) as refused:
             dev_two_factor.main([SEED_USER_EMAIL])
 
         assert "at host 'db', not this host's loopback" in str(refused.value)
-        assert not built, "the app was built before the database was judged"
 
 
 class TestDevSecret:

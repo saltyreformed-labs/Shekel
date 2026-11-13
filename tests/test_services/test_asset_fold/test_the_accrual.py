@@ -582,7 +582,7 @@ class TestTheCentCarry:
         :meth:`test_the_cumulative_accrual_is_the_rounded_exact_total` in this
         same class, whose $19.20 over 14 days is hand-computed against the
         APY -- so the two together pin the RATE and its long-horizon BEHAVIOUR
-        separately, which is the split this file uses everywhere.
+        separately, which is the split this package uses everywhere.
 
         No sampling: every one of the 52 columns participates in both arms.
         """

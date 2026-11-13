@@ -3,11 +3,11 @@
 Plan step X-g1 (``docs/audits/balance_architecture/README.md``).  Grades
 ``app.services.balance_at._asset_fold`` -- the replay plan step X-g2 will point
 the three modelled kinds at.  The fold is ADDITIVE here: no production surface
-reads it yet, so nothing in this file can move a shipped balance.
+reads it yet, so nothing in this package can move a shipped balance.
 
-**Every expected figure below is HAND-COMPUTED and written out in the test that
+**Every expected figure in this package is HAND-COMPUTED and written out in the test that
 asserts it.**  None is taken from a shipping producer, and that is not a style
-preference: the shipping producers are WRONG about exactly the cases this file
+preference: the shipping producers are WRONG about exactly the cases this package
 exists for -- the retired three-source merge rendered $6,315.57 of
 net-worth history that contradicts the user's own recorded assertions (findings
 N-43 / N-74), and the three modelled kinds answer a DATE with a PERIOD (N-71).

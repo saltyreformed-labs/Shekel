@@ -148,7 +148,7 @@ class TestThePerPeriodIdentity:
             ), f"identity broke on period {derived_span(period).period_index}"
 
 
-# ``TestTheSeedFiltersTheModelledReturn`` stood here until plan step X-g2b.
+# ``TestTheSeedFiltersTheModelledReturn`` stood in ``test_asset_fold.py`` until plan step X-g2b.
 # It graded ``asset_seed_at`` -- ruling R-U's ACCRUAL-filtered read -- and both
 # went with ruling **R-AE**, which found that filter to be a SECOND correction
 # for an overlap ruling R-AB's date had already removed: applied together they
@@ -176,7 +176,7 @@ class TestTheGrowthDecomposition:
         """$20,000 at 7% with a $500.00 deduction: (55.78, 500.00) on 2026-01-16.
 
         Hand-computed, and it closes on itself: the 14 days of period 0 accrue
-        **$51.97** (this file's own figure), the 01-16 payday lands **$500.00**,
+        **$51.97** (``test_the_accrual.py``'s own figure), the 01-16 payday lands **$500.00**,
         and that day's growth on the raised $20,551.97 base is **$3.81** -- so
         the cumulative accrual is $55.78 and ``20000.00 + 55.78 + 500.00 ==
         20555.78``, the balance the fold independently reports for that day.

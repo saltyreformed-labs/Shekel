@@ -25,7 +25,7 @@ from tests._test_helpers import (
 )
 
 
-# An as-of far past every valuation date in this file, so the PLANNED tier
+# An as-of far past every valuation date in this package, so the PLANNED tier
 # (which clamps to ``as_of + 1``, ruling R-G) cannot reach any date asserted
 # here.  The modelled tiers are graded on their own, exactly as the cash fold's
 # oracle grades its tiers apart: a test that mixed them could pass with either
@@ -70,7 +70,7 @@ def _feed_for(seed_user, account, params=None):
     :class:`~app.services.investment_projection.AccountPayrollFeed` since plan
     step **salary:R14-b** (ruling **R-SAL2**), and it is built by the real
     loader here rather than by hand: what a deduction takes from a paycheck is
-    the paycheck ENGINE's answer, so a hand-built feed would grade this file's
+    the paycheck ENGINE's answer, so a hand-built feed would grade this package's
     arithmetic instead of the engine's.  It replaced an ``adapt_deductions``
     call that flattened the ORM rows into a shape whose per-period figure this
     tier then re-derived, raise-blind (finding **D45**).
@@ -98,7 +98,7 @@ def _401k(seed_user, period, balance, *, opened_on, books_open_on=None,
 
     ``make_investment_account`` now pins its own opening to the anchor period's
     first day (finding N-77, closed at plan step X-g2a), so this wrapper is no
-    longer a compensator for a wall-clock stamp -- it exists because this file's
+    longer a compensator for a wall-clock stamp -- it exists because this package's
     whole subject is WHERE an accrual window opens, and several cases need that
     day to be somewhere other than the period's start (mid-period, or on a later
     period's payday).

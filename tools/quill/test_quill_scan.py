@@ -10,13 +10,16 @@ from tools.ci.arcs import REPO
 from tools.quill import quill
 from tools.update import scan
 
-#: What the stand-in scan found: two matches, as the judge orders them.
+#: What the stand-in scan found: three matches, as the judge orders them, the last counted for
+#: its mark alone, with no fix.
 _DONE = scan.Scanned(
     "sha256:" + "4f19" * 16, "0123456789abcdef" * 2 + "01234567",
-    (scan.Fixed("CVE-2000-0002", "binary", "python", "3.1.4", ("3.1.5", "3.2.1"),
-                scan.RATINGS.index("critical")),
-     scan.Fixed("CVE-2000-0001", "deb", "libexample1", "1.0-1", ("1.0-2",),
-                scan.RATINGS.index("high"))))
+    (scan.Counted("CVE-2000-0002", "binary", "python", "3.1.4", ("3.1.5", "3.2.1"),
+                  scan.RATINGS.index("critical"), False),
+     scan.Counted("CVE-2000-0001", "deb", "libexample1", "1.0-1", ("1.0-2",),
+                  scan.RATINGS.index("high"), True),
+     scan.Counted("CVE-2000-0003", "deb", "libexample2", "2.0-1", (),
+                  scan.RATINGS.index("medium"), True)))
 
 
 def _never():
@@ -47,16 +50,19 @@ def test_a_scan_says_the_image_the_commit_and_each_match_that_counts(monkeypatch
     assert handed == [REPO]
     assert capsys.readouterr() == (
         f"scan: production's image {_DONE.image}, built from {_DONE.revision}\n"
-        "scan: CVEs with a fix rated HIGH or CRITICAL: 2\n"
+        "scan: CVEs with a fix rated HIGH or CRITICAL, or known exploited: 3\n"
         "  CVE-2000-0002, rated critical: binary python 3.1.4, fixed in 3.1.5, 3.2.1\n"
-        "  CVE-2000-0001, rated high: deb libexample1 1.0-1, fixed in 1.0-2\n", "")
+        "  CVE-2000-0001, rated high, known exploited: deb libexample1 1.0-1, fixed in 1.0-2\n"
+        "  CVE-2000-0003, rated medium, known exploited: deb libexample2 2.0-1, no fix known\n",
+        "")
 
 
 def test_a_clean_scan_says_none_count(monkeypatch, capsys):
     """A scan in which no match counts says so, exit 0."""
     _stood_in(monkeypatch, scan.Scanned(_DONE.image, _DONE.revision, ()))
     assert quill.main(["scan"], connect=_never, root=REPO) == 0
-    assert capsys.readouterr().out.endswith("scan: CVEs with a fix rated HIGH or CRITICAL: 0\n")
+    assert capsys.readouterr().out.endswith(
+        "scan: CVEs with a fix rated HIGH or CRITICAL, or known exploited: 0\n")
 
 
 @pytest.mark.parametrize("raised, status, said", [

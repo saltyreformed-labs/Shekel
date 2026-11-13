@@ -20,7 +20,8 @@ from tools.update import scan
 def cmd_scan(_args, _connect: Callable[[], Tracker], root: Path) -> int:
     """Scan the image production is running from the checkout at ``root``, and print the
     image's digest, the commit it was built from, how many matches count, and each one: its
-    CVE, its rating, the package it is in and each version Grype names its fix in.
+    CVE, its rating, whether it is known exploited, the package it is in and each version Grype
+    names its fix in, or that Grype knows no fix.
 
     Raises:
         Refused: the scanner's answer is no scan, or names no commit.
@@ -30,8 +31,11 @@ def cmd_scan(_args, _connect: Callable[[], Tracker], root: Path) -> int:
     except scan.NotAScan as error:
         raise Refused(f"the scan of production's image was refused: {error}") from error
     print(f"scan: production's image {done.image}, built from {done.revision}")
-    print(f"scan: CVEs with a fix rated HIGH or CRITICAL: {len(done.found)}")
+    print("scan: CVEs with a fix rated HIGH or CRITICAL, or known exploited: "
+          f"{len(done.found)}")
     for item in done.found:
-        print(f"  {item.vulnerability}, rated {scan.RATINGS[item.rating]}: {item.kind} "
-              f"{item.package} {item.installed}, fixed in {', '.join(item.fixes)}")
+        print(f"  {item.vulnerability}, rated {scan.RATINGS[item.rating]}"
+              f"{', known exploited' if item.exploited else ''}: {item.kind} {item.package} "
+              f"{item.installed}, "
+              + (f"fixed in {', '.join(item.fixes)}" if item.fixes else "no fix known"))
     return 0

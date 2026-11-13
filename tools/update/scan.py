@@ -20,13 +20,18 @@ database downloaded fresh, in 42 s.
 **The one judge.**  A match counts when Grype knows its fix (its ``fix.state`` is ``fixed``) and
 the highest rating any source gives it is HIGH or CRITICAL (ruling plan#3720): the match's own,
 which for a Debian package is Debian's, or that of any record related to it, NVD's among them.
-Each match counted is one :class:`Fixed` for each package it was found in, its CVE as Grype
-names it.
+A match Grype marks known exploited, on its own record or on a related one, counts at any
+rating, with a fix or without one (ruling plan#3819).  Grype marks it from CISA's list of CVEs
+known to be exploited, which its database holds as the provider :data:`KEV`; a scan whose
+database names no such provider could mark nothing, so it is refused, never read as one in
+which nothing is exploited.  Each match counted is one :class:`Counted` for each package it
+was found in, its CVE as Grype names it.
 
 **Read as data.**  What a package's name and version say is written by what the image holds.
 So :func:`judged` refuses the scan whole (:class:`NotAScan`) where it is not the shape Grype
-writes, where a fix state or a rating deciding a match is one Grype does not spell (read at its
-pinned v0.121.2, :data:`FIX_STATES`, :data:`RATINGS`), and where a value a counted match names
+writes, where a fix state, a mark or a rating deciding a match is one Grype does not write (read
+at its pinned v0.121.2, :data:`FIX_STATES`, :func:`_exploited`, :data:`RATINGS`), where a match
+counted for its fix names no version it is fixed in, and where a value a counted match names
 holds a character outside :data:`_LISTABLE`: none can then close a code span it is quoted in,
 mention anyone, or spell a marker that ``quill sync`` reads.  A scan refused is never read as a
 clean one.
@@ -64,6 +69,11 @@ FIXED = "fixed"
 #: read 2026-11-13 at v0.121.2), and none, which it writes for a match whose record holds no
 #: metadata (``grype/presenter/models/vulnerability.go``'s ``NewVulnerability``).
 FIX_STATES = frozenset({FIXED, "not-fixed", "wont-fix", "unknown", ""})
+#: The provider of Grype's database that holds CISA's list of CVEs known to be exploited, as the
+#: scan's ``descriptor.db.providers`` names each provider the database was built from
+#: (``cmd/grype/cli/commands/root.go``'s ``dbInfo``, read 2026-11-13 at v0.121.2; Grype writes
+#: no provider at all where it could not read them).
+KEV = "kev"
 #: What each value a counted match names may hold: letters and digits, then those and the marks
 #: the names and versions of Debian's packages, of PEP 440 and of Go's modules use.  No space,
 #: backtick, ``<``, ``>`` or ``@``, so nothing it holds can end a code span it is quoted in,
@@ -99,9 +109,9 @@ SCAN_SECONDS = 1800
 
 
 class NotAScan(ValueError):
-    """The scanner's answer is no scan as Grype writes one, holds what a counted match cannot
-    name, or names no commit the scanned image was built from; the message says what and
-    where."""
+    """The scanner's answer is no scan as Grype writes one, read with no list of CVEs known to
+    be exploited, holds what a counted match cannot name, or names no commit the scanned image
+    was built from; the message says what and where."""
 
 
 class ScanFailed(RuntimeError):
@@ -111,12 +121,13 @@ class ScanFailed(RuntimeError):
 
 
 @dataclass(frozen=True)
-class Fixed:
+class Counted:
     """One match the scan counts (the module's one judge): ``vulnerability``, the CVE as Grype
     names it; the package it was found in, by its ``kind`` (Grype's type: ``deb``, ``python``,
     ``binary``), its ``package`` name and its ``installed`` version; ``fixes``, each version
-    Grype names the fix in, in its order; and ``rating``, the highest any source gives it, an
-    index of :data:`RATINGS`."""
+    Grype names the fix in, in its order, none when Grype knows no fix; ``rating``, the highest
+    any source gives it, an index of :data:`RATINGS`; and ``exploited``, whether Grype marks it
+    known exploited."""
 
     vulnerability: str
     kind: str
@@ -124,6 +135,7 @@ class Fixed:
     installed: str
     fixes: tuple[str, ...]
     rating: int
+    exploited: bool
 
     @property
     def marker(self) -> str:
@@ -141,7 +153,7 @@ class Scanned:
 
     image: str
     revision: str
-    found: tuple[Fixed, ...]
+    found: tuple[Counted, ...]
 
 
 #: How the scan runs one docker command: on the daemon given (as ``DOCKER_HOST`` spells it),
@@ -177,40 +189,86 @@ def _rating(record: object, where: str) -> int:
     return RATINGS.index(spelled.lower() or "unknown")
 
 
-def _counted(match: object, where: str) -> Fixed | None:
-    """``match``, one of the scan's, as a :class:`Fixed`, or None when it does not count (the
-    module's one judge)."""
+def _exploited(record: object, where: str) -> bool:
+    """Whether Grype marks ``record``, a vulnerability's, known exploited.  Grype writes its
+    ``knownExploited`` only where CISA's list names the CVE, as a list of that list's entries,
+    each naming the CVE (``cve``), and leaves it out where the list names none (it is
+    ``omitempty``, ``grype/presenter/models/vulnerability_metadata.go``, read 2026-11-13 at
+    v0.121.2).  Any other shape is refused: an empty list or a null, say, could be a mark read
+    as none.
+
+    Raises:
+        NotAScan: ``record`` is no object, or its mark is not one Grype writes.
+    """
+    if not isinstance(record, dict):
+        raise NotAScan(f"{where} is {record!r}, which is no record Grype writes")
+    if "knownExploited" not in record:
+        return False
+    marks = record["knownExploited"]
+    if not (isinstance(marks, list) and marks and all(
+            isinstance(mark, dict) and isinstance(mark.get("cve"), str) for mark in marks)):
+        raise NotAScan(f"{where} is marked known exploited as {marks!r}, which Grype does not "
+                       "write")
+    return True
+
+
+def _counted(match: object, where: str) -> Counted | None:
+    """``match``, one of the scan's, as a :class:`Counted`, or None when it does not count (the
+    module's one judge).  Every record's mark is read, so one Grype does not write is refused
+    however the match is judged; a rating is read only where it decides the match or is
+    listed."""
     vulnerability = _value(match, "vulnerability", dict, where)
     fix = _value(vulnerability, "fix", dict, f"{where}'s vulnerability")
     if (state := _value(fix, "state", str, f"{where}'s fix")) not in FIX_STATES:
         raise NotAScan(f"{where}'s fix state is {state!r}, which Grype does not write")
-    if state != FIXED:
+    records = (("vulnerability", vulnerability), *(
+        (f"related vulnerability {index}", record) for index, record in
+        enumerate(_value(match, "relatedVulnerabilities", list, where))))
+    marks = [_exploited(record, f"{where}'s {name}") for name, record in records]
+    exploited = any(marks)
+    if state != FIXED and not exploited:
         return None
-    related = _value(match, "relatedVulnerabilities", list, where)
-    rating = max(_rating(record, f"{where}'s {name}") for name, record in (
-        ("vulnerability", vulnerability),
-        *((f"related vulnerability {index}", record) for index, record in enumerate(related))))
-    if rating < RED:
+    rating = max(_rating(record, f"{where}'s {name}") for name, record in records)
+    if rating < RED and not exploited:
         return None
     artifact = _value(match, "artifact", dict, where)
-    fixes = _value(fix, "versions", list, f"{where}'s fix")
-    return Fixed(_listable(vulnerability.get("id"), f"{where}'s vulnerability's id"),
-                 *(_listable(artifact.get(key), f"{where}'s artifact's {key}")
-                   for key in ("type", "name", "version")),
-                 tuple(_listable(version, f"{where}'s fix's version {index}")
-                       for index, version in enumerate(fixes)),
-                 rating)
+    fixes = _value(fix, "versions", list, f"{where}'s fix") if state == FIXED else []
+    if state == FIXED and not fixes:
+        raise NotAScan(f"{where}'s fix is {FIXED} in no version, which Grype does not write")
+    return Counted(_listable(vulnerability.get("id"), f"{where}'s vulnerability's id"),
+                   *(_listable(artifact.get(key), f"{where}'s artifact's {key}")
+                     for key in ("type", "name", "version")),
+                   tuple(_listable(version, f"{where}'s fix's version {index}")
+                         for index, version in enumerate(fixes)),
+                   rating, exploited)
 
 
-def judged(scan: object) -> list[Fixed]:
+def _refused_without_kev(scan: object) -> None:
+    """Refuse ``scan`` unless its database was built with CISA's list of CVEs known to be
+    exploited (:data:`KEV` among the providers its descriptor names), as without it no match
+    can be marked (the module's one judge).
+
+    Raises:
+        NotAScan: the scan names no such provider.
+    """
+    descriptor = _value(scan, "descriptor", dict, "the scan")
+    database = _value(descriptor, "db", dict, "the scan's descriptor")
+    providers = _value(database, "providers", dict, "the scan's database")
+    if not isinstance(providers.get(KEV), dict):
+        raise NotAScan(f"the scan's database names no provider {KEV}, so it read no list of "
+                       "CVEs known to be exploited and could mark none")
+
+
+def judged(scan: object) -> list[Counted]:
     """Each match of ``scan``, Grype's JSON as read, that the scan counts (the module's one
     judge), each once, the highest rated first, then by its CVE's id as text, the package's
     type and name, and the version installed.
 
     Raises:
-        NotAScan: ``scan`` is no scan as Grype writes one, or holds what a counted match cannot
-            name; the message says where.
+        NotAScan: ``scan`` is no scan as Grype writes one, was read with no list of CVEs known
+            to be exploited, or holds what a counted match cannot name; the message says where.
     """
+    _refused_without_kev(scan)
     found = {item for index, match in enumerate(_value(scan, "matches", list, "the scan"))
              if (item := _counted(match, f"match {index}")) is not None}
     return sorted(found, key=lambda item: (-item.rating, item.vulnerability, item.kind,

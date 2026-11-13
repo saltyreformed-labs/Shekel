@@ -1,10 +1,12 @@
-"""The daily image scan (:mod:`tools.update.scan`): its judge (ruling plan#3720), the scanner's
-JSON judged as data, each CVE with a fix rated HIGH or CRITICAL by any source counted; and the
-scan itself (ruling plan#3822), production's image read on its daemon and scanned on the
-rootless one, run with a stand-in for docker.  The scan judged is a trimmed copy of a real one,
+"""The daily image scan (:mod:`tools.update.scan`): its judge (rulings plan#3720, plan#3819), the
+scanner's JSON judged as data, each CVE with a fix rated HIGH or CRITICAL by any source counted,
+and each Grype marks known exploited, at any rating, with a fix or without; and the scan itself
+(ruling plan#3822), production's image read on its daemon and scanned on the rootless one, run
+with a stand-in for docker.  The scan judged is a trimmed copy of a real one,
 ``recorded/scan.json``: seven of the 422 matches Grype v0.121.2 made on dev's image 2026-11-13,
-each whole, with the scan's own source, distro and descriptor.  A case the real scan does not
-hold is that copy with one value changed."""
+each whole, with the scan's own source, distro and descriptor, its CVE ids, descriptions and
+links invented (ruling plan#3841).  None is marked known exploited.  A case the real scan does
+not hold is that copy with one value changed."""
 from __future__ import annotations
 
 import copy
@@ -25,9 +27,9 @@ from tools.update.app import marker, markers
 #: The trimmed copy of a real scan.
 RECORDED = Path(__file__).resolve().parent / "recorded" / "scan.json"
 #: The one match of the recorded scan that counts: the interpreter's CRITICAL CVE.
-_CRITICAL = scan.Fixed("CVE-2026-1999903", "binary", "python", "3.14.8",
-                       ("3.11.18", "3.12.16", "3.13.18", "3.14.10", "3.15.2", "3.16.0"),
-                       scan.RATINGS.index("critical"))
+_CRITICAL = scan.Counted("CVE-2026-1999903", "binary", "python", "3.14.8",
+                         ("3.11.18", "3.12.16", "3.13.18", "3.14.10", "3.15.2", "3.16.0"),
+                         scan.RATINGS.index("critical"), False)
 
 
 def _recorded() -> dict:
@@ -58,6 +60,18 @@ def _given_a_fix(match: dict, *versions: str) -> dict:
     """``match`` as Grype would write it once it knew a fix in ``versions``."""
     match["vulnerability"]["fix"] = {"versions": list(versions), "state": "fixed"}
     return match
+
+
+def _marked(record: dict) -> dict:
+    """``record``, a vulnerability's, as Grype writes it once CISA's list of CVEs known to be
+    exploited names its CVE: one entry of that list, in Grype's shape, its values invented but
+    the CVE's (ruling plan#3841)."""
+    record["knownExploited"] = [{
+        "cve": record["id"], "vendorProject": "Example", "product": "Example",
+        "dateAdded": "2026-11-02", "requiredAction": "Apply the vendor's fix.",
+        "dueDate": "2026-11-23", "knownRansomwareCampaignUse": "Unknown",
+        "urls": ["https://example.invalid/advisory"], "cwes": ["CWE-787"]}]
+    return record
 
 
 def test_the_recorded_scan_lists_its_one_fixed_cve_rated_critical():
@@ -158,6 +172,115 @@ def test_a_fix_state_grype_does_not_write_refuses_the_scan(state):
         scan.judged(_scan(match))
 
 
+def test_a_match_counted_for_its_fix_naming_no_version_is_refused():
+    """Grype writes a fix's state as fixed only beside a version it is fixed in, so a match
+    that would be listed for its fix with none is refused, never listed as having no fix."""
+    match = _given_a_fix(_match("CVE-2026-1999903", "python"))
+    with pytest.raises(scan.NotAScan, match="match 0's fix is fixed in no version"):
+        scan.judged(_scan(match))
+
+
+def test_a_cve_known_exploited_counts_at_medium_with_a_fix():
+    """Ruling plan#3819: the interpreter's Medium CVE with a fix does not count until Grype
+    marks it known exploited; then it is listed at Medium, with its fix."""
+    match = _match("CVE-2026-9999902", "python")
+    assert not scan.judged(_scan(match))
+    _marked(match["vulnerability"])
+    assert scan.judged(_scan(match)) == [scan.Counted(
+        "CVE-2026-9999902", "binary", "python", "3.14.8",
+        ("3.10.22", "3.11.17", "3.12.15", "3.13.16", "3.14.9", "3.15.0rc3"),
+        scan.RATINGS.index("medium"), True)]
+
+
+@pytest.mark.parametrize("state", ["not-fixed", "wont-fix", "unknown", ""])
+def test_a_cve_known_exploited_counts_at_low_with_no_fix(state):
+    """Ruling plan#3819: the interpreter's Low CVE, as Grype writes it with no fix (each state
+    but ``fixed``, no version), counted once Grype marks it known exploited, listed as fixed in
+    no version."""
+    match = _match("CVE-2026-1999901", "python")
+    match["vulnerability"]["fix"] = {"versions": [], "state": state}
+    assert not scan.judged(_scan(match))
+    _marked(match["vulnerability"])
+    assert scan.judged(_scan(match)) == [scan.Counted(
+        "CVE-2026-1999901", "binary", "python", "3.14.8", (), scan.RATINGS.index("low"), True)]
+
+
+@pytest.mark.parametrize(("vulnerability", "package", "rating"), [
+    ("CVE-2019-9000001", "libc-bin", "critical"),
+    ("CVE-2026-9999903", "openssl", "unknown"),
+], ids=["negligible_to_debian_critical_to_nvd", "unrated_by_both"])
+def test_a_mark_on_a_related_record_counts_as_one_on_the_match(vulnerability, package, rating):
+    """Grype reads CISA's list for each record of a match, its own and each related one, and a
+    mark on either is the CVE's: a Debian CVE with no fix whose NVD record alone is marked is
+    counted, at the highest rating any source gives it."""
+    match = _match(vulnerability, package)
+    _marked(match["relatedVulnerabilities"][0])
+    found, = scan.judged(_scan(match))
+    assert (found.vulnerability, found.package, found.fixes, found.rating, found.exploited) == (
+        vulnerability, package, (), scan.RATINGS.index(rating), True)
+
+
+@pytest.mark.parametrize("marks", [None, [], {}, True, "CVE-2026-1999902", ["CVE-2026-1999902"],
+                                   [{}], [{"cve": 7}], [{"cve": "CVE-2026-1999902"}, None]],
+                         ids=["null", "empty", "an_object", "true", "a_string", "a_list_of_ids",
+                              "an_entry_naming_no_cve", "a_cve_no_string", "a_second_entry"])
+@pytest.mark.parametrize("record", ["vulnerability", "related", "related_beside_a_mark"])
+def test_a_mark_grype_does_not_write_refuses_the_scan(marks, record):
+    """Grype leaves the mark out where CISA's list names no CVE, and writes it otherwise as a
+    list of that list's entries: any other shape could be a mark read as none, so it is refused,
+    on a match that would not count unmarked as on any other, and on a related record beside
+    the match's own mark, as every record's mark is read."""
+    match = _match("CVE-2026-1999902", "libkrb5-3")
+    if record == "related_beside_a_mark":
+        _marked(match["vulnerability"])
+    (match["vulnerability"] if record == "vulnerability" else
+     match["relatedVulnerabilities"][0])["knownExploited"] = marks
+    with pytest.raises(scan.NotAScan, match="which Grype does not write"):
+        scan.judged(_scan(match))
+
+
+def test_a_match_whose_related_records_are_not_as_grype_writes_them_is_refused():
+    """Every record of every match is read for its mark, so a match with no fix and no list of
+    related records, or one holding a record that is no object, is refused."""
+    match = _match("CVE-2026-1999902", "libkrb5-3")
+    match["relatedVulnerabilities"].append(3)
+    with pytest.raises(scan.NotAScan, match="related vulnerability 1 is 3, which is no record"):
+        scan.judged(_scan(match))
+    del match["relatedVulnerabilities"]
+    with pytest.raises(scan.NotAScan, match="match 0 holds no relatedVulnerabilities"):
+        scan.judged(_scan(match))
+
+
+def test_a_rating_on_a_match_counted_for_its_mark_is_read():
+    """A match counted for its mark alone is listed with its rating, so one Grype does not
+    spell is refused there, as on a match counted for its fix."""
+    match = _match("CVE-2026-1999902", "libkrb5-3")
+    match["vulnerability"]["severity"] = "Important"
+    _marked(match["vulnerability"])
+    with pytest.raises(scan.NotAScan, match="which is no rating Grype gives"):
+        scan.judged(_scan(match))
+
+
+@pytest.mark.parametrize(("descriptor", "said"), [
+    ({"db": {"providers": {"nvd": {"captured": "2026-11-13T00:22:41Z"}}}},
+     "names no provider kev"),
+    ({"db": {"providers": {}}}, "names no provider kev"),
+    ({"db": {"providers": {"kev": None}}}, "names no provider kev"),
+    ({"db": {"providers": None}}, "the scan's database holds no providers"),
+    ({"db": {}}, "the scan's database holds no providers"),
+    ({}, "the scan's descriptor holds no db"),
+    (None, "the scan holds no descriptor"),
+], ids=["another_provider", "no_provider", "kev_no_object", "providers_null", "no_providers",
+        "no_db", "no_descriptor"])
+def test_a_scan_read_with_no_list_of_exploited_cves_is_refused(descriptor, said):
+    """A database built without CISA's list marks nothing, so a scan that names no such
+    provider is refused, never read as one in which nothing is exploited; Grype writes no
+    provider at all where it could not read them.  The recorded scan names it."""
+    assert set(_recorded()["descriptor"]["db"]["providers"]) >= {scan.KEV, "nvd", "debian"}
+    with pytest.raises(scan.NotAScan, match=said):
+        scan.judged({**_recorded(), "descriptor": descriptor})
+
+
 @pytest.mark.parametrize(("where", "value"), [
     (("artifact", "name"), "py`thon"),
     (("artifact", "name"), f"python <!-- update: mention {'a' * 64} -->"),
@@ -184,17 +307,19 @@ def test_a_value_that_cannot_be_listed_refuses_the_scan(where, value):
         scan.judged(_scan(match))
 
 
-@pytest.mark.parametrize("given", [
-    [],
-    {"matches": {}},
-    {"matches": [1]},
-    {"matches": [{"vulnerability": {}}]},
-    {"matches": [{"vulnerability": {"fix": {}}}]},
-], ids=["no_object", "matches_no_list", "a_match_no_object", "no_fix", "no_fix_state"])
-def test_a_scan_not_shaped_as_grype_writes_one_is_refused(given):
-    """Nothing read as no match: a JSON of another shape is refused whole."""
-    with pytest.raises(scan.NotAScan, match="holds no"):
-        scan.judged(given)
+@pytest.mark.parametrize(("matches", "said"), [
+    ({}, "the scan holds no matches"),
+    ([1], "match 0 holds no vulnerability"),
+    ([{"vulnerability": {}}], "match 0's vulnerability holds no fix"),
+    ([{"vulnerability": {"fix": {}}}], "match 0's fix holds no state"),
+], ids=["matches_no_list", "a_match_no_object", "no_fix", "no_fix_state"])
+def test_a_scan_not_shaped_as_grype_writes_one_is_refused(matches, said):
+    """Nothing read as no match: a JSON of another shape is refused whole, the recorded scan's
+    descriptor kept so each refusal is the one its case names."""
+    with pytest.raises(scan.NotAScan, match="the scan holds no descriptor"):
+        scan.judged([])
+    with pytest.raises(scan.NotAScan, match=said):
+        scan.judged({**_recorded(), "matches": matches})
 
 
 @pytest.mark.parametrize("dropped", [("relatedVulnerabilities",), ("artifact",),
@@ -207,7 +332,7 @@ def test_a_counted_match_missing_what_it_names_is_refused(dropped):
     for key in dropped[:-1]:
         node = node[key]
     del node[dropped[-1]]
-    with pytest.raises(scan.NotAScan, match="holds no"):
+    with pytest.raises(scan.NotAScan, match=f"holds no {dropped[-1]} "):
         scan.judged(_scan(match))
 
 

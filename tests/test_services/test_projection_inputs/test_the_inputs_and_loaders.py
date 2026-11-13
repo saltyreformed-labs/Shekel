@@ -26,10 +26,11 @@ def _feed(paydays, *, employee=None, gross=None):
     """Build the :class:`AccountPayrollFeed` a caller hands the wrapper.
 
     **The input since plan step salary:R14-b** (ruling **R-SAL2**), in place
-    of the ``_FakeDeduction`` this file built: the paycheck engine prices a
-    deduction when it prices the paycheck, and :func:`load_payroll_feeds`
-    hands this value a resolver over that pricer.  ``TestLoadPayrollFeeds``
-    below grades the real resolvers against real rows; the cases here only
+    of the ``_FakeDeduction`` ``test_projection_inputs.py`` built: the paycheck
+    engine prices a deduction when it prices the paycheck, and
+    :func:`load_payroll_feeds` hands this value a resolver over that pricer.
+    ``test_the_payroll_feeds.TestLoadPayrollFeeds`` grades the real resolvers
+    against real rows; the cases here only
     need a feed that answers, so each resolver is a table over *paydays*
     keyed by the period's ``start_date`` -- the one thing a fake period here
     carries.  A ``None`` figure means no resolver at all, which is the state

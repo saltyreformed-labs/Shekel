@@ -310,6 +310,16 @@ with no drop before it and dropped when the test ends, so one left standing make
 under that name refuse (`already exists`) rather than be reused. A snapshot is created once, so a
 second world under its name is refused at its create rather than overwriting the first.
 
+**A test's environment never reaches the harness** (ruling plan#3900). A test may set any libpq
+setting (`PGHOSTADDR`, `PGSERVICE`, `PGOPTIONS` and the rest) with `monkeypatch`, as
+`tests/test_scripts/test_dev_two_factor.py` does. pytest-flask's autouse fixtures take the shared
+`monkeypatch` before `db`, so the setting is still in force when `db`'s teardown drops the test's
+database. Every clone, drop and catalog read of the harness goes over one admin connection per
+worker, opened as `tests/_worker_database.py` is imported, before any test runs. libpq reads the
+environment only when a connection opens, so the setting reaches the app's engine and any connection
+the test opens itself, never the harness. The connection is never reopened, since a reopen would
+read the environment of that moment.
+
 **State a test keeps in its PROCESS is the same.** A module global, a cache or a counter is seen
 only by the tests that happen to run on that worker, in whatever order they run, and any test can
 run on any worker and in any CI shard. A cost paid once per process belongs in a session-scoped

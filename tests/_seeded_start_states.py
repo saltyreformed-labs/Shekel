@@ -12,13 +12,12 @@ from contextlib import contextmanager
 from datetime import date, datetime
 from decimal import Decimal
 
-import psycopg
 from psycopg import sql
 
 from app.extensions import db as _db
 from tests._worker_database import (
+    _ADMIN_CONNECTION,
     _SNAPSHOT_INFIX,
-    _WORKER_ADMIN_URL,
     _WORKER_DB_NAME,
     _clone_worker_database,
     _drop_worker_database,
@@ -350,7 +349,7 @@ def _build_seeded_snapshot(name, app):
 
     _refuse_a_build_the_environment_is_not_ready_for(name)
     snapshot = _seeded_snapshot_name(name)
-    _clone_worker_database(_WORKER_DB_NAME, _WORKER_ADMIN_URL)
+    _clone_worker_database(_WORKER_DB_NAME)
     try:
         with app.app_context():
             # ``try``/``finally`` so a builder that RAISES still releases this
@@ -376,23 +375,18 @@ def _build_seeded_snapshot(name, app):
                 _db.session.remove()
                 _db.engine.dispose()
 
-        admin_conn = psycopg.connect(_WORKER_ADMIN_URL)
-        try:
-            admin_conn.autocommit = True
-            with admin_conn.cursor() as cur:
-                cur.execute(
-                    sql.SQL(
-                        "CREATE DATABASE {} TEMPLATE {} STRATEGY WAL_LOG "
-                        "ALLOW_CONNECTIONS false"
-                    ).format(
-                        sql.Identifier(snapshot),
-                        sql.Identifier(_WORKER_DB_NAME),
-                    )
+        with _ADMIN_CONNECTION.cursor() as cur:
+            cur.execute(
+                sql.SQL(
+                    "CREATE DATABASE {} TEMPLATE {} STRATEGY WAL_LOG "
+                    "ALLOW_CONNECTIONS false"
+                ).format(
+                    sql.Identifier(snapshot),
+                    sql.Identifier(_WORKER_DB_NAME),
                 )
-        finally:
-            admin_conn.close()
+            )
     finally:
-        _drop_worker_database(_WORKER_DB_NAME, _WORKER_ADMIN_URL)
+        _drop_worker_database(_WORKER_DB_NAME)
     return snapshot, ids
 
 
@@ -491,7 +485,7 @@ def _drop_seeded_snapshots(worlds):
             :func:`built_worlds` yields it.
     """
     for snapshot, _ids in worlds.values():
-        _drop_worker_database(snapshot, _WORKER_ADMIN_URL)
+        _drop_worker_database(snapshot)
 
 
 # --- Helpers --------------------------------------------------------------

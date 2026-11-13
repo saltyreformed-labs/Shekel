@@ -7,6 +7,19 @@ profile harness, and it imports nothing from ``app``.  The ``db`` fixture
 (:mod:`tests._app_fixtures`) clones the database for every test with
 :func:`_clone_worker_database` and drops it with :func:`_drop_worker_database` when the test
 ends, so a test's database lives exactly as long as the test (ruling plan#3870).
+
+**Every clone, drop and catalog read goes over ONE admin connection per worker**
+(:data:`_ADMIN_CONNECTION`, ruling plan#3900), opened as this module is imported, before any
+test runs.  libpq reads its settings from the environment (``PGHOSTADDR``, ``PGSERVICE``,
+``PGOPTIONS`` and dozens more) only when a connection opens, and a test sets them with
+``monkeypatch`` on purpose to test code that reads them
+(``tests/test_scripts/test_dev_two_factor.py``).  pytest-flask's autouse fixtures take the
+shared ``monkeypatch`` before ``db``, so it is undone only after ``db``'s teardown: a
+connection opened there would read the test's settings, and a drop sent to the wrong server
+leaves the database standing for every later clone on the worker to refuse.  A connection
+opened before any test reads none of them.  It is never reopened, since a reopen would read
+the environment of that moment: a connection that dies fails every later clone and drop on
+the worker, loudly.
 """
 
 import os
@@ -335,22 +348,28 @@ _BOOTSTRAP_RESULT = _bootstrap_worker_database()
 
 # Pull the worker DB name and admin DSN into module-level constants so
 # the per-test ``db`` fixture (Phase 3b) can clone and drop without
-# unpacking ``_BOOTSTRAP_RESULT`` on every call.  ``None`` when the
-# bootstrap was skipped (xdist master), in which case the per-test
-# fixture will refuse to run -- the master never executes tests so
-# this branch should be unreachable in practice; the defensive check
-# inside the fixture surfaces a clear error if it ever fires.
+# unpacking ``_BOOTSTRAP_RESULT`` on every call, and open the worker's
+# one admin connection (the module docstring says why it is one, and
+# why now).  ``_WORKER_ADMIN_URL`` stays for a DSN a test builds to
+# reach another database.  All ``None`` when the bootstrap was skipped
+# (xdist master), in which case the per-test fixture will refuse to
+# run -- the master never executes tests so this branch should be
+# unreachable in practice; the defensive check inside the fixture
+# surfaces a clear error if it ever fires.  ``pytest_sessionfinish``
+# (``tests/conftest.py``) closes the connection.
 if _BOOTSTRAP_RESULT is not None:
     _WORKER_DB_NAME, _WORKER_ADMIN_URL = _BOOTSTRAP_RESULT
+    _ADMIN_CONNECTION = psycopg.connect(_WORKER_ADMIN_URL, autocommit=True)
 else:
     _WORKER_DB_NAME = None
     _WORKER_ADMIN_URL = None
+    _ADMIN_CONNECTION = None
 
 
 def database_exists(name):
     """Whether *name* is a database on this run's cluster right now.
 
-    Asked through a fresh admin connection rather than the app's engine: the
+    Asked on the worker's admin connection rather than the app's engine: the
     subject is the catalog, not any one test's database.
 
     Args:
@@ -359,25 +378,22 @@ def database_exists(name):
     Returns:
         ``True`` when it exists.
     """
-    conn = psycopg.connect(_WORKER_ADMIN_URL)
-    try:
-        conn.autocommit = True
-        with conn.cursor() as cur:
-            cur.execute(
-                "SELECT 1 FROM pg_database WHERE datname = %s", (name,),
-            )
-            return cur.fetchone() is not None
-    finally:
-        conn.close()
+    with _ADMIN_CONNECTION.cursor() as cur:
+        cur.execute(
+            "SELECT 1 FROM pg_database WHERE datname = %s", (name,),
+        )
+        return cur.fetchone() is not None
 
 
-def _drop_worker_database(db_name, admin_url):
-    """Drop the per-worker test database via an admin psycopg connection.
+def _drop_worker_database(db_name):
+    """Drop the per-worker test database on the worker's admin connection.
 
     Phase 3b helper.  The ``db`` fixture calls it as each test ends,
     ``setup_database`` for the bootstrap's start-up database, a world's
-    build for its scratch database, and :func:`built_worlds`
-    (:mod:`tests._seeded_start_states`) for each snapshot.  No caller
+    build for its scratch database, :func:`built_worlds`
+    (:mod:`tests._seeded_start_states`) for each snapshot, and
+    ``pytest_sessionfinish`` (``tests/conftest.py``) for a name a session
+    ended with a database standing under.  No caller
     drops a name in order to clone over it: each name is cloned once
     and dropped once, so a drop that failed makes the next clone under
     that name refuse (``already exists``) rather than reuse what stood
@@ -389,28 +405,22 @@ def _drop_worker_database(db_name, admin_url):
     interpolation goes through :mod:`psycopg.sql` so the
     ``shekel_test_*`` name stays safely quoted even though it comes
     from a controlled f-string at module load time -- consistent
-    with the rest of this module's admin-DSN access pattern.
+    with the rest of this module's admin access pattern.
 
     Args:
-        db_name: Name of the per-worker DB to drop.
-        admin_url: Admin DSN (must NOT point at ``db_name`` itself
-            -- ``DROP DATABASE`` cannot run against the connection's
-            own database).
+        db_name: Name of the per-worker DB to drop.  Never the admin
+            database the connection is on: ``DROP DATABASE`` cannot run
+            against the connection's own database.
     """
-    admin_conn = psycopg.connect(admin_url)
-    try:
-        admin_conn.autocommit = True
-        with admin_conn.cursor() as cur:
-            cur.execute(
-                sql.SQL(
-                    "DROP DATABASE IF EXISTS {} WITH (FORCE)"
-                ).format(sql.Identifier(db_name))
-            )
-    finally:
-        admin_conn.close()
+    with _ADMIN_CONNECTION.cursor() as cur:
+        cur.execute(
+            sql.SQL(
+                "DROP DATABASE IF EXISTS {} WITH (FORCE)"
+            ).format(sql.Identifier(db_name))
+        )
 
 
-def _clone_worker_database(db_name, admin_url, template=None):
+def _clone_worker_database(db_name, template=None):
     """Create the per-worker test DB by cloning ``shekel_test_template``.
 
     Phase 3b helper.  Called once per test by the ``db`` fixture, under
@@ -462,9 +472,10 @@ def _clone_worker_database(db_name, admin_url, template=None):
     ``ref.account_types`` count the bootstrap verifies are therefore
     unchanged.
 
+    Issued on the worker's admin connection (:data:`_ADMIN_CONNECTION`).
+
     Args:
         db_name: Name of the per-worker DB to create.
-        admin_url: Admin DSN (must NOT point at ``db_name`` itself).
         template: The database to clone FROM.  Defaults to the empty
             ``shekel_test_template``, which is what every test that has not
             declared a seeded start state gets.  A test carrying the
@@ -473,17 +484,12 @@ def _clone_worker_database(db_name, admin_url, template=None):
             way, a private database per test; only the content it starts with
             differs.
     """
-    admin_conn = psycopg.connect(admin_url)
-    try:
-        admin_conn.autocommit = True
-        with admin_conn.cursor() as cur:
-            cur.execute(
-                sql.SQL(
-                    "CREATE DATABASE {} TEMPLATE {} STRATEGY WAL_LOG"
-                ).format(
-                    sql.Identifier(db_name),
-                    sql.Identifier(template or _TEST_TEMPLATE_DATABASE),
-                )
+    with _ADMIN_CONNECTION.cursor() as cur:
+        cur.execute(
+            sql.SQL(
+                "CREATE DATABASE {} TEMPLATE {} STRATEGY WAL_LOG"
+            ).format(
+                sql.Identifier(db_name),
+                sql.Identifier(template or _TEST_TEMPLATE_DATABASE),
             )
-    finally:
-        admin_conn.close()
+        )

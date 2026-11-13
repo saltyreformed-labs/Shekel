@@ -43,7 +43,6 @@ from tests._test_helpers import (
     step_down_through_the_transfer_column_drop,
 )
 from tests._worker_database import (
-    _WORKER_ADMIN_URL,
     _WORKER_DB_NAME,
     _clone_worker_database,
     _drop_worker_database,
@@ -223,7 +222,7 @@ def setup_database(app):
         bind_db_clock_rewriter(_db.engine)
         _db.session.remove()
         _db.engine.dispose()
-    _drop_worker_database(_WORKER_DB_NAME, _WORKER_ADMIN_URL)
+    _drop_worker_database(_WORKER_DB_NAME)
     yield
 
 
@@ -332,7 +331,7 @@ def db(app, setup_database, request, disable_hibp_check):  # pylint: disable=unu
          snapshot of the world the test declared.  The first
          declaring test on this worker builds every declared world
          here (``_seeded_snapshots``).
-      2. ``setup_clone_template`` -- admin-DSN ``CREATE DATABASE
+      2. ``setup_clone_template`` -- ``CREATE DATABASE
          {worker_db} TEMPLATE {source} STRATEGY WAL_LOG``.  See
          ``_clone_worker_database`` for why the strategy is named
          explicitly and what ``FILE_COPY`` cost.
@@ -345,10 +344,18 @@ def db(app, setup_database, request, disable_hibp_check):  # pylint: disable=unu
       4. ``call`` -- the test body.
       5. ``teardown`` -- release the engine (``session.remove()``
          detaches the scoped session; ``engine.dispose()`` closes
-         every pooled connection), then admin-DSN ``DROP DATABASE IF
+         every pooled connection), then ``DROP DATABASE IF
          EXISTS {worker_db} WITH (FORCE)``.  Disposing first keeps
          the pool from holding a connection to a dropped database;
          FORCE severs a backend the test opened itself.
+
+    Both the clone and the drop go over the worker's one admin
+    connection, opened before any test (``tests/_worker_database.py``,
+    ruling plan#3900).  **The teardown runs under the test's own
+    environment**: pytest-flask's autouse fixtures take the shared
+    ``monkeypatch`` before this one, so whatever a test set with it is
+    undone only after this teardown, and a connection opened here
+    would read any libpq setting the test made.
 
     Why the worker DB name is stable across the session: the URL
     the Flask-SQLAlchemy engine binds to at app-creation time is
@@ -366,7 +373,7 @@ def db(app, setup_database, request, disable_hibp_check):  # pylint: disable=unu
     comment near ``_FIXTURE_PROFILE_ENABLED`` at the top of
     ``tests/_fixture_profile.py``).
     """
-    if _WORKER_DB_NAME is None or _WORKER_ADMIN_URL is None:
+    if _WORKER_DB_NAME is None:
         raise RuntimeError(
             "db fixture invoked from a process that skipped "
             "_bootstrap_worker_database (xdist master?).  The "
@@ -392,9 +399,7 @@ def db(app, setup_database, request, disable_hibp_check):  # pylint: disable=unu
         clone_source = None if world is None else world[0]
 
         with _profile_step(timings, "setup_clone_template"):
-            _clone_worker_database(
-                _WORKER_DB_NAME, _WORKER_ADMIN_URL, clone_source,
-            )
+            _clone_worker_database(_WORKER_DB_NAME, clone_source)
 
         # ``try``/``finally`` from the clone on, so the drop runs however
         # the rest of setup or the test ends: the database lives exactly as
@@ -434,7 +439,7 @@ def db(app, setup_database, request, disable_hibp_check):  # pylint: disable=unu
                     _db.session.remove()
                     _db.engine.dispose()
                 finally:
-                    _drop_worker_database(_WORKER_DB_NAME, _WORKER_ADMIN_URL)
+                    _drop_worker_database(_WORKER_DB_NAME)
             _profile_write_row(nodeid, timings)
 
 

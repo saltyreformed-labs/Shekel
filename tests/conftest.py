@@ -64,9 +64,7 @@ and the failures that decision produced; do not restore
 import base64
 import os
 
-import psycopg
 import pytest
-from psycopg import sql
 
 # IMPORTANT: SECRET_KEY must be set in the environment BEFORE the
 # ``app`` package is imported, because ``app/config.py`` reads it at
@@ -98,7 +96,11 @@ os.environ["TOTP_ENCRYPTION_KEY"] = base64.urlsafe_b64encode(
 ).decode()
 
 from tests._fixture_profile import _FIXTURE_PROFILE_ENABLED, _profile_print_summary
-from tests._worker_database import _BOOTSTRAP_RESULT
+from tests._worker_database import (
+    _ADMIN_CONNECTION,
+    _BOOTSTRAP_RESULT,
+    _drop_worker_database,
+)
 from tests._shard import SHARD_ENV, apply_shard, parse_shard
 # Every fixture, imported by name: pytest registers each fixture it finds in this
 # module's namespace with this conftest's directory as its base, so each keeps the
@@ -260,7 +262,7 @@ def pytest_sessionfinish():
     bootstrap (``_BOOTSTRAP_RESULT`` is ``None``); only worker
     processes own a DB to drop.
 
-    Why psycopg directly (not SQLAlchemy):
+    Why the worker's admin connection (not SQLAlchemy):
         Flask-SQLAlchemy 3.x scopes ``db.session`` and ``db.engine``
         to the current app context, and the
         ``pytest_sessionfinish`` hook runs AFTER the session-scoped
@@ -276,7 +278,10 @@ def pytest_sessionfinish():
         ``WITH (FORCE)`` clause severs any backend that did
         escape, at the protocol level.  See
         ``docs/audits/test_improvements/per-worker-database-plan.md``
-        Phase 3 for the broader context.
+        Phase 3 for the broader context.  The connection is the one
+        every clone and drop of the session went over
+        (``tests/_worker_database.py``, ruling plan#3900), and it is
+        closed here, after its last statement.
 
     Survives SIGKILL imperfectly: a process killed before this hook
     runs leaves an orphan DB.  Where a NEXT session reaches the same
@@ -305,20 +310,13 @@ def pytest_sessionfinish():
     whatever the exit status, because it is throwaway.
     """
     if _BOOTSTRAP_RESULT is not None:
-        db_name, admin_url = _BOOTSTRAP_RESULT
+        db_name, _admin_url = _BOOTSTRAP_RESULT
         # The worlds' snapshots are not dropped here: the ``_seeded_snapshots``
         # fixture's teardown drops them, as pytest tears session fixtures down.
-        admin_conn = psycopg.connect(admin_url)
         try:
-            admin_conn.autocommit = True
-            with admin_conn.cursor() as cur:
-                cur.execute(
-                    sql.SQL(
-                        "DROP DATABASE IF EXISTS {} WITH (FORCE)"
-                    ).format(sql.Identifier(db_name))
-                )
+            _drop_worker_database(db_name)
         finally:
-            admin_conn.close()
+            _ADMIN_CONNECTION.close()
 
     # Only the xdist controller / single-process run aggregates and
     # prints.  Workers (PYTEST_XDIST_WORKER set) are write-only: they

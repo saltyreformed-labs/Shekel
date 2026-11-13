@@ -43,10 +43,10 @@ _SIBLING_SNAPSHOT = f"{_SIBLING_DATABASE}{worker_database._SNAPSHOT_INFIX}probe"
 def laid_out_cluster():
     """Create the leftover and the sibling's two databases; drop every probe name after."""
     for name in (_OWN_LEFTOVER, _SIBLING_DATABASE, _SIBLING_SNAPSHOT):
-        worker_database._clone_worker_database(name, worker_database._WORKER_ADMIN_URL)
+        worker_database._clone_worker_database(name)
     yield
     for name in (_OWN_LEFTOVER, _SIBLING_DATABASE, _SIBLING_SNAPSHOT, _PROBE_DATABASE):
-        worker_database._drop_worker_database(name, worker_database._WORKER_ADMIN_URL)
+        worker_database._drop_worker_database(name)
 
 
 @pytest.mark.usefixtures("laid_out_cluster")

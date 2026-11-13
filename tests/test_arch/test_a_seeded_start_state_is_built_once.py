@@ -107,9 +107,7 @@ def _free_the_worker_name(db):
     """
     db.session.remove()
     db.engine.dispose()
-    worker_database._drop_worker_database(
-        worker_database._WORKER_DB_NAME, worker_database._WORKER_ADMIN_URL,
-    )
+    worker_database._drop_worker_database(worker_database._WORKER_DB_NAME)
 
 
 class _CollectedTest:
@@ -319,7 +317,6 @@ class TestTheSeamRefusesWhatItCannotDeliver:
         finally:
             worker_database._drop_worker_database(
                 seeded_states._seeded_snapshot_name(first),
-                worker_database._WORKER_ADMIN_URL,
             )
 
     def test_an_unregistered_world_names_the_ones_that_exist(self, app):

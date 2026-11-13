@@ -21,7 +21,13 @@ from tools.split._render import (
     write,
 )
 from tools.split._run import pylint_messages
-from tools.split._source import collect_rules, read_module
+from tools.split._source import (
+    Refusal,
+    collect_rules,
+    free_names,
+    member_free_names,
+    read_module,
+)
 from tools.split.conftest import SAMPLE, SOURCE, build, layout_of
 
 PACKAGE = "tests/test_area/test_sample"
@@ -29,6 +35,15 @@ PACKAGE = "tests/test_area/test_sample"
 #: A ``from __future__`` import, and the sample carrying one after its docstring.
 FUTURE = "from __future__ import annotations\n"
 FUTURE_SAMPLE = SAMPLE.replace("\nimport re\n", f"\n{FUTURE}\nimport re\n", 1)
+
+#: The sample with ``_make``, which lands in ``_helpers.py``, reading ``re`` only in a local
+#: variable's annotation: no other node there reads it.
+ANNOTATED_SAMPLE = SAMPLE.replace('''    """Make a thing."""
+    return helper_one(n)
+''', '''    """Make a thing."""
+    made: re.Pattern | None = None
+    return helper_one(n) if made is None else made
+''', 1)
 
 
 def applied(repo: Path) -> Layout:
@@ -115,6 +130,95 @@ class TestTheSampleSplits:
         assert not proof(repo, layout)
         for module in ("test_first", "test_big_early", "test_big_late", "conftest", "_helpers"):
             assert FUTURE in text(repo, module), module
+
+    def test_an_import_only_a_local_annotation_reads_stays_with_its_reader(self, tmp_path):
+        """``_helpers.py`` imports ``re``, which ``_make`` reads only in a local variable's
+        annotation, and pylint finds every name it reads bound.  Python never evaluates
+        such an annotation, so :mod:`symtable` records no name in it; read through
+        symtable alone, the part lost the import and pylint called ``re`` undefined."""
+        assert ANNOTATED_SAMPLE != SAMPLE
+        repo = build(tmp_path, ANNOTATED_SAMPLE)
+        layout = applied(repo)
+        assert not proof(repo, layout)
+        imports = [ast.unparse(n) for n in ast.parse(text(repo, "_helpers")).body
+                   if isinstance(n, (ast.Import, ast.ImportFrom))]
+        assert imports == ["import re", "from datetime import date",
+                           "from tests.shared import helper_one, helper_two, unused_thing"]
+        assert not [m for m in pylint_messages(repo, [f"{PACKAGE}/_helpers.py"])
+                    if m["symbol"] == "undefined-variable"]
+
+    def test_a_module_level_annotated_assignment_splits_and_proves(self, tmp_path):
+        """``_CASES: list = [...]`` moves to ``_helpers.py`` and the proof passes.  On
+        Python 3.14 symtable reports the compiler's own ``__conditional_annotations__`` as a
+        name such a block reads; taken as the source's, it was bound nowhere, and every
+        source holding one was refused."""
+        source = SAMPLE.replace("_CASES = [", "_CASES: list = [", 1)
+        assert source != SAMPLE
+        repo = build(tmp_path, source)
+        layout = applied(repo)
+        assert not proof(repo, layout)
+        assert '_CASES: list = [("a", 1), ("b", 2)]' in text(repo, "_helpers")
+
+
+class TestALocalAnnotationsNames:
+    """A name a local variable's annotation reads is a read of the scope Python would
+    resolve it in, were the annotation evaluated: the function's own, an enclosing
+    function's, else the module's."""
+
+    @pytest.mark.parametrize("source,expected", [
+        ("def f():\n    made: Pattern = None\n    return made\n", {"Pattern"}),
+        ("def f():\n    def g():\n        made: Pattern = None\n        return made\n"
+         "    return g\n", {"Pattern"}),
+        ("def f():\n    if True:\n        made: Pattern\n    return 1\n", {"Pattern"}),
+        ("def f():\n    Pattern = None\n    made: Pattern = 0\n    return made\n", set()),
+        ("def f():\n    made: Pattern = None\n    Pattern = 0\n    return made\n", set()),
+        ("def f():\n    Pattern = None\n    def g():\n        made: Pattern = 0\n"
+         "        return made\n    return g\n", set()),
+        ("def f():\n    def g():\n        Pattern = None\n        made: Pattern = 0\n"
+         "        return made\n    return g\n", set()),
+        ("def f():\n    Pattern = None\n    def g():\n        made: Pattern = None\n"
+         "        nonlocal Pattern\n        Pattern = 0\n        return made\n"
+         "    return g\n", set()),
+    ], ids=["module-level", "nested-function", "bare-in-a-branch", "the-function-binds-it",
+            "the-function-binds-it-after", "an-enclosing-function-binds-it",
+            "only-an-inner-function-binds-it", "a-nonlocal-declared-after-it"])
+    def test_a_top_level_block(self, source, expected):
+        """Each case's module-level reads, as a top-level block."""
+        assert free_names(source) == expected
+
+    @pytest.mark.parametrize("member", [
+        ("    def m(self):", "        made: Pattern = None", "        return made"),
+        ("    def __init__(self):", "        self.made: Pattern = None"),
+    ], ids=["a-name-target", "an-attribute-target"])
+    def test_a_class_member(self, member):
+        """A method's local annotation is read at module level, not in the class body."""
+        assert member_free_names(member) == {"Pattern"}
+
+    def test_a_block_too_deep_to_restate_is_refused(self):
+        """A local annotation's block is restated by ``ast.unparse``, which recurses in
+        Python: one nested past its reach is refused by name, and the same block with no
+        local annotation is read as written."""
+        body = "    return " + " + ".join(["a"] * 400) + "\n"
+        assert free_names("def f(a):\n" + body) == set()
+        with pytest.raises(Refusal, match=r"the local annotations in \['f'\] cannot be read"):
+            free_names("def f(a):\n    made: Pattern = None\n" + body)
+
+
+class TestTheCompilersOwnName:
+    """``__conditional_annotations__``, which 3.14's compiler adds to a module holding a
+    module-level variable annotation and to a class holding one in a compound statement,
+    is no read of a block that never writes it, and stays one of a block that does."""
+
+    @pytest.mark.parametrize("source,expected", [
+        ("X: int = 1\n", {"int"}),
+        ("class C:\n    if FLAG:\n        x: int = 1\n", {"FLAG", "int"}),
+        ("def f():\n    return __conditional_annotations__\n",
+         {"__conditional_annotations__"}),
+    ], ids=["a-module-level-annotation", "a-class-annotation-in-a-branch",
+            "a-block-that-reads-it"])
+    def test_a_top_level_block(self, source, expected):
+        """Each case's module-level reads."""
+        assert free_names(source) == expected
 
 
 class TestEveryProofArmFails:

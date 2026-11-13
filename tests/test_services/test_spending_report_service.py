@@ -13,6 +13,11 @@ contracts.  Every value assertion carries the arithmetic that produces it.
 **The chart's windows are DERIVED off the owner's pay calendar** since plan
 step C2-f3d; ``TestTheChartReadsTheDerivedOrdinal`` is that step's firing
 control, and it fails on the ``period_index`` queries it replaced.
+
+The privates these tests exercise moved into the package's submodules at plan
+step X-au-c2b, when finding **N-270**'s 1000-line ceiling forced the split;
+they are imported from where they live rather than re-exported, so the test
+names the module that owns each rule.
 """
 
 from contextlib import contextmanager
@@ -49,10 +54,6 @@ from app.services.spending_report_service import (
     SpendingWindow,
     compute_spending_report,
 )
-# The privates these tests exercise moved into the package's submodules at plan
-# step X-au-c2b, when finding **N-270**'s 1000-line ceiling forced the split;
-# they are imported from where they live rather than re-exported, so the test
-# names the module that owns each rule.
 from app.services.spending_report_service._hero import (
     _TRAILING_WINDOW_COUNT,
 )
@@ -1394,9 +1395,6 @@ class TestScopeAndContracts:
                 )
 
 
-# ── Comparison value object ──────────────────────────────────────────
-
-
 class TestTheReportReadsTheCashFlowSet:
     """Where the money went is the paycheck's across the set (plan step CC-4-3).
 
@@ -1917,6 +1915,9 @@ class TestATransferIsALegOfItsParent:
             assert [s.item_key for s in surprises.rows] == [
                 row.id, (settled.id, checking.id),
             ]
+
+
+# ── Comparison value object ──────────────────────────────────────────
 
 
 class TestComparison:

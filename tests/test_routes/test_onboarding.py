@@ -86,6 +86,29 @@ def _banner(html):
     return html[start:html.index("</ul>", start)]
 
 
+class TestNoChecklistAtTheTwoFactorHold:
+    """A user without two-factor is shown no checklist (plan#3777).
+
+    The login gate holds them at two-factor setup (``app/login_gate.py``,
+    plan#3452), so setting it up is the one thing they can do, and each of the
+    checklist's links would lead back there.
+    """
+
+    def test_a_held_owners_setup_page_draws_no_checklist(self, no_two_factor_client):
+        """The seed owner, his two-factor reset, sees setup and no checklist or its queries.
+
+        The same owner with two-factor, his checklist as incomplete, sees it
+        on his own page (:meth:`TestOnboardingBanner.test_banner_shows_for_new_user`).
+        """
+        with counting_calls(_FACT_DOOR) as counts:
+            resp = no_two_factor_client.get("/mfa/setup")
+
+        assert resp.status_code == 200
+        assert b"Verify and Enable" in resp.data
+        assert b'id="welcome-banner"' not in resp.data
+        assert counts["_exists"] == 0
+
+
 class TestOnboardingBanner:
     """Welcome banner should appear only when setup is incomplete."""
 

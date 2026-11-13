@@ -7,7 +7,10 @@ account's two-factor row, ``auth.mfa_configs`` (``User.has_two_factor``).  So
 re-confirm page checks its code against it, always (ruling plan#3826, built at
 plan#3775): neither reads the row a second time to ask again whether two-factor
 is on.  Each test counts the statements a door's request sends that read the
-table: the gate's one, and none of the door's own.
+table before its first commit, the door's own work: the gate's one, and none
+of the door's.  The page Regenerate draws after its commit asks the property
+again, for the welcome checklist's banner (``base.html``, plan#3777), in a
+transaction of its own: that read is the layout's, not the door's.
 """
 
 import re
@@ -37,33 +40,42 @@ _SHOWN_CODE = re.compile(r"(?<![0-9a-f])[0-9a-f]{28}(?![0-9a-f])")
 def _reads_of_the_two_factor_table(
     send: Callable[[], TestResponse],
 ) -> tuple[TestResponse, list[str]]:
-    """Run *send*, and return its result and each statement it sent that read the table.
+    """Run *send*, and return its result and each read of the table before its first commit.
 
     Args:
         send: A zero-argument callable that issues one request.
 
     Returns:
         ``(response, reads)``: what *send* returned, and the text of every
-        statement it sent that reads ``auth.mfa_configs``, in order.
+        statement it sent that reads ``auth.mfa_configs`` before its first
+        commit, in order.
     """
     reads = []
+    committed = []
 
     def on_execute(_conn, _cursor, statement, *_args, **_kwargs):
-        if _READS_THE_TWO_FACTOR_TABLE.search(statement):
+        if not committed and _READS_THE_TWO_FACTOR_TABLE.search(statement):
             reads.append(statement)
 
+    def on_commit(_conn):
+        committed.append(True)
+
     event.listen(db.engine, "before_cursor_execute", on_execute)
+    event.listen(db.engine, "commit", on_commit)
     try:
         response = send()
     finally:
         event.remove(db.engine, "before_cursor_execute", on_execute)
+        event.remove(db.engine, "commit", on_commit)
+    assert committed, "the door never committed, so the count covers nothing it wrote"
     return response, reads
 
 
 def _only_the_gate_read(reads: list[str]) -> str:
     """The failure message when a door's request read the table more than the gate's once."""
     return (
-        f"the request read auth.mfa_configs {len(reads)} times; only the login "
+        f"before its first commit the request read auth.mfa_configs "
+        f"{len(reads)} times; only the login "
         f"gate's read is wanted, and the door uses the row it read (ruling "
         f"plan#3826): {reads}"
     )

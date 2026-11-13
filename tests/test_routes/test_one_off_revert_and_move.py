@@ -14,11 +14,13 @@ plan#3059).  ``tests/test_routes/test_one_off_row_doors.py``'s
 ``test_a_minimal_revert_and_move_carries_the_purchase_legs_to_the_new_paycheck``
 graded this through the stored purchase legs until plan task plan#3072 took
 the store's grading off the suite and deleted it whole, and the row's own move
-went with it.  ``TestUnlockEditLock`` there still grades the order, on the
-category, a field the lock does hold.  This case grades the move on the row
-and on the worked-out read: a purchase's line is filed under its PARENT's
-paycheck (ruling **R-FM**), so it follows the move.  It lives beside that file rather
-than in it because that file is over 1,000 lines.
+went with it.  ``TestUnlockEditLock``, now in
+``test_one_off_row_doors/test_the_figure_and_the_act_order.py``, still grades
+the order, on the category, a field the lock does hold.  This case grades the
+move on the row and on the worked-out read: a purchase's line is filed under
+its PARENT's paycheck (ruling **R-FM**), so it follows the move.  It was
+written beside that file rather than in it because the file was then over
+1,000 lines.
 """
 
 from decimal import Decimal

@@ -13,7 +13,7 @@ and the discardable count promised it back after a truncate that no rule would
 write.  ``TransferTemplate.recurs`` / ``Transfer.recurs`` / ``Transfer.is_placed``
 are the accessors every such site reads now (``PaycheckLine.recurs`` beside
 them, R-BAL97), and the transaction twin of each door is pinned in
-``tests/test_routes/test_one_off_row_doors.py``.
+``tests/test_routes/test_one_off_row_doors/``.
 
 Pinned per door, each beside its recurring or ad-hoc control so the arms are
 graded against each other and not against a shape the app never writes:

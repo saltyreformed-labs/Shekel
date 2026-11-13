@@ -11,7 +11,7 @@ prices from it: the second must be refused and the first price must stand.
 
 Measured with the bump removed (2026-11-02): the TRANSACTION case fails (the
 second save lands), and so does the placed row's card
-(``test_one_off_row_doors.TestTheDefinitionsCounterGuardsTheCard``); the
+(``test_one_off_row_doors.test_the_item.TestTheDefinitionsCounterGuardsTheCard``); the
 TRANSFER case still passes, because that form's save also writes a column of
 the template's own row, which bumps the counter by itself.  It stays as the
 guard for that form, not as a grade of the bump.

@@ -325,7 +325,8 @@ class TestNoPaymentMovesTheRecordedStart:
 
     Ruling R-R114 ("Decide at the door") reads the statements alone and moves
     the decision to the door that adds a tracking start later, which refuses
-    one dated on or before a recorded payment (``test_anchor_service.py``'s
+    one dated on or before a recorded payment
+    (``test_anchor_service/test_the_loan_tracking_start.py``'s
     ``TestRecordLoanTrackingStart`` and ``test_loan/test_params.py``'s
     ``TestRecordTrackingStartRoute``).  So an owner correcting a loan kept in
     the app from its origination records a TRUE-UP, which starts nothing, and

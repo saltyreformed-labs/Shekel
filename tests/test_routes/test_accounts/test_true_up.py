@@ -362,9 +362,10 @@ class TestTrueUpStatementDay:
 
     Rulings **R-EE** (the true-up form gets its own statement date) and
     **R-EI** (it goes on a second line).  The service contract is pinned in
-    ``tests/test_services/test_anchor_service.py``; these cases grade the WIRING
-    -- that the form offers the field bounded, that the submitted day reaches
-    the write door, and that a refusal renders where the submission was made.
+    ``tests/test_services/test_anchor_service/test_the_day_an_assertion_is_for.py``;
+    these cases grade the WIRING -- that the form offers the field bounded, that
+    the submitted day reaches the write door, and that a refusal renders where
+    the submission was made.
     """
 
     #: Days back from today for a day that is assertable on any calendar day.

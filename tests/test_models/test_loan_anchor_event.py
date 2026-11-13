@@ -210,12 +210,14 @@ class TestSchemaShape:
         (``loan_anchor_service._append_loan_anchor_and_commit``), which compares the
         submission against the event that GOVERNS and can tell them apart.  The
         door's coverage is
-        ``test_anchor_service.TestApplyLoanAnchorTrueUpUnchanged``.
+        ``test_anchor_service/test_the_loan_true_up.py``'s
+        ``TestApplyLoanAnchorTrueUpUnchanged``.
 
         Kept as a POSITIVE assertion rather than deleted so the permission is
         recorded as a decision: an ``IntegrityError`` reappearing here would
         mean the index had been re-added behind the door's rule, which is the
-        state ``test_anchor_service`` grades against ``pg_indexes``.
+        state ``test_anchor_service/test_the_cash_true_up.py``'s
+        ``TestApplyAnchorTrueUpModuleContract`` grades against ``pg_index``.
         """
         with app.app_context():
             account, _ = _create_loan_account(seed_user, _db.session)

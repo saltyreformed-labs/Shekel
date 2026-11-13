@@ -16,6 +16,9 @@ session of the user and forgets every trusted device of theirs (plan#2173,
 ruling plan#2406, "turning 2FA off ... forgets them all").  No account can
 turn two-factor off in the app (ruling plan#3604), so this, and for a
 companion the owner's Reset, is how an account's two-factor is cleared.
+Every account must have two-factor (plan#3452), so the user's next sign-in
+lands on its setup, and the login gate holds them there until they enrol an
+authenticator again.
 
 **The reset is ONE act, ``mfa_service.reset_two_factor``** (ruling
 plan#3441), which the owner's "Reset two-factor" for a companion on

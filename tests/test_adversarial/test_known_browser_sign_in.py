@@ -18,10 +18,10 @@ Plan#2772.  A browser that finishes a sign-in holds one record and one cookie
 * :class:`TestTenWrongMakeAStranger` -- a known browser's wrong passwords
   count on its own record, and ten in a row delete it (ruling **plan#2996**),
   leaving the user's other browsers signing in.
-* :class:`TestEveryDoorHasTheOneRule` -- the code form, re-confirm, Change
-  password and Disable two-factor let a known browser past the strangers' lock
-  and count its wrong answers on its own record (ruling **plan#3034**).  Their
-  stranger's side is ``tests/test_routes/test_every_guess_counts.py``.
+* :class:`TestEveryDoorHasTheOneRule` -- the code form, re-confirm and Change
+  password let a known browser past the strangers' lock and count its wrong
+  answers on its own record (ruling **plan#3034**).  Their stranger's side is
+  ``tests/test_routes/test_every_guess_counts.py``.
 * :class:`TestAReConfirmReplacesTheCookie` -- a finished re-confirm gives a
   known browser a new token on the same row, as a sign-in does (ruling
   **plan#3070**), and moves neither its thirty days nor its trust; a stranger
@@ -35,7 +35,10 @@ Every shared account is made with two-factor (plan#3600).  A test of what a
 password alone finishes resets the account's two-factor first, as
 ``scripts/reset_mfa.py`` does (``reset_two_factor_of``), so its password
 signs it in as it does an account before setup; a test of a code types the
-account's own (``two_factor_secret_of``).
+account's own (``two_factor_secret_of``).  A test of a door past the sign-in
+(re-confirm, Change password) signs in with the account's code: the login gate
+holds an account without two-factor at setup (plan#3452), so only an account
+with it reaches those doors, and its re-confirm types the next step's code.
 """
 
 import logging
@@ -47,7 +50,7 @@ import sqlalchemy
 
 from app.extensions import db
 from app.models.known_device import KnownDevice
-from app.models.user import MfaConfig, User
+from app.models.user import User
 from app.routes.auth import _helpers as auth_route_helpers
 from app.services import auth_service, known_device_service
 from app.utils.log_events import EVT_KNOWN_DEVICE_DELETED
@@ -748,14 +751,15 @@ class TestEveryDoorHasTheOneRule:
         assert _lock_state(user_id) == (0, None)
 
     def test_a_known_browser_re_confirms_while_locked(self, app, seed_user):
-        """Signed in, then locked by strangers: ``/reauth`` takes the right password."""
-        reset_two_factor_of(seed_user["user"].id)
+        """Signed in, then locked by strangers: ``/reauth`` takes the right password and code."""
         user_id = seed_user["user"].id
-        browser = app.test_client()
-        assert _signed_in(_password(browser))
+        secret = two_factor_secret_of(user_id)
+        browser = _signed_in_with_a_code(app, secret)
         lock_before = _strangers_lock(app, user_id)
 
-        response = browser.post("/reauth", data={"password": SEED_USER_PASSWORD})
+        response = browser.post("/reauth", data={
+            "password": SEED_USER_PASSWORD, "totp_code": _second_code(secret),
+        })
 
         assert response.status_code == 302
         assert response.headers["Location"].endswith("/dashboard")
@@ -764,12 +768,13 @@ class TestEveryDoorHasTheOneRule:
     def test_a_re_confirm_counts_and_clears_on_the_browser(self, app, seed_user):
         """A wrong password counts 1 on the record; the right one clears it to 0.
 
-        The strangers' four on the account stay four throughout.
+        The strangers' four on the account stay four throughout.  The wrong
+        password is refused before any code is asked; the right one goes with
+        the account's code.
         """
-        reset_two_factor_of(seed_user["user"].id)
         user_id = seed_user["user"].id
-        browser = app.test_client()
-        assert _signed_in(_password(browser))
+        secret = two_factor_secret_of(user_id)
+        browser = _signed_in_with_a_code(app, secret)
         _strangers_guess(app, 4)
         token = _token(browser, user_id)
 
@@ -777,9 +782,9 @@ class TestEveryDoorHasTheOneRule:
         assert b"Invalid password." in refused.data
         assert _device_count(user_id, token) == 1
 
-        assert browser.post(
-            "/reauth", data={"password": SEED_USER_PASSWORD},
-        ).status_code == 302
+        assert browser.post("/reauth", data={
+            "password": SEED_USER_PASSWORD, "totp_code": _second_code(secret),
+        }).status_code == 302
 
         assert _device_count(user_id, _token(browser, user_id)) == 0
         assert _lock_state(user_id) == (4, None)
@@ -806,10 +811,8 @@ class TestEveryDoorHasTheOneRule:
 
     def test_a_known_browser_changes_its_password_while_locked(self, app, seed_user):
         """The current password gets past the lock, and the new one is stored."""
-        reset_two_factor_of(seed_user["user"].id)
         user_id = seed_user["user"].id
-        browser = app.test_client()
-        assert _signed_in(_password(browser))
+        browser = _signed_in_with_a_code(app, two_factor_secret_of(user_id))
         lock_before = _strangers_lock(app, user_id)
         new_password = "a-brand-new-passphrase"
 
@@ -839,22 +842,24 @@ class TestAReConfirmReplacesTheCookie:
     def test_the_old_cookie_is_a_strangers_and_the_new_one_known(
         self, app, seed_user,
     ):
-        """No two-factor: a new token on the same row, its thirty days unmoved.
+        """A known browser not trusted: a new token on the same row, its thirty days unmoved.
 
         The re-confirm's response carries the cookie, so the browser holds the
         new token; a stolen copy of the old one now names nothing.  Neither the
         record's last sign-in nor the session's sign-in stamp moves: a
-        re-confirm is not a sign-in (ruling plan#3069).
+        re-confirm is not a sign-in (ruling plan#3069).  The trusted
+        browser's case is the next one.
         """
-        reset_two_factor_of(seed_user["user"].id)
         user_id = seed_user["user"].id
-        browser = app.test_client()
-        assert _signed_in(_password(browser))
+        secret = two_factor_secret_of(user_id)
+        browser = _signed_in_with_a_code(app, secret)
         old_token = _token(browser, user_id)
         (device,) = _rows_of(user_id)
         device_id, signed_in_at = device.id, device.last_signed_in_at
 
-        response = browser.post("/reauth", data={"password": SEED_USER_PASSWORD})
+        response = browser.post("/reauth", data={
+            "password": SEED_USER_PASSWORD, "totp_code": _second_code(secret),
+        })
 
         assert _re_confirmed(response)
         assert _cookie_header(response, user_id) is not None
@@ -905,14 +910,15 @@ class TestAReConfirmReplacesTheCookie:
         re-confirm clears them, as every finished check of a stranger's does
         (ruling plan#3007).
         """
-        reset_two_factor_of(seed_user["user"].id)
         user_id = seed_user["user"].id
-        browser = app.test_client()
-        assert _signed_in(_password(browser))
+        secret = two_factor_secret_of(user_id)
+        browser = _signed_in_with_a_code(app, secret)
         make_a_stranger(user_id)
         _strangers_guess(app, 4)
 
-        response = browser.post("/reauth", data={"password": SEED_USER_PASSWORD})
+        response = browser.post("/reauth", data={
+            "password": SEED_USER_PASSWORD, "totp_code": _second_code(secret),
+        })
 
         assert _re_confirmed(response)
         assert _cookie_header(response, user_id) is None

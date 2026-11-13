@@ -56,21 +56,21 @@ view it DID follow it, the view being dispatched after every hook.  The
 order is pinned so that it is one thing, in
 ``tests/test_routes/test_auth_required.py``.
 
-**A signed-in user who must have two-factor and has not set it up is held at
-its setup** (ruling plan#3434: every companion must use two-factor, and there
-is no switch).  Such a user reaches the endpoints in
+**A signed-in user without two-factor is held at its setup**, whatever their
+role: every account must use two-factor, and there is no switch (plan#3452,
+widening ruling plan#3434 from companions to every account), and no account
+can turn it off (ruling plan#3604).  Such a user reaches the endpoints in
 :data:`TWO_FACTOR_SETUP_ENDPOINTS` -- setup, its confirmation, and signing out
 -- and the public ones, and nothing else: every other request is sent to
 setup without running, an htmx one by ``HX-Redirect``
 (:func:`~app.utils.auth_helpers.full_page_redirect`), so a POST is never
-performed.  The check is per request and reads the database's answer, so a
-session signed in before the rule existed is held at its next request like a
-fresh sign-in, and a user whose two-factor is cleared (``scripts/reset_mfa.py``,
-which ends their sessions too) meets the hold at their next sign-in.  Who
-must have it is :attr:`~app.models.user.User.must_have_two_factor`, its one
-home, so this module never reads the role.  An unmatched URL is held too, as
-an anonymous one is bounced: the hold has no exception the route table does
-not name.
+performed.  The check is per request and reads the database's answer,
+:attr:`~app.models.user.User.has_two_factor`, so a session signed in before
+the rule existed is held at its next request like a fresh sign-in, and a user
+whose two-factor is cleared (``scripts/reset_mfa.py``, or the owner's Reset
+for a companion, each of which ends their sessions too) meets the hold at
+their next sign-in.  An unmatched URL is held too, as an anonymous one is
+bounced: the hold has no exception the route table does not name.
 """
 
 from flask import Response, request, url_for
@@ -109,7 +109,7 @@ PUBLIC_ENDPOINTS = frozenset({
     "static_pass.service_worker",
 })
 
-#: What a signed-in user who owes two-factor may reach beside the public
+#: What a signed-in user without two-factor may reach beside the public
 #: endpoints, by ENDPOINT NAME (ruling plan#3434): the setup page, the POST
 #: that confirms it, and signing out.  ``tests/test_routes/test_auth_required.py``
 #: pins this set's exact contents and that every name resolves, as it does
@@ -122,7 +122,7 @@ TWO_FACTOR_SETUP_ENDPOINTS = frozenset({
 
 
 def _hold_at_two_factor_setup() -> Response:
-    """Send a user who owes two-factor to its setup, the request not performed.
+    """Send a user without two-factor to its setup, the request not performed.
 
     The one answer the hold ends a request with, so a test observes the
     hold's decision by counting calls here, as the anonymous sweep counts
@@ -137,7 +137,7 @@ def _hold_at_two_factor_setup() -> Response:
 def register_login_gate(app):
     """Refuse every request that is not authenticated and not declared public.
 
-    And hold a signed-in user who owes two-factor at its setup (the module
+    And hold a signed-in user without two-factor at its setup (the module
     docstring says what that lets through).
 
     Args:
@@ -149,7 +149,7 @@ def register_login_gate(app):
 
     @app.before_request
     def _require_login():
-        """Bounce an anonymous request unless its endpoint is public; hold one owing two-factor.
+        """Bounce an anonymous request unless its endpoint is public; hold one without two-factor.
 
         Returns:
             ``None`` to let the request through, the login redirect
@@ -166,6 +166,6 @@ def register_login_gate(app):
             return login_manager.unauthorized()
         if request.endpoint in TWO_FACTOR_SETUP_ENDPOINTS:
             return None
-        if current_user.must_have_two_factor and not current_user.has_two_factor:
+        if not current_user.has_two_factor:
             return _hold_at_two_factor_setup()
         return None

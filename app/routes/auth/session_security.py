@@ -69,14 +69,15 @@ def security() -> str:
     sessions.  No owner gate: every route the page posts to acts on the
     signed-in user alone, and a companion manages her own here, her password
     included (ruling plan#3437).  It lived in Settings, which is the
-    household's and the owner's alone, until that ruling.
+    household's and the owner's alone, until that ruling.  Its user has
+    two-factor on: the login gate holds one without it at setup (plan#3452),
+    so the page has no state for an account without it.
 
     Returns:
         The rendered page.
     """
     return render_template(
         "auth/security.html",
-        mfa_enabled=current_user.has_two_factor,
         # How long a trusted device stays trusted, which the page states in
         # its sentences: the one value, never a second spelling of it.
         trust_days=TRUST_LIFETIME.days,

@@ -1,24 +1,20 @@
 {# Two-Factor Authentication card body (included by auth/_security.html
    inside its form_card, which carries the card title).  The Enabled
    marker is the shared accent flag chip -- MFA state is not a money
-   state, so it never rides money-green (polish audit P-ST3 / RC3). #}
-{% if mfa_enabled %}
+   state, so it never rides money-green (polish audit P-ST3 / RC3).
+
+   Every account must have two-factor (plan#3452, widening ruling plan#3434
+   to every account), and the login gate holds one without it at setup, so
+   the Security page renders only for a user who has it: the card has one
+   state.  No account can turn it off (ruling plan#3604), so it has no
+   Disable. #}
 <p class="mb-2">
   <span class="flag-chip"><i class="bi bi-shield-check"></i> Enabled</span>
 </p>
-{# A user who must have two-factor (ruling plan#3434) is told so.  No
-   account can turn it off (ruling plan#3604), so the card has no Disable. #}
-{% if current_user.must_have_two_factor %}
 <p class="text-muted small">
   Your account requires two-factor authentication, and it is on.
   You can regenerate your backup codes below.
 </p>
-{% else %}
-<p class="text-muted small">
-  Your account is protected with two-factor authentication.
-  You can regenerate your backup codes below.
-</p>
-{% endif %}
 <div class="d-flex gap-2">
   <form method="POST" action="{{ url_for('auth.regenerate_backup_codes') }}">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
@@ -27,12 +23,3 @@
     </button>
   </form>
 </div>
-{% else %}
-<p class="text-muted small">
-  Add an extra layer of security to your account by requiring a code from
-  your authenticator app when you sign in.
-</p>
-<a href="{{ url_for('auth.mfa_setup') }}" class="btn btn-outline-primary btn-sm">
-  <i class="bi bi-shield-plus"></i> Set Up Two-Factor Authentication
-</a>
-{% endif %}

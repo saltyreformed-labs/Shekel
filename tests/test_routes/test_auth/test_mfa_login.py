@@ -4,8 +4,6 @@ No account can turn two-factor off (ruling plan#3604), so the tests of
 ``/mfa/disable`` went with it.
 """
 
-from datetime import datetime, timedelta, timezone
-
 from app import create_app
 from app.extensions import db
 from app.models.user import MfaConfig
@@ -13,11 +11,7 @@ from app.services import mfa_service
 from app.services.mfa_service import TotpVerificationResult
 from tests._seed_owner_fixtures import OWNERS_PAGE, SEED_USER_EMAIL, SEED_USER_PASSWORD
 from tests._test_helpers import store_backup_codes
-from tests._two_factor_sign_in import (
-    reset_two_factor_of,
-    sign_in_by_password,
-    two_factor_secret_of,
-)
+from tests._two_factor_sign_in import reset_two_factor_of, two_factor_secret_of
 
 
 class TestMfaLogin:
@@ -295,27 +289,33 @@ class TestMfaLogin:
             assert response.status_code == 200
             assert b"Invalid verification code." in response.data
 
-    def test_login_without_mfa_unchanged(self, app, client, seed_user):
-        """POST /login without MFA enabled completes in one step (existing behavior).
+    def test_login_without_mfa_signs_in_and_is_held_at_setup(self, app, client, seed_user):
+        """POST /login without MFA enabled signs in in one step, and setup is next.
 
         The account's two-factor is reset first, so it has none, as after
-        ``scripts/reset_mfa.py``.
+        ``scripts/reset_mfa.py``.  The password alone finishes the sign-in:
+        no code form.  Every account must have two-factor (plan#3452), so the
+        signed-in browser's next page is setup, which an anonymous browser is
+        refused: the sign-in did finish.
         """
         with app.app_context():
             reset_two_factor_of(seed_user["user"].id)
             response = client.post("/login", data={
-                "email": "test@shekel.local",
-                "password": "testpass",
+                "email": SEED_USER_EMAIL,
+                "password": SEED_USER_PASSWORD,
             }, follow_redirects=False)
 
             assert response.status_code == 302
             location = response.headers.get("Location", "")
-            # Should redirect to grid, not to /mfa/verify.
-            assert "mfa" not in location
+            # Lands where an owner's sign-in lands, not on /mfa/verify.
+            assert location.endswith(OWNERS_PAGE), location
 
-            # User is logged in.
-            grid_resp = client.get("/", follow_redirects=False)
-            assert grid_resp.status_code == 200
+            held = client.get(OWNERS_PAGE, follow_redirects=False)
+            assert held.status_code == 302
+            assert held.headers["Location"].endswith("/mfa/setup")
+            setup = client.get("/mfa/setup", follow_redirects=False)
+            assert setup.status_code == 200
+            assert b"Verify and Enable" in setup.data
 
     def test_mfa_open_redirect_absolute_url_blocked(
         self, app, client, seed_user, monkeypatch

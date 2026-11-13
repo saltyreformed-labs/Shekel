@@ -87,8 +87,9 @@
     {# What forgets every device, for the reader's role: no account can turn
        two-factor off (ruling plan#3604), and a companion's devices are also
        forgotten when the owner resets her two-factor (ruling plan#3441) or
-       sets her a new password from Settings > Companions. #}
-    {% if current_user.must_have_two_factor %}
+       sets her a new password from Settings > Companions, which act on a
+       companion alone. #}
+    {% if current_user.role_id == COMPANION_ROLE_ID %}
     Changing your password, logging out all other sessions or signing in with
     a backup code forgets every device, and so does the budget's owner
     resetting your two-factor authentication or setting you a new password.
@@ -118,16 +119,13 @@
     </div>
     {% endfor %}
   </div>
-  {% elif mfa_enabled %}
+  {% else %}
+  {# Two-factor is on: the login gate holds an account without it at setup,
+     so this page never renders for one (plan#3452). #}
   <p class="small mb-0">
     No trusted devices. When you type a two-factor code at sign-in, tick
     &quot;Trust this device for {{ trust_days }} days&quot; to skip the code on
     that browser.
-  </p>
-  {% else %}
-  <p class="small mb-0">
-    No trusted devices. A device can be trusted once two-factor
-    authentication is on.
   </p>
   {% endif %}
   {% endcall %}

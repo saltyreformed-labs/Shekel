@@ -529,8 +529,8 @@ def reset_two_factor(user: User) -> bool:
     or after that column (``app.services.known_device_service``), and a reset
     is exactly when a trust the old authenticator vouched for must die,
     or a browser trusted under it would skip the code of the one enrolled
-    after.  A user the rule requires two-factor of (``User.must_have_two_factor``)
-    then meets setup at their next sign-in.
+    after.  Every account must have two-factor (plan#3452), so the login gate
+    then holds the user at setup from their next sign-in.
 
     A row already disabled but still carrying material (an orphaned secret
     from a manual database change, an interrupted disable, or an abandoned

@@ -16,7 +16,9 @@ from app.models.pay_era import CADENCE_DAYS_MAX, CADENCE_DAYS_MIN
 from app.utils.dates import CALENDAR_DATE_MAX, CALENDAR_DATE_MIN
 from app.schemas.validation.pay_periods import PERIOD_BATCH_MAX
 from app.utils.dates import display_today
-from tests._test_helpers import register_form_data
+from tests._seed_owner_fixtures import OWNERS_PAGE
+from tests._test_helpers import enable_mfa, register_form_data
+from tests._two_factor_sign_in import sign_in_from_a_trusted_browser
 
 
 class TestRegistration:
@@ -299,7 +301,10 @@ class TestRegistration:
         """A newly registered user sees an empty grid with no seed user data.
 
         Verifies complete data isolation: the new user's grid does not
-        contain transactions from the seed user.
+        contain transactions from the seed user.  A new account meets
+        two-factor setup at its first sign-in (plan#3452), so the account is
+        given two-factor first, as its setup would, and signs in through the
+        shared sign-in.
         """
         with app.app_context():
             # Register a new user.
@@ -309,12 +314,15 @@ class TestRegistration:
                 password="securepass123",
                 confirm_password="securepass123",
             ))
+            new_user = db.session.query(User).filter_by(
+                email="isolated@example.com",
+            ).one()
+            enable_mfa(db.session, new_user.id)
 
             # Log in as the new user.
-            client.post("/login", data={
-                "email": "isolated@example.com",
-                "password": "securepass123",
-            })
+            sign_in_from_a_trusted_browser(
+                client, "isolated@example.com", "securepass123", OWNERS_PAGE,
+            )
 
             # Access the grid.
             grid_resp = client.get("/")

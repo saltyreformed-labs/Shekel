@@ -367,14 +367,25 @@ class TestMfaSetup:
             assert response.status_code == 200
             assert b"Save Your Backup Codes" in response.data
 
-    def test_regenerate_backup_codes_requires_mfa_enabled(self, app, no_two_factor_client, seed_user):
-        """POST /mfa/regenerate-backup-codes without MFA enabled shows error."""
+    def test_regenerate_backup_codes_requires_mfa_enabled(
+        self, app, no_two_factor_client, seed_user,
+    ):
+        """POST /mfa/regenerate-backup-codes without MFA enabled mints no codes.
+
+        The login gate holds an account without two-factor at setup
+        (plan#3452), so the POST is sent there and never performed: the row
+        the reset cleared still holds no backup codes, and setup's page is
+        what follows the redirect.
+        """
         with app.app_context():
             response = no_two_factor_client.post(
                 "/mfa/regenerate-backup-codes", follow_redirects=True
             )
             assert response.status_code == 200
-            assert b"Two-factor authentication is not enabled" in response.data
+            assert [hop.headers["Location"] for hop in response.history] == ["/mfa/setup"]
+            assert b"Verify and Enable" in response.data
+            assert b"Save Your Backup Codes" not in response.data
+            assert two_factor_row_of(seed_user["user"].id).backup_codes is None
 
     def test_regenerate_backup_codes_renders_28_char_codes(self, app, auth_client, seed_user):
         """POST /mfa/regenerate-backup-codes renders 10 codes of 28 hex chars.

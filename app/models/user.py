@@ -146,28 +146,18 @@ class User(UserMixin, TimestampMixin, db.Model):
     # View-only: every write of the row goes through its own query, and a
     # deleted user's row goes with them by the foreign key's ``ON DELETE
     # CASCADE``.  Loaded on first read and kept for the rest of the request,
-    # whose closing rollback expires it, so the login gate, the Security page
-    # and the enrolment nag ask the database once between them.
+    # whose closing rollback expires it, so the login gate asks the database
+    # once a request and anything later in it reads the gate's answer.
     mfa_config = db.relationship("MfaConfig", uselist=False, viewonly=True)
-
-    @property
-    def must_have_two_factor(self) -> bool:
-        """Return whether this user must use two-factor authentication.
-
-        **The one statement of that rule** (ruling plan#3434): every companion
-        must, and there is no switch, so it is the role's and nothing stores
-        it.  The login gate holds a user it names at setup until they have
-        it, and the Security page and the setup page say it is required.
-        None of those reads the role.
-
-        Returns:
-            True for a companion, False for an owner.
-        """
-        return self.role_id == ref_cache.role_id(RoleEnum.COMPANION)
 
     @property
     def has_two_factor(self) -> bool:
         """Return whether this user has two-factor authentication turned on.
+
+        Every account must have it, whatever its role, and there is no switch
+        (plan#3452, widening ruling plan#3434 from companions to every
+        account): the login gate holds a signed-in user without it at setup
+        (``app/login_gate.py``), so this is the one question the rule asks.
 
         A row whose setup was started and never confirmed is not two-factor:
         ``is_enabled`` is what ``/mfa/confirm`` sets, and what the one reset

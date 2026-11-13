@@ -31,7 +31,14 @@ from app.extensions import db
 from app.models.user import MfaConfig
 from app.services import mfa_service
 from app.utils.session_helpers import SESSION_LAST_ACTIVITY_KEY
-from tests._two_factor_sign_in import sign_in_seed_companion_by_password
+from tests._seed_owner_fixtures import (
+    OWNERS_PAGE, SEED_USER_EMAIL, SEED_USER_PASSWORD,
+)
+from tests._two_factor_sign_in import (
+    reset_two_factor_of,
+    sign_in_by_password,
+    sign_in_seed_companion_by_password,
+)
 
 
 def _decode_session_cookie(app, cookie_value: str) -> dict:
@@ -182,7 +189,7 @@ class TestMfaSetupSecretIsServerSide:
             assert config.is_enabled is False
 
     def test_setup_adds_only_the_keys_fingerprint_to_the_session(
-        self, app, no_two_factor_client, seed_user
+        self, app, client, seed_user
     ):
         """The session gains one value at setup: a SHA-256 digest of the ciphertext.
 
@@ -194,17 +201,22 @@ class TestMfaSetupSecretIsServerSide:
         and with the digest added, and nothing else: no value holds the key or
         its ciphertext in any encoding, under any name.  The digest is spelled
         here with ``hashlib``, never read from the route's helper.
+
+        The browser opens the sign-in form before it signs in, as a person's
+        does, so its session holds the form token every page with a form
+        writes the first time it renders one.  Setup is the first page this
+        account can open, since the login gate holds an account without
+        two-factor there (plan#3452), so without that the token would be
+        added at setup beside the digest.
         """
         with app.app_context():
-            assert no_two_factor_client.get("/security").status_code == 200
-            before = _decode_session_cookie(
-                app, _get_session_cookie_value(no_two_factor_client),
-            )
+            reset_two_factor_of(seed_user["user"].id)
+            assert client.get("/login").status_code == 200
+            sign_in_by_password(client, SEED_USER_EMAIL, SEED_USER_PASSWORD, OWNERS_PAGE)
+            before = _decode_session_cookie(app, _get_session_cookie_value(client))
 
-            assert no_two_factor_client.get("/mfa/setup").status_code == 200
-            after = _decode_session_cookie(
-                app, _get_session_cookie_value(no_two_factor_client),
-            )
+            assert client.get("/mfa/setup").status_code == 200
+            after = _decode_session_cookie(app, _get_session_cookie_value(client))
 
             config = (
                 db.session.query(MfaConfig)

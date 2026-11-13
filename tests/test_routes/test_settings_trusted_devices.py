@@ -20,9 +20,9 @@ through the service, as the trust itself would make them.
 sign-in's browser is one it trusts (ruling plan#3621), so ``auth_client``'s own
 browser is in the owner's list.  A test that reads the list therefore signs in
 on a browser of its own with the owner's code and without trusting it
-(:func:`_firefox_signed_in_with_a_code`), which the list leaves out.  The case
-without two-factor signs in as the owner after a reset
-(``no_two_factor_client``).
+(:func:`_firefox_signed_in_with_a_code`), which the list leaves out.  An
+account without two-factor never reaches the page: the login gate holds it at
+setup (plan#3452), so the card has no empty state for one.
 """
 
 import logging
@@ -225,16 +225,6 @@ class TestTheList:
             "No trusted devices. When you type a two-factor code at sign-in, "
             "tick \"Trust this device for 30 days\""
         ) in _text(page).replace("&quot;", '"')
-
-    def test_no_device_with_two_factor_off_says_it_needs_it(self, no_two_factor_client):
-        """Without two-factor no device can be trusted, and the card says so."""
-        page = no_two_factor_client.get(_SECURITY_PAGE).get_data(as_text=True)
-
-        assert _rows(page) == []
-        assert (
-            "No trusted devices. A device can be trusted once two-factor "
-            "authentication is on."
-        ) in _text(page)
 
 
 class TestTheTrustLength:

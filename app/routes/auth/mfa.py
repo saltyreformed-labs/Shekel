@@ -499,7 +499,7 @@ def mfa_setup():
     browser every load while the key is pending shows the same QR code and
     manual key, and moves the expiry to ``MFA_SETUP_PENDING_TTL`` from now.
     So a wrong code at ``/mfa/confirm`` (which sends the user back here), a
-    refresh, the login gate holding a companion here, or the phone reloading
+    refresh, the login gate holding a user here, or the phone reloading
     the tab on the way back from the authenticator app all show the key
     already scanned, and the entry made from it keeps working, however late
     in its window it was reached.  Until ruling plan#3470 each load made a
@@ -531,8 +531,8 @@ def mfa_setup():
     settings.  **If the encryption key is missing the page says so in place**
     (plan#3514): a 200 naming the operator-side prerequisite, with no key, QR
     code or form, and nothing written.  It once redirected to the Security
-    page with a flash, which the login gate refuses a companion it holds here,
-    so she was sent straight back, round and round, the flash never shown.
+    page with a flash, which the login gate refuses a user it holds here, so
+    they were sent straight back, round and round, the flash never shown.
     ``/mfa/confirm`` sends its own key failures here for the same reason.
 
     **A GET that WRITES, and it says so** (plan step balance:X-i3).  Every
@@ -583,7 +583,7 @@ def mfa_setup():
         return redirect(url_for("auth.security"))
     if shown is None:
         # The page says so here, in place, never by a redirect: this is the
-        # one page a companion without two-factor is held at (plan#3514).
+        # one page a user without two-factor is held at (plan#3514).
         return render_template("auth/mfa_setup.html", key_missing=True)
     if shown.new_ciphertext is not None:
         # After the commit, so a write that fails stores no fingerprint.
@@ -626,7 +626,7 @@ def mfa_confirm():
       * Encryption key is missing, at the decrypt or at the promotion's
         re-encrypt -- redirect to /mfa/setup, which says in place that the
         operator must set it (plan#3514), never to a page the login gate
-        refuses a companion it holds at setup.
+        refuses a user it holds at setup.
       * The pending ciphertext does not decrypt under any configured key
         -- clear it and redirect to /mfa/setup with a flash to start again.
       * Invalid TOTP code -- flash and redirect; pending state is
@@ -663,7 +663,7 @@ def mfa_confirm():
         # longer read and send the user to /mfa/setup, whose own encrypt
         # fails the same way and which then says in place that the operator
         # must set the key (plan#3514).  No flash: setup's page is the one
-        # place that says it, and a redirect anywhere else loops a companion
+        # place that says it, and a redirect anywhere else loops a user
         # the login gate holds at setup.
         mfa_config.pending_secret_encrypted = None
         mfa_config.pending_secret_expires_at = None

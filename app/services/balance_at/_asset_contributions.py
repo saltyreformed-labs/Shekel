@@ -364,11 +364,16 @@ def contribution_events(
         inputs: The account's :class:`ContributionInputs`.
         reconciled_through: The account's coverage boundary -- the assertion
             :func:`_dated_events` admits an event strictly after (ruling R-Z).
-        periods: The owner's SAVED pay periods, as
-            :meth:`~app.services.pay_calendar.PayCalendar.saved` yields them.
-            The WHOLE schedule, never a slice: the year-boundary reset and the
-            limit accounting are wrong over one (see :func:`_dated_events`).
-            That is a precondition no window type can carry, which is why
+        periods: The owner's paychecks from the FIRST payday through the
+            read's end, saved and projected past the horizon, as
+            :meth:`~app.services.pay_calendar.PayCalendar.projection_axis`
+            yields them (plan step **C9**, ruling plan#3930).  They were
+            :meth:`~app.services.pay_calendar.PayCalendar.saved` until then,
+            which stopped this tier at the horizon while the accrual beside it
+            ran on (ledger row **P7**).  Never a slice that opens later than
+            the first payday: the year-boundary reset and the limit accounting
+            are wrong over one (see :func:`_dated_events`).  That is a
+            precondition no window type can carry, which is why
             :func:`._asset_fold.resolve` takes the CALENDAR and derives this
             rather than accepting one.
 
@@ -452,11 +457,15 @@ def _dated_events(
     excludes from this walk entirely.  Those seven are the only ones where
     R14-b models LESS than the old feed did (`$176.30` against `$181.59`), so
     counting them netted a real understatement against periods the app never
-    reaches.  The window this walk covers is the owner's SAVED schedule minus
-    what the assertion already contains.  *Until plan step salary:S3-e-2 that
-    was also exactly the domain the feed had priced up front, so its hold
-    rule never engaged here; the feed prices any period on demand now and
-    there is no hold rule to engage.*
+    reaches.  The window this walk covers is the owner's schedule from its
+    first payday through the read's end, saved and projected (plan step
+    **C9**), minus what the assertion already contains; it was the SAVED
+    schedule alone until then.  *Until plan step salary:S3-e-2 the saved
+    schedule was also exactly the domain the feed had priced up front, so its
+    hold rule never engaged here; the feed prices any period on demand now,
+    a projected one included, and there is no hold rule to engage.*  A
+    projected period's ``period_id`` is ``None`` and no row can file under
+    it, so it reads no recorded contribution.
 
     Args:
         plan: The account's :class:`_ContributionPlan`.

@@ -657,8 +657,9 @@ def resolve(
     every planned row in the fold lands on -- so a SECOND one taken here as its
     own argument was the shape the paragraph above deletes for the scenario.
     The argument is GONE and the value is read off the record clamped by it, so
-    the mis-pairing is unrepresentable rather than refused.  Plan step **C9** is
-    still the one-line change below, now spelled ``cash.calendar``.
+    the mis-pairing is unrepresentable rather than refused.  Since plan step
+    **C9** (superseding ruling R-AG) the tier walks its projection axis through
+    *horizon_end*, past the saved schedule as far as the accrual runs (**P7**).
 
     Args:
         account: The account to value.
@@ -702,14 +703,13 @@ def resolve(
     )
     return _resolve(
         cash,
-        # The ONE line plan step C9 changes -- ``saved()`` becomes
-        # ``projection_axis(...)`` so this tier stops halting at the horizon
-        # the ACCRUAL tier runs past (ledger row **P7**).  Both are methods on
-        # the value already in hand, so that step edits no signature and no
-        # caller.
         _asset_contributions.contribution_events(
             account, cash.plan.basis, inputs, reconciled_through,
-            cash.calendar.saved(),
+            # Every paycheck from the FIRST payday through the read's end,
+            # projected past the saved horizon as the accrual runs (ruling
+            # plan#3930): ``projection_axis`` raises ``date.min`` to the first
+            # payday, the opening the calendar-year limit needs.
+            cash.calendar.projection_axis(date.min, horizon_end),
         ),
         window,
     )

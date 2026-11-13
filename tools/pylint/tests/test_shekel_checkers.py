@@ -5,6 +5,12 @@ and verified with pylint's ``CheckerTestCase`` harness. Every positive case
 (the antipattern is flagged) is paired with the corresponding negative case (the
 legitimate form is NOT flagged), because a checker that over-fires creates the
 cargo-cult-disable noise the rules exist to prevent.
+
+The package-privacy checker's physical-membership primitive,
+``_importer_file_inside``, is tested DIRECTLY: its placeholder-path guards have
+no other discriminating observer.  It is internal to the checker module rather
+than a package re-export, so it is imported from its home,
+``shekel_checkers.package_privacy``.
 """
 
 import sys
@@ -40,10 +46,6 @@ from shekel_checkers import (
     ShekelRefNameChecker,
     ShekelTransactionStatusBypassChecker,
 )
-
-# The physical-membership primitive is tested DIRECTLY (its placeholder-path
-# guards have no other discriminating observer); it is internal to the checker
-# module rather than a package re-export, so it is imported from its home.
 from shekel_checkers.package_privacy import _importer_file_inside
 
 # repo root: this file is <root>/tools/pylint/tests/test_*.py

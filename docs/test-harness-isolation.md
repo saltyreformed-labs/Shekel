@@ -61,11 +61,12 @@ Deferred or corrected:
 - Most tests are pure Python / static config assertions. **Eight classes across six files** touch
   the docker daemon (all gated by `_docker_available()`, all now `@pytest.mark.docker`). Of those:
   - **Three actually spawn containers.**
-    `test_proxy_trust_and_headers.py::TestSharedNginxRuntimeHeaders` (network + stub + nginx; the
-    main source of churn) and `::TestSharedVhostNginxParse` (`nginx -t`), plus
-    `test_deploy_configs.py::TestDeployNginxConfigParses` (`nginx -t`). The original draft named
-    `test_container_hardening.py` as the second spawner and missed `test_deploy_configs.py`; that
-    was wrong.
+    `test_proxy_trust_and_headers/test_shared_nginx_runtime.py::TestSharedNginxRuntimeHeaders`
+    (network + stub + nginx; the main source of churn) and
+    `test_proxy_trust_and_headers/test_nginx_configs.py::TestSharedVhostNginxParse` (`nginx -t`),
+    plus `test_deploy_configs.py::TestDeployNginxConfigParses` (`nginx -t`). The original draft
+    named `test_container_hardening.py` as the second spawner and missed `test_deploy_configs.py`;
+    that was wrong.
   - **Five only run `docker compose config`,** which renders merged YAML and creates **no**
     container: `test_container_hardening.py::TestMergedComposeHardeningSurvivesOverride`,
     `test_deploy_configs.py::TestDeployComposeParses`,
@@ -90,13 +91,13 @@ correct; they just have nowhere isolated to run locally.
 
 | What | Where |
 |---|---|
-| Containers driven via the **`docker` CLI** (`subprocess.run(["docker", *args])`) | `test_proxy_trust_and_headers.py:849` (`_docker()` helper) |
-| PID-namespaced names → 12 workers × their own stack | `test_proxy_trust_and_headers.py:835` (`suffix = f"c33-{os.getpid()}"`) |
-| Creates network + stub + nginx, `class`-scoped fixture | `test_proxy_trust_and_headers.py:820` (`running_stack`) |
-| Images pulled onto the daemon | `NGINX_TEST_IMAGE` = the compose's bundled nginx tag, read by `tests/test_deploy/_compose.py`; stub `python:3.14-alpine` (:891) |
-| Publishes port, curls host loopback | `-p 0:443` (:909) → `docker port` (:925) → `curl https://localhost:<port>` (:947, :980) |
-| Teardown = `docker rm -f` (→ exit 137) | `test_proxy_trust_and_headers.py:966-968` (`finally`) |
-| Skips when docker absent (`docker info`) | `_docker_available()` :87 (and `test_container_hardening.py:56`) |
+| Containers driven via the **`docker` CLI** (`subprocess.run(["docker", *args])`) | `test_proxy_trust_and_headers/test_shared_nginx_runtime.py:133` (`_docker()` helper) |
+| PID-namespaced names → 12 workers × their own stack | `test_proxy_trust_and_headers/test_shared_nginx_runtime.py:119` (`suffix = f"c33-{os.getpid()}"`) |
+| Creates network + stub + nginx, `class`-scoped fixture | `test_proxy_trust_and_headers/test_shared_nginx_runtime.py:105` (`running_stack`) |
+| Images pulled onto the daemon | `NGINX_TEST_IMAGE` = the compose's bundled nginx tag, read by `tests/test_deploy/_compose.py`; stub `python:3.14-alpine` (:175) |
+| Publishes port, curls host loopback | `-p 0:443` (:193) → `docker port` (:209) → `curl https://localhost:<port>` (:231, :265) |
+| Teardown = `docker rm -f` (→ exit 137) | `test_proxy_trust_and_headers/test_shared_nginx_runtime.py:250-252` (`finally`) |
+| Skips when docker absent (`docker info`) | `_docker_available()` (`test_proxy_trust_and_headers/_helpers.py:63`, and `test_container_hardening.py:60`) |
 
 **Two facts drive the whole solution:**
 
@@ -243,8 +244,9 @@ the single biggest churn reduction — routine local TDD then spins up **zero** 
               isolated daemon (see docs/test-harness-isolation.md)
   ```
 
-- Apply it to the spawning tests (module-level in `test_proxy_trust_and_headers.py`, or class-level
-  on the `running_stack` class; and the docker-gated cases in `test_container_hardening.py`):
+- Apply it to the spawning tests (module-level in `test_proxy_trust_and_headers/`'s parts, or
+  class-level on the `running_stack` class; and the docker-gated cases in
+  `test_container_hardening.py`):
 
   ```python
   pytestmark = pytest.mark.docker
@@ -351,8 +353,10 @@ actually keeps test containers off the production daemon (and out of cadvisor/al
 
 ## References
 
-- Spawning fixture: `tests/test_deploy/test_proxy_trust_and_headers.py:820-968`
-- Docker helper / gate: `…:849` (`_docker`), `…:87` (`_docker_available`)
+- Spawning fixture:
+  `tests/test_deploy/test_proxy_trust_and_headers/test_shared_nginx_runtime.py:103-252`
+- Docker helper / gate: `…/test_shared_nginx_runtime.py:133` (`_docker`), `…/_helpers.py:63`
+  (`_docker_available`)
 - Test config: `pytest.ini` (`addopts … -n 12`, `markers =` :47)
 - Entrypoint: `scripts/test.sh`
 - CI (already isolated): `.github/workflows/ci.yml`, the `test` job (`runs-on: ubuntu-26.04`) and

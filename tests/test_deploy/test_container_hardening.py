@@ -20,7 +20,7 @@ config`` parses the merged base + shared-mode override and surfaces
 the hardening fields on the merged result.  That test skips when
 Docker is not available on the test host (matching the C-32/C-33
 patterns in the sibling ``test_deploy_configs.py`` and
-``test_proxy_trust_and_headers.py``).
+``test_proxy_trust_and_headers/``).
 """
 from __future__ import annotations
 

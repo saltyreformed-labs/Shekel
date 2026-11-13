@@ -127,7 +127,7 @@ class TestDeployFilesExist:
         wider ``homelab`` network; F-020/F-129 mandated moving Shekel
         onto its own bridge so co-tenants (jellyfin, immich, unifi)
         could no longer reach Gunicorn directly.  See
-        tests/test_deploy/test_proxy_trust_and_headers.py
+        tests/test_deploy/test_proxy_trust_and_headers/test_compose_topology.py
         TestProdComposeNetworkTopology for the topology assertions in
         full.
         """

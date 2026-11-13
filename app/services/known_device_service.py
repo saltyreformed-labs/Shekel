@@ -10,7 +10,8 @@ names, by its id), record a finished
 sign-in or re-confirm (each gives the browser a new token and clears its
 count), count a wrong guess, list a user's trusted devices, and forget one.
 Beside them, :func:`device_named_by` picks a browser's device out of a list
-already read, so the token's hash is spelled in this module alone.
+already read, so no caller spells the token's hash; how a token is made and
+hashed is :mod:`app.utils.bearer_tokens`'s alone.
 
 **Each standing is stated once**: :func:`_known`, a finished sign-in less than
 :data:`~app.models.known_device.KNOWN_LIFETIME` ago, and :func:`_trusted`, a
@@ -40,8 +41,6 @@ Architecture:
     database transaction boundary.
 """
 
-import hashlib
-import secrets
 from collections.abc import Mapping
 from datetime import datetime, timezone
 from typing import NamedTuple
@@ -57,10 +56,7 @@ from app.models.known_device import (
     KnownDevice,
 )
 from app.models.user import User
-
-
-#: Bytes of randomness in a device token: 256 bits (ruling plan#2406).
-_TOKEN_BYTES = 32
+from app.utils.bearer_tokens import new_token, token_hash
 
 
 class BrowserStanding(NamedTuple):
@@ -73,22 +69,6 @@ class BrowserStanding(NamedTuple):
 
     device: KnownDevice
     trusted: bool
-
-
-def _token_hash(token: str) -> str:
-    """Return the stored form of *token*: its SHA-256 as lowercase hex.
-
-    No salt and no stretching, because the token is 256 random bits: there is
-    no dictionary to search, so a fast hash loses nothing a slow one would
-    keep, and it lets the lookup find the row by an index.
-
-    Args:
-        token: The browser's token, as the cookie carries it.
-
-    Returns:
-        Sixty-four lowercase hex digits.
-    """
-    return hashlib.sha256(token.encode("utf-8")).hexdigest()
 
 
 def _known(now: datetime) -> ColumnElement[bool]:
@@ -175,7 +155,7 @@ def _the_known_browsers(now: datetime, tokens: Mapping[int, str]) -> ColumnEleme
     """
     return and_(
         tuple_(KnownDevice.user_id, KnownDevice.token_hash).in_(
-            [(user_id, _token_hash(token)) for user_id, token in tokens.items()]
+            [(user_id, token_hash(token)) for user_id, token in tokens.items()]
         ),
         _known(now),
     )
@@ -395,11 +375,11 @@ def _renew(device: KnownDevice) -> str:
         The new token.  This is the only place it exists: the row holds its
         hash.
     """
-    new_token = secrets.token_urlsafe(_TOKEN_BYTES)
-    device.token_hash = _token_hash(new_token)
+    token = new_token()
+    device.token_hash = token_hash(token)
     device.failed_login_count = 0
     db.session.flush()
-    return new_token
+    return token
 
 
 def count_failed_attempt(device: KnownDevice, threshold: int) -> bool:
@@ -472,9 +452,9 @@ def device_named_by(
     """
     if token is None:
         return None
-    token_hash = _token_hash(token)
+    hashed = token_hash(token)
     return next(
-        (device for device in devices if device.token_hash == token_hash),
+        (device for device in devices if device.token_hash == hashed),
         None,
     )
 

@@ -32,8 +32,8 @@ facts stored once.  The one statement of each predicate is in
 
 **The browser's token is never stored**: only its SHA-256, as lowercase hex,
 which ``ck_known_devices_token_hash_sha256_hex`` pins so a writer that stored
-the token itself is refused at the database.  The token is 256 random bits, so
-the hash needs no salt or stretching: there is no dictionary to search.  The
+the token itself is refused at the database (``app.utils.bearer_tokens``, the
+one statement of the token, its hash and the CHECK).  The
 table is audited, so ``system.audit_log`` holds each row's hash too, which is
 as useless as this table's copy without the token.
 
@@ -43,6 +43,8 @@ Related service: app/services/known_device_service.py
 from datetime import timedelta
 
 from app.extensions import db
+from app.models.mixins import BrowserTokenMixin
+from app.utils.bearer_tokens import TOKEN_HASH_CHECK
 
 
 #: How long a device stays trusted after the code was typed on it (ruling
@@ -68,12 +70,8 @@ KNOWN_LIFETIME = TRUST_LIFETIME
 #: service cuts it here rather than letting a long one refuse the sign-in.
 USER_AGENT_MAX_LENGTH = 255
 
-#: Characters in a SHA-256 digest written as hex: the length of
-#: :attr:`KnownDevice.token_hash`.
-TOKEN_HASH_LENGTH = 64
 
-
-class KnownDevice(db.Model):
+class KnownDevice(BrowserTokenMixin, db.Model):
     """One browser a user finished a sign-in on; a trust is one fact on it.
 
     One browser holds one row per user, renewed at each finished sign-in, so
@@ -86,8 +84,7 @@ class KnownDevice(db.Model):
         db.PrimaryKeyConstraint("id", name="pk_known_devices"),
         db.UniqueConstraint("token_hash", name="uq_known_devices_token_hash"),
         db.CheckConstraint(
-            f"token_hash ~ '^[0-9a-f]{{{TOKEN_HASH_LENGTH}}}$'",
-            name="ck_known_devices_token_hash_sha256_hex",
+            TOKEN_HASH_CHECK, name="ck_known_devices_token_hash_sha256_hex",
         ),
         db.CheckConstraint(
             "failed_login_count >= 0",
@@ -98,15 +95,6 @@ class KnownDevice(db.Model):
     )
 
     id = db.Column(db.Integer)
-    user_id = db.Column(
-        db.Integer,
-        db.ForeignKey(
-            "auth.users.id", name="fk_known_devices_user_id",
-            ondelete="CASCADE",
-        ),
-        nullable=False,
-    )
-    token_hash = db.Column(db.String(TOKEN_HASH_LENGTH), nullable=False)
     # NOT NULL: a browser that sends no User-Agent is stored as the empty
     # string, which names it no less than NULL would.
     user_agent = db.Column(db.String(USER_AGENT_MAX_LENGTH), nullable=False)

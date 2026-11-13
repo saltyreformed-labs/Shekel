@@ -16,6 +16,7 @@ from datetime import date, datetime
 from sqlalchemy.orm import declared_attr, validates
 
 from app.extensions import db
+from app.utils.bearer_tokens import TOKEN_HASH_LENGTH
 
 
 class UserScopedMixin:
@@ -63,10 +64,11 @@ class UserScopedMixin:
         tables whose ``user_id`` carries ``unique=True``.
       * ``budget.transactions`` -- the FK is ``ON DELETE RESTRICT``; see
         below.
-      * ``auth.known_devices`` -- its migrations named the FK
-        ``fk_known_devices_user_id`` (``b7e4c19a2d60`` renamed
+      * ``auth.known_devices`` and ``auth.sign_ins`` -- their migrations
+        named the FK ``fk_<table>_user_id`` (``b7e4c19a2d60`` renamed
         ``fk_trusted_devices_user_id`` with its table), so the mixin's
-        default-named FK would diverge.
+        default-named FK would diverge; :class:`BrowserTokenMixin` declares
+        theirs.
 
     ``Transaction`` HAS a ``user_id`` since plan step
     ``pay_calendar:C13-a`` (ruling **R-PC32**) -- until then it had none
@@ -107,6 +109,63 @@ class UserScopedMixin:
         db.Integer, db.ForeignKey("auth.users.id", ondelete="CASCADE"),
         nullable=False,
     )
+
+
+class BrowserTokenMixin:
+    """The owning user and the token hash of a row a browser's cookie names.
+
+    Adds two columns:
+
+      ``user_id``    -- INTEGER NOT NULL, ``FK auth.users.id ON DELETE
+                        CASCADE``, named ``fk_<table>_user_id``: whose row.
+                        A deleted user's rows name nobody.
+      ``token_hash`` -- VARCHAR(64) NOT NULL: the SHA-256, as lowercase hex,
+                        of the token the browser's cookie carries
+                        (:mod:`app.utils.bearer_tokens`).
+
+    Used by :class:`~app.models.known_device.KnownDevice` (the device
+    cookie's record) and :class:`~app.models.sign_in.SignIn` (the session
+    cookie's), the two rows a browser names by a token.  It exists because
+    adding ``auth.sign_ins`` (ruling plan#3925) made the two tables'
+    identical declarations of these columns a pylint ``duplicate-code``
+    finding, the same cleanup :class:`SettleDatedMixin` is.
+
+    ``user_id`` is declared through ``@declared_attr`` because its foreign key
+    carries a per-table NAME, as :meth:`SettleDatedMixin.settled_day_basis_id`
+    does: a shared ``ForeignKey`` object would give both tables one constraint
+    name.  The hash's UNIQUE and CHECK stay in each table's
+    ``__table_args__``, whose names are per table too.  Same mid-table reorder
+    and order-independence argument as :class:`UserScopedMixin`.
+    """
+
+    token_hash = db.Column(db.String(TOKEN_HASH_LENGTH), nullable=False)
+
+    @declared_attr
+    def user_id(cls):  # pylint: disable=no-self-argument
+        """Map the owning user so each table names its own foreign key.
+
+        Pylint: ``no-self-argument`` -- ``declared_attr`` passes the mapped
+        CLASS, not an instance, and SQLAlchemy's own documented signature for
+        the decorator names that parameter ``cls``.  The same disable
+        :meth:`SettleDatedMixin.settled_day_basis_id` carries for the same
+        reason.
+
+        Args:
+            cls: The mapped class, supplied by ``declared_attr``.  Its
+                ``__tablename__`` is what makes the constraint name per-table.
+
+        Returns:
+            The ``user_id`` :class:`sqlalchemy.Column` for *cls*.
+        """
+        return db.Column(
+            db.Integer,
+            db.ForeignKey(
+                "auth.users.id",
+                name=f"fk_{cls.__tablename__}_user_id",
+                ondelete="CASCADE",
+            ),
+            nullable=False,
+        )
 
 
 class AccountScopedMixin:

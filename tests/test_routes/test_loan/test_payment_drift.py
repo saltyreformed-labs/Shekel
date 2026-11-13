@@ -528,10 +528,11 @@ class TestPaymentDrift:
         # The sweep is short; the tracking payment is not.
         assert html.count("loan-payment--short") == 1
         assert "short of the" in html
-        # The page-top alerts are gone: the card is the one home (the base
-        # layout's own MFA nag is the one warning alert a page may carry).
+        # The page-top alerts are gone: the card is the one home, so the page
+        # carries no warning alert.  The layout's two-factor banner, the one
+        # this count once allowed, went with plan#3452.
         assert "Switch to automatic payment" not in html
-        assert html.count("alert-warning") == html.count("mfa-nag-banner")
+        assert "alert-warning" not in html
         assert "No recurring payment set up" not in html
 
     def test_the_strip_prices_the_next_payment_not_the_newest_stated_price(

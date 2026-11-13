@@ -15,8 +15,6 @@ rejection branch:
                               bcrypt verification).
   * ``MfaConfirmSchema``      -- F-163 (totp_code length cap on
                               enrolment confirmation).
-  * ``MfaDisableSchema``      -- F-041 + F-163 (current_password +
-                              totp_code shape).
   * ``ReauthSchema``          -- F-041 + F-163 on the step-up path.
 
 The plan calls for 22 tests covering the schema layer; this file
@@ -36,7 +34,6 @@ from app.schemas.validation import (
     ChangePasswordSchema,
     LoginSchema,
     MfaConfirmSchema,
-    MfaDisableSchema,
     MfaVerifySchema,
     ReauthSchema,
     RegisterSchema,
@@ -559,54 +556,6 @@ class TestMfaConfirmSchema:
         """Leading/trailing whitespace is stripped before length validation."""
         data = MfaConfirmSchema().load({"totp_code": " 654321 "})
         assert data["totp_code"] == "654321"
-
-
-# ── MfaDisableSchema ─────────────────────────────────────────────────
-
-
-class TestMfaDisableSchema:
-    """Tests for MfaDisableSchema (commit C-26 / F-041 + F-163)."""
-
-    def test_valid_data(self):
-        """Happy path: both fields populated."""
-        data = MfaDisableSchema().load({
-            "current_password": "anyhistoricalpw",
-            "totp_code": "123456",
-        })
-        assert data["current_password"] == "anyhistoricalpw"
-        assert data["totp_code"] == "123456"
-
-    def test_missing_current_password_rejected(self):
-        """current_password is required."""
-        with pytest.raises(ValidationError) as exc:
-            MfaDisableSchema().load({"totp_code": "123456"})
-        assert "current_password" in exc.value.messages
-
-    def test_oversized_current_password_rejected_dos_protection(self):
-        """F-163: a DoS-sized current_password is rejected before bcrypt."""
-        with pytest.raises(ValidationError) as exc:
-            MfaDisableSchema().load({
-                "current_password": "x" * 1024,
-                "totp_code": "123456",
-            })
-        assert "current_password" in exc.value.messages
-
-    def test_oversized_totp_code_rejected(self):
-        """totp_code > 6 chars is rejected."""
-        with pytest.raises(ValidationError) as exc:
-            MfaDisableSchema().load({
-                "current_password": "anyhistoricalpw",
-                "totp_code": "1" * 100,
-            })
-        assert "totp_code" in exc.value.messages
-
-    def test_legacy_short_current_password_accepted(self):
-        """current_password has min=1 so a legacy short password is accepted."""
-        data = MfaDisableSchema().load({
-            "current_password": "short",
-            "totp_code": "123456",
-        })
-        assert data["current_password"] == "short"
 
 
 # ── ReauthSchema ─────────────────────────────────────────────────────

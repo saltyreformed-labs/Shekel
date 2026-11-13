@@ -52,8 +52,11 @@ For building the chosen direction into the real grid.
    .venv/bin/python tests/manual/save_dev_session.py
    ```
 
-   It prompts for the password (typed silently) and writes `tests/manual/.dev_session_state.json`
-   (gitignored).
+   It prompts for the password (typed silently), types the dev key's two-factor code, and writes
+   `tests/manual/.dev_session_state.json` (gitignored). Every account must use two-factor, so the
+   dev copy's account needs the dev key first: set `SHEKEL_DEV_TOTP_SECRET` in `.env` and run
+   `.venv/bin/python -m tools.dev_two_factor <email>` against the copy (`tools/dev_two_factor.py`
+   says how).
 4. Edit the real templates (`app/templates/grid/`) and the matching stylesheet under
    `app/static/css/` (`grid.css` for the grid; layout in `css_architecture_audit.md`). Honor the
    hard constraints: no inline `<style>`/`<script>` (CSP), tokens not raw hex, both themes via

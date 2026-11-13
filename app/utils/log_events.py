@@ -41,7 +41,7 @@ import logging
 # to maintain a name-to-category lookup table at query time.
 
 #: Authentication and credential lifecycle (login/logout, password
-#: change, MFA enrol/verify/disable, lockouts, HIBP rejections).
+#: change, MFA enrol/verify/reset, lockouts, HIBP rejections).
 AUTH = "auth"
 
 #: Business-domain mutations (transfers, transactions, entries, pay
@@ -176,8 +176,8 @@ EVT_OTHER_SESSIONS_INVALIDATED = _register(
 )
 EVT_REAUTH_FAILED = _register(
     "reauth_failed", AUTH,
-    "A signed-in password or code check refused the person (/reauth, "
-    "/change-password or /mfa/disable).",
+    "A signed-in password or code check refused the person (/reauth "
+    "or /change-password).",
 )
 EVT_REAUTH_SUCCESS = _register(
     "reauth_success", AUTH,
@@ -190,10 +190,6 @@ EVT_MFA_LOGIN_SUCCESS = _register(
 EVT_MFA_ENABLED = _register(
     "mfa_enabled", AUTH,
     "User enrolled an authenticator and confirmed the first TOTP.",
-)
-EVT_MFA_DISABLED = _register(
-    "mfa_disabled", AUTH,
-    "User removed their MFA enrolment via /mfa/disable.",
 )
 EVT_DEVICE_TRUSTED = _register(
     "device_trusted", AUTH,

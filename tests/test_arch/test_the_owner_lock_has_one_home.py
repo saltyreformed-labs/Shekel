@@ -31,8 +31,11 @@ the repository root's own (``gunicorn.conf.py``, ``run.py``):
 
 * Each name that takes the lock, or reaches a function that does, is
   referenced only by its homes (:data:`_HOMES`): the one statement of the lock
-  (``take_owner_write_lock``) by ``app/db_transaction.py``, its definer
-  ``app/services/user_write_lock.py`` calling it from nowhere; the lock's KEY
+  (``take_owner_write_lock``) by ``app/db_transaction.py`` and
+  ``app/services/user_write_lock.py``; the every-owner form by the two-factor
+  reset script (``scripts/reset_mfa.py``, ruling plan#3823), and by the
+  deploy's three ledger reconciles until plan task plan#3077 deleted them;
+  the lock's KEY
   (``_USER_WRITE_LOCK_NAMESPACE``)
   by ``user_write_lock.py`` alone, so no module can take the same lock under
   its own statement; ``bind_request_actor`` (where a request's owner becomes
@@ -47,20 +50,18 @@ the repository root's own (``gunicorn.conf.py``, ``run.py``):
   ``pg_advisory...`` or ``pg_try_advisory...``, and any non-docstring string
   that names one, which is a raw SQL statement -- appears only in
   ``user_write_lock.py``.
-* The names ``lock_user_writes`` -- the deleted per-service form -- and
-  ``lock_every_user_writes`` -- the deleted every-owner form, which the
-  deploy's three ledger reconciles took until plan task plan#3077 deleted
-  them -- are bound nowhere.
+* The name ``lock_user_writes`` -- the deleted per-service form -- is bound
+  nowhere.
 * **The homes cannot grow a new door.**  ``user_write_lock.py`` binds
-  exactly its namespace and the statement at module level -- no lambda,
-  class or alias -- so a helper wrapping the statement under a new name (the
-  ``lock_user_writes`` shape again) fails here rather than passing as
-  "inside a home".  And inside EVERY home, the functions allowed to
+  exactly its namespace and the two functions above at module level -- no
+  lambda, class or alias -- so a helper wrapping the statement under a new
+  name (the ``lock_user_writes`` shape again) fails here rather than passing
+  as "inside a home".  And inside EVERY home, the functions allowed to
   reference each locking name are pinned by name
-  (:data:`_PINNED_CALLERS`): ``db_transaction``'s listener and locker, and
-  no function of ``user_write_lock`` -- so a loop there taking every owner's
-  lock (the every-owner form again, the deadlock its ascending order existed
-  to prevent if two requests took it) fails too.
+  (:data:`_PINNED_CALLERS`): ``db_transaction``'s listener and locker, the
+  every-owner form alone calling the statement, and the reset script's
+  ``reset_mfa`` alone calling the every-owner form -- so a second function
+  in a home taking every owner's lock fails too.
 
 **What it does not see, stated rather than implied**: a lock reached through
 ``getattr``, or a statement assembled from pieces at run time, which nothing
@@ -120,10 +121,15 @@ _STATEMENT_PATTERN = re.compile(r"\bpg_(?:try_)?advisory", re.IGNORECASE)
 
 #: Each watched name, and the modules that may reference it.
 _HOMES: dict[str, frozenset[str]] = {
-    _PRIMITIVE: frozenset({_DB_TRANSACTION}),
-    # Deleted at plan task plan#3077 with its only callers, the deploy's three
-    # ledger reconciles: like ``lock_user_writes`` below, no module may bind it.
-    _EVERY_OWNER: frozenset(),
+    _PRIMITIVE: frozenset({_DB_TRANSACTION, _USER_WRITE_LOCK}),
+    _EVERY_OWNER: frozenset({
+        # A reset of an account's two-factor, before it reads anything
+        # (ruling plan#3823): a signed-in save holds its owner's lock while
+        # the login gate's read of the two-factor row stands.  The deploy's
+        # three ledger reconciles were its homes too, until plan task
+        # plan#3077 deleted them.
+        "scripts/reset_mfa.py",
+    }),
     _NAMESPACE: frozenset({_USER_WRITE_LOCK}),
     _REQUEST_OWNER: frozenset({"app/utils/logging_config.py"}),
     _SIGN_IN_OWNER: frozenset({
@@ -143,24 +149,24 @@ _HOMES: dict[str, frozenset[str]] = {
     _DELETED: frozenset(),
 }
 
-#: Every name ``user_write_lock.py`` may bind at module level: the lock's key
-#: and the statement (the every-owner form built on it went at plan task
-#: plan#3077).
-_USER_WRITE_LOCK_BINDINGS = frozenset({_NAMESPACE, _PRIMITIVE})
+#: Every name ``user_write_lock.py`` may bind at module level: the lock's key,
+#: the statement, and the every-owner form built on it.
+_USER_WRITE_LOCK_BINDINGS = frozenset({_NAMESPACE, _PRIMITIVE, _EVERY_OWNER})
 
 #: Inside each home: which functions may reference each locking name.  In
 #: ``db_transaction`` the listener's COMMAND arm and the open-transaction lock
 #: take the statement, the before-request hook and the sign-in door call the
 #: open-transaction lock, and only the boundary registers the hook; in
-#: ``user_write_lock`` no function calls the statement (the every-owner form
-#: did, until plan task plan#3077 deleted it with the deploy's reconciles).
+#: ``user_write_lock`` only the every-owner form calls the statement, and in
+#: the reset script only ``reset_mfa`` calls the every-owner form.
 _PINNED_CALLERS: dict[str, dict[str, frozenset[str]]] = {
     _DB_TRANSACTION: {
         _PRIMITIVE: frozenset({"_bind_transaction_mode", _LOCK_OPEN}),
         _LOCK_OPEN: frozenset({_REQUEST_HOOK, _SIGN_IN_OWNER}),
         _REQUEST_HOOK: frozenset({"register_transaction_boundary"}),
     },
-    _USER_WRITE_LOCK: {_PRIMITIVE: frozenset()},
+    _USER_WRITE_LOCK: {_PRIMITIVE: frozenset({_EVERY_OWNER})},
+    "scripts/reset_mfa.py": {_EVERY_OWNER: frozenset({"reset_mfa"})},
 }
 
 
@@ -319,7 +325,7 @@ def _surface_violations(sources: dict[str, str]) -> list[str]:
             :data:`_PINNED_CALLERS`).
 
     Returns:
-        Empty when ``user_write_lock`` binds exactly its two names and
+        Empty when ``user_write_lock`` binds exactly its three names and
         every home references each locking name from exactly the functions
         pinned above.
     """
@@ -403,9 +409,9 @@ class TestTheOwnerLockHasOneHome:
             )
         assert not violations, (
             "The owner's write lock is taken where a writing transaction "
-            "BEGINS (app/db_transaction.py) and at a sign-in, and nowhere "
-            "else (rulings "
-            "R-CC106, R-CC115, R-CC121).  An acquisition deeper in a "
+            "BEGINS (app/db_transaction.py), at a sign-in, and at the start "
+            "of the two-factor reset script, and nowhere else (rulings "
+            "R-CC106, R-CC115, R-CC121, plan#3823).  An acquisition deeper in a "
             "transaction can only repeat a lock already held -- or, off a "
             "request, be the only one, which is a writer that must take it "
             "at its own start instead.  Sites:\n" + "\n".join(violations)
@@ -477,8 +483,9 @@ class TestTheOwnerLockHasOneHome:
         open-transaction locker in ``db_transaction``, and a new
         request-path function in ``posting_service`` taking every owner's
         lock.  The fourth's home went at plan task plan#3077 with the
-        every-owner form, so it is measured here as that form's own shape
-        reborn: a loop in ``user_write_lock`` calling the statement per owner.
+        deploy's ledger reconciles, so it is measured in the every-owner
+        form's one home left, the reset script: a second function there
+        taking every owner's lock.
         """
         real = _home_sources()
         assert _surface_violations(real) == []
@@ -494,7 +501,7 @@ class TestTheOwnerLockHasOneHome:
             f"{sorted(_USER_WRITE_LOCK_BINDINGS | {'lock_owner'})}, "
             f"not {sorted(_USER_WRITE_LOCK_BINDINGS)}",
             f"{_USER_WRITE_LOCK}: {_PRIMITIVE} is referenced from "
-            f"{['<module>']}, not []",
+            f"{sorted({'<module>', _EVERY_OWNER})}, not {[_EVERY_OWNER]}",
         ]
         klass = (
             "\n\nclass OwnerLock:\n"
@@ -506,7 +513,7 @@ class TestTheOwnerLockHasOneHome:
             f"{sorted(_USER_WRITE_LOCK_BINDINGS | {'OwnerLock'})}, "
             f"not {sorted(_USER_WRITE_LOCK_BINDINGS)}",
             f"{_USER_WRITE_LOCK}: {_PRIMITIVE} is referenced from "
-            f"{['take']}, not []",
+            f"{sorted({'take', _EVERY_OWNER})}, not {[_EVERY_OWNER]}",
         ]
         second_caller = (
             "\n\ndef lock_again(owner_id):\n"
@@ -517,17 +524,15 @@ class TestTheOwnerLockHasOneHome:
             f"{sorted({_REQUEST_HOOK, _SIGN_IN_OWNER, 'lock_again'})}, "
             f"not {sorted({_REQUEST_HOOK, _SIGN_IN_OWNER})}",
         ]
+        reset = "scripts/reset_mfa.py"
         every_owner = (
-            "\n\ndef lock_every_owner(connection, owner_ids):\n"
-            "    for owner_id in owner_ids:\n"
-            "        take_owner_write_lock(connection, owner_id)\n"
+            "\n\ndef reset_one_more(email):\n"
+            "    lock_every_user_writes()\n"
         )
-        assert mutated(_USER_WRITE_LOCK, every_owner) == [
-            f"{_USER_WRITE_LOCK} binds "
-            f"{sorted(_USER_WRITE_LOCK_BINDINGS | {'lock_every_owner'})}, "
-            f"not {sorted(_USER_WRITE_LOCK_BINDINGS)}",
-            f"{_USER_WRITE_LOCK}: {_PRIMITIVE} is referenced from "
-            f"{['lock_every_owner']}, not []",
+        assert mutated(reset, every_owner) == [
+            f"{reset}: {_EVERY_OWNER} is referenced from "
+            f"{sorted({'reset_mfa', 'reset_one_more'})}, "
+            f"not ['reset_mfa']",
         ]
 
     def test_prose_is_not_a_reference(self, tmp_path: Path) -> None:

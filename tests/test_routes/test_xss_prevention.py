@@ -560,7 +560,9 @@ class TestXSSPrevention:
         """XSS in registration display_name is escaped in the navbar.
 
         Uses the unauthenticated ``client`` fixture to register a new
-        user, then logs in and checks the main page navbar.
+        user, then logs in.  A new account has no two-factor, so the login
+        gate holds it at setup (plan#3452), and the navbar checked is that
+        page's: ``base.html`` draws it on every signed-in page.
         """
         with app.app_context():
             # Register a new user with the XSS payload as display_name.

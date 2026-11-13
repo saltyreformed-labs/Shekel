@@ -1,6 +1,12 @@
 """The users beside the seeded owner: a second owner of each kind, and the companion.
 
 ``tests/conftest.py`` registers each fixture here by importing it by name.
+
+**Each owner here is made with two-factor** (plan#3600), as every account past
+setup has it, and signs in through the one shared sign-in,
+:func:`tests._two_factor_sign_in.sign_in_from_a_trusted_browser`.  The
+companion is made without it, as her owner makes her; her client turns it on
+(:func:`tests._two_factor_sign_in.sign_in_seed_companion`).
 """
 
 from datetime import date
@@ -15,31 +21,47 @@ from app.models.ref import AccountType
 from app.services import account_service
 from app.services.auth_service import hash_password
 from tests._seed_owner_fixtures import (
+    OWNERS_PAGE,
     SEED_USER_BOOTSTRAP_START,
     SEED_USER_CADENCE_DAYS,
     _reset_seed_calendar,
 )
 from tests._test_helpers import (
+    enable_mfa,
     open_books_before_the_first_assertion,
     open_owner_calendar,
 )
 from tests._two_factor_sign_in import (
-    SEED_COMPANION_EMAIL, SEED_COMPANION_PASSWORD, sign_in_seed_companion,
+    SEED_COMPANION_EMAIL,
+    SEED_COMPANION_PASSWORD,
+    sign_in_from_a_trusted_browser,
+    sign_in_seed_companion,
 )
+
+#: ``second_user``'s credentials, in one place: the fixture writes them and a
+#: test signing it in passes them.
+SECOND_USER_EMAIL = "other@shekel.local"
+SECOND_USER_PASSWORD = "otherpass"
+
+#: ``seed_second_user``'s credentials, in one place: the fixture writes them
+#: and :func:`second_auth_client` signs in with them.
+SEED_SECOND_USER_EMAIL = "second@shekel.local"
+SEED_SECOND_USER_PASSWORD = "secondpass12"
 
 
 @pytest.fixture()
 def second_user(app, db):
     """Create a second user for IDOR and cross-user isolation testing.
 
-    Mirrors the shape of seed_user so the two can be used interchangeably.
+    Mirrors the shape of seed_user so the two can be used interchangeably,
+    two-factor included (plan#3600).
 
     Returns:
         dict with keys: user, settings, account, scenario, categories.
     """
     user = User(
-        email="other@shekel.local",
-        password_hash=hash_password("otherpass"),
+        email=SECOND_USER_EMAIL,
+        password_hash=hash_password(SECOND_USER_PASSWORD),
         display_name="Other User",
     )
     db.session.add(user)
@@ -98,6 +120,7 @@ def second_user(app, db):
     db.session.flush()
 
     db.session.commit()
+    enable_mfa(db.session, user.id)
 
     return {
         "user": user,
@@ -116,15 +139,15 @@ def second_user(app, db):
 def seed_second_user(app, db):
     """Create an independent second user for multi-user isolation testing.
 
-    Mirrors seed_user in structure but creates entirely separate objects
-    with distinguishable names and amounts.
+    Mirrors seed_user in structure, two-factor included (plan#3600), but
+    creates entirely separate objects with distinguishable names and amounts.
 
     Returns:
         dict with keys: user, settings, account, scenario, categories.
     """
     user = User(
-        email="second@shekel.local",
-        password_hash=hash_password("secondpass12"),
+        email=SEED_SECOND_USER_EMAIL,
+        password_hash=hash_password(SEED_SECOND_USER_PASSWORD),
         display_name="Second User",
     )
     db.session.add(user)
@@ -191,6 +214,7 @@ def seed_second_user(app, db):
     db.session.flush()
 
     db.session.commit()
+    enable_mfa(db.session, user.id)
 
     return {
         "user": user,
@@ -223,17 +247,13 @@ def second_auth_client(app, db, seed_second_user):
     """Provide an authenticated test client for the second user.
 
     Creates a NEW test client instance to avoid session conflicts
-    with the primary auth_client.
+    with the primary auth_client, and signs it in through the shared
+    sign-in, on a browser the second user trusts.
     """
-    second_client = app.test_client()
-    resp = second_client.post("/login", data={
-        "email": "second@shekel.local",
-        "password": "secondpass12",
-    })
-    assert resp.status_code == 302, (
-        f"second_auth_client login failed with status {resp.status_code}"
+    return sign_in_from_a_trusted_browser(
+        app.test_client(), SEED_SECOND_USER_EMAIL, SEED_SECOND_USER_PASSWORD,
+        OWNERS_PAGE,
     )
-    return second_client
 
 
 @pytest.fixture()
@@ -271,7 +291,7 @@ def seed_companion(app, db, seed_user):
 
 @pytest.fixture()
 def companion_client(app, db, seed_companion):
-    """A browser signed in as the companion with her password and her code.
+    """A browser signed in as the companion, on a browser she trusts.
 
     Ruling plan#3434: a companion without two-factor is held at its setup, so
     she gets it first (:func:`tests._two_factor_sign_in.sign_in_seed_companion`);

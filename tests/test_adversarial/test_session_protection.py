@@ -38,6 +38,8 @@ every test in the file shares the same baseline:
 """
 
 from app.extensions import login_manager
+from tests._seed_owner_fixtures import OWNERS_PAGE, SEED_USER_EMAIL, SEED_USER_PASSWORD
+from tests._two_factor_sign_in import sign_in_from_a_trusted_browser
 
 
 # A second IP address distinct from Werkzeug's test-client default
@@ -168,17 +170,11 @@ class TestStrongSessionProtection:
 
         # Log in with a deterministic X-Forwarded-For so the
         # session's stored "_id" is the sha512 of that header (not
-        # the REMOTE_ADDR fallback).
-        login_resp = client.post(
-            "/login",
-            data={
-                "email": "test@shekel.local",
-                "password": "testpass",
-            },
+        # the REMOTE_ADDR fallback).  The shared sign-in, on a browser
+        # the owner trusts, so the password finishes it.
+        sign_in_from_a_trusted_browser(
+            client, SEED_USER_EMAIL, SEED_USER_PASSWORD, OWNERS_PAGE,
             headers={"X-Forwarded-For": _OTHER_REMOTE_ADDR},
-        )
-        assert login_resp.status_code == 302, (
-            f"Login failed with status {login_resp.status_code}"
         )
 
         # Sanity: the same XFF still resolves to the dashboard.

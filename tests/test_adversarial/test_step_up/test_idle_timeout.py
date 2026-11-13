@@ -1,12 +1,15 @@
 """C-10's idle-timeout tests (F-006): load_user accepts a session active within the timeout and
 rejects one past it, and the before_request hook refreshes the activity stamp.
+
+Each test signs the seed owner in through the shared sign-in, on a browser
+the owner trusts (``tests._seed_owner_fixtures.log_in_seed_user``): the owner
+has two-factor (plan#3600), and the session, not the code, is under test.
 """
 
 from datetime import datetime, timedelta, timezone
 
 from app.utils.session_helpers import SESSION_LAST_ACTIVITY_KEY
-
-from ._helpers import _do_login_no_mfa
+from tests._seed_owner_fixtures import log_in_seed_user
 
 
 # ---------------------------------------------------------------------------
@@ -27,8 +30,8 @@ class TestIdleTimeoutAcceptance:
         ``before_request`` hook, which runs after ``load_user``.
         """
         with app.app_context():
-            resp = _do_login_no_mfa(client)
-            assert resp.status_code == 302
+            # The sign-in asserts its own redirect to the owner's page.
+            log_in_seed_user(client)
 
             # Subsequent protected request must succeed.
             check = client.get("/dashboard", follow_redirects=False)
@@ -45,7 +48,7 @@ class TestIdleTimeoutAcceptance:
         "stale rejected" tests because every value would be rejected.
         """
         with app.app_context():
-            _do_login_no_mfa(client)
+            log_in_seed_user(client)
             recent = (
                 datetime.now(timezone.utc) - timedelta(minutes=1)
             ).isoformat()
@@ -70,7 +73,7 @@ class TestIdleTimeoutRejection:
         the 12-hour idle window.
         """
         with app.app_context():
-            _do_login_no_mfa(client)
+            log_in_seed_user(client)
             stale = (
                 datetime.now(timezone.utc) - timedelta(hours=13)
             ).isoformat()
@@ -92,7 +95,7 @@ class TestIdleTimeoutRejection:
         the failure mode is "log in again" instead of a 500.
         """
         with app.app_context():
-            _do_login_no_mfa(client)
+            log_in_seed_user(client)
             with client.session_transaction() as sess:
                 sess[SESSION_LAST_ACTIVITY_KEY] = "not-an-iso-timestamp"
 
@@ -108,7 +111,7 @@ class TestIdleTimeoutRejection:
         consistent with the malformed case above.
         """
         with app.app_context():
-            _do_login_no_mfa(client)
+            log_in_seed_user(client)
             naive = datetime.now().replace(tzinfo=None).isoformat()
             with client.session_transaction() as sess:
                 sess[SESSION_LAST_ACTIVITY_KEY] = naive
@@ -137,7 +140,7 @@ class TestIdleTimeoutRejection:
         request.
         """
         with app.app_context():
-            _do_login_no_mfa(client)
+            log_in_seed_user(client)
             future = (
                 datetime.now(timezone.utc) + timedelta(hours=1)
             ).isoformat()
@@ -169,7 +172,7 @@ class TestActivityRefreshHook:
         session-lifetime cap).
         """
         with app.app_context():
-            _do_login_no_mfa(client)
+            log_in_seed_user(client)
 
             # Read the post-login stamp (set by stamp_login_session).
             with client.session_transaction() as sess:

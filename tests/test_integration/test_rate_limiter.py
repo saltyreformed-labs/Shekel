@@ -42,6 +42,9 @@ import pytest
 
 from app import CONFIG_MAP, create_app
 from app.utils.log_events import EVT_RATE_LIMIT_EXCEEDED
+from tests._other_user_fixtures import SEED_SECOND_USER_EMAIL, SEED_SECOND_USER_PASSWORD
+from tests._seed_owner_fixtures import OWNERS_PAGE, SEED_USER_EMAIL, SEED_USER_PASSWORD
+from tests._two_factor_sign_in import sign_in_from_a_trusted_browser
 
 
 # Window math for the default ceiling.  RATELIMIT_DEFAULT in BaseConfig
@@ -588,6 +591,9 @@ class TestEachAccountHasItsOwnCounter:
     def _signed_in(counted_app, email, password, client_address):
         """Return a client signed in as *email*, arriving through nginx.
 
+        The shared sign-in, on a browser the account trusts, so the password
+        finishes it; the trust is the browser's record, so it is known.
+
         Args:
             counted_app: The app under test.
             email: The account's address.
@@ -597,13 +603,10 @@ class TestEachAccountHasItsOwnCounter:
         Returns:
             The signed-in test client.
         """
-        client = counted_app.test_client()
-        response = client.post(
-            "/login", data={"email": email, "password": password},
+        return sign_in_from_a_trusted_browser(
+            counted_app.test_client(), email, password, OWNERS_PAGE,
             **_through_nginx(client_address),
         )
-        assert response.status_code == 302
-        return client
 
     @staticmethod
     def _spend_the_default_ceiling(client, expected_status, **request_arguments):
@@ -631,7 +634,7 @@ class TestEachAccountHasItsOwnCounter:
         """
         # pylint: disable=unused-argument
         owner = self._signed_in(
-            counted_app, "test@shekel.local", "testpass", "8.8.8.8",
+            counted_app, SEED_USER_EMAIL, SEED_USER_PASSWORD, "8.8.8.8",
         )
         anonymous = counted_app.test_client()
         self._spend_the_default_ceiling(
@@ -651,10 +654,10 @@ class TestEachAccountHasItsOwnCounter:
         """One account's spending never reaches another's on the same address."""
         # pylint: disable=unused-argument
         owner = self._signed_in(
-            counted_app, "test@shekel.local", "testpass", "8.8.8.8",
+            counted_app, SEED_USER_EMAIL, SEED_USER_PASSWORD, "8.8.8.8",
         )
         other = self._signed_in(
-            counted_app, "second@shekel.local", "secondpass12", "8.8.8.8",
+            counted_app, SEED_SECOND_USER_EMAIL, SEED_SECOND_USER_PASSWORD, "8.8.8.8",
         )
         self._spend_the_default_ceiling(
             owner, 200, **_through_nginx("8.8.8.8"),

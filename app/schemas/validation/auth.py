@@ -431,44 +431,16 @@ class MfaConfirmSchema(BaseSchema):
         return _strip_code_field(dict(data), "totp_code")
 
 
-class MfaDisableSchema(BaseSchema):
-    """Validates POST data for /mfa/disable.
-
-    Requires both the user's current password (verified by
-    ``auth_service.verify_password``) and a current TOTP code (verified
-    by ``mfa_service.verify_totp_code`` with replay protection).
-    Backup codes are intentionally NOT accepted here -- the disable
-    flow is the canonical "I can still log in normally" path; the
-    "I lost my authenticator" path goes through /login + backup code
-    instead.
-
-    ``current_password`` accepts any historical password length so a
-    legacy short password can be entered for verification (same rule
-    as ``ChangePasswordSchema.current_password``).
-    """
-
-    current_password = fields.String(
-        required=True,
-        validate=validate.Length(min=1, max=_AUTH_PASSWORD_MAX_CHARS),
-    )
-    totp_code = fields.String(
-        load_default="",
-        validate=validate.Length(max=_TOTP_CODE_MAX_LENGTH),
-    )
-
-    @pre_load
-    def strip_codes(self, data, **kwargs):
-        """Strip whitespace from totp_code before length validation."""
-        return _strip_code_field(dict(data), "totp_code")
-
-
 class ReauthSchema(BaseSchema):
     """Validates POST data for /reauth (step-up re-authentication).
 
-    Used when a high-value action (e.g. password change, MFA disable,
-    salary edit) requires fresh proof of identity.  Mirrors the /login
-    flow: password is required and totp_code is optional (only verified
-    if the user has MFA enabled).  Backup codes are intentionally NOT
+    Used when a high-value action (e.g. password change, backup-code
+    regeneration, salary edit) requires fresh proof of identity.  Mirrors the /login
+    flow: password is required, and totp_code is always verified, since
+    every account the login gate lets reach /reauth has two-factor on
+    (ruling plan#3826).  It loads as "" when absent, so a missing code is
+    refused as a wrong one, counted toward the lock, rather than as a
+    malformed form.  Backup codes are intentionally NOT
     accepted here -- they are single-use recovery credentials for the
     "I lost my authenticator" scenario at primary login.
 

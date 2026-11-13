@@ -3,6 +3,10 @@
 The seeded owner's credentials and :func:`build_seed_user` are here, beside ``seed_user``
 and the pay-period fixtures that reset that owner's schedule.  ``tests/conftest.py``
 registers each fixture here by importing it by name.
+
+**Each owner here is made with two-factor** (plan#3600), as every account past
+setup has it, and signs in through the one shared sign-in,
+:func:`tests._two_factor_sign_in.sign_in_from_a_trusted_browser`.
 """
 
 from datetime import date, timedelta
@@ -22,12 +26,27 @@ from app.services import account_service, pay_period_write
 from app.services.auth_service import hash_password
 from app.utils.dates import display_today
 from tests._test_helpers import (
+    enable_mfa,
     mint_fixture_era,
     open_books_before_the_first_assertion,
     open_owner_calendar,
     rebuild_calendar,
     rhythm_of,
 )
+from tests._two_factor_sign_in import (
+    reset_two_factor_of,
+    sign_in_by_password,
+    sign_in_from_a_trusted_browser,
+)
+
+
+#: Where a finished sign-in lands an owner who asked for no page: the dashboard.
+OWNERS_PAGE = "/dashboard"
+
+#: The bare user's credentials, in one place: :func:`bare_user` writes them and
+#: :func:`bare_auth_client` signs in with them.
+BARE_USER_EMAIL = "bare@shekel.local"
+BARE_USER_PASSWORD = "barepass-12345"
 
 
 # --- Data Fixtures --------------------------------------------------------
@@ -44,12 +63,14 @@ def bare_user(app, db):
     for the NOT NULL anchor columns ruling R-EH deleted, then for account
     create's refusal of an owner with none, until ruling plan#3318).
 
+    It has two-factor, as every account past setup does (plan#3600).
+
     Returns:
         dict with keys: user, settings.
     """
     user = User(
-        email="bare@shekel.local",
-        password_hash=hash_password("barepass-12345"),
+        email=BARE_USER_EMAIL,
+        password_hash=hash_password(BARE_USER_PASSWORD),
         display_name="Bare User",
     )
     db.session.add(user)
@@ -58,6 +79,7 @@ def bare_user(app, db):
     settings = UserSettings(user_id=user.id)
     db.session.add(settings)
     db.session.commit()
+    enable_mfa(db.session, user.id)
 
     return {"user": user, "settings": settings}
 
@@ -70,16 +92,12 @@ def bare_auth_client(app, db, client, bare_user):  # pylint: disable=unused-argu
     scenario, no categories, and (importantly for pay_period_service
     tests) no bootstrap pay period.  Use this in tests that need a
     logged-in session against a user with no pre-existing financial
-    data.
+    data.  It signs in through the shared sign-in, on a browser the user
+    trusts.
     """
-    resp = client.post("/login", data={
-        "email": "bare@shekel.local",
-        "password": "barepass-12345",
-    })
-    assert resp.status_code == 302, (
-        f"bare_auth_client login failed with status {resp.status_code}"
+    return sign_in_from_a_trusted_browser(
+        client, BARE_USER_EMAIL, BARE_USER_PASSWORD, OWNERS_PAGE,
     )
-    return client
 
 
 @pytest.fixture()
@@ -183,7 +201,10 @@ def log_in_seed_user(client):
     Split out of ``auth_client`` because a test starting from a seeded start
     state already HAS the owner and must not seed a second one, but still
     needs the same session cookie the form issues -- so the two share this
-    rather than posting their own copy of the credentials.
+    rather than posting their own copy of the credentials.  The owner has
+    two-factor, and *client* becomes a browser the owner trusts, so the
+    password signs in with no code
+    (:func:`tests._two_factor_sign_in.sign_in_from_a_trusted_browser`).
 
     Args:
         client: A Flask test client.
@@ -191,14 +212,9 @@ def log_in_seed_user(client):
     Returns:
         The same client, now carrying a logged-in session.
     """
-    resp = client.post("/login", data={
-        "email": SEED_USER_EMAIL,
-        "password": SEED_USER_PASSWORD,
-    })
-    assert resp.status_code == 302, (
-        f"login as {SEED_USER_EMAIL} failed with status {resp.status_code}"
+    return sign_in_from_a_trusted_browser(
+        client, SEED_USER_EMAIL, SEED_USER_PASSWORD, OWNERS_PAGE,
     )
-    return client
 
 
 def build_seed_user(db):
@@ -209,6 +225,9 @@ def build_seed_user(db):
     function rather than only a fixture so those two describe the SAME user
     instead of two definitions that drift -- a world built from a copy of this
     would be a second answer to "what does a seeded owner look like".
+
+    The owner has two-factor, as every account past setup does (plan#3600);
+    its secret is the row's (:func:`tests._two_factor_sign_in.two_factor_secret_of`).
 
     Args:
         db: The Flask-SQLAlchemy extension to write through.
@@ -346,6 +365,7 @@ def build_seed_user(db):
     db.session.flush()
 
     db.session.commit()
+    enable_mfa(db.session, user.id)
 
     return {
         "user": user,
@@ -585,6 +605,21 @@ def auth_client(app, db, client, seed_user):  # pylint: disable=unused-argument
     Logs in via the login form to get a proper session.
     """
     return log_in_seed_user(client)
+
+
+@pytest.fixture()
+def no_two_factor_client(app, db, client, seed_user):  # pylint: disable=unused-argument
+    """A browser signed in as the seed owner, whose two-factor a reset took away.
+
+    The owner an account without two-factor is: one the reset act cleared
+    (``scripts/reset_mfa.py``, through
+    :func:`tests._two_factor_sign_in.reset_two_factor_of`), signed in with the
+    password alone, as production signs in an account before its setup.  For
+    a test of setup, or of what an account without two-factor meets.  The
+    reset runs before the sign-in, since it ends every session of the account.
+    """
+    reset_two_factor_of(seed_user["user"].id)
+    return sign_in_by_password(client, SEED_USER_EMAIL, SEED_USER_PASSWORD, OWNERS_PAGE)
 
 
 @pytest.fixture()

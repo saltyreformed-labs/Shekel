@@ -33,9 +33,11 @@ from app.services import (
     account_service,
     pay_schedule_service,
 )
+from tests._seed_owner_fixtures import OWNERS_PAGE
 from tests._test_helpers import (
     assert_pay_period_invariants,
     capture_sql_statements,
+    enable_mfa,
     last_covered_day,
     mint_fixture_era,
     one_off_row_of,
@@ -45,6 +47,7 @@ from tests._test_helpers import (
 )
 from app.services import cash_ledger
 from app.utils.dates import display_today
+from tests._two_factor_sign_in import sign_in_from_a_trusted_browser
 
 
 # ---------------------------------------------------------------------------
@@ -57,7 +60,10 @@ def _make_auth_client(app, email, password):
 
     Each thread must have its own client to avoid session interference.
     Uses use_cookies=True (default) and a fresh client instance so
-    each client maintains its own session cookie.
+    each client maintains its own session cookie.  It signs in through the
+    shared sign-in (``tests._two_factor_sign_in``), on a browser the account
+    trusts: the account has two-factor, as every account past setup does
+    (plan#3452), so the password signs it in with no code.
 
     Args:
         app:      The Flask application (session-scoped fixture).
@@ -68,15 +74,9 @@ def _make_auth_client(app, email, password):
         A logged-in Flask test client.
     """
     # use_cookies=True is the default but being explicit here.
-    client = app.test_client(use_cookies=True)
-    resp = client.post("/login", data={
-        "email": email,
-        "password": password,
-    })
-    assert resp.status_code == 302, (
-        f"Thread client login failed for {email}: {resp.status_code}"
+    return sign_in_from_a_trusted_browser(
+        app.test_client(use_cookies=True), email, password, OWNERS_PAGE,
     )
-    return client
 
 
 def _run_concurrent(app, func_a, func_b, timeout=10):
@@ -132,6 +132,9 @@ def _run_concurrent(app, func_a, func_b, timeout=10):
 
 def _create_user_with_data(db_session):
     """Create a user with a checking account, scenario, category, and periods.
+
+    The user is made with two-factor (``enable_mfa``), as every account past
+    setup has it: the login gate holds one without it at setup (plan#3452).
 
     Returns a dict with all the objects needed by the concurrent tests.
     """
@@ -202,6 +205,7 @@ def _create_user_with_data(db_session):
     )
     db_session.add(category)
     db_session.commit()
+    enable_mfa(db_session, user.id)
 
     return {
         "user": user,

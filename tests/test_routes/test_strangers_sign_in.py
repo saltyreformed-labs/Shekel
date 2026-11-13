@@ -29,6 +29,13 @@ confirming under it that the hash checked is still the account's.
 
 What a reply COSTS is measured on the real app and never here: this suite's
 cluster runs with fsync off, so a commit costs it nothing.
+
+The seed owner is made with two-factor (plan#3600), so a stranger's right
+password leads to the code form.  A case that grades a stranger's sign-in
+finished at ``/login`` itself first takes the owner's two-factor away through
+the one reset act (:func:`tests._two_factor_sign_in.reset_two_factor_of`), as
+``scripts/reset_mfa.py`` does: an account without it is the one ``/login``
+signs a stranger in to with no code.
 """
 
 from datetime import datetime, timedelta, timezone
@@ -54,6 +61,7 @@ from tests._test_helpers import (
     owner_lock_key,
 )
 from tests._seed_owner_fixtures import SEED_USER_EMAIL, SEED_USER_PASSWORD
+from tests._two_factor_sign_in import reset_two_factor_of
 
 _WRONG = "not-the-password"
 _NO_ACCOUNT = "nobody@shekel.local"
@@ -286,6 +294,7 @@ class TestARightPasswordLocksAfterItsCheck:
     ):
         """Judgment, commit, the owner's key, then the account read again."""
         user_id = seed_user["user"].id
+        reset_two_factor_of(user_id)
 
         response, events = _capture(lambda: _post_login(client))
 
@@ -318,6 +327,7 @@ class TestAPasswordChangedDuringTheCheck:
         Left alone (the same hash written back): the right password signs in.
         """
         user_id = seed_user["user"].id
+        reset_two_factor_of(user_id)
         old_hash = db.session.get(User, user_id).password_hash
         written = auth_service.hash_password("a-new-password-12") if changed else old_hash
         real_check = auth_service.verify_password
@@ -362,6 +372,7 @@ class TestABrowserMadeAStrangerMeanwhile:
         right one signs in, and the finished sign-in clears that record.
         """
         user_id = seed_user["user"].id
+        reset_two_factor_of(user_id)
         client.set_cookie(f"shekel_device_{user_id}", "a-record-gone-since")
         monkeypatch.setattr(
             known_device_service, "known_to", lambda _tokens: frozenset({user_id}),

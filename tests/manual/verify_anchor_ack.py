@@ -29,7 +29,9 @@ skips it.
    idempotent re-assert, which records nothing.
 
 **Usage.**  Point a dev server at a database you may write to (a clone, never
-production -- this probe RECORDS BALANCES), then::
+production -- this probe RECORDS BALANCES), write the dev key onto the account
+(``python -m tools.dev_two_factor <email>``; it signs in with the password and
+then that key's code), then::
 
     .venv/bin/python tests/manual/verify_anchor_ack.py \\
         --base-url http://127.0.0.1:5011 \\
@@ -42,9 +44,23 @@ it can be read at a glance or run in a pre-ship loop.
 from __future__ import annotations
 
 import argparse
+import pathlib
 import sys
 
 from playwright.sync_api import sync_playwright
+
+# Python puts the SCRIPT's own directory on ``sys.path``, not the working
+# directory, so the repository root is added explicitly -- the same line every
+# harness in this directory carries.
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
+
+# Pylint: ``wrong-import-position`` -- this import must FOLLOW the ``sys.path``
+# line above, which is what makes this checkout's ``tools`` the one imported.
+# pylint: disable=wrong-import-position
+from tools.dev_two_factor import (  # noqa: E402
+    sign_in_with_dev_key, why_not_signed_in,
+)
+# pylint: enable=wrong-import-position
 
 #: The mount every anchor acknowledgement lands in (``base.html``).  Spelled
 #: once here because three checks below read it.
@@ -53,6 +69,9 @@ MOUNT = "#anchor-ack-mount"
 #: How long the toast's own ``data-bs-delay`` gives it, plus room for the fade
 #: transition, in milliseconds.  Read from the element rather than assumed.
 _AUTOHIDE_SLACK_MS = 2500
+
+#: How long each sign-in form's answer may take to settle, in milliseconds.
+_SIGN_IN_TIMEOUT_MS = 10_000
 
 
 def _parse_args(argv):
@@ -113,17 +132,16 @@ class _Report:
 
 
 def _login(page, args):
-    """Sign in, failing loudly rather than proceeding unauthenticated."""
-    page.goto(f"{args.base_url}/login")
-    page.fill("#email", args.email)
-    page.fill("#password", args.password)
-    page.click("button[type=submit]")
-    page.wait_for_load_state("networkidle")
-    if page.url.rstrip("/").endswith("/login"):
-        raise SystemExit(
-            "login did not take: check the credentials, and note that a user "
-            "with MFA enabled cannot be driven by this probe."
-        )
+    """Sign in, the password then the dev key's code, failing loudly rather than going on.
+
+    Every account has two-factor (plan#3452), so the account signs in through
+    the dev-app tools' one sign-in (:func:`tools.dev_two_factor.sign_in_with_dev_key`),
+    which needs the dev key written onto it.
+    """
+    if not sign_in_with_dev_key(
+        page, args.base_url, args.email, args.password, _SIGN_IN_TIMEOUT_MS,
+    ):
+        raise SystemExit(f"login did not finish.  {why_not_signed_in(page.url, args.email)}")
 
 
 def _record_balance(page, balance):

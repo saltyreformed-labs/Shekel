@@ -24,22 +24,26 @@ never cleared cannot pass it by leaving the count alone.
 
 Each door's control is the same flow with no guess in the gap: the record is
 cleared.
+
+**The seed owner is made with two-factor** (plan#3600).  ``/login`` finishes
+a stranger's sign-in with no code only for an account without it, so its cases
+first take the owner's away through the one reset act
+(:func:`tests._two_factor_sign_in.reset_two_factor_of`), as
+``scripts/reset_mfa.py`` does.  The code form's and re-confirm's cases type the
+owner's own code (:func:`tests._two_factor_sign_in.two_factor_secret_of`).
 """
 
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from urllib.parse import urlsplit
 
-import pyotp
-import pytest
-
 from app.extensions import db
 from app.services import auth_service, guess_record_service
 from tests._guess_records import count_of, locked_until_of, record_of, set_record
 from tests._lock_waits import THREAD_DEADLINE_S
 from tests._sign_in import make_a_stranger
-from tests._test_helpers import enable_mfa
 from tests._seed_owner_fixtures import SEED_USER_EMAIL, SEED_USER_PASSWORD
+from tests._two_factor_sign_in import code_now, reset_two_factor_of, two_factor_secret_of
 
 _WRONG = "not-the-password"
 _REFUSED = b"Invalid email or password."
@@ -149,11 +153,15 @@ def _password(client):
 
 
 class TestLogin:
-    """``/login`` with no code clears against what its own try's judgment left."""
+    """``/login`` with no code clears against what its own try's judgment left.
 
-    @pytest.mark.usefixtures("seed_user")
-    def test_a_guess_in_the_gap_stands(self, app, client, monkeypatch):
+    An account without two-factor is the one ``/login`` signs in with no
+    code from a stranger's browser, so each case resets the owner's first.
+    """
+
+    def test_a_guess_in_the_gap_stands(self, app, client, seed_user, monkeypatch):
         """3 before, the right password counts none, 1 after its judgment: signed in, 4 stands."""
+        reset_two_factor_of(seed_user["user"].id)
         _stage_the_run_before()
         clears = _a_guess_after_the_checks(app, monkeypatch, "check_strangers_password")
 
@@ -162,13 +170,13 @@ class TestLogin:
         assert len(clears) == 1
         assert count_of(SEED_USER_EMAIL) == _THE_RUN_BEFORE + 1
 
-    @pytest.mark.usefixtures("seed_user")
-    def test_a_lock_opened_in_the_gap_stands(self, app, client, monkeypatch):
+    def test_a_lock_opened_in_the_gap_stands(self, app, client, seed_user, monkeypatch):
         """Threshold 3, 2 before, the gap's guess is the third: signed in, and its lock stands.
 
         The plan#3117 review's probe: a lock opened between the judgment and
         the confirm under the owner's lock was gone once the sign-in finished.
         """
+        reset_two_factor_of(seed_user["user"].id)
         monkeypatch.setenv("LOCKOUT_THRESHOLD", str(_THRESHOLD))
         _stage_the_run_before(_THRESHOLD - 1)
         clears = _a_guess_after_the_checks(app, monkeypatch, "check_strangers_password")
@@ -180,9 +188,8 @@ class TestLogin:
         assert locked_until_of(SEED_USER_EMAIL) is not None
         assert guess_record_service.read(SEED_USER_EMAIL).locked
 
-    @pytest.mark.usefixtures("seed_user")
     def test_a_lock_opened_in_the_gap_on_a_clean_account_stands(
-        self, app, client, monkeypatch,
+        self, app, client, seed_user, monkeypatch,
     ):
         """No count before; the gap's one guess opens a lock, leaving 0: signed in, it stands.
 
@@ -190,6 +197,7 @@ class TestLogin:
         leaves 0 again, so only the lock's end tells the record from the one
         the checks saw: the plan#3120 review's probe.
         """
+        reset_two_factor_of(seed_user["user"].id)
         monkeypatch.setenv("LOCKOUT_THRESHOLD", str(_ONE_GUESS_LOCKS))
         clears = _a_guess_after_the_checks(app, monkeypatch, "check_strangers_password")
 
@@ -199,9 +207,9 @@ class TestLogin:
         assert count_of(SEED_USER_EMAIL) == 0
         assert guess_record_service.read(SEED_USER_EMAIL).locked
 
-    @pytest.mark.usefixtures("seed_user")
-    def test_no_guess_in_the_gap_clears_the_run_before(self, client):
+    def test_no_guess_in_the_gap_clears_the_run_before(self, client, seed_user):
         """The control: 3 before, signed in, the record gone."""
+        reset_two_factor_of(seed_user["user"].id)
         _stage_the_run_before()
 
         assert _signed_in(_password(client))
@@ -218,12 +226,12 @@ class TestTheCodeForm:
         response = _password(client)
         assert urlsplit(response.headers["Location"]).path == "/mfa/verify"
         return client.post(
-            "/mfa/verify", data={"totp_code": pyotp.TOTP(secret).now()},
+            "/mfa/verify", data={"totp_code": code_now(secret)},
         )
 
     def test_a_guess_in_the_gap_stands(self, app, client, seed_user, monkeypatch):
         """3 before, 1 after the lock's read, before the code's check: signed in, 4 stands."""
-        secret = enable_mfa(db.session, seed_user["user"].id)
+        secret = two_factor_secret_of(seed_user["user"].id)
         _stage_the_run_before()
         clears = _a_guess_after_the_checks(app, monkeypatch, "read_the_lock")
 
@@ -234,7 +242,7 @@ class TestTheCodeForm:
 
     def test_no_guess_in_the_gap_clears_the_run_before(self, client, seed_user):
         """The control: 3 before, signed in with the code, the record gone."""
-        secret = enable_mfa(db.session, seed_user["user"].id)
+        secret = two_factor_secret_of(seed_user["user"].id)
         _stage_the_run_before()
 
         assert _signed_in(self._sign_in_with_a_code(client, secret))
@@ -247,12 +255,17 @@ class TestReConfirm:
 
     Re-confirm clears the strangers' count only for a stranger, so each case
     first makes the signed-in browser one (:func:`tests._sign_in.make_a_stranger`).
+    The owner has two-factor, so re-confirm asks for the code too, and the
+    shared sign-in typed none: the current step's is the test's to type.
     """
 
     @staticmethod
-    def _re_confirm(client):
-        """POST the right password at ``/reauth``; return the response."""
-        return client.post("/reauth", data={"password": SEED_USER_PASSWORD})
+    def _re_confirm(client, user_id):
+        """POST the right password and code at ``/reauth``; return the response."""
+        return client.post("/reauth", data={
+            "password": SEED_USER_PASSWORD,
+            "totp_code": code_now(two_factor_secret_of(user_id)),
+        })
 
     def test_a_guess_in_the_gap_stands(self, app, auth_client, seed_user, monkeypatch):
         """3 before, 1 after the lock's read, before the password's: re-confirmed, 4 stands."""
@@ -260,7 +273,7 @@ class TestReConfirm:
         _stage_the_run_before()
         clears = _a_guess_after_the_checks(app, monkeypatch, "read_the_lock")
 
-        assert _signed_in(self._re_confirm(auth_client))
+        assert _signed_in(self._re_confirm(auth_client, seed_user["user"].id))
 
         assert len(clears) == 1
         assert count_of(SEED_USER_EMAIL) == _THE_RUN_BEFORE + 1
@@ -276,7 +289,7 @@ class TestReConfirm:
         make_a_stranger(seed_user["user"].id)
         clears = _a_guess_after_the_checks(app, monkeypatch, "read_the_lock")
 
-        assert _signed_in(self._re_confirm(auth_client))
+        assert _signed_in(self._re_confirm(auth_client, seed_user["user"].id))
 
         assert clears == [None]
         assert count_of(SEED_USER_EMAIL) == 1
@@ -286,6 +299,6 @@ class TestReConfirm:
         make_a_stranger(seed_user["user"].id)
         _stage_the_run_before()
 
-        assert _signed_in(self._re_confirm(auth_client))
+        assert _signed_in(self._re_confirm(auth_client, seed_user["user"].id))
 
         assert record_of(SEED_USER_EMAIL) is None

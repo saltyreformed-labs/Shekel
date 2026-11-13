@@ -30,8 +30,7 @@ Module map:
   (``login``, ``register_form``, ``register``, ``logout``).
 * :mod:`app.routes.auth.mfa` -- the MFA lifecycle, co-located
   (``mfa_verify``, ``mfa_setup``, ``mfa_confirm``,
-  ``regenerate_backup_codes``, ``mfa_disable``,
-  ``mfa_disable_confirm``).
+  ``regenerate_backup_codes``).
 * :mod:`app.routes.auth.session_security` -- authenticated-session
   security (``change_password``, ``invalidate_sessions``, ``reauth``,
   ``dismiss_security_event``).

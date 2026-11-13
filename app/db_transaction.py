@@ -201,9 +201,11 @@ is no clue to which emails have accounts.  A CLI script, the deploy and
 Alembic hold no request, so nothing here locks for them.  The deploy needs
 none: ``entrypoint.sh`` runs it before gunicorn serves, and its three ledger
 reconciles, which took every owner's lock at their own start, went at plan
-task plan#3077.  A script that writes an existing owner's data takes none
-either: :mod:`app.services.user_write_lock` names the four operator scripts
-that write such rows.
+task plan#3077.  A script that writes an existing owner's data must take that
+owner's lock at its own start: the two-factor reset takes every owner's
+(:func:`app.services.user_write_lock.lock_every_user_writes`, ruling
+plan#3823), and three operator scripts take none yet
+(:mod:`app.services.user_write_lock` names them).
 
 **What this module does NOT do**, said here because the boundary is worth
 knowing rather than discovering: a COMMAND's own re-render still reads at

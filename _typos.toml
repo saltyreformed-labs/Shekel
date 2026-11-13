@@ -33,6 +33,11 @@ extend-exclude = [
   # (tools/quill/_recorded.py): GitHub's machine text -- node ids, commit
   # signatures -- not ours to spell.
   "tools/quill/recorded/**",
+  # Recorded scanner output the image scan's tests read (tools/update/
+  # test_scan.py, test_scan_seen.py): Grype's machine text -- package ids,
+  # digests, CPEs -- not ours to spell (a catalog's id `df023aded3c8f9cf`
+  # read as "aded", 2026-11-13).
+  "tools/update/recorded/**",
 ]
 
 # A git SHORT HASH is never a typo, and this is the STRUCTURAL form of that

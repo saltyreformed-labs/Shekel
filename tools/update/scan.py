@@ -11,11 +11,22 @@ of the scan's own.  The scanner, ``docker-compose.scan.yml``'s Grype, then reads
 the developer's rootless daemon, once that daemon says it is rootless
 (``scripts/private_cluster.py``'s ``asked_rootless``, the one spelling of that question), so
 nothing the scan starts, no container, network or scanner image, lands on production's
-daemon; and the scanner holds the file alone, no socket (ruling plan#3706).  The commit the
+daemon; and the scanner holds that file and the one it writes its catalog to alone, no socket
+(rulings plan#3706, plan#3875).  The image's own python runs on that daemon too, in a copy of
+the file loaded there and removed however the scan ends (ruling plan#3876).  The commit the
 image was built from is read from the scanner's own record of the file it scanned
 (:func:`revision`), so the commit and the findings are one read of the same bytes.  Measured
-2026-11-13 on production's image: the save, a 98 MB archive, in 0.8 s, and the scan, its
-database downloaded fresh, in 42 s.
+2026-11-13 on production's image: the save, a 98 MB archive, in 0.8 s; the load in 2 s and
+the image's python's run in 2 s; and the scan, its database downloaded fresh, in 42 s.
+
+**What it saw** (rulings plan#3788, plan#3875, plan#3876).  Grype's JSON lists only what it
+matched, so an interpreter with no CVE leaves no trace there.  So the scanner's one run writes
+too its catalog of every package it read (:func:`catalogued`), and the image's own python
+reports its version and the file it runs from (:func:`reported`).  :func:`seen` refuses the
+scan unless every package a match names is one the catalog lists, so the findings are of that
+catalog, and unless the catalog lists the interpreter at that version, found at that file:
+Grype finds the interpreter by its binary alone, and a scan that stopped finding it would read
+clean without having looked.
 
 **The one judge.**  A match counts when Grype knows its fix (its ``fix.state`` is ``fixed``) and
 the highest rating any source gives it is HIGH or CRITICAL (ruling plan#3720): the match's own,
@@ -33,8 +44,9 @@ writes, where a fix state, a mark or a rating deciding a match is one Grype does
 at its pinned v0.121.2, :data:`FIX_STATES`, :func:`_exploited`, :data:`RATINGS`), where a match
 counted for its fix names no version it is fixed in, and where a value a counted match names
 holds a character outside :data:`_LISTABLE`: none can then close a code span it is quoted in,
-mention anyone, or spell a marker that ``quill sync`` reads.  A scan refused is never read as a
-clean one.
+mention anyone, or spell a marker that ``quill sync`` reads.  The catalog and the report are
+read so too, and refused where they are not as Grype and the scan's own probe write them.  A
+scan refused is never read as a clean one.
 
 **It imports the standard library alone**, with :mod:`tools.update.app` and
 ``scripts/private_cluster.py``, which do too, so it runs on an interpreter given no installed
@@ -100,8 +112,27 @@ _DIGEST = re.compile(r"sha256:[0-9a-f]{64}")
 REVISION = "org.opencontainers.image.revision"
 #: A commit as that label names it: its whole sha.
 _COMMIT = re.compile(r"[0-9a-f]{40}")
-#: The longest an inspect or a save may take: the save of production's image took 0.8 s
-#: (2026-11-13), so a daemon still busy after this is a daemon that is not answering.
+#: What the catalog says it is: Grype's catalog is a CycloneDX report (ruling plan#3875).
+CATALOG_FORMAT = "CycloneDX"
+#: The property of a catalog's component naming its package's type, as Grype's type names it
+#: (``deb``, ``python``, ``binary``); a component naming none is a file or the operating
+#: system, no package (measured 2026-11-13 on production's image, Grype v0.121.2: 147 of its
+#: 4,964 components name one, each once).
+_KIND = "syft:package:type"
+#: The properties naming each file a package was found at, numbered from 0.
+_LOCATION = re.compile(r"syft:location:[0-9]+:path")
+#: The interpreter as Grype catalogues it, by its type and name: the package its binary
+#: classifier finds at the interpreter's file (measured 2026-11-13 on production's image).
+INTERPRETER = ("binary", "python")
+#: What the image's own python runs (the probe of ``docker-compose.scan.yml``, ruling
+#: plan#3876): one line of JSON, its version and the real path of the file it runs from.
+REPORT = ("import json, os, platform, sys; print(json.dumps({'version': "
+           "platform.python_version(), 'executable': os.path.realpath(sys.executable)}))")
+#: A file the report names: an absolute path whose every part :data:`_LISTABLE` could list.
+_EXECUTABLE = re.compile(r"(?:/[A-Za-z0-9._+~-]+)+")
+#: The longest an inspect, a save, a load, the probe's run or a removal may take: the save of
+#: production's image took 0.8 s, its load 2 s and the probe 2 s (2026-11-13), so a daemon still
+#: busy after this is a daemon that is not answering.
 DOCKER_SECONDS = 120
 #: The longest the scanner may take: 42 s on 2026-11-13, most of it its database's download
 #: (ruling plan#3708), so a run past this is one whose download or scan has stalled.
@@ -111,13 +142,15 @@ SCAN_SECONDS = 1800
 class NotAScan(ValueError):
     """The scanner's answer is no scan as Grype writes one, read with no list of CVEs known to
     be exploited, holds what a counted match cannot name, or names no commit the scanned image
-    was built from; the message says what and where."""
+    was built from; its catalog or the image's python's report is not as written; or the scan
+    did not see what the image runs (:func:`seen`); the message says what and where."""
 
 
 class ScanFailed(RuntimeError):
     """The scan could not run: a docker command failed or did not finish, the deploy script
-    names no container, or the daemon the scanner would run on is not rootless; the message
-    says which, and what docker said."""
+    names no container, the daemon the scanner would run on is not rootless, or the image it
+    loaded is not production's or was not removed; the message says which, and what docker
+    said."""
 
 
 @dataclass(frozen=True)
@@ -154,6 +187,27 @@ class Scanned:
     image: str
     revision: str
     found: tuple[Counted, ...]
+
+
+@dataclass(frozen=True)
+class Catalogued:
+    """One package Grype's catalog lists (:func:`catalogued`): its ``kind`` (Grype's type, as
+    :class:`Counted`'s), its ``package`` name, its ``version`` and ``paths``, each file it was
+    found at."""
+
+    kind: str
+    package: str
+    version: str
+    paths: frozenset[str]
+
+
+@dataclass(frozen=True)
+class Interpreter:
+    """What the image's own python reports of itself (:func:`reported`): its ``version``, and
+    ``executable``, the real path of the file it runs from."""
+
+    version: str
+    executable: str
 
 
 #: How the scan runs one docker command: on the daemon given (as ``DOCKER_HOST`` spells it),
@@ -304,6 +358,89 @@ def parsed(answer: bytes) -> object:
         raise NotAScan(f"it is no JSON: {error}") from error
 
 
+def catalogued(written: bytes) -> tuple[Catalogued, ...]:
+    """Each package the catalog the scanner ``written`` lists (its CycloneDX report, ruling
+    plan#3875), in its order: each component naming its package's type (:data:`_KIND`), with
+    each file it was found at.  A version Grype leaves out (CycloneDX's is omitted when empty)
+    is read as an empty one, as Grype writes a match's.
+
+    Raises:
+        NotAScan: ``written`` is no catalog as Grype writes one: no JSON, no CycloneDX report,
+            or a component, or a package's name, version or properties, not as it writes them.
+    """
+    try:
+        catalog = parsed(written)
+    except NotAScan as error:
+        raise NotAScan(f"the scanner's catalog: {error}") from error
+    if not isinstance(catalog, dict) or catalog.get("bomFormat") != CATALOG_FORMAT:
+        raise NotAScan(f"the scanner's catalog is no {CATALOG_FORMAT} report")
+    found = []
+    for index, component in enumerate(_value(catalog, "components", list, "the catalog")):
+        where = f"the catalog's component {index}"
+        if not isinstance(component, dict):
+            raise NotAScan(f"{where} is no object, which Grype does not write")
+        properties = component.get("properties", [])
+        if not (isinstance(properties, list) and all(
+                isinstance(item, dict) and isinstance(item.get("name"), str)
+                and isinstance(item.get("value"), str) for item in properties)):
+            raise NotAScan(f"{where}'s properties are not as Grype writes them")
+        kinds = [item["value"] for item in properties if item["name"] == _KIND]
+        if len(kinds) > 1:
+            raise NotAScan(f"{where} names its package's type {len(kinds)} times")
+        if not kinds:
+            continue
+        if not isinstance(version := component.get("version", ""), str):
+            raise NotAScan(f"{where}'s version is no string, which Grype does not write")
+        found.append(Catalogued(kinds[0], _value(component, "name", str, where), version,
+                                frozenset(item["value"] for item in properties
+                                          if _LOCATION.fullmatch(item["name"]))))
+    return tuple(found)
+
+
+def reported(answer: bytes) -> Interpreter:
+    """What the image's own python reports of itself, its probe's ``answer`` (:data:`REPORT`,
+    ruling plan#3876).
+
+    Raises:
+        NotAScan: ``answer`` is no report as the probe writes it, or names a version or a file
+            that cannot be listed.
+    """
+    where = "the image's python's report"
+    try:
+        report = parsed(answer)
+    except NotAScan as error:
+        raise NotAScan(f"{where}: {error}") from error
+    if not _EXECUTABLE.fullmatch(executable := _value(report, "executable", str, where)):
+        raise NotAScan(f"{where} names a file it runs from that cannot be listed")
+    return Interpreter(_listable(_value(report, "version", str, where), f"{where}'s version"),
+                       executable)
+
+
+def seen(scan: object, catalog: Sequence[Catalogued], interpreter: Interpreter) -> None:
+    """Refuse ``scan``, Grype's JSON, unless it saw what the image runs (the module's paragraph
+    on what it saw): every package a match names, by its type, name and version, is one
+    ``catalog`` lists, so the matches were made of that catalog; and ``catalog`` lists the
+    interpreter (:data:`INTERPRETER`) at ``interpreter``'s version, found at the file it runs
+    from.
+
+    Raises:
+        NotAScan: a match names a package the catalog does not list, or the catalog does not
+            list the interpreter so.
+    """
+    listed = {(item.kind, item.package, item.version) for item in catalog}
+    for index, match in enumerate(_value(scan, "matches", list, "the scan")):
+        artifact = _value(match, "artifact", dict, f"match {index}")
+        if tuple(artifact.get(key) for key in ("type", "name", "version")) not in listed:
+            raise NotAScan(f"match {index}'s package is none the scanner's catalog lists, so the "
+                           "catalog is not the one its matches were made of")
+    kind, name = INTERPRETER
+    if not any((item.kind, item.package, item.version) == (kind, name, interpreter.version)
+               and interpreter.executable in item.paths for item in catalog):
+        raise NotAScan(f"the scanner's catalog lists no {kind} package {name} at "
+                       f"{interpreter.version} found at {interpreter.executable}, the "
+                       "interpreter the image runs, so the scan did not see it")
+
+
 def container(root: Path) -> str:
     """The name of production's app container, as the checkout at ``root``'s deploy script
     defaults ``SHEKEL_CONTAINER_NAME`` to it (:data:`DEPLOY_SCRIPT`).
@@ -361,18 +498,62 @@ def _rootless() -> str:
     return daemon
 
 
+def _removed(docker: Docker, daemon: str, image: str, after: Exception | None) -> None:
+    """Remove ``image``, the copy of production's image the scan loaded onto ``daemon``.
+
+    Raises:
+        ScanFailed: the removal failed, saying so, and ``after``, the failure the removal
+            followed, when there was one.
+    """
+    try:
+        docker(daemon, ["image", "rm", image], {}, DOCKER_SECONDS)
+    except (ScanFailed, OSError) as error:
+        followed = f", after this failure: {after}" if after else ""
+        raise ScanFailed(f"the copy of production's image loaded onto {daemon} was not removed: "
+                         f"{error}{followed}") from error
+
+
+def _probed(docker: Docker, daemon: str, run: Sequence[str], added: Mapping[str, str]) -> bytes:
+    """What the image's own python answers (:data:`REPORT`; ruling plan#3876), run with
+    ``run``, the compose command, and ``added``, its variables: the saved file they hand the
+    scanner (``SCAN_IMAGE``) loaded onto ``daemon``, the image it loads checked to be the one
+    they hand the probe (``SCAN_PROBE``), production's, so the probe runs what was loaded; that
+    image removed however the run ends.
+
+    Raises:
+        ScanFailed: the load, the probe or the removal failed, or the load named another image.
+        OSError: as running docker raises it.
+    """
+    image = added["SCAN_PROBE"]
+    loaded = docker(daemon, ["load", "--input", added["SCAN_IMAGE"]], {}, DOCKER_SECONDS)
+    failure: Exception | None = None
+    try:
+        if loaded.decode("utf-8", errors="replace").strip() != f"Loaded image ID: {image}":
+            raise ScanFailed(f"docker load on {daemon} loaded no image {image}, production's")
+        return docker(daemon, [*run, "probe", REPORT], added, DOCKER_SECONDS)
+    except (ScanFailed, OSError) as error:
+        failure = error
+        raise
+    finally:
+        _removed(docker, daemon, image, failure)
+
+
 def scanned(root: Path, docker: Docker = _docker) -> Scanned:
     """One scan of the image production is running, from the checkout at ``root`` (the module's
-    first paragraph): the rootless daemon asked first, so a scan it would refuse reads nothing
-    of production; then production's container's image read, saved to a file of the scan's own
-    that the scanner can read, and scanned there; then judged.  The file is deleted with its
-    directory however the scan ends.
+    first paragraphs): the rootless daemon asked first, so a scan it would refuse reads nothing
+    of production; then production's container's image read and saved to a file of the scan's
+    own; the image's own python run there (:func:`_probed`); the file scanned there, the
+    scanner writing its catalog to a second file; then judged, and refused unless it saw what
+    the image runs (:func:`seen`).  The files are deleted with their directory however the scan
+    ends.
 
     Raises:
         ScanFailed: the scan could not run (:class:`ScanFailed`).
-        NotAScan: the scanner's answer is no scan, or names no commit (:func:`judged`,
-            :func:`revision`).
-        OSError: as reading the deploy script, making the file or running docker raises it.
+        NotAScan: the scanner's answer is no scan, names no commit, or saw not what the image
+            runs, or its catalog or the image's python's report is not as written
+            (:func:`judged`, :func:`revision`, :func:`catalogued`, :func:`reported`,
+            :func:`seen`).
+        OSError: as reading the deploy script, making the files or running docker raises it.
     """
     scanner = _rootless()
     name = container(root)
@@ -385,10 +566,22 @@ def scanned(root: Path, docker: Docker = _docker) -> Scanned:
         saved = Path(directory) / "image.tar"
         docker(PRODUCTION, ["save", "--output", str(saved), image], {}, DOCKER_SECONDS)
         # The scanner runs as uid 65532, which the rootless daemon maps to a uid that is neither
-        # the file's owner nor in its group, and docker writes the file 0600, which the scanner
-        # then cannot open (measured 2026-11-13: "permission denied", exit 1).
+        # the file's owner nor in its group, so it reads and writes a file by its mode for
+        # others alone: docker writes the image 0600, which it then cannot open (measured
+        # 2026-11-13: "permission denied", exit 1), and the catalog's file is made for it to
+        # write, its directory 0700 so no other user of the host reaches it.
         saved.chmod(0o644)
-        answer = docker(scanner, ["compose", "--file", str(root / COMPOSE), "run", "--rm",
-                                  "--no-TTY", "scan"], {"SCAN_IMAGE": str(saved)}, SCAN_SECONDS)
+        written = Path(directory) / "catalog.json"
+        written.write_bytes(b"")
+        written.chmod(0o666)
+        # Compose reads every variable the file names for whichever service it runs (measured
+        # 2026-11-13: the probe alone, run without the scanner's, refused), so both get all.
+        added = {"SCAN_IMAGE": str(saved), "SCAN_CATALOG": str(written), "SCAN_PROBE": image}
+        run = ["compose", "--file", str(root / COMPOSE), "run", "--rm", "--no-TTY"]
+        interpreter = reported(_probed(docker, scanner, run, added))
+        answer = docker(scanner, [*run, "scan"], added, SCAN_SECONDS)
+        catalog = catalogued(written.read_bytes())
     scan = parsed(answer)
-    return Scanned(image, revision(scan), tuple(judged(scan)))
+    found = judged(scan)
+    seen(scan, catalog, interpreter)
+    return Scanned(image, revision(scan), tuple(found))

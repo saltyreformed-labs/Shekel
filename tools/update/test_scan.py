@@ -6,12 +6,15 @@ with a stand-in for docker.  The scan judged is a trimmed copy of a real one,
 ``recorded/scan.json``: seven of the 422 matches Grype v0.121.2 made on dev's image 2026-11-13,
 each whole, with the scan's own source, distro and descriptor, its CVE ids, descriptions and
 links invented (ruling plan#3841).  None is marked known exploited.  A case the real scan does
-not hold is that copy with one value changed."""
+not hold is that copy with one value changed.  The stand-in's scanner writes the recorded
+catalog (``recorded/catalog.json``, read in ``test_scan_seen.py``), which lists each package
+those matches name at the version they name it."""
 from __future__ import annotations
 
 import copy
 import json
 import os
+import re
 import stat
 import subprocess
 import sys
@@ -26,6 +29,8 @@ from tools.update.app import marker, markers
 
 #: The trimmed copy of a real scan.
 RECORDED = Path(__file__).resolve().parent / "recorded" / "scan.json"
+#: The trimmed copy of a real catalog, the scanner's second report (ruling plan#3875).
+CATALOGUED = RECORDED.with_name("catalog.json")
 #: The one match of the recorded scan that counts: the interpreter's CRITICAL CVE.
 _CRITICAL = scan.Counted("CVE-2026-1999903", "binary", "python", "3.14.8",
                          ("3.11.18", "3.12.16", "3.13.18", "3.14.10", "3.15.2", "3.16.0"),
@@ -401,38 +406,61 @@ def _labelled(labels: object) -> dict:
     return scanned
 
 
+#: What the stand-in's image's python reports of itself: the interpreter the recorded catalog
+#: lists (``recorded/catalog.json``), at its version and file.
+_REPORTED = {"version": "3.14.8", "executable": "/usr/local/bin/python3.14"}
+
+
+def _command(arguments: list[str]) -> str:
+    """The name of the docker command ``arguments`` runs: its first, but a compose run's
+    service, ``probe`` or ``scan``, and an image's removal, ``rm``."""
+    if arguments[0] == "compose":
+        return arguments[arguments.index("--no-TTY") + 1]
+    return "rm" if arguments[:2] == ["image", "rm"] else arguments[0]
+
+
 class _Docker:
     """A stand-in for docker (:data:`tools.update.scan.Docker`): each call recorded, as its
     daemon, its arguments, the variables it adds and its seconds.  An inspect answers
-    ``image``; a save writes the file it names as docker does, 0600; the scanner answers
-    ``answer``, the mode of the file it was handed recorded as it runs; and the command
-    ``failing`` names raises as a failed one."""
+    ``image``; a save writes the file it names as docker does, 0600; the scanner writes its
+    catalog into the catalog's file, the modes of the files it was handed recorded as it runs;
+    each command answers its answer (:func:`_command` names it); and each command ``failing``
+    names raises as a failed one."""
 
-    def __init__(self, image: str = _IMAGE, answer: bytes | None = None,
-                 failing: str | None = None) -> None:
-        """A stand-in whose inspect answers ``image``, whose scanner answers ``answer`` (a
-        labelled copy of the recorded scan when None), and whose ``failing`` command fails."""
+    def __init__(self, image: str = _IMAGE, failing: frozenset[str] = frozenset(),
+                 **answers: bytes) -> None:
+        """A stand-in whose inspect answers ``image`` and whose ``failing`` commands fail;
+        ``answers`` replace, by name, what it answers otherwise: ``load``, that it loaded
+        ``image``; ``probe``, :data:`_REPORTED`; ``rm``, that it deleted ``image``; ``scan``, a
+        labelled copy of the recorded scan; and ``catalog``, what the scanner writes, the
+        recorded catalog."""
         self.calls: list[tuple[str, list[str], dict[str, str], int]] = []
         self.image = image
-        self.answer = (json.dumps(_labelled({scan.REVISION: _BUILT_FROM})).encode()
-                       if answer is None else answer)
         self.failing = failing
-        self.mode: int | None = None
+        self.answers = {"load": f"Loaded image ID: {image}\n".encode(),
+                        "probe": json.dumps(_REPORTED).encode(),
+                        "rm": f"Deleted: {image}\n".encode(),
+                        "scan": json.dumps(_labelled({scan.REVISION: _BUILT_FROM})).encode(),
+                        "catalog": CATALOGUED.read_bytes(), **answers}
+        self.modes: tuple[int, ...] | None = None
 
     def __call__(self, daemon, arguments, added, seconds) -> bytes:
         """One docker command, as the class says."""
         self.calls.append((daemon, list(arguments), dict(added), seconds))
-        if arguments[0] == self.failing:
-            raise scan.ScanFailed(f"docker {arguments[0]} failed")
-        if arguments[0] == "inspect":
+        if (command := _command(list(arguments))) in self.failing:
+            raise scan.ScanFailed(f"docker {command} failed")
+        if command == "inspect":
             return f"{self.image}\n".encode()
-        if arguments[0] == "save":
+        if command == "save":
             saved = Path(arguments[arguments.index("--output") + 1])
             saved.write_bytes(b"an image")
             saved.chmod(0o600)
             return b""
-        self.mode = stat.S_IMODE(Path(added["SCAN_IMAGE"]).stat().st_mode)
-        return self.answer
+        if command == "scan":
+            self.modes = tuple(stat.S_IMODE(Path(added[name]).stat().st_mode)
+                               for name in ("SCAN_IMAGE", "SCAN_CATALOG"))
+            Path(added["SCAN_CATALOG"]).write_bytes(self.answers["catalog"])
+        return self.answers[command]
 
 
 @pytest.fixture(name="rootless")
@@ -448,22 +476,101 @@ def _saved(docker: _Docker) -> Path:
     return Path(save[save.index("--output") + 1])
 
 
+#: The compose run each service of the scanner's file is run by.
+_RUN = ["compose", "--file", str(REPO / scan.COMPOSE), "run", "--rm", "--no-TTY"]
+
+
+def _added(docker: _Docker) -> dict[str, str]:
+    """The variables the stand-in's scanner was run with."""
+    scanner, = (added for _, arguments, added, _ in docker.calls if arguments == [*_RUN, "scan"])
+    return scanner
+
+
 @pytest.mark.usefixtures("rootless")
 def test_a_scan_reads_production_on_its_daemon_and_scans_the_saved_file_on_the_rootless_one():
-    """Production's container's image is read and saved on the system daemon, by its digest; the
-    scanner reads the saved file, world-readable, on the rootless daemon; the commit is the
-    scanned image's label; and the file is gone once the scan ends (ruling plan#3822)."""
+    """Production's container's image is read and saved on the system daemon, by its digest;
+    on the rootless daemon the saved file is loaded, the image's own python run in it and the
+    loaded image removed (ruling plan#3876), then the scanner reads the file, world-readable,
+    and writes its catalog to a file made for it to write (ruling plan#3875), each run handed
+    every variable the compose file names; the commit is the scanned image's label; and the
+    files are gone once the scan ends (ruling plan#3822)."""
     docker = _Docker()
     assert scan.scanned(REPO, docker) == scan.Scanned(_IMAGE, _BUILT_FROM, (_CRITICAL,))
     saved = str(_saved(docker))
+    added = {"SCAN_IMAGE": saved, "SCAN_CATALOG": str(Path(saved).with_name("catalog.json")),
+             "SCAN_PROBE": _IMAGE}
     assert docker.calls == [
         (scan.PRODUCTION, ["inspect", "--format", "{{.Image}}", "shekel-prod-app"], {},
          scan.DOCKER_SECONDS),
         (scan.PRODUCTION, ["save", "--output", saved, _IMAGE], {}, scan.DOCKER_SECONDS),
-        (_ROOTLESS, ["compose", "--file", str(REPO / scan.COMPOSE), "run", "--rm", "--no-TTY",
-                     "scan"], {"SCAN_IMAGE": saved}, scan.SCAN_SECONDS)]
-    assert docker.mode == 0o644
+        (_ROOTLESS, ["load", "--input", saved], {}, scan.DOCKER_SECONDS),
+        (_ROOTLESS, [*_RUN, "probe", scan.REPORT], added, scan.DOCKER_SECONDS),
+        (_ROOTLESS, ["image", "rm", _IMAGE], {}, scan.DOCKER_SECONDS),
+        (_ROOTLESS, [*_RUN, "scan"], added, scan.SCAN_SECONDS)]
+    assert docker.modes == (0o644, 0o666)
     assert not Path(saved).parent.exists()
+
+
+def test_the_probe_s_script_reports_this_interpreter_as_the_scan_reads_it():
+    """The script the probe runs, run by this interpreter: its report reads as this one's
+    version and the real path of the file it runs from."""
+    done = subprocess.run([sys.executable, "-I", "-c", scan.REPORT], capture_output=True,
+                          check=True)
+    assert scan.reported(done.stdout) == scan.Interpreter(
+        ".".join(map(str, sys.version_info[:3])), os.path.realpath(sys.executable))
+
+
+@pytest.mark.usefixtures("rootless")
+@pytest.mark.parametrize("failing", ["probe", "scan"])
+def test_the_loaded_image_is_removed_before_the_scanner_runs_however_the_probe_ends(failing):
+    """The loaded copy of production's image lives on the rootless daemon only while the probe
+    runs: removed after a probe that fails, which is then the failure, and before the scanner
+    runs."""
+    docker = _Docker(failing=frozenset({failing}))
+    with pytest.raises(scan.ScanFailed, match=f"^docker {failing} failed$"):
+        scan.scanned(REPO, docker)
+    commands = [_command(arguments) for _, arguments, _, _ in docker.calls]
+    assert commands[2:] == ["load", "probe", "rm", *(["scan"] if failing == "scan" else [])]
+
+
+@pytest.mark.usefixtures("rootless")
+@pytest.mark.parametrize("probe_fails", [False, True])
+def test_a_removal_that_fails_is_reported_never_read_as_a_clean_scan(probe_fails):
+    """A loaded image left on the rootless daemon fails the scan, the scanner never run; the
+    failure says so, and names the probe's own failure where the removal followed one."""
+    docker = _Docker(failing=frozenset({"rm", *(["probe"] if probe_fails else [])}))
+    said = (f"the copy of production's image loaded onto {_ROOTLESS} was not removed: docker rm "
+            "failed" + (", after this failure: docker probe failed" if probe_fails else ""))
+    with pytest.raises(scan.ScanFailed, match=f"^{re.escape(said)}$"):
+        scan.scanned(REPO, docker)
+    assert "scan" not in [_command(arguments) for _, arguments, _, _ in docker.calls]
+
+
+@pytest.mark.usefixtures("rootless")
+def test_a_load_that_names_another_image_runs_no_probe():
+    """The probe runs the image the load says it loaded, production's, or nothing runs; the
+    image is still removed."""
+    docker = _Docker(load=b"Loaded image: shekel:latest\n")
+    with pytest.raises(scan.ScanFailed, match=f"loaded no image {_IMAGE}, production's"):
+        scan.scanned(REPO, docker)
+    assert [_command(arguments) for _, arguments, _, _ in docker.calls][2:] == ["load", "rm"]
+
+
+@pytest.mark.usefixtures("rootless")
+@pytest.mark.parametrize(("answers", "said"), [
+    ({"catalog": b""}, "the scanner's catalog: it is no JSON"),
+    ({"probe": b"Traceback"}, "the image's python's report: it is no JSON"),
+    ({"probe": json.dumps({**_REPORTED, "version": "3.14.9"}).encode()},
+     "lists no binary package python at 3.14.9 found at /usr/local/bin/python3.14"),
+], ids=["no_catalog_written", "no_report", "another_interpreter"])
+def test_a_scan_that_did_not_see_the_interpreter_is_refused(answers, said):
+    """A scanner that wrote no catalog, a probe that reported nothing, or a catalog that lists
+    not the interpreter the image runs: the scan is refused (ruling plan#3788), the files gone
+    all the same."""
+    docker = _Docker(**answers)
+    with pytest.raises(scan.NotAScan, match=re.escape(said)):
+        scan.scanned(REPO, docker)
+    assert not _saved(docker).parent.exists()
 
 
 @pytest.mark.parametrize("asked, said", [(False, "is not rootless"),
@@ -493,10 +600,11 @@ def test_a_container_that_names_no_image_digest_saves_nothing(image):
 
 
 @pytest.mark.usefixtures("rootless")
-@pytest.mark.parametrize("failing", ["save", "compose"])
+@pytest.mark.parametrize("failing", ["save", "load", "probe", "scan"])
 def test_the_saved_file_is_deleted_however_the_scan_fails(failing):
-    """A save or a scan that fails leaves no saved image behind."""
-    docker = _Docker(failing=failing)
+    """A save, a load, a probe or a scan that fails leaves no saved image and no catalog
+    behind."""
+    docker = _Docker(failing=frozenset({failing}))
     with pytest.raises(scan.ScanFailed, match=f"docker {failing} failed"):
         scan.scanned(REPO, docker)
     assert not _saved(docker).parent.exists()
@@ -510,7 +618,7 @@ def test_the_saved_file_is_deleted_however_the_scan_fails(failing):
 def test_a_scanned_image_naming_no_commit_is_refused(labels):
     """The commit later steps read the image's fixes at is the label's whole sha, or the scan
     is refused: dev's recorded image, built with no label, among them."""
-    docker = _Docker(answer=json.dumps(_labelled(labels)).encode())
+    docker = _Docker(scan=json.dumps(_labelled(labels)).encode())
     with pytest.raises(scan.NotAScan, match="names no commit it was built from"):
         scan.scanned(REPO, docker)
     with pytest.raises(scan.NotAScan, match="names no commit it was built from"):
@@ -521,7 +629,7 @@ def test_a_scanned_image_naming_no_commit_is_refused(labels):
 def test_a_scanner_answer_that_is_no_scan_is_refused():
     """What the scanner writes is judged as data: no JSON is no scan."""
     with pytest.raises(scan.NotAScan, match="it is no JSON"):
-        scan.scanned(REPO, _Docker(answer=b"Error: no image"))
+        scan.scanned(REPO, _Docker(scan=b"Error: no image"))
 
 
 @pytest.mark.parametrize("lines, count", [([], 0), (['CONTAINER_NAME="${SHEKEL_CONTAINER_NAME'
@@ -541,28 +649,39 @@ def test_production_s_container_is_the_one_the_deploy_script_names_once(lines, c
 # -- the scan's docker, a real process -------------------------------------------------------
 
 #: A stand-in ``docker`` on the path: what each command does is the script's, which records
-#: the daemon it was handed, and the variable the scanner reads, for each command it runs.
+#: the daemon it was handed, and the variable naming the saved file, for each command it runs;
+#: the probe and the scanner are told apart by the service compose is to run, its seventh
+#: argument.
 _FAKE_DOCKER = """#!/bin/sh
 printf '%s %s %s\\n' "$1" "$DOCKER_HOST" "$SCAN_IMAGE" >> "$SCAN_TEST_LOG"
 case "$1" in
   inspect) {inspect} ;;
   save) printf 'an image' > "$3"; chmod 600 "$3" ;;
-  compose) cat "$SCAN_TEST_ANSWER" ;;
+  load) echo 'Loaded image ID: {image}' ;;
+  image) echo 'Deleted: {image}' ;;
+  compose)
+    case "$7" in
+      probe) echo '{report}' ;;
+      scan) cat "$SCAN_TEST_CATALOG" > "$SCAN_CATALOG"; cat "$SCAN_TEST_ANSWER" ;;
+    esac ;;
 esac
 """
 
 
 def _on_path(tmp_path: Path, monkeypatch, inspect: str) -> Path:
     """A stand-in ``docker`` first on the path whose inspect runs ``inspect``, its log's path;
-    the scanner answers a labelled copy of the recorded scan."""
+    its load and removal name :data:`_IMAGE`, its probe reports :data:`_REPORTED`, and the
+    scanner writes the recorded catalog and answers a labelled copy of the recorded scan."""
     binary = tmp_path / "bin" / "docker"
     binary.parent.mkdir()
-    binary.write_text(_FAKE_DOCKER.replace("{inspect}", inspect), encoding="utf-8")
+    binary.write_text(_FAKE_DOCKER.replace("{inspect}", inspect).replace("{image}", _IMAGE)
+                      .replace("{report}", json.dumps(_REPORTED)), encoding="utf-8")
     binary.chmod(0o755)
     answer = tmp_path / "answer.json"
     answer.write_text(json.dumps(_labelled({scan.REVISION: _BUILT_FROM})), encoding="utf-8")
     monkeypatch.setenv("PATH", f"{binary.parent}{os.pathsep}{os.environ['PATH']}")
     monkeypatch.setenv("SCAN_TEST_ANSWER", str(answer))
+    monkeypatch.setenv("SCAN_TEST_CATALOG", str(CATALOGUED))
     monkeypatch.setenv("SCAN_TEST_LOG", str(tmp_path / "log"))
     monkeypatch.setenv("DOCKER_HOST", "unix:///an/inherited/daemon")
     monkeypatch.setenv("SCAN_IMAGE", "/an/inherited/file")
@@ -572,14 +691,17 @@ def _on_path(tmp_path: Path, monkeypatch, inspect: str) -> Path:
 @pytest.mark.usefixtures("rootless")
 def test_each_docker_command_runs_on_the_daemon_the_scan_names(tmp_path, monkeypatch):
     """The real docker runner: each command is handed its own daemon whatever ``DOCKER_HOST``
-    this process holds, and only the scanner the saved file's path."""
+    this process holds, and only the compose runs, the probe's and the scanner's, the saved
+    file's path."""
     log = _on_path(tmp_path, monkeypatch, f"echo {_IMAGE}")
     done = scan.scanned(REPO)
     assert (done.image, done.revision, done.found) == (_IMAGE, _BUILT_FROM, (_CRITICAL,))
-    inspect, save, run = log.read_text(encoding="utf-8").splitlines()
+    inspect, save, load, probe, remove, run = log.read_text(encoding="utf-8").splitlines()
     assert inspect == save.replace("save", "inspect", 1) == (
         f"inspect {scan.PRODUCTION} /an/inherited/file")
-    assert run.startswith(f"compose {_ROOTLESS} /") and run.endswith("/image.tar")
+    assert load == remove.replace("image", "load", 1) == f"load {_ROOTLESS} /an/inherited/file"
+    assert probe == run and run.startswith(f"compose {_ROOTLESS} /")
+    assert run.endswith("/image.tar")
 
 
 @pytest.mark.usefixtures("rootless")

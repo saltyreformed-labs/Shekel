@@ -2,12 +2,19 @@
 #
 # Grype (ruling plan#3704) reads the app image saved as a file and writes,
 # on its standard output, every CVE it matches there as JSON, which
-# tools/update/scan.py judges (ruling plan#3720).  `quill scan` runs it
-# (tools/update/scan.py, ruling plan#3825) over production's image, saved,
-# on the developer's rootless daemon (ruling plan#3822), as, from the
-# repository's root, with DOCKER_HOST naming that daemon:
+# tools/update/scan.py judges (ruling plan#3720), and, into the one file
+# it may write, its catalog of every package it read there, which the scan
+# checks holds the interpreter the image runs (rulings plan#3788,
+# plan#3875).  The probe runs the image's own python, loaded onto the same
+# daemon, which reports what the scan checks the catalog against (ruling
+# plan#3876).  `quill scan` runs both (tools/update/scan.py, ruling
+# plan#3825) over production's image, saved, on the developer's rootless
+# daemon (ruling plan#3822), as, from the repository's root, with
+# DOCKER_HOST naming that daemon (compose reads every variable below for
+# either service):
 #
-#   SCAN_IMAGE=/path/to/image.tar \
+#   SCAN_IMAGE=/path/to/image.tar SCAN_CATALOG=/path/to/catalog.json \
+#       SCAN_PROBE=sha256:<the loaded image's id> \
 #       docker compose -f docker-compose.scan.yml run --rm --no-TTY scan
 #
 # THE PIN (ruling plan#3706).  The service's image line is the one home of
@@ -26,15 +33,24 @@
 # plan#2471).  Grype's check for a newer Grype is off: the pin above is
 # what moves it.
 #
-# WHAT IT HOLDS.  The image file, read-only, and nothing else of the
-# host's: no Docker socket, no secret, no port.  Its root filesystem is
-# read-only, every capability is dropped and none can be gained.
+# WHAT IT HOLDS.  The image file, read-only, and the catalog's file, the
+# one it writes (ruling plan#3875), and nothing else of the host's: no
+# Docker socket, no secret, no port.  Its root filesystem is read-only,
+# every capability is dropped and none can be gained.
+#
+# THE PROBE (ruling plan#3876).  The image's own python, run once with the
+# script the scan hands it, on no network and holding nothing of the
+# host's, hardened as the scanner is; the image's own non-root user.  Its
+# image line names a variable, so it pins nothing for Dependabot to move,
+# and Dependabot's compose parser skips it (dependabot-core's
+# docker/lib/dependabot/docker_compose/file_parser.rb, read 2026-11-13).
 name: shekel-scan
 
 services:
   scan:
     image: anchore/grype:v0.121.2-nonroot@sha256:1a0788d4ebdfcc19e4d6378041ac26877ca6c444f85a4dba31438c81b671db6e
-    command: ["docker-archive:/scan/image.tar", "--output", "json"]
+    command: ["docker-archive:/scan/image.tar", "--output", "json",
+              "--output", "cyclonedx-json=/scan/catalog.json"]
     read_only: true
     security_opt:
       - no-new-privileges:true
@@ -54,9 +70,27 @@ services:
         source: ${SCAN_IMAGE:?SCAN_IMAGE must name the saved image file to scan}
         target: /scan/image.tar
         read_only: true
+      - type: bind
+        source: ${SCAN_CATALOG:?SCAN_CATALOG must name the file the scanner writes its catalog to}
+        target: /scan/catalog.json
     deploy:
       resources:
         limits:
           cpus: "2.0"
           memory: 8g
           pids: 256
+  probe:
+    image: ${SCAN_PROBE:?SCAN_PROBE must name the loaded image whose python reports itself}
+    entrypoint: ["python", "-I", "-c"]
+    network_mode: none
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 256m
+          pids: 16

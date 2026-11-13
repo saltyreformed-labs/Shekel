@@ -11,8 +11,9 @@ SAYS is ruling **R-CC140** (the same day, "Short", replacing R-CC137's
 sentence), at the figure ruling **R-CC139** names (*"Don't display $120 if
 the bill is $135."*).  The service-level half (the offer set, the refused
 accept on Checking, the accept on the card) is
-``test_cc5_3_settle_tender::TestTheRowsClearingLinkStaysOnTheRowsAccount
-::test_the_matcher_never_moves_a_card_payment``.
+``test_cc5_3_settle_tender/test_the_tenders_books_and_links.py::
+TestTheRowsClearingLinkStaysOnTheRowsAccount::
+test_the_matcher_never_moves_a_card_payment``.
 
 Every figure here is a made-up example.
 """

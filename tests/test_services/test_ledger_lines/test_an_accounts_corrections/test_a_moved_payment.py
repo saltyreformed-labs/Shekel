@@ -14,7 +14,7 @@ plan#3059) planted a read that files a bill's movement under the bill's own
 account rather than the account its money moved through
 (``cash_ledger._events._settled_facts_by_account``): across the ledger-lines,
 integration, lifecycle and cash-walk suites only four tests failed, all in
-``tests/test_services/test_cc5_3_settle_tender.py``.  Both cases here fail
+``tests/test_services/test_cc5_3_settle_tender/``.  Both cases here fail
 under that plant too (measured 2026-11-10).  They are restored without the
 parity lines, which compared the read with the store that is gone (plan task
 plan#3394).

@@ -245,8 +245,8 @@ class TestTheCaptionMapIsREQUIRED:
     def test_a_render_without_the_map_FAILS(self, app):
         """``due_captions[t.id]`` on an absent map raises ``UndefinedError``.
 
-        The twin of
-        ``test_grid_entries.TestTheAmountComesFromTheMap.test_a_render_without_the_map_FAILS_rather_than_falling_back``,
+        The twin of ``test_a_render_without_the_map_FAILS_rather_than_falling_back``
+        in ``test_grid_entries/test_grid_page.py::TestTheAmountFenceIsGone``,
         for the fourth thing this cell draws.  It renders the partial directly
         rather than through a route, because what is under test is the
         TEMPLATE's contract: every route that draws it publishes the map, so no

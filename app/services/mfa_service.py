@@ -9,6 +9,7 @@ import os
 import secrets
 import time
 from base64 import b64encode
+from datetime import datetime, timezone
 from enum import Enum
 from io import BytesIO
 
@@ -17,7 +18,8 @@ import pyotp
 import qrcode
 from cryptography.fernet import Fernet, MultiFernet
 
-from app.models.user import MfaConfig
+from app.extensions import db
+from app.models.user import MfaConfig, User
 from app.utils.digit_strings import is_ascii_digits
 
 
@@ -511,3 +513,45 @@ def has_mfa_material(mfa_config: MfaConfig) -> bool:
         getattr(mfa_config, field) is not None
         for field in _MFA_MATERIAL_FIELDS
     )
+
+
+def reset_two_factor(user: User) -> bool:
+    """Reset *user*'s two-factor: the ONE act of every reset (ruling plan#3441).
+
+    What ``scripts/reset_mfa.py`` does for a lost authenticator and what the
+    owner's "Reset two-factor" on Settings > Companions does for a companion,
+    stated once so the two cannot drift.  It clears every piece of stored MFA
+    material and disables the row (:func:`clear_mfa_material`), and in the
+    same transaction bumps the user's ``session_invalidated_at`` on the
+    process clock, so every session of theirs ends and every trusted device
+    of theirs is forgotten: a device is trusted only while it was trusted at
+    or after that column (``app.services.known_device_service``), and a reset
+    is exactly when a trust the old authenticator vouched for must die,
+    or a browser trusted under it would skip the code of the one enrolled
+    after.  A user the rule requires two-factor of (``User.must_have_two_factor``)
+    then meets setup at their next sign-in.
+
+    A row already disabled but still carrying material (an orphaned secret
+    from a manual database change, an interrupted disable, or an abandoned
+    setup's pending ciphertext) is cleared too: no decryptable secret may stay
+    at rest past the reset.
+
+    Mutates the rows and does NOT commit: the caller commits, and logs.
+
+    Args:
+        user: The persistent user whose two-factor to reset.
+
+    Returns:
+        True when the reset cleared the row.  False, writing nothing, when
+        there was nothing to clear: no row, or a disabled one with no
+        material left (:func:`has_mfa_material`); their sessions are left
+        alone then.
+    """
+    mfa_config = db.session.query(MfaConfig).filter_by(user_id=user.id).first()
+    if mfa_config is None or (
+        not mfa_config.is_enabled and not has_mfa_material(mfa_config)
+    ):
+        return False
+    clear_mfa_material(mfa_config)
+    user.session_invalidated_at = datetime.now(timezone.utc)
+    return True

@@ -33,7 +33,7 @@ from app.utils.session_helpers import (
 )
 from tests._guess_records import locked_until_of
 from tests._test_helpers import enable_mfa
-from tests.conftest import SEED_USER_EMAIL, SEED_USER_PASSWORD
+from tests._seed_owner_fixtures import SEED_USER_EMAIL, SEED_USER_PASSWORD
 
 #: Ruling plan#3069's thirty days, spelled here as an oracle the model's
 #: constant cannot move silently.

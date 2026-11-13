@@ -24,7 +24,7 @@ from app.services import guess_record_service
 from tests._guess_records import count_of, locked_until_of, record_of
 from tests._lock_waits import act_past_a_held_row
 from tests._test_helpers import freeze_today
-from tests.conftest import SEED_USER_EMAIL
+from tests._seed_owner_fixtures import SEED_USER_EMAIL
 
 #: The moment each case's first try is made.
 _T0 = datetime(2026, 3, 1, 12, 0, tzinfo=timezone.utc)

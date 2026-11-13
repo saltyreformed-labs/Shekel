@@ -15,7 +15,7 @@ scrubbing in seed_user.py) live in
 tests/test_scripts/test_seed_user.py::TestSeedUserCredentialScrub.
 The runtime-behaviour assertions for the route-level F-053 fix
 (REGISTRATION_ENABLED=false returns 404) live in
-tests/test_routes/test_auth.py::TestRegistrationToggle (existing).
+tests/test_routes/test_auth/test_registration.py::TestRegistration (existing).
 """
 from __future__ import annotations
 

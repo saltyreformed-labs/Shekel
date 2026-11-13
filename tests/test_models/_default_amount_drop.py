@@ -12,8 +12,8 @@ the database at any particular revision: it is head's schema with the column
 back.  Neither comes back up; the ``db`` fixture re-clones the case's database
 for the next test.
 
-Beside the tests, not in ``tests/_test_helpers.py``: that module is over the
-1,000-line ceiling, so nothing new goes into it (ruling R-IR).
+Beside the tests, not in ``tests/_test_helpers.py``: that module was over the
+1,000-line ceiling, so nothing new went into it (ruling R-IR).
 """
 from argparse import Namespace
 

@@ -33,7 +33,7 @@ from tests._test_helpers import (
     make_transfer_template,
     one_off_row_of,
 )
-from tests.conftest import SEED_USER_BOOTSTRAP_START
+from tests._seed_owner_fixtures import SEED_USER_BOOTSTRAP_START
 from tests.oracles.recurrence_baseline import MONTHLY
 from tests._definition_price import newest_price
 

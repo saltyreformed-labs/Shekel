@@ -488,8 +488,8 @@ class TestNoBaselineIsAnsweredOnceForEveryKind:
     baseline for every owner, nothing deletes or un-baselines one, and no path
     promotes a companion to owner -- which is precisely why it needs tests:
     nothing else would ever execute it.  The end-to-end arms live in
-    ``tests/test_routes/test_no_baseline_policy.py``, which sweeps every route
-    in ``url_map``.
+    ``tests/test_routes/test_no_baseline_policy/test_the_sweep.py``, which
+    sweeps every route in ``url_map``.
     """
 
     def test_every_kind_raises_the_same_named_exception(

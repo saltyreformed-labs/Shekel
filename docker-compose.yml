@@ -170,7 +170,7 @@ services:
     # may run are deploy/valkey/users.acl, the ONE home of those rules
     # (ruling plan#2350).  The bind below is relative to this file, so
     # production, running from /opt/docker/shekel, reads its HOST COPY
-    # of deploy/valkey/ (docs/runbook.md 2.5), and every stack reads the
+    # of deploy/valkey/ (docs/runbook/2_deployment.md 2.5), and every stack reads the
     # rules when this container starts: a changed copy is live once it
     # restarts.  start.sh adds the shekel user's password to them as its
     # hash, from VALKEY_PASSWORD below, and starts the server.

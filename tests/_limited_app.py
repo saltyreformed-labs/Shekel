@@ -21,7 +21,7 @@ from contextlib import contextmanager
 from app import CONFIG_MAP, create_app
 from app.extensions import db
 from app.rate_limits import limiter
-from tests.conftest import SEED_USER_EMAIL, SEED_USER_PASSWORD
+from tests._seed_owner_fixtures import SEED_USER_EMAIL, SEED_USER_PASSWORD
 
 #: An address on ``TestConfig.FORWARDED_ALLOW_IPS``, as nginx is in production.
 NGINX_ADDRESS = "172.32.0.4"

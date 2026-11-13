@@ -38,7 +38,15 @@ import logging
 from datetime import datetime, timedelta, timezone
 from functools import wraps
 
-from flask import abort, current_app, make_response, redirect, request, url_for
+from flask import (
+    Response,
+    abort,
+    current_app,
+    make_response,
+    redirect,
+    request,
+    url_for,
+)
 from flask_login import current_user
 
 from app import ref_cache
@@ -700,18 +708,33 @@ def fresh_login_required(max_age_minutes: int | None = None):
             # open redirect on a third-party site that links into a
             # decorated route) cannot redirect the user off-origin
             # after re-auth.
-            reauth_url = url_for("auth.reauth", next=request.url)
-            if request.headers.get("HX-Request"):
-                # HTMX swaps response bodies; a 302 would render
-                # /reauth's HTML into whatever fragment slot the
-                # original request targeted.  Use ``HX-Redirect``
-                # with a 204 (No Content) so htmx does a full-page
-                # navigation instead.  Status 204 keeps the body
-                # empty so no swap happens regardless of the
-                # ``hx-target``/``hx-swap`` configuration.
-                response = make_response("", 204)
-                response.headers["HX-Redirect"] = reauth_url
-                return response
-            return redirect(reauth_url)
+            return full_page_redirect(
+                url_for("auth.reauth", next=request.url),
+            )
         return wrapper
     return decorator
+
+
+def full_page_redirect(url: str) -> Response:
+    """Send the browser to *url* as a page of its own, an htmx request too.
+
+    The one spelling of that answer, read by :func:`fresh_login_required` and
+    the login gate's two-factor hold (``app/login_gate.py``).  HTMX swaps
+    response bodies rather than following redirects, so a 302 would render
+    the target's HTML into whatever fragment slot the original request
+    targeted.  An htmx request therefore gets ``HX-Redirect`` with a 204 (No
+    Content), which htmx answers with a full-page navigation; the empty body
+    means no swap happens whatever the ``hx-target``/``hx-swap``.  Any other
+    request gets the plain redirect.
+
+    Args:
+        url: Where the browser goes.
+
+    Returns:
+        The 204 with ``HX-Redirect`` for an htmx request, else a 302.
+    """
+    if request.headers.get("HX-Request"):
+        response = make_response("", 204)
+        response.headers["HX-Redirect"] = url
+        return response
+    return redirect(url)

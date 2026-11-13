@@ -11,7 +11,7 @@ Why this exists: the production CSP forbids ``https://fonts.googleapis.com``
 and ``https://fonts.gstatic.com`` (audit finding F-037).  The web app
 must serve every font asset from its own origin.  Re-running this script
 is the supported way to bump the vendored font version; see
-``app/static/vendor/VERSIONS.txt`` and ``docs/runbook.md`` "CDN vendor
+``app/static/vendor/VERSIONS.txt`` and ``docs/runbook/4_security_operations.md`` "CDN vendor
 refresh procedure".
 
 Subsets dropped (not needed for an English-language US-focused app):

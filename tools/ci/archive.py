@@ -18,8 +18,9 @@ cannot get around it.
 Moved here from the plan gate (``tools/plan_gate/_archive.py``) when step X-cx's
 S3b deleted the gate: it never graded a registry, its subject is every markdown
 file under an archived directory, its only shared input is the repository root
-(:data:`tools.ci.arcs.REPO`), and CLAUDE.md still holds every archived document
-to it.  ``test_archive.py`` grades it, and pre-commit runs that test whenever an
+(:data:`tools.ci.arcs.REPO`), and the banner rule's one statement is this
+module: CLAUDE.md says only that an archived document governs nothing.
+``test_archive.py`` grades it, and pre-commit runs that test whenever an
 archived document is edited.
 """
 from __future__ import annotations

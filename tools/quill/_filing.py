@@ -185,6 +185,8 @@ class _Filing:
     (:attr:`claims`) -- both empty with no parent.  ``asked``: for a
     ruling converted from a question, that question as read.  ``milestone``: for a leaf,
     the milestone it is filed in, which its split step gives up (:func:`_leaf_milestone`).
+    ``top``: whether a card going on the board at the top level goes at its top, not its
+    bottom: a card the update's waits file (ruling plan#3620, ``_waits``).
     """
 
     draft: Draft
@@ -193,6 +195,7 @@ class _Filing:
     reads: _git.Reads
     asked: _Asked | None
     milestone: _LeafMilestone
+    top: bool = False
 
     @property
     def shipped(self) -> frozenset[int]:
@@ -721,12 +724,13 @@ def cmd_file(args, tracker: Tracker, root: Path) -> int:
 
 
 def _write(tracker: Tracker, filing: _Filing, earlier: Card | None,
-           before: Card | None) -> None:
+           before: Card | None) -> Card:
     """Every write of ``filing``, decided over already, each printed as it lands: ``earlier``,
     the card an earlier run made, finished, the field values it lacks written first
     (:func:`_refield`), or with none a new card created (:func:`_created`), then its
     suggested Priority (:func:`_suggest`), then the rest of its filing (:func:`_finish`), a
-    task placed above ``before`` when the filing names one."""
+    task placed above ``before`` when the filing names one.  The card filed or finished, as
+    read before its last writes."""
     card = earlier
     if card is None:
         card = _created(tracker, filing.draft, filing.milestone)
@@ -737,6 +741,7 @@ def _write(tracker: Tracker, filing: _Filing, earlier: Card | None,
         _refield(tracker, card, filing.draft)
     _suggest(tracker, card, filing.draft.suggestion)
     _finish(tracker, card, filing, before)
+    return card
 
 
 def _suggest(tracker: Tracker, card: Card, suggestion: Suggestion | None) -> None:
@@ -884,7 +889,9 @@ def _finish(tracker: Tracker, card: Card, filing: _Filing, before: Card | None) 
     owners, and the same command run again finishes it), a top-level step's or question's
     board place, or a task's under a step the board holds (:func:`_command.on_board`, rulings
     plan#1814, plan#1842), at the bottom,
-    where the board's order does not read it; a task is first placed in its card's order of
+    where the board's order does not read it, or at the top for a filing that says so
+    (:attr:`_Filing.top`, ruling plan#3620), on every run, before the mark comes off, as no read
+    can tell the tool's move from a person's drag; a task is first placed in its card's order of
     its tasks, above ``before`` when the filing names one (:func:`_tasks.place`, ruling
     plan#1868)."""
     kind, parent = filing.draft.kind, filing.parent
@@ -907,6 +914,10 @@ def _finish(tracker: Tracker, card: Card, filing: _Filing, before: Card | None) 
                   "holds none (ruling plan#2555)")
         for finding in _findings.owned(tracker, parent.number, filing.shipped):
             _findings.hand_on(tracker, finding, card, parent, prefix="  ")
+    elif on_board(kind, parent) and filing.top:
+        shown = tracker.board.place(card.board_item or tracker.board.add(card), None)
+        print("  board: put at the top (ruling plan#3620)"
+              + ("" if shown else " -- the board has not shown it yet"))
     elif on_board(kind, parent) and card.board_item is None:
         tracker.board.add(card)
         print("  board: added at the bottom")

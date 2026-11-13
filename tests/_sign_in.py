@@ -16,7 +16,7 @@ from app.extensions import db
 from app.models.known_device import KnownDevice
 from app.models.user import User
 from app.services import auth_service
-from tests.conftest import SEED_USER_EMAIL, SEED_USER_PASSWORD
+from tests._seed_owner_fixtures import SEED_USER_EMAIL, SEED_USER_PASSWORD
 
 
 def stranger_signs_in(email, password) -> User:

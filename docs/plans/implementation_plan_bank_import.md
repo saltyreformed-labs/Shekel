@@ -5,8 +5,8 @@ showed.** It was `balance:X-f6`, a single sequenced follow-on to the cash cutove
 measurement against the developer's own bank exports showed the cutover depends on this arc's output
 rather than the other way round, and the balance README's step rationale had already named a
 document for it. Each step, finding and ruling is a card in the tracker,
-`saltyreformed-labs/shekel-plan` (`CLAUDE.md`, Development Status), whose board holds the order, and
-what "done" means is `verification.md`. The standing-consent redesign's argument
+`saltyreformed-labs/shekel-plan` (`CLAUDE.md`, Multi-session operation), whose board holds the
+order, and what "done" means is `verification.md`. The standing-consent redesign's argument
 (**R-GH**..**R-GL**) is `docs/audits/bank_import_redesign/README.md`.
 
 ## Context

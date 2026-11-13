@@ -26,8 +26,6 @@ import here would load at package import the modules the processors read:
 
 from flask import Flask, request
 
-from app.extensions import db
-
 
 def register_context_processors(app: Flask) -> None:
     """Register the welcome-checklist, companion-role, security-event, MFA-nag
@@ -190,7 +188,8 @@ def register_context_processors(app: Flask) -> None:
             companions cannot reach ``/settings/companions`` or any
             other owner-only action that the finding cited as
             unprotected.
-          * The user has no ``MfaConfig`` row with ``is_enabled=True``.
+          * The user has no two-factor (``User.has_two_factor``: no
+            ``MfaConfig`` row with ``is_enabled=True``).
             A row with ``is_enabled=False`` (e.g. a setup that was
             started but never confirmed) still counts as "no MFA" and
             keeps the banner visible.
@@ -226,15 +225,10 @@ def register_context_processors(app: Flask) -> None:
         if endpoint.startswith("auth.mfa_"):
             return {"mfa_nag_visible": False}
 
-        from sqlalchemy import exists
-        from app.models.user import MfaConfig
-        has_enabled_mfa = db.session.query(
-            exists().where(
-                MfaConfig.user_id == current_user.id,
-                MfaConfig.is_enabled.is_(True),
-            )
-        ).scalar()
-        return {"mfa_nag_visible": not has_enabled_mfa}
+        # The user's one two-factor answer, loaded once a request
+        # (``User.has_two_factor``), so the nag asks nothing the login gate or
+        # the page has already asked.
+        return {"mfa_nag_visible": not current_user.has_two_factor}
 
     @app.context_processor
     def inject_tax_law_notice():

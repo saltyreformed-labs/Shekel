@@ -13,7 +13,7 @@ It was the app's ``tax_config_service.load_tax_configs_for_year`` until the
 Taxes tab's report, its last caller there, began reading its law off the
 primary profile's pricer.  A production function with only test callers is
 the shape ruling P54 names, so it lives here; its own module because
-``tests/_test_helpers.py`` is past the 1,000-line ceiling (ruling R-IR).
+``tests/_test_helpers.py`` was past the 1,000-line ceiling (ruling R-IR).
 
 **A test that builds a config set or a paycheck's tax lines BY HAND** -- with
 fake rules, to price exact figures -- builds it through :func:`hand_built_law`

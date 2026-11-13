@@ -63,13 +63,14 @@ from tools.ci.arcs import REPO
 from tools.ci.gitcmd import GitError
 from tools.quill.door import Moved, NotVersions, described, fetch, versions_waiting
 from tools.update.alert import ISSUE_TOKEN_VARIABLE, sent
-from tools.update.app import DEVELOPER, REPOSITORY_VARIABLE, unset
+from tools.update.app import ACTIONS, DEVELOPER, REPOSITORY_VARIABLE, unset
 
 #: The title this module's issue goes by, read back each run: its one record.
 TITLE = "A release is due: dev and main pin different versions"
-#: The login GitHub gives the workflow's own token (measured 2026-11-04: an issue such a token
-#: opened, read through GitHub's search).
-BOT = "github-actions[bot]"
+#: The login GitHub's REST names the workflow's own token by (measured 2026-11-04: an issue
+#: such a token opened, read through GitHub's search): its bot's,
+#: :data:`tools.update.app.ACTIONS`, as REST names a bot.
+BOT = f"{ACTIONS}[bot]"
 #: What closes the issue.
 CLOSED = {"state": "closed", "state_reason": "completed"}
 

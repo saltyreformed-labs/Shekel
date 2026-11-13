@@ -90,10 +90,9 @@ Nothing reconciles them.
 
 That is `CLAUDE.md` rule 14 exactly:
 
-> A value that is derived AND stored has both problems, and the stored copy is a stale cache with no
-> reconciler. **The tell is an INVARIANT** -- where a rule says two places must always agree, they
-> are one value with two homes and a maintenance contract, and the remedy is to delete a home rather
-> than keep them in step.
+> A value both derived and stored leaves the stored copy a stale cache. The tell is an invariant:
+> where a rule says two places must always agree, they are one value with two homes and a
+> maintenance contract, and the remedy is to delete a home rather than keep them in step.
 
 `P80` is that divergence, observed. `R-PC55`'s two-clause check is the maintenance contract, written
 down. Building it is choosing to keep two homes in step.
@@ -213,9 +212,9 @@ fence, and it says so:
 > DELETE.*
 
 An immutable ledger needs a runtime lock to survive a cache-maintenance door.
-**This is not a bug -- the lock holds.** It is scaffolding around the defect, and `CLAUDE.md`'s
-doctrine says the goal state is that it is structurally unnecessary. A period that is never a row is
-never deleted.
+**This is not a bug -- the lock holds.** It is scaffolding around the defect, and the goal state in
+`CLAUDE.md` rule 14 is that it is structurally unnecessary. A period that is never a row is never
+deleted.
 
 ---
 

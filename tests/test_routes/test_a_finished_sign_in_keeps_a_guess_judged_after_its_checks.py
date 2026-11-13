@@ -39,7 +39,7 @@ from tests._guess_records import count_of, locked_until_of, record_of, set_recor
 from tests._lock_waits import THREAD_DEADLINE_S
 from tests._sign_in import make_a_stranger
 from tests._test_helpers import enable_mfa
-from tests.conftest import SEED_USER_EMAIL, SEED_USER_PASSWORD
+from tests._seed_owner_fixtures import SEED_USER_EMAIL, SEED_USER_PASSWORD
 
 _WRONG = "not-the-password"
 _REFUSED = b"Invalid email or password."

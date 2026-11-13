@@ -107,8 +107,8 @@ _IMAGE_REPO = "shekel-test-db"
 # asked for it by literal in five places, so a rename elsewhere would have left
 # the verifier reporting "the commit did not capture it" -- a diagnosis naming
 # the wrong cause -- and ``main`` discarding a good image on every invocation,
-# forever.  ``tests/conftest.py`` and ``scripts/build_test_template.py`` spell
-# the same constant; all THREE must agree.
+# forever.  ``tests/_worker_database.py`` and ``scripts/build_test_template.py``
+# spell the same constant; all THREE must agree.
 _TEMPLATE_DATABASE = "shekel_test_template"
 
 # Inputs the key covers no matter what the builder imports.  These shape the

@@ -302,6 +302,17 @@ def read_module(path: Path, rules: CollectRules, relative: str | None = None) ->
                         imports=tuple(imports), units=units)
 
 
+#: The names Python's compiler adds to a scope, which symtable reports as a module-level
+#: read: 3.14 adds ``__conditional_annotations__`` to a module holding a module-level
+#: variable annotation, and to a class not nested in a class holding one inside a compound
+#: statement.  Where the source never writes the name it is no read of the source's, so no
+#: output imports it (:func:`_scopes`); one the source does write is kept, and the layout
+#: refuses it as bound nowhere, as it does a name the compiler adds that is not listed.
+#: A class member is read inside a stand-in class, where 3.14.8 reports the name free,
+#: never global, so :func:`member_free_names` does not meet it there.
+_COMPILER_NAMES = frozenset({"__conditional_annotations__"})
+
+
 def _table_globals(table: symtable.SymbolTable) -> set[str]:
     """Every global name ``table`` or a scope nested in it reads."""
     found = {s.get_name() for s in table.get_symbols() if s.is_global() and s.is_referenced()}
@@ -329,9 +340,10 @@ def _local_annotations(function: ast.FunctionDef | ast.AsyncFunctionDef) -> list
     return found
 
 
-def _scopes(text: str, name: str) -> symtable.SymbolTable:
+def _scopes(text: str, name: str) -> tuple[symtable.SymbolTable, frozenset[str]]:
     """``text``'s symbol table, each local variable's annotation read as a statement of
-    its function.
+    its function; and the :data:`_COMPILER_NAMES` ``text`` never writes as a name, which a
+    reading of the table drops.
 
     Python never evaluates a local variable's annotation (PEP 526), so :mod:`symtable`
     records no name one reads; a reader and pylint each read them, and a part that
@@ -348,10 +360,12 @@ def _scopes(text: str, name: str) -> symtable.SymbolTable:
     recurse is refused, not misread.
     """
     tree = ast.parse(text, filename=name)
+    unwritten = _COMPILER_NAMES - {node.id for node in ast.walk(tree)
+                                   if isinstance(node, ast.Name)}
     found = [(node, _local_annotations(node)) for node in ast.walk(tree)
              if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))]
     if not any(annotations for _, annotations in found):
-        return symtable.symtable(text, name, "exec")
+        return symtable.symtable(text, name, "exec"), unwritten
     for function, annotations in found:
         function.body.extend(ast.Expr(value=annotation) for annotation in annotations)
     try:
@@ -360,7 +374,7 @@ def _scopes(text: str, name: str) -> symtable.SymbolTable:
         holders = sorted({function.name for function, annotations in found if annotations})
         raise Refusal(f"the local annotations in {holders} cannot be read: the block nests "
                       "deeper than ast.unparse recurses") from exc
-    return symtable.symtable(restated, name, "exec")
+    return symtable.symtable(restated, name, "exec"), unwritten
 
 
 def free_names(text: str) -> frozenset[str]:
@@ -373,20 +387,20 @@ def free_names(text: str) -> frozenset[str]:
     run time (a ``globals()`` key's readers, a class member reaching its own class) count
     it too, so they refuse where only an annotation names the key or the class.
     """
-    top = _scopes(text, "<block>")
+    top, unwritten = _scopes(text, "<block>")
     found = {s.get_name() for s in top.get_symbols()
              if s.is_referenced() and not s.is_assigned() and not s.is_imported()}
     for child in top.get_children():
         found |= _table_globals(child)
-    return frozenset(found)
+    return frozenset(found - unwritten)
 
 
 def member_free_names(member_lines: tuple[str, ...]) -> frozenset[str]:
     """:func:`free_names` for a class member's lines, read inside a stand-in class so the
     class scope is Python's own (a method does not see a class attribute by bare name)."""
     probe = "class _SplitProbe:\n" + "\n".join(member_lines) + "\n"
-    top = _scopes(probe, "<member>")
+    top, unwritten = _scopes(probe, "<member>")
     found: set[str] = set()
     for child in top.get_children():
         found |= _table_globals(child)
-    return frozenset(found)
+    return frozenset(found - unwritten)

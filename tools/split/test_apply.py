@@ -147,6 +147,18 @@ class TestTheSampleSplits:
         assert not [m for m in pylint_messages(repo, [f"{PACKAGE}/_helpers.py"])
                     if m["symbol"] == "undefined-variable"]
 
+    def test_a_module_level_annotated_assignment_splits_and_proves(self, tmp_path):
+        """``_CASES: list = [...]`` moves to ``_helpers.py`` and the proof passes.  On
+        Python 3.14 symtable reports the compiler's own ``__conditional_annotations__`` as a
+        name such a block reads; taken as the source's, it was bound nowhere, and every
+        source holding one was refused."""
+        source = SAMPLE.replace("_CASES = [", "_CASES: list = [", 1)
+        assert source != SAMPLE
+        repo = build(tmp_path, source)
+        layout = applied(repo)
+        assert not proof(repo, layout)
+        assert '_CASES: list = [("a", 1), ("b", 2)]' in text(repo, "_helpers")
+
 
 class TestALocalAnnotationsNames:
     """A name a local variable's annotation reads is a read of the scope Python would
@@ -190,6 +202,23 @@ class TestALocalAnnotationsNames:
         assert free_names("def f(a):\n" + body) == set()
         with pytest.raises(Refusal, match=r"the local annotations in \['f'\] cannot be read"):
             free_names("def f(a):\n    made: Pattern = None\n" + body)
+
+
+class TestTheCompilersOwnName:
+    """``__conditional_annotations__``, which 3.14's compiler adds to a module holding a
+    module-level variable annotation and to a class holding one in a compound statement,
+    is no read of a block that never writes it, and stays one of a block that does."""
+
+    @pytest.mark.parametrize("source,expected", [
+        ("X: int = 1\n", {"int"}),
+        ("class C:\n    if FLAG:\n        x: int = 1\n", {"FLAG", "int"}),
+        ("def f():\n    return __conditional_annotations__\n",
+         {"__conditional_annotations__"}),
+    ], ids=["a-module-level-annotation", "a-class-annotation-in-a-branch",
+            "a-block-that-reads-it"])
+    def test_a_top_level_block(self, source, expected):
+        """Each case's module-level reads."""
+        assert free_names(source) == expected
 
 
 class TestEveryProofArmFails:

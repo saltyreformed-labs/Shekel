@@ -21,7 +21,7 @@ from tests._test_helpers import (
 )
 
 
-# Hand-computed expected values (see module docstring for derivation).
+# Hand-computed expected values (derived in the package's docstring, ``__init__.py``).
 _RAISE_APPLIED_GROSS = Decimal("4120.00")  # the 4,000.00 entry x 1.03
 
 
@@ -212,8 +212,8 @@ def _net_map(user_id, scenario_id, rows):
     stores no figure, so there is nothing for a repair to supersede and
     ``salary_net_for`` is the one producer.  The difference is not cosmetic --
     the repair filtered to Projected non-overridden rows and the PRICING rule
-    filters on neither (finding **N-262**), which is what the class below now
-    grades.
+    filters on neither (finding **N-262**), which is what
+    ``test_the_salary_net.TestSalaryNetFor`` now grades.
     """
     pricing = income_service.salary_pricing(
         scenario_id, income_service.derived_paycheck_pricing(user_id),
@@ -231,7 +231,7 @@ def _derived(user_id):
 
     That engine moved onto :class:`~app.services.pay_calendar.DerivedPeriod`
     at pay-calendar plan step C2-f2d-3, and ``income_service`` derives this
-    same window internally -- so the oracles below are handed the shape the
+    same window internally -- so the oracles that read it are handed the shape the
     producer under test uses, while the ORM rows beside them stay for the
     fixtures that WRITE a ``pay_period_id``.
     """

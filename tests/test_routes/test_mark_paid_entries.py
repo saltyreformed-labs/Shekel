@@ -360,8 +360,10 @@ class TestPostPaidEntryMutation:
     movement that already carries the whole close (ruling **R-BAL80**).
 
     The service-level controls live in
-    ``test_entry_service.TestASettledRowsPurchasesAreClosed`` and
-    ``TestASettledRowMayStillGAINAPurchase``; these grade the same rules on a
+    ``test_entry_service.test_a_settled_rows_purchases_are_closed
+    .TestASettledRowsPurchasesAreClosed`` and
+    ``test_entry_service.test_a_settled_row_gaining_a_purchase
+    .TestASettledRowMayStillGAINAPurchase``; these grade the same rules on a
     row closed through the real ``mark-done`` route, and assert the second half
     of each -- what the RECORDED figure does.
     """
@@ -402,13 +404,16 @@ class TestPostPaidEntryMutation:
         `$300.00` becomes `$350.00`: the pessimistic direction, and no stored
         figure is overwritten because there is none.
 
-        **It must state the day the bank took it** (developer ruling
-        2026-08-19).  Without that day the amount comes out of the envelope's
-        own leg on the day the row closed instead of booking its own dated
-        cash, which is a movement on a past day with no evidence -- so the
-        undated form stays refused, graded by
-        ``test_entry_service.TestASettledRowMayStillGAINAPurchase
-        .test_an_UNDATED_purchase_is_refused_on_a_closed_row``.
+        **This case's purchase states the day the bank took it.**  The
+        developer's 2026-08-19 ruling refused the undated form, because the
+        envelope's own leg then booked it on the day the row closed, a
+        movement on a past day with no evidence.  Ruling **R-BAL77** (plan
+        step ``balance:X-bi-4a``) lifted that refusal: a plan row books
+        nothing of its own now (ruling **R-BAL80**), so an undated purchase
+        on a closed row is admitted and in flight, graded by
+        ``test_entry_service.test_a_settled_row_gaining_a_purchase
+        .TestASettledRowMayStillGAINAPurchase
+        .test_an_UNDATED_purchase_is_admitted_on_a_closed_row_and_is_in_flight``.
         """
         with app.app_context():
             txn_id, _ = self._paid_envelope_at_300(

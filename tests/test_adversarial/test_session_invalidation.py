@@ -36,17 +36,19 @@ from app.extensions import db
 from app.models.user import MfaConfig
 from app.services import mfa_service
 from app.services.mfa_service import TotpVerificationResult
+from tests._test_helpers import store_backup_codes
+from tests._two_factor_sign_in import reset_two_factor_of, two_factor_secret_of
 
 
-_KNOWN_TOTP_SECRET = "JBSWY3DPEHPK3PXP"
 _KNOWN_BACKUP_CODES = ["aaaaaaaa", "bbbbbbbb", "cccccccc"]
 
 
-def _enable_mfa(user_id, codes=None):
-    """Persist an enabled MFA config with a known secret and codes.
+def _its_two_factor(user_id, codes=None):
+    """Give a shared account's two-factor known backup codes; return its secret and them.
 
-    Mirrors the helper in
-    ``tests/test_routes/test_auth/test_mfa_login_and_disable.py::TestMfaLogin._enable_mfa``
+    The account is made with two-factor (plan#3600), so its secret is its
+    row's.  Mirrors the helper in
+    ``tests/test_routes/test_auth/test_mfa_login_and_disable.py::TestMfaLogin._its_two_factor``
     but free-standing (this file does not subclass ``TestMfaLogin``).
 
     Args:
@@ -62,15 +64,8 @@ def _enable_mfa(user_id, codes=None):
     """
     if codes is None:
         codes = list(_KNOWN_BACKUP_CODES)
-    config = MfaConfig(
-        user_id=user_id,
-        is_enabled=True,
-        totp_secret_encrypted=mfa_service.encrypt_secret(_KNOWN_TOTP_SECRET),
-        backup_codes=mfa_service.hash_backup_codes(codes),
-    )
-    db.session.add(config)
-    db.session.commit()
-    return _KNOWN_TOTP_SECRET, codes
+    store_backup_codes(db.session, user_id, codes)
+    return two_factor_secret_of(user_id), codes
 
 
 def _login_with_totp(app, email, password):
@@ -137,7 +132,7 @@ class TestPendingMfaTimeout:
         within the wall-clock window of the request.
         """
         with app.app_context():
-            _enable_mfa(seed_user["user"].id)
+            _its_two_factor(seed_user["user"].id)
 
             before = datetime.now(timezone.utc)
             resp = client.post("/login", data={
@@ -170,13 +165,12 @@ class TestPendingMfaTimeout:
 
         Belt-and-braces: catches a regression where the timestamp is
         unconditionally written, which would put the timestamp in
-        every authenticated user's cookie for no reason.
+        every authenticated user's cookie for no reason.  The account's
+        two-factor is reset first, so it has none, as after
+        ``scripts/reset_mfa.py``.
         """
-        # pylint: disable=unused-argument  # seed_user creates the
-        # auth.users row that the /login POST below authenticates
-        # against; not referenced directly in the test body.
         with app.app_context():
-            # No MFA enabled for seed_user.
+            reset_two_factor_of(seed_user["user"].id)
             resp = client.post("/login", data={
                 "email": "test@shekel.local",
                 "password": "testpass",
@@ -203,7 +197,7 @@ class TestPendingMfaTimeout:
           3. Flash a user-visible reason for the bounce.
         """
         with app.app_context():
-            _enable_mfa(seed_user["user"].id)
+            _its_two_factor(seed_user["user"].id)
             monkeypatch.setattr(
                 mfa_service, "verify_totp_code",
                 lambda mc, c: TotpVerificationResult.ACCEPTED,
@@ -261,7 +255,7 @@ class TestPendingMfaTimeout:
         POST handler will then reject.
         """
         with app.app_context():
-            _enable_mfa(seed_user["user"].id)
+            _its_two_factor(seed_user["user"].id)
 
             client.post("/login", data={
                 "email": "test@shekel.local",
@@ -290,7 +284,7 @@ class TestPendingMfaTimeout:
         including freshly-stamped ones).
         """
         with app.app_context():
-            _enable_mfa(seed_user["user"].id)
+            _its_two_factor(seed_user["user"].id)
             monkeypatch.setattr(
                 mfa_service, "verify_totp_code",
                 lambda mc, c: TotpVerificationResult.ACCEPTED,
@@ -323,7 +317,7 @@ class TestPendingMfaTimeout:
         date-bound.
         """
         with app.app_context():
-            _enable_mfa(seed_user["user"].id)
+            _its_two_factor(seed_user["user"].id)
             monkeypatch.setattr(
                 mfa_service, "verify_totp_code",
                 lambda mc, c: TotpVerificationResult.ACCEPTED,
@@ -357,7 +351,7 @@ class TestPendingMfaTimeout:
         tampered cookie could 500 the route and leak a stack trace.
         """
         with app.app_context():
-            _enable_mfa(seed_user["user"].id)
+            _its_two_factor(seed_user["user"].id)
             monkeypatch.setattr(
                 mfa_service, "verify_totp_code",
                 lambda mc, c: TotpVerificationResult.ACCEPTED,
@@ -389,7 +383,7 @@ class TestPendingMfaTimeout:
         cannot be trusted; reject and force a fresh password step.
         """
         with app.app_context():
-            _enable_mfa(seed_user["user"].id)
+            _its_two_factor(seed_user["user"].id)
             monkeypatch.setattr(
                 mfa_service, "verify_totp_code",
                 lambda mc, c: TotpVerificationResult.ACCEPTED,
@@ -424,7 +418,7 @@ class TestPendingMfaTimeout:
         in again" instead of "500 with traceback."
         """
         with app.app_context():
-            _enable_mfa(seed_user["user"].id)
+            _its_two_factor(seed_user["user"].id)
             monkeypatch.setattr(
                 mfa_service, "verify_totp_code",
                 lambda mc, c: TotpVerificationResult.ACCEPTED,
@@ -474,7 +468,7 @@ class TestBackupCodeInvalidatesOtherSessions:
         then re-check A and assert it is now redirected to /login.
         """
         with app.app_context():
-            _enable_mfa(seed_user["user"].id)
+            _its_two_factor(seed_user["user"].id)
             monkeypatch.setattr(
                 mfa_service, "verify_totp_code",
                 lambda mc, c: TotpVerificationResult.ACCEPTED,
@@ -523,7 +517,7 @@ class TestBackupCodeInvalidatesOtherSessions:
         bug elsewhere kept the cross-client test green.
         """
         with app.app_context():
-            _enable_mfa(seed_user["user"].id)
+            _its_two_factor(seed_user["user"].id)
             user_id = seed_user["user"].id
 
             before = datetime.now(timezone.utc)
@@ -561,7 +555,7 @@ class TestBackupCodeInvalidatesOtherSessions:
         (TOTP + backup) would still pass the F-003 cross-client test.
         """
         with app.app_context():
-            _enable_mfa(seed_user["user"].id)
+            _its_two_factor(seed_user["user"].id)
             monkeypatch.setattr(
                 mfa_service, "verify_totp_code",
                 lambda mc, c: TotpVerificationResult.ACCEPTED,
@@ -592,7 +586,7 @@ class TestBackupCodeInvalidatesOtherSessions:
         the load-bearing detail this test pins down.
         """
         with app.app_context():
-            _enable_mfa(seed_user["user"].id)
+            _its_two_factor(seed_user["user"].id)
 
             client = _login_with_backup_code(
                 app, "test@shekel.local", "testpass",
@@ -631,7 +625,7 @@ class TestMfaDisableInvalidatesOtherSessions:
         the end of mfa_disable_confirm.
         """
         with app.app_context():
-            _enable_mfa(seed_user["user"].id)
+            _its_two_factor(seed_user["user"].id)
             monkeypatch.setattr(
                 mfa_service, "verify_totp_code",
                 lambda mc, c: TotpVerificationResult.ACCEPTED,
@@ -672,7 +666,7 @@ class TestMfaDisableInvalidatesOtherSessions:
         current session survive.
         """
         with app.app_context():
-            _enable_mfa(seed_user["user"].id)
+            _its_two_factor(seed_user["user"].id)
             monkeypatch.setattr(
                 mfa_service, "verify_totp_code",
                 lambda mc, c: TotpVerificationResult.ACCEPTED,
@@ -707,7 +701,7 @@ class TestMfaDisableInvalidatesOtherSessions:
         above.
         """
         with app.app_context():
-            _enable_mfa(seed_user["user"].id)
+            _its_two_factor(seed_user["user"].id)
             monkeypatch.setattr(
                 mfa_service, "verify_totp_code",
                 lambda mc, c: TotpVerificationResult.ACCEPTED,
@@ -743,7 +737,7 @@ class TestMfaDisableInvalidatesOtherSessions:
         log-out the user's other sessions.
         """
         with app.app_context():
-            _enable_mfa(seed_user["user"].id)
+            _its_two_factor(seed_user["user"].id)
             user_id = seed_user["user"].id
 
             client = _login_with_backup_code(

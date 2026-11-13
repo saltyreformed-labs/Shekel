@@ -72,8 +72,10 @@ def through_nginx(client_address):
 def signed_in_browser(app, address):
     """Return a browser that finished the seed user's sign-in from *address*, still signed in.
 
-    The account has no code to ask, so the password finishes the sign-in, and
-    the browser holds the cookie of the record it made: it is known.
+    The account has no code to ask (its test reset its two-factor first,
+    ``tests._two_factor_sign_in.reset_two_factor_of``), so the password
+    finishes the sign-in, and the browser holds the cookie of the record it
+    made: it is known.
 
     Args:
         app: The app under test.

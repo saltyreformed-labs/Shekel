@@ -30,6 +30,13 @@ stranger there, and spends the account's five.  A session answers only at the
 address and browser it signed in from (``session_protection = "strong"``), so
 a copy is used from the owner's address, and re-confirm has no address limit
 that could answer instead of the counters.
+
+Every shared account is made with two-factor (plan#3600).  A test whose
+browsers sign in with the password alone, or re-confirm with it, resets the
+account's two-factor first (``reset_two_factor_of``), as ``scripts/reset_mfa.py``
+does, and one that then turns it on again sets it up afresh (``enable_mfa``);
+a test of a code from the start types the account's own
+(``two_factor_secret_of``).
 """
 
 import secrets
@@ -48,6 +55,7 @@ from tests._limited_app import (
 )
 from tests._test_helpers import enable_mfa
 from tests._seed_owner_fixtures import SEED_USER_EMAIL, SEED_USER_PASSWORD
+from tests._two_factor_sign_in import reset_two_factor_of, two_factor_secret_of
 
 _SECOND_EMAIL = "second@shekel.local"
 _SECOND_PASSWORD = "secondpass12"
@@ -188,7 +196,7 @@ class TestAKnownBrowserHasItsOwnTries:
         and its code is checked and signs it in.
         """
         with rate_app.app_context():
-            secret = enable_mfa(db.session, seed_user["user"].id)
+            secret = two_factor_secret_of(seed_user["user"].id)
             owner = _known_browser(rate_app, secret, "7.7.7.7")
             _guesses_checked(rate_app, _CODE_TRIES - 1, "8.8.8")
             assert _refused_for_tries(_guess(rate_app, "8.8.9.0"))
@@ -209,7 +217,7 @@ class TestAKnownBrowserHasItsOwnTries:
         """
         with rate_app.app_context():
             user_id = seed_user["user"].id
-            secret = enable_mfa(db.session, user_id)
+            secret = two_factor_secret_of(user_id)
             owner = _known_browser(rate_app, secret, "7.7.7.7")
             _type_password(owner, "7.7.7.7")
 
@@ -235,6 +243,7 @@ class TestAKnownBrowserHasItsOwnTries:
         then the second's wrong code is checked.
         """
         with rate_app.app_context():
+            reset_two_factor_of(seed_user["user"].id)
             first = signed_in_browser(rate_app, "7.7.7.7")
             first.post("/logout", **through_nginx("7.7.7.7"))
             second = signed_in_browser(rate_app, "7.7.7.8")
@@ -266,7 +275,7 @@ class TestAKnownBrowserHasItsOwnTries:
         """
         with rate_app.app_context():
             user_id = seed_user["user"].id
-            secret = enable_mfa(db.session, user_id)
+            secret = two_factor_secret_of(user_id)
             _guesses_checked(rate_app, _CODE_TRIES, "8.8.8")
 
             new_browser = rate_app.test_client()
@@ -292,7 +301,8 @@ class TestAKnownBrowserHasItsOwnTries:
         """
         with rate_app.app_context():
             user_id = seed_user["user"].id
-            secret = enable_mfa(db.session, user_id)
+            secret = two_factor_secret_of(user_id)
+            reset_two_factor_of(seed_second_user["user"].id)
             borrowed = rate_app.test_client()
             assert _signed_in(borrowed.post(
                 "/login",
@@ -330,6 +340,7 @@ class TestAKnownBrowserHasItsOwnTries:
         none of the code form's counters.
         """
         with rate_app.app_context():
+            reset_two_factor_of(seed_user["user"].id)
             user_id = seed_user["user"].id
             owner = signed_in_browser(rate_app, "7.7.7.7")
             enable_mfa(db.session, user_id)
@@ -409,6 +420,7 @@ class TestAKnownBrowserHasItsOwnReConfirmTries:
         password.
         """
         with rate_app.app_context():
+            reset_two_factor_of(seed_user["user"].id)
             owner = signed_in_browser(rate_app, _OWNERS_ADDRESS)
             thief = stolen_session(rate_app, owner)
             _wrong_passwords_checked(thief, _CODE_TRIES)
@@ -428,6 +440,7 @@ class TestAKnownBrowserHasItsOwnReConfirmTries:
         has its password checked.
         """
         with rate_app.app_context():
+            reset_two_factor_of(seed_user["user"].id)
             user_id = seed_user["user"].id
             owner = signed_in_browser(rate_app, _OWNERS_ADDRESS)
             _wrong_passwords_checked(owner, _CODE_TRIES)
@@ -454,6 +467,7 @@ class TestAKnownBrowserHasItsOwnReConfirmTries:
         five wrong ones and no more.
         """
         with rate_app.app_context():
+            reset_two_factor_of(seed_user["user"].id)
             user_id = seed_user["user"].id
             owner = signed_in_browser(rate_app, _OWNERS_ADDRESS)
             _wrong_passwords_checked(stolen_session(rate_app, owner), _CODE_TRIES)
@@ -478,6 +492,7 @@ class TestAKnownBrowserHasItsOwnReConfirmTries:
         them for the whole page.
         """
         with rate_app.app_context():
+            reset_two_factor_of(seed_user["user"].id)
             owner = signed_in_browser(rate_app, _OWNERS_ADDRESS)
             assert _re_confirmed(_re_confirm(owner, _OWNERS_ADDRESS))
 
@@ -499,7 +514,7 @@ class TestAKnownBrowserHasItsOwnReConfirmTries:
         there: each door's counters are its own.
         """
         with rate_app.app_context():
-            secret = enable_mfa(db.session, seed_user["user"].id)
+            secret = two_factor_secret_of(seed_user["user"].id)
             owner = rate_app.test_client()
             _type_password(owner, _OWNERS_ADDRESS)
             assert _signed_in(_try_code(owner, _OWNERS_ADDRESS, _code(secret)))
@@ -520,6 +535,7 @@ class TestAKnownBrowserHasItsOwnReConfirmTries:
         one, and the sixth POST is the browser's first try.
         """
         with rate_app.app_context():
+            reset_two_factor_of(seed_user["user"].id)
             user_id = seed_user["user"].id
             owner = signed_in_browser(rate_app, _OWNERS_ADDRESS)
             for _ in range(_CODE_TRIES):
@@ -543,6 +559,7 @@ class TestAKnownBrowserHasItsOwnReConfirmTries:
         put the lock on, as a stranger who knows the email would.
         """
         with rate_app.app_context():
+            reset_two_factor_of(seed_user["user"].id)
             owner = signed_in_browser(rate_app, _OWNERS_ADDRESS)
             for octet in range(_LOCK_THRESHOLD):
                 rate_app.test_client().post(

@@ -30,24 +30,27 @@ def enable_mfa(db_session, user_id, backup_codes=()):
     Returns:
         The plaintext base32 secret, for ``pyotp.TOTP(secret)`` codes.
 
+    An account whose two-factor a reset took away
+    (``tests._two_factor_sign_in.reset_two_factor_of``) keeps its disabled
+    row, and this turns that row on again, as setting it up again does.
+
     Raises:
-        AssertionError: *user_id* already has a two-factor row, which a second
-            one would collide with on its unique ``user_id``.
+        AssertionError: *user_id* already has two-factor turned on.
     """
-    existing = db_session.query(MfaConfig).filter_by(user_id=user_id).one_or_none()
-    assert existing is None, (
+    row = db_session.query(MfaConfig).filter_by(user_id=user_id).one_or_none()
+    assert row is None or not row.is_enabled, (
         f"user {user_id} already has two-factor: every shared test account is "
         f"made with it, so read its secret with "
         f"tests._two_factor_sign_in.two_factor_secret_of({user_id})"
     )
+    if row is None:
+        row = MfaConfig(user_id=user_id)
+        db_session.add(row)
     secret = mfa_service.generate_totp_secret()
-    db_session.add(MfaConfig(
-        user_id=user_id,
-        is_enabled=True,
-        totp_secret_encrypted=mfa_service.encrypt_secret(secret),
-        backup_codes=mfa_service.hash_backup_codes(list(backup_codes), rounds=4),
-        confirmed_at=_real_datetime.now(_real_timezone.utc),
-    ))
+    row.is_enabled = True
+    row.totp_secret_encrypted = mfa_service.encrypt_secret(secret)
+    row.backup_codes = mfa_service.hash_backup_codes(list(backup_codes), rounds=4)
+    row.confirmed_at = _real_datetime.now(_real_timezone.utc)
     db_session.commit()
     return secret
 

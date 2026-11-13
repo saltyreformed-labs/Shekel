@@ -21,6 +21,8 @@ from app.extensions import db
 from app.models.user import MfaConfig, User
 from app.services import mfa_service
 from app.utils.session_helpers import FRESH_LOGIN_AT_KEY
+from tests._test_helpers import store_backup_codes
+from tests._two_factor_sign_in import two_factor_secret_of
 
 _EMAIL = "test@shekel.local"
 _PASSWORD = "testpass"
@@ -34,8 +36,11 @@ _THREE_CODES = (
 _BACKUP_CODE_LINE = "You signed in with a backup code"
 
 
-def _enable_mfa(user_id: int, codes: tuple[str, ...] = (_ORIGINAL_CODE,)) -> str:
-    """Enable two-factor for *user_id* with known backup codes.
+def _its_two_factor(user_id: int, codes: tuple[str, ...] = (_ORIGINAL_CODE,)) -> str:
+    """Give a shared account's two-factor known backup codes; return its secret.
+
+    The account is made with two-factor (plan#3600), so its secret is its
+    row's.
 
     Args:
         user_id: The account.
@@ -44,16 +49,8 @@ def _enable_mfa(user_id: int, codes: tuple[str, ...] = (_ORIGINAL_CODE,)) -> str
     Returns:
         The plaintext secret.
     """
-    secret = mfa_service.generate_totp_secret()
-    db.session.add(MfaConfig(
-        user_id=user_id,
-        is_enabled=True,
-        totp_secret_encrypted=mfa_service.encrypt_secret(secret),
-        backup_codes=mfa_service.hash_backup_codes(list(codes)),
-        confirmed_at=datetime.now(timezone.utc),
-    ))
-    db.session.commit()
-    return secret
+    store_backup_codes(db.session, user_id, codes)
+    return two_factor_secret_of(user_id)
 
 
 def _sign_in_with(client, code_field: str, code: str):
@@ -112,7 +109,7 @@ class TestRegenerateTakesAStepUp:
         """Past the window: to /reauth, the old codes intact, no security event."""
         with app.app_context():
             user_id = seed_user["user"].id
-            _enable_mfa(user_id)
+            _its_two_factor(user_id)
             before = _stored_codes(user_id)
             _make_session_stale(auth_client)
 
@@ -129,7 +126,7 @@ class TestRegenerateTakesAStepUp:
         """No fresh-login stamp at all is treated as stale."""
         with app.app_context():
             user_id = seed_user["user"].id
-            _enable_mfa(user_id)
+            _its_two_factor(user_id)
             before = _stored_codes(user_id)
             with auth_client.session_transaction() as session:
                 session.pop(FRESH_LOGIN_AT_KEY, None)
@@ -146,7 +143,7 @@ class TestRegenerateTakesAStepUp:
         """HTMX swaps bodies, so the redirect is a 204 and a header, codes intact."""
         with app.app_context():
             user_id = seed_user["user"].id
-            _enable_mfa(user_id)
+            _its_two_factor(user_id)
             before = _stored_codes(user_id)
             _make_session_stale(auth_client)
 
@@ -160,7 +157,7 @@ class TestRegenerateTakesAStepUp:
         """Just signed in: the page shows new codes and the old one is void."""
         with app.app_context():
             user_id = seed_user["user"].id
-            _enable_mfa(user_id)
+            _its_two_factor(user_id)
             before = _stored_codes(user_id)
 
             response = auth_client.post(_ROUTE)
@@ -183,7 +180,7 @@ class TestRegenerateTakesAStepUp:
         """
         with app.app_context():
             user_id = seed_user["user"].id
-            secret = _enable_mfa(user_id)
+            secret = _its_two_factor(user_id)
             before = _stored_codes(user_id)
             _make_session_stale(auth_client)
 
@@ -220,7 +217,7 @@ class TestABackupCodeSignInSaysHowLongToReplaceThem:
         monkeypatch.setitem(app.config, "FRESH_LOGIN_MAX_AGE_MINUTES", window)
         with app.app_context():
             user_id = seed_user["user"].id
-            _enable_mfa(user_id, codes=_THREE_CODES)
+            _its_two_factor(user_id, codes=_THREE_CODES)
 
             landed = _sign_in_with(client, "backup_code", _THREE_CODES[0])
 
@@ -236,7 +233,7 @@ class TestABackupCodeSignInSaysHowLongToReplaceThem:
         """One code, spent: the line says none are left, the case that matters most."""
         with app.app_context():
             user_id = seed_user["user"].id
-            _enable_mfa(user_id)
+            _its_two_factor(user_id)
 
             landed = _sign_in_with(client, "backup_code", _ORIGINAL_CODE)
 
@@ -252,7 +249,7 @@ class TestABackupCodeSignInSaysHowLongToReplaceThem:
         """Inside the window the line names, Regenerate needs no re-confirm."""
         with app.app_context():
             user_id = seed_user["user"].id
-            _enable_mfa(user_id, codes=_THREE_CODES)
+            _its_two_factor(user_id, codes=_THREE_CODES)
             _sign_in_with(client, "backup_code", _THREE_CODES[0])
 
             response = client.post(_ROUTE)
@@ -266,7 +263,7 @@ class TestABackupCodeSignInSaysHowLongToReplaceThem:
         """The phone is in hand, so there is nothing to warn about."""
         with app.app_context():
             user_id = seed_user["user"].id
-            secret = _enable_mfa(user_id, codes=_THREE_CODES)
+            secret = _its_two_factor(user_id, codes=_THREE_CODES)
 
             landed = _sign_in_with(
                 client, "totp_code", pyotp.TOTP(secret).at(int(time.time())),

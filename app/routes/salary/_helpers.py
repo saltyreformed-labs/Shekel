@@ -42,7 +42,7 @@ from app.services import (
 from app.services.balance_at import BalanceContext
 from app.services.pay_calendar import PayCalendar, calendar_for
 from app.services.payroll_basis import PayrollBasis
-from app.services.salary_raises import RAISE_YEAR_MAX, RAISE_YEAR_MIN
+from app.services.salary_raises import RAISE_YEAR_MAX, RAISE_YEAR_MIN, RaiseTerms
 from app.services.recurrence import (
     NEVER_ENDS,
     EndBound,
@@ -291,7 +291,7 @@ def _raise_card_context(
     return {
         "raises_in_pay": (
             {} if basis is None
-            else {row.id: basis.raise_in_pay(row) for row in profile.raises}
+            else {row.id: basis.raise_in_pay(RaiseTerms.of(row)) for row in profile.raises}
         ),
         **_raise_form_bounds(),
     }

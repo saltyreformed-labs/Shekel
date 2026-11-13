@@ -95,7 +95,10 @@ class RaiseInPay:
             order; empty for a raise every application of which lands after
             the last entry opens.
         reaches_pay: Whether some application lands after the day the entry
-            in force then opens, so that some paycheck is priced under it.
+            in force then opens and some paycheck pays a day of it before the
+            entry holding it opens, a day its pay is priced over: its pay
+            period's weekdays (ruling **plan#3089**), or the last day of a
+            period holding none.  So some paycheck's pay is priced under it.
             Every raise has at least one application (a recurring raise's end
             year is never before its start's), so when this is ``False``
             :attr:`held` holds every one of them.

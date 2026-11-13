@@ -4,7 +4,7 @@ A leaf of :mod:`app.services.payroll_basis` (task plan#3576); the package's
 docstring states what the value is and why it holds what it holds.
 """
 from collections import Counter
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date, timedelta
 from decimal import Decimal
 from functools import cached_property
@@ -425,6 +425,23 @@ class PayrollBasis:
         """
         return self._in_force_on(day).rate
 
+    def raises_applied_on(self, day: date) -> "tuple[tuple[date, RaiseTerms], ...]":
+        """Return the forecast raise applications the walk to *day* applied, in order.
+
+        The walk's own ``raised`` (:meth:`_walk`): ``(landing day, raise)``
+        for each application landing after the day the entry in force on
+        *day* opens and on or before *day*.  A paycheck's banner names these
+        at its last priced day (:meth:`banner_on`), and :meth:`raise_in_pay`
+        reads them over a basis pricing one raise alone.
+
+        Args:
+            day: Any day.
+
+        Returns:
+            The applications, oldest first; empty when the walk applied none.
+        """
+        return self._in_force_on(day).raised
+
     @cached_property
     def _base_pays(self) -> "dict[date, BasePay]":
         """Every payday priced so far, keyed by payday, as :attr:`_in_force` keys its days."""
@@ -540,8 +557,8 @@ class PayrollBasis:
         the paycheck whose priced days (:func:`_priced_days`) hold the first
         priced day on or after the raise lands, and only where that paycheck
         is priced under it.  The banner names the applications the walk to
-        the paycheck's last priced day applied (:meth:`_walk`, ``raised``)
-        that land after the PREVIOUS paycheck's last priced day: the
+        the paycheck's last priced day applied (:meth:`raises_applied_on`)
+        that the PREVIOUS paycheck pays no day of (:meth:`_paid_before`): the
         pricing's own days and its own read of the entry in force, so a
         banner cannot announce a raise the base beside it does not pay, nor
         miss one it does.  A raise dated on or before the day the paycheck's
@@ -595,22 +612,30 @@ class PayrollBasis:
             )
             if change is not None
         ]
-        last = self._last_priced_day(payday)
-        before = self._last_priced_day(previous_payday(self.calendar, payday))
         events.extend(
             ForecastRaise(raise_obj)
-            for landed, raise_obj in self._in_force_on(last).raised
-            if landed > before
+            for landed, raise_obj in self.raises_applied_on(self._last_priced_day(payday))
+            if not self._paid_before(payday, landed)
         )
         return PayBanner(tuple(events))
 
     def _last_priced_day(self, payday: date) -> date:
-        """Return the last day the paycheck paid on *payday* is priced over (:func:`_priced_days`).
-
-        What :meth:`banner_on` and :meth:`raise_in_pay` read to ask whether a
-        paycheck pays a day on or after a raise lands.
-        """
+        """Return the last day *payday*'s paycheck is priced over (:func:`_priced_days`)."""
         return _priced_days(self._paid_days_of(payday))[-1]
+
+    def _paid_before(self, payday: date, day: date) -> bool:
+        """Whether a paycheck before *payday*'s pays a day on or after *day*.
+
+        **The one statement of "an earlier paycheck already pays a day of
+        it"** (ruling **plan#3092**, task plan#3122): the paycheck just before
+        (:func:`~app.services.pay_calendar.previous_payday`) has a priced day
+        (:func:`_priced_days`) on or after *day*; every earlier one pays only
+        earlier days.  :meth:`banner_on` badges a raise the walk applied only
+        on a paycheck it is not paid before, the first to pay a day of it, and
+        :meth:`raise_in_pay` finds an application reaching pay when it is paid
+        before the payday of the entry holding it.
+        """
+        return day <= self._last_priced_day(previous_payday(self.calendar, payday))
 
     def _recorded_change(self, entry: _Entry) -> "RecordedChange | None":
         """Return what *entry* changes: its pay against the pay before its paycheck opens.
@@ -633,7 +658,7 @@ class PayrollBasis:
             change = RecordedChange(after.annual - before.annual, yearly=True)
         return None if change.change == ZERO else change
 
-    def raise_in_pay(self, raise_obj) -> RaiseInPay:
+    def raise_in_pay(self, raise_obj: RaiseTerms) -> RaiseInPay:
         """Return which of *raise_obj*'s years recorded pay holds, and whether any reaches pay.
 
         Ruling **R-SAL95** on the day each entry opens (ruling **plan#3091**),
@@ -642,34 +667,35 @@ class PayrollBasis:
         application is HELD by the first entry opening on or after the day it
         lands, whose recorded pay includes it, and one before the first entry
         by that entry (**R-SAL59**).  It REACHES pay when the walk applies it
-        (:meth:`_walk`: it lands after the day the entry in force opens) and
-        some paycheck PAYS a day of it before an entry holds it: a day its
-        base is priced over (:func:`_priced_days`, ruling **plan#3089**) on
-        or after the day it lands, which is the paycheck before the holder's
-        when one does, as :meth:`banner_on` reads "a paycheck pays a day of
-        it".  An application after the last entry opens always reaches pay,
-        so the walk need only see whether one exists: a raise lands once in
-        each year it is believed, unbroken from its start's year, so the next
-        lands by the end of the year after.
+        (the walk to the day it lands applied it, :meth:`raises_applied_on`)
+        and some paycheck PAYS a day of it before an entry holds it: no entry
+        does, or it is paid before the holder's payday (:meth:`_paid_before`,
+        the banner's rule).  The walk read prices *raise_obj* ALONE
+        (``raise_terms``), so the applications it reads are this raise's as
+        given: the Retirement page's what-if, which no stored row holds, is
+        walked with the end year it would save (task plan#3576).  An
+        application after the last entry opens always reaches pay, so the
+        walk need only see whether one exists: a raise lands once in each
+        year it is believed, unbroken from its start's year, so the next lands
+        by the end of the year after.
 
         Args:
-            raise_obj: A raise row, or any raise-shaped object
-                :func:`~app.services.salary_raises.applications_between` reads.
+            raise_obj: The raise's terms: a row's (``RaiseTerms.of``), or a
+                what-if's.
 
         Returns:
             The :class:`~app.services.raise_in_pay.RaiseInPay`.
         """
+        alone = replace(self, raise_terms=(raise_obj,))
         last = self._pay_list[-1].opens
         through = date(max(raise_obj.effective_date.year, last.year + 1), 12, 31)
         held: "dict[_Entry, list[int]]" = {}
         reaches = False
-        for landed, _rank, _raise in applications_between((raise_obj,), date.min, through):
+        for landed, _rank, terms in applications_between(alone.raises, date.min, through):
             holder = next((entry for entry in self._pay_list if entry.opens >= landed), None)
             reaches = reaches or (
-                landed > self._entry_on(landed).opens
-                and (holder is None or landed <= self._last_priced_day(
-                    previous_payday(self.calendar, holder.payday),
-                ))
+                (landed, terms) in alone.raises_applied_on(landed)
+                and (holder is None or self._paid_before(holder.payday, landed))
             )
             if holder is not None:
                 held.setdefault(holder, []).append(landed.year)

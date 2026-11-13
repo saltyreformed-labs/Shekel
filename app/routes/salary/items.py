@@ -56,6 +56,7 @@ from app.schemas.validation import RECURRENCE_SUBMISSION_KEY
 from app.services import paycheck_line_kinds, pay_stub_service, payroll_line_cadence
 from app.services.balance_at import BalanceContext
 from app.services.payroll_basis import PayrollBasis
+from app.services.salary_raises import RaiseTerms
 from app.services.recurrence import (
     UNSET,
     MonthReading,
@@ -124,7 +125,9 @@ def _refuse_unreached_raise(
     """
     profile = salary_raise.salary_profile
     with db.session.no_autoflush:
-        refusal = PayrollBasis(profile, ctx.calendar()).raise_in_pay(salary_raise).refusal
+        refusal = PayrollBasis(profile, ctx.calendar()).raise_in_pay(
+            RaiseTerms.of(salary_raise),
+        ).refusal
     if refusal is None:
         return None
     logger.info(

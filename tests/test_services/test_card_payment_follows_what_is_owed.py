@@ -24,9 +24,13 @@ from app.enums import (
     StatusEnum,
 )
 from app.extensions import db
-from app.services.balance_at import BalanceContext, balance_at, cash_balance_at
-from app.services.balance_at._cash_fold import assembled_fold
-from app.services.balance_at._cash_periods import period_view_of
+from app.services import transfer_service
+from app.services.balance_at import (
+    BalanceContext,
+    balance_at,
+    cash_balance_at,
+    grid_balance_view,
+)
 from app.services.transaction_service import mark_as_credit
 from tests._test_helpers import (
     add_txn,
@@ -51,19 +55,27 @@ _JAN_30 = date(2026, 1, 30)
 _FEB_27 = date(2026, 2, 27)
 
 
-def _on_the_card(seed_user, card, period, amount, on, *, name="Groceries"):
-    """A row in *period* bought on *card* on *on*, by a Credit press.
+def _on_the_card(seed_user, card, period, amount, on):
+    """A Groceries row in *period* bought on *card* on *on*, by a Credit press.
 
     The row is dated *on*, so the press puts it on the card that day
     (``transaction_service.credit_day``: the row's own date once it has come).
     """
     row = add_txn(
-        db.session, seed_user, period, name, Decimal(amount), due_date=on,
+        db.session, seed_user, period, "Groceries", Decimal(amount), due_date=on,
     )
     db.session.commit()
     mark_as_credit(row, card_account_id=card.id)
     db.session.commit()
     return row
+
+
+def _cancel(row):
+    """Cancel *row* through the update door, as the transfer cancel route does."""
+    transfer_service.update_transfer(
+        row.id, row.user_id, status_id=ref_cache.status_id(StatusEnum.CANCELLED),
+    )
+    db.session.commit()
 
 
 def _true_up(card, owed, on):
@@ -293,10 +305,7 @@ class TestCappedAtWhatIsOwed:
         """
         card = _card(seed_user)
         _on_the_card(seed_user, card, seed_periods[0], "800.00", date(2026, 1, 3))
-        _on_the_card(
-            seed_user, card, seed_periods[1], "200.00", date(2026, 1, 20),
-            name="Gas",
-        )
+        _on_the_card(seed_user, card, seed_periods[1], "200.00", date(2026, 1, 20))
         template = _scheduled(seed_user, card)
         _true_up(card, "300.00", date(2026, 3, 1))
         as_of = date(2026, 3, 10)
@@ -320,8 +329,7 @@ class TestCappedAtWhatIsOwed:
             _one_off(seed_user, card, seed_periods[2], "800.00", _JAN_30), _JAN_30,
         )
         row = _row(template, _JAN_27)
-        row.status_id = ref_cache.status_id(StatusEnum.CANCELLED)
-        db.session.commit()
+        _cancel(row)
 
         assert _price(template, _JAN_27, date(2026, 2, 1)) == Decimal("800.00")
 
@@ -337,8 +345,7 @@ class TestCappedAtWhatIsOwed:
         template = _scheduled(seed_user, card)
         _true_up(card, "300.00", date(2026, 1, 20))
         row = _row(template, _JAN_27)
-        row.status_id = ref_cache.status_id(StatusEnum.CANCELLED)
-        db.session.commit()
+        _cancel(row)
         as_of = date(2026, 1, 21)
 
         assert _price(template, _JAN_27, as_of) == Decimal("300.00")
@@ -353,8 +360,7 @@ class TestCappedAtWhatIsOwed:
         template = _scheduled(seed_user, card)
         _true_up(card, "300.00", _JAN_30)
         row = _row(template, _JAN_27)
-        row.status_id = ref_cache.status_id(StatusEnum.CANCELLED)
-        db.session.commit()
+        _cancel(row)
 
         assert _price(template, _JAN_27, date(2026, 2, 1)) == Decimal("800.00")
 
@@ -396,9 +402,7 @@ class TestAnEachPaydayRowCountsItsPaycheck:
         assert _price(template, _JAN_30) == _ZERO
 
         ctx = BalanceContext.build(seed_user["user"].id, as_of=_JAN_1)
-        view = period_view_of(
-            assembled_fold(seed_user["account"], ctx), ctx.reported_periods(),
-        )
+        view = grid_balance_view(seed_user["account"], ctx)
         assert view.columns[seed_periods[1].id].expense == Decimal("800.00")
         assert _balances(seed_user, card, _JAN_1, date(2026, 1, 20))[1] == _ZERO
 
@@ -516,10 +520,7 @@ class TestALaterPurchaseIsALaterRowsToPay:
         _settle(
             _one_off(seed_user, card, seed_periods[2], "800.00", _JAN_30), _JAN_30,
         )
-        _on_the_card(
-            seed_user, card, seed_periods[2], "800.00", date(2026, 1, 31),
-            name="Tires",
-        )
+        _on_the_card(seed_user, card, seed_periods[2], "800.00", date(2026, 1, 31))
         as_of = date(2026, 2, 1)
 
         assert _price(template, _JAN_27, as_of) == _ZERO
@@ -537,10 +538,7 @@ class TestALaterPurchaseIsALaterRowsToPay:
         _settle(
             _one_off(seed_user, card, seed_periods[2], "800.00", _JAN_30), _JAN_30,
         )
-        _on_the_card(
-            seed_user, card, seed_periods[2], "300.00", date(2026, 1, 31),
-            name="Tires",
-        )
+        _on_the_card(seed_user, card, seed_periods[2], "300.00", date(2026, 1, 31))
         as_of = date(2026, 2, 1)
 
         assert _price(template, _JAN_27, as_of) == _ZERO
@@ -556,10 +554,7 @@ class TestALaterPurchaseIsALaterRowsToPay:
         _on_the_card(seed_user, card, seed_periods[0], "800.00", date(2026, 1, 3))
         template = _scheduled(seed_user, card)
         _true_up(card, "300.00", date(2026, 1, 20))
-        _on_the_card(
-            seed_user, card, seed_periods[1], "400.00", date(2026, 1, 22),
-            name="Tires",
-        )
+        _on_the_card(seed_user, card, seed_periods[1], "400.00", date(2026, 1, 22))
         as_of = date(2026, 1, 23)
 
         assert _price(template, _JAN_27, as_of) == Decimal("300.00")
@@ -597,10 +592,7 @@ class TestALaterPurchaseIsALaterRowsToPay:
         _on_the_card(seed_user, card, seed_periods[0], "800.00", date(2026, 1, 3))
         template = _payoff(seed_user, card)
         _true_up(card, "300.00", date(2026, 1, 20))
-        _on_the_card(
-            seed_user, card, seed_periods[1], "100.00", date(2026, 1, 21),
-            name="Gas",
-        )
+        _on_the_card(seed_user, card, seed_periods[1], "100.00", date(2026, 1, 21))
         as_of = date(2026, 1, 22)
 
         assert _price(template, _JAN_16, as_of) == Decimal("300.00")
@@ -621,10 +613,7 @@ class TestALaterPurchaseIsALaterRowsToPay:
             _one_off(seed_user, card, seed_periods[2], "800.00", date(2026, 1, 31)),
             date(2026, 1, 31),
         )
-        _on_the_card(
-            seed_user, card, seed_periods[2], "300.00", date(2026, 1, 31),
-            name="Gas",
-        )
+        _on_the_card(seed_user, card, seed_periods[2], "300.00", date(2026, 1, 31))
         as_of = date(2026, 2, 1)
 
         assert _price(template, _JAN_16, as_of) == _ZERO
@@ -856,10 +845,7 @@ class TestWhatStays:
         as_of = date(2026, 1, 10)
         assert _price(template, _JAN_16, as_of) == Decimal("800.00")
 
-        _on_the_card(
-            seed_user, card, seed_periods[0], "100.00", date(2026, 1, 8),
-            name="Gas",
-        )
+        _on_the_card(seed_user, card, seed_periods[0], "100.00", date(2026, 1, 8))
 
         assert _price(template, _JAN_16, as_of) == Decimal("900.00")
 
@@ -911,10 +897,7 @@ class TestWhatStays:
         """$800 Jan 3 on Jan 5's statement, $100 Jan 8 on Feb 5's: $800.00, $100.00."""
         card = _card(seed_user)
         _on_the_card(seed_user, card, seed_periods[0], "800.00", date(2026, 1, 3))
-        _on_the_card(
-            seed_user, card, seed_periods[0], "100.00", date(2026, 1, 8),
-            name="Gas",
-        )
+        _on_the_card(seed_user, card, seed_periods[0], "100.00", date(2026, 1, 8))
         template = _scheduled(seed_user, card)
         as_of = date(2026, 1, 10)
 

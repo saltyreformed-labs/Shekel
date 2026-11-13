@@ -1,27 +1,30 @@
-"""The seed companion signed in as she now must: her password, then her code.
+"""The shared test sign-in, the seed companion's credentials, and what the two-factor tests type and read.
+
+**Every shared test sign-in is** :func:`sign_in_from_a_trusted_browser`
+(rulings plan#3621, plan#3623): the account has two-factor, its browser is one
+it trusts, and the password signs it in with no code, as a person signs in on
+their own browser every day.  A code is accepted once per thirty-second step
+(``mfa_service.verify_totp_code``), so a sign-in that typed one would make
+every code its test then types in that step a replay; this one types none.  A
+test of the code form itself types codes, on a browser of its own.
 
 Ruling plan#3434: every companion must use two-factor, and the login gate holds
 a signed-in companion without it at setup (``app/login_gate.py``), so a browser
 signed in with her password alone reaches no page of hers.  A test that needs
 her on her pages signs her in through :func:`sign_in_seed_companion`, which
 turns two-factor on through the role-neutral :func:`tests._test_helpers.enable_mfa`
-and then signs a fresh browser in with her password and a code, as the login
-form and ``/mfa/verify`` take them.  ``seed_companion`` itself stays without
-two-factor: a companion just created, which is what a test of the hold, or of
-her setup, starts from.
+and then signs a fresh browser in through the shared sign-in.
+``seed_companion`` itself stays without two-factor: a companion her owner has
+just made, which is what a test of the hold, or of her setup, starts from.
 
 The one spelling of her credentials is here, and ``seed_companion`` writes
 them.
 
-**Replay prevention refuses a second code for one secret inside a 30-second
-step** (``mfa_service.verify_totp_code``), so a test signed in this way types
-no second code for her; a test that must, enrols her itself after a password
-sign-in and types its one code then (``tests/test_routes/test_security_page.py``).
-
 **The one home of what the two-factor tests type and read** (plan#3517):
 :func:`code_now`, the code to type for a secret, and its clock rule;
-:func:`post_her_password`; :func:`redirect_path`; and
-:func:`two_factor_row_of`, a user's two-factor row read fresh.
+:func:`post_her_password`; :func:`redirect_path`;
+:func:`two_factor_row_of`, a user's two-factor row read fresh; and
+:func:`two_factor_secret_of`, the secret that row holds.
 """
 
 import time
@@ -31,7 +34,9 @@ import pyotp
 
 from app.extensions import db
 from app.models.user import MfaConfig, User
+from app.services import mfa_service
 from tests._test_helpers import enable_mfa
+from tests._trusted_devices import trust_browser
 
 SEED_COMPANION_EMAIL = "companion@shekel.local"
 SEED_COMPANION_PASSWORD = "companionpass"
@@ -60,6 +65,68 @@ def two_factor_row_of(user_id):
     """Return *user_id*'s ``auth.mfa_configs`` row, read fresh, or ``None``."""
     db.session.expire_all()
     return db.session.query(MfaConfig).filter_by(user_id=user_id).one_or_none()
+
+
+def two_factor_secret_of(user_id):
+    """Return the authenticator secret *user_id*'s two-factor row holds.
+
+    Read from the row, the one place it is stored, so a test types codes for
+    the secret the app checks rather than a copy the fixture kept.
+
+    Raises:
+        AssertionError: *user_id* has no two-factor turned on.
+    """
+    row = two_factor_row_of(user_id)
+    assert row is not None and row.is_enabled, (
+        f"user {user_id} has no two-factor turned on, so it has no secret"
+    )
+    return mfa_service.decrypt_secret(row.totp_secret_encrypted)
+
+
+def sign_in_from_a_trusted_browser(browser, email, password, lands_on, **request_arguments):
+    """Sign *browser* in to the account *email* names, on a browser it trusts.
+
+    THE shared test sign-in (rulings plan#3621, plan#3623).  The account must
+    already have two-factor, as every account past setup does.  This trusts
+    *browser* through the service, as a code sign-in that asked to be trusted
+    leaves it (``tests._trusted_devices.trust_browser``), then posts the
+    password, which ``/login`` then signs in with no code.  It types none, so
+    every code of the account's current step is the test's to type.
+
+    Call inside an app context.
+
+    Args:
+        browser: A test client, which this signs in.
+        email: The account's email.
+        password: The account's password.
+        lands_on: The path a finished sign-in sends the account to.
+        **request_arguments: Passed to the password's POST, as a test whose
+            browser signs in from an address of its own passes them
+            (``tests._limited_app.through_nginx``).
+
+    Returns:
+        *browser*, signed in.
+    """
+    user = db.session.query(User).filter_by(email=email).one()
+    has_two_factor = db.session.query(
+        db.session.query(MfaConfig)
+        .filter_by(user_id=user.id, is_enabled=True)
+        .exists()
+    ).scalar()
+    assert has_two_factor, (
+        f"Setup failed: {email} has no two-factor, so no browser of theirs can "
+        f"be trusted; give it two-factor where the account is made"
+    )
+    trust_browser(browser, user.id)
+    response = browser.post(
+        "/login", data={"email": email, "password": password}, **request_arguments,
+    )
+    assert redirect_path(response) == lands_on, (
+        f"Setup failed: signing {email} in on a trusted browser answered "
+        f"{response.status_code} to {response.headers.get('Location')!r}, "
+        f"not {lands_on!r}"
+    )
+    return browser
 
 
 def post_her_password(browser):
@@ -98,11 +165,13 @@ def sign_in_seed_companion_by_password(app):
 
 
 def sign_in_seed_companion(app):
-    """Turn two-factor on for the seed companion, then sign a browser in with it.
+    """Turn two-factor on for the seed companion, then sign a browser in as her.
 
     Call inside an app context, after ``seed_companion`` has created her.  A
     second call in one test would fail at ``enable_mfa``: she has one
-    two-factor row.
+    two-factor row.  Her browser is one she trusts
+    (:func:`sign_in_from_a_trusted_browser`), so her code is the test's to type
+    (:func:`two_factor_secret_of`).
 
     Args:
         app: The Flask application.
@@ -112,17 +181,7 @@ def sign_in_seed_companion(app):
         pages.
     """
     companion = db.session.query(User).filter_by(email=SEED_COMPANION_EMAIL).one()
-    secret = enable_mfa(db.session, companion.id)
-    browser = app.test_client()
-
-    password = post_her_password(browser)
-    assert redirect_path(password) == "/mfa/verify", (
-        f"Setup failed: her password answered {password.status_code} to "
-        f"{password.headers.get('Location')!r}, not the code form"
+    enable_mfa(db.session, companion.id)
+    return sign_in_from_a_trusted_browser(
+        app.test_client(), SEED_COMPANION_EMAIL, SEED_COMPANION_PASSWORD, _HER_PAGE,
     )
-    code = browser.post("/mfa/verify", data={"totp_code": code_now(secret)})
-    assert redirect_path(code) == _HER_PAGE, (
-        f"Setup failed: her code answered {code.status_code} to "
-        f"{code.headers.get('Location')!r}, not her page"
-    )
-    return browser

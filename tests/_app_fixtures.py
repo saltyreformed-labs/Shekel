@@ -74,11 +74,23 @@ def fast_bcrypt():
     _bcrypt.gensalt = _original_gensalt
 
 
-@pytest.fixture(autouse=True)
-def set_totp_key(monkeypatch):
-    """Set a test TOTP encryption key for all tests."""
+@pytest.fixture(scope="session", autouse=True)
+def set_totp_key():
+    """Hold ONE two-factor encryption key for the whole test process (ruling plan#3625).
+
+    A seeded start state is built once per worker and cloned into each test
+    that declares it, so its owner's two-factor row is encrypted under the key
+    of the test that built it.  A key per test made that row unreadable from
+    the second test on (measured 2026-11-12: 267 cases of one route sweep
+    errored ``InvalidToken`` once its owner had two-factor), so the key lives
+    as long as the worker does.  A test that needs a key of its own, or none,
+    still sets or deletes it with ``monkeypatch``, which puts this one back
+    after it.
+    """
     from cryptography.fernet import Fernet  # pylint: disable=import-outside-toplevel
-    monkeypatch.setenv("TOTP_ENCRYPTION_KEY", Fernet.generate_key().decode())
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setenv("TOTP_ENCRYPTION_KEY", Fernet.generate_key().decode())
+        yield
 
 
 @pytest.fixture(autouse=True)
@@ -234,8 +246,9 @@ def db(app, setup_database, request, set_totp_key, disable_hibp_check):  # pylin
     """Provide a freshly-cloned database for each test.
 
     **It DEPENDS on the two environment fixtures rather than merely coexisting
-    with them** (plan step balance:X-be-2).  All three are autouse and
-    function-scoped, so every test got them either way -- but pytest builds
+    with them** (plan step balance:X-be-2).  All three are autouse, so every
+    test got them either way, and all three were function-scoped until
+    ``set_totp_key`` became session-scoped (ruling plan#3625) -- but pytest builds
     the fixture list from ``dir(module)``, which is ALPHABETICAL, and
     ``"db" < "disable_hibp_check" < "set_totp_key"``.  That is the whole of
     why this one used to run first: not scope, and nothing about what it does.

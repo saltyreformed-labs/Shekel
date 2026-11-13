@@ -824,48 +824,6 @@ class TestEveryDoorHasTheOneRule:
         assert auth_service.verify_password(new_password, user.password_hash)
         assert _lock_state(user_id) == lock_before
 
-    def test_a_known_browser_turns_two_factor_off_while_locked(self, app, seed_user):
-        """The password and the code get past the lock, and two-factor is off."""
-        user_id = seed_user["user"].id
-        secret = two_factor_secret_of(user_id)
-        browser = app.test_client()
-        assert _asked_the_code(_password(browser))
-        assert _signed_in(browser.post("/mfa/verify", data={"totp_code": _code(secret)}))
-        _strangers_lock(app, user_id)
-
-        browser.post("/mfa/disable", data={
-            "current_password": SEED_USER_PASSWORD,
-            "totp_code": _second_code(secret),
-        })
-
-        db.session.expire_all()
-        assert db.session.query(MfaConfig).filter_by(
-            user_id=user_id,
-        ).one().is_enabled is False
-
-    def test_a_known_browsers_wrong_code_at_disable_counts_on_its_record(
-        self, app, seed_user,
-    ):
-        """A wrong code at Disable two-factor: 1 on its record, 0 on the account's.
-
-        The password is right, and two-factor stays on.
-        """
-        user_id = seed_user["user"].id
-        secret = two_factor_secret_of(user_id)
-        browser = _signed_in_with_a_code(app, secret)
-
-        response = browser.post("/mfa/disable", data={
-            "current_password": SEED_USER_PASSWORD, "totp_code": _NEVER_A_CODE,
-        }, follow_redirects=True)
-
-        assert _INVALID_CODE in response.data
-        assert _device_count(user_id, _token(browser, user_id)) == 1
-        assert _lock_state(user_id) == (0, None)
-        db.session.expire_all()
-        assert db.session.query(MfaConfig).filter_by(
-            user_id=user_id,
-        ).one().is_enabled is True
-
 
 def _re_confirmed(response):
     """Return whether *response* is a finished re-confirm's redirect."""

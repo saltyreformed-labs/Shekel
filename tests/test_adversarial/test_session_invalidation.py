@@ -13,12 +13,15 @@ C-08 of the 2026-04-15 security remediation plan:
 
   * F-032 (CWE-613): MFA disable does not invalidate other sessions.
     Closed by the ``invalidate_other_sessions`` call at the end of
-    :func:`mfa_disable_confirm`.
+    ``mfa_disable_confirm``, then made unreachable: no account can turn
+    two-factor off (ruling plan#3604), so its tests went with the route.
+    The one reset act ends every session itself
+    (``mfa_service.reset_two_factor``; ``tests/test_scripts/test_reset_mfa.py``).
 
 Tests in this file run two test clients side-by-side -- one
 representing a "compromised" session that should be terminated, the
 other representing the user's new trusted session.  A regression on
-any of the three findings would leave the compromised session alive,
+either live finding would leave the compromised session alive,
 which these tests detect by GETting a protected page from the
 compromised client and asserting a 302 to /login.
 
@@ -47,7 +50,7 @@ def _its_two_factor(user_id, codes=None):
 
     The account is made with two-factor (plan#3600), so its secret is its
     row's.  Mirrors the helper in
-    ``tests/test_routes/test_auth/test_mfa_login_and_disable.py::TestMfaLogin._its_two_factor``
+    ``tests/test_routes/test_auth/test_mfa_login.py::TestMfaLogin._its_two_factor``
     but free-standing (this file does not subclass ``TestMfaLogin``).
 
     Args:
@@ -606,172 +609,6 @@ class TestBackupCodeInvalidatesOtherSessions:
 
 # ---------------------------------------------------------------------------
 # F-032: MFA disable invalidates other sessions
-# ---------------------------------------------------------------------------
-
-
-class TestMfaDisableInvalidatesOtherSessions:
-    """``mfa_disable_confirm`` is an auth-factor state change."""
-
-    def test_other_session_logged_out_after_mfa_disable(
-        self, app, seed_user, monkeypatch,
-    ):
-        """A parallel session is forced out when MFA is disabled.
-
-        Threat scenario per F-032: the user disables MFA because they
-        suspect a session is compromised.  The disable itself does
-        nothing to the suspect session unless we also bump
-        session_invalidated_at -- exactly what the helper does at
-        the end of mfa_disable_confirm.
-        """
-        with app.app_context():
-            _its_two_factor(seed_user["user"].id)
-            monkeypatch.setattr(
-                mfa_service, "verify_totp_code",
-                lambda mc, c: TotpVerificationResult.ACCEPTED,
-            )
-
-            # Client A: the (potentially compromised) parallel session.
-            client_a = _login_with_totp(
-                app, "test@shekel.local", "testpass",
-            )
-            assert client_a.get("/dashboard").status_code == 200
-
-            # Client B: the user disabling MFA from a trusted device.
-            client_b = _login_with_totp(
-                app, "test@shekel.local", "testpass",
-            )
-            disable_resp = client_b.post("/mfa/disable", data={
-                "current_password": "testpass",
-                "totp_code": "123456",
-            })
-            assert disable_resp.status_code == 302
-
-            # Client A: must now be invalidated.
-            recheck_a = client_a.get("/dashboard", follow_redirects=False)
-            assert recheck_a.status_code == 302, (
-                "MFA disable did NOT invalidate Client A's session; "
-                f"got status {recheck_a.status_code}.  F-032 regression."
-            )
-            assert "/login" in recheck_a.headers.get("Location", "")
-
-    def test_disabling_session_survives_mfa_disable(
-        self, app, seed_user, monkeypatch,
-    ):
-        """The session that issued the MFA disable stays authenticated.
-
-        Same single-``now`` invariant as the backup-code path:  the
-        helper sets the DB column and the cookie to the same instant
-        so the strict-less-than comparison in load_user lets the
-        current session survive.
-        """
-        with app.app_context():
-            _its_two_factor(seed_user["user"].id)
-            monkeypatch.setattr(
-                mfa_service, "verify_totp_code",
-                lambda mc, c: TotpVerificationResult.ACCEPTED,
-            )
-
-            client = _login_with_totp(
-                app, "test@shekel.local", "testpass",
-            )
-
-            disable_resp = client.post("/mfa/disable", data={
-                "current_password": "testpass",
-                "totp_code": "123456",
-            })
-            assert disable_resp.status_code == 302
-
-            # The client that disabled MFA must still be able to
-            # access protected pages.
-            r = client.get("/dashboard")
-            assert r.status_code == 200, (
-                "MFA-disabling client lost its own session; got "
-                f"status {r.status_code}.  Single-now invariant in "
-                "invalidate_other_sessions has regressed."
-            )
-
-    def test_session_invalidated_at_advanced_after_mfa_disable(
-        self, app, seed_user, monkeypatch,
-    ):
-        """The DB column is bumped by mfa_disable_confirm.
-
-        Direct-to-DB check on the load-bearing artefact, parallel to
-        ``test_session_invalidated_at_advanced_after_backup_code``
-        above.
-        """
-        with app.app_context():
-            _its_two_factor(seed_user["user"].id)
-            monkeypatch.setattr(
-                mfa_service, "verify_totp_code",
-                lambda mc, c: TotpVerificationResult.ACCEPTED,
-            )
-            user_id = seed_user["user"].id
-
-            client = _login_with_totp(
-                app, "test@shekel.local", "testpass",
-            )
-
-            before = datetime.now(timezone.utc)
-            client.post("/mfa/disable", data={
-                "current_password": "testpass",
-                "totp_code": "123456",
-            })
-            after = datetime.now(timezone.utc)
-
-            db.session.expire_all()
-            from app.models.user import User  # pylint: disable=import-outside-toplevel
-            reloaded = db.session.get(User, user_id)
-            assert reloaded.session_invalidated_at is not None
-            assert before <= reloaded.session_invalidated_at <= after
-
-    def test_mfa_disable_failed_password_does_not_invalidate(
-        self, app, seed_user,
-    ):
-        """Failed MFA disable (wrong password) does NOT bump the column.
-
-        Negative control:  the helper must run only on a SUCCESSFUL
-        disable, not on any POST to /mfa/disable.  A regression that
-        ran the helper before the password check would let an
-        attacker who has only a session cookie (no password) force-
-        log-out the user's other sessions.
-        """
-        with app.app_context():
-            _its_two_factor(seed_user["user"].id)
-            user_id = seed_user["user"].id
-
-            client = _login_with_backup_code(
-                app, "test@shekel.local", "testpass",
-                _KNOWN_BACKUP_CODES[0],
-            )
-            # The backup-code login already bumped the column;
-            # capture the value so we can prove the failed disable
-            # below does NOT bump it again.
-            db.session.expire_all()
-            from app.models.user import User  # pylint: disable=import-outside-toplevel
-            stamp_before = db.session.get(
-                User, user_id,
-            ).session_invalidated_at
-            assert stamp_before is not None
-
-            resp = client.post("/mfa/disable", data={
-                "current_password": "WRONG_PASSWORD",
-                "totp_code": "123456",
-            })
-            # Wrong password -> 302 to /mfa/disable (not a 500).
-            assert resp.status_code == 302
-
-            db.session.expire_all()
-            stamp_after = db.session.get(
-                User, user_id,
-            ).session_invalidated_at
-            assert stamp_after == stamp_before, (
-                "Failed MFA-disable must NOT bump session_invalidated_at; "
-                "the helper must only run on a successful disable."
-            )
-
-
-# ---------------------------------------------------------------------------
-# Cross-cutting regressions
 # ---------------------------------------------------------------------------
 
 

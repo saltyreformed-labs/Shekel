@@ -53,7 +53,7 @@ class TestResetMfa:
         """The reset bumps ``session_invalidated_at`` to the moment it ran.
 
         That bump is what ends the user's sessions and forgets every trusted
-        device (plan#2173, ruling plan#2406), as ``/mfa/disable``'s does.
+        device (plan#2173, ruling plan#2406).
         """
         with app.app_context():
             user_id = seed_user["user"].id

@@ -126,6 +126,7 @@ class TestThirtyDaysAfterItsSignIn:
             pytest.param(_THIRTY_DAYS - _ONE_SECOND, True, id="a-second-younger"),
         ],
     )
+
     def test_the_boundary_is_thirty_days_to_the_second(
         self, app, seed_user, age, still_signed_in,
     ):
@@ -225,26 +226,6 @@ class TestNothingButASignInRenewsIt:
             )
 
         assert _the_session_after(_sign_in(app), change_password) is False
-
-    def test_turning_two_factor_off(self, app, seed_user):
-        """``/mfa/disable`` near day thirty: the session still ends on it."""
-        user_id = seed_user["user"].id
-        secret = two_factor_secret_of(user_id)
-        browser = app.test_client()
-        assert _password(browser).headers["Location"].endswith("/mfa/verify")
-        assert _signed_in(browser.post("/mfa/verify", data={"totp_code": code_now(secret)}))
-
-        def turn_two_factor_off(browser):
-            browser.post("/mfa/disable", data={
-                "current_password": SEED_USER_PASSWORD,
-                "totp_code": _next_code(secret),
-            })
-            db.session.expire_all()
-            assert db.session.query(MfaConfig).filter_by(
-                user_id=user_id,
-            ).one().is_enabled is False
-
-        assert _the_session_after(browser, turn_two_factor_off) is False
 
 
 class TestTheSessionAndItsRecord:

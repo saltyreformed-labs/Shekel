@@ -241,7 +241,7 @@ def reauth():
       * If the user has MFA enabled, a TOTP code is required.  A wrong or
         replayed one counts toward the lock.  The
         same ``_verify_totp_with_replay_logging`` helper used by
-        /mfa/verify and /mfa/disable enforces replay prevention --
+        /mfa/verify enforces replay prevention --
         a code captured at primary login cannot be reused here, and
         vice versa, because the helper bumps and persists
         ``mfa_config.last_totp_timestep`` on every ACCEPTED match.
@@ -254,7 +254,7 @@ def reauth():
       * Decryption errors (missing TOTP_ENCRYPTION_KEY, ciphertext
         unreadable under any current Fernet) flash an
         operator-actionable message and re-render the form, mirroring
-        /mfa/verify and /mfa/disable.
+        /mfa/verify.
 
     Each POST whose form the schema accepts spends a try
     (:func:`~app.routes.auth._helpers._spend_a_try`) before its password is

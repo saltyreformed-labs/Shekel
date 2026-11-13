@@ -44,8 +44,8 @@ What this module does NOT do
 
   * It does NOT itself emit ``log_event`` calls -- the route handlers
     that motivate the security event already log via
-    ``EVT_PASSWORD_CHANGED`` / ``EVT_MFA_ENABLED`` / ``EVT_MFA_DISABLED``
-    / ``EVT_BACKUP_CODES_REGENERATED``.  Adding a second log line here
+    ``EVT_PASSWORD_CHANGED`` / ``EVT_MFA_ENABLED`` /
+    ``EVT_BACKUP_CODES_REGENERATED``.  Adding a second log line here
     would double-count the same event in dashboards.
   * It does NOT commit the SQLAlchemy session.  The caller batches
     the security-event stamp with the credential change so a failure
@@ -94,6 +94,10 @@ class SecurityEventKind(str, enum.Enum):
 
     PASSWORD_CHANGED = "password_changed"
     MFA_ENABLED = "mfa_enabled"
+    #: Written by ``/mfa/disable`` until no account could turn two-factor
+    #: off (ruling plan#3604); nothing writes it now.  It stays so a row
+    #: that recorded it before still shows its banner, and
+    #: ``ck_users_security_event_kind`` still names it.
     MFA_DISABLED = "mfa_disabled"
     BACKUP_CODES_REGENERATED = "backup_codes_regenerated"
 
@@ -125,8 +129,9 @@ KIND_DISPLAY: dict[str, dict[str, str]] = {
     SecurityEventKind.MFA_ENABLED.value: {
         "title": "Two-factor authentication was enabled.",
         "detail": (
-            "If you did not set this up, sign in and remove the "
-            "authenticator before it locks you out."
+            "If you did not set this up, change your password and log "
+            "out all other sessions now, then have your two-factor "
+            "authentication reset so you can set it up yourself."
         ),
     },
     SecurityEventKind.MFA_DISABLED.value: {
@@ -140,7 +145,8 @@ KIND_DISPLAY: dict[str, dict[str, str]] = {
         "title": "Your backup codes were regenerated.",
         "detail": (
             "Any previously printed codes no longer work.  If this was "
-            "not you, change your password and disable MFA."
+            "not you, regenerate them again, change your password and "
+            "log out all other sessions."
         ),
     },
 }

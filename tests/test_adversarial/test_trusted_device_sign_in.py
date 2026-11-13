@@ -30,7 +30,6 @@ import sqlalchemy
 from app.config import ProdConfig
 from app.extensions import db
 from app.models.known_device import KnownDevice
-from app.models.user import MfaConfig
 from scripts.reset_mfa import reset_mfa
 from tests._test_helpers import enable_mfa, store_backup_codes
 from tests._seed_owner_fixtures import SEED_USER_EMAIL, SEED_USER_PASSWORD
@@ -381,28 +380,6 @@ class TestWhatForgetsTheDevice:
         assert _signed_in(
             elsewhere.post("/mfa/verify", data={"backup_code": _BACKUP_CODE}),
         )
-
-        assert _asked_the_code(
-            _password(browser, SEED_USER_EMAIL, SEED_USER_PASSWORD),
-        )
-
-    def test_turning_two_factor_off(self, app, seed_user):
-        """``/mfa/disable``, then a new authenticator: the code is asked."""
-        user_id = seed_user["user"].id
-        secret = two_factor_secret_of(user_id)
-        browser = _browser_trusted_through_the_service(app, user_id)
-        # Control: before two-factor is turned off, this browser skips the code.
-        assert _signed_in(_password(browser, SEED_USER_EMAIL, SEED_USER_PASSWORD))
-
-        response = browser.post("/mfa/disable", data={
-            "current_password": SEED_USER_PASSWORD, "totp_code": _code(secret),
-        })
-        assert response.status_code == 302
-        assert db.session.query(MfaConfig).filter_by(
-            user_id=user_id,
-        ).one().is_enabled is False, "Setup failed: two-factor is still on"
-        browser.post("/logout")
-        enable_mfa(db.session, user_id)
 
         assert _asked_the_code(
             _password(browser, SEED_USER_EMAIL, SEED_USER_PASSWORD),

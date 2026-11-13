@@ -137,14 +137,14 @@ class TestThePage:
 class TestWhatForgetsEveryDevice:
     """The Trusted Devices card names what forgets them for the reader's role.
 
-    Plan#3521: a companion cannot turn two-factor off (ruling plan#3434), and
-    the owner's reset forgets her devices (ruling plan#3441).
+    Plan#3521: no account can turn two-factor off (ruling plan#3604, which
+    widened ruling plan#3434's rule for a companion), and the owner's reset
+    forgets her devices (ruling plan#3441).
     """
 
     _OWNERS = (
-        "Changing your password, logging out all other sessions, turning off "
-        "two-factor authentication or signing in with a backup code forgets "
-        "every device."
+        "Changing your password, logging out all other sessions or signing in "
+        "with a backup code forgets every device."
     )
     _COMPANIONS = (
         "Changing your password, logging out all other sessions or signing in "
@@ -153,13 +153,17 @@ class TestWhatForgetsEveryDevice:
         "password."
     )
 
-    def test_an_owner_is_told_turning_it_off_does(self, app, auth_client):
-        """The owner's card names turning two-factor off, and no owner's reset."""
+    def test_an_owner_is_told_what_forgets_them(self, app, auth_client):
+        """The owner's card names no turning two-factor off, and no owner's reset.
+
+        No account can turn it off (ruling plan#3604).
+        """
         with app.app_context():
             page = text_of(auth_client.get("/security").get_data(as_text=True))
 
             assert self._OWNERS in page
             assert self._COMPANIONS not in page
+            assert "turning off two-factor" not in page
 
     def test_a_companion_is_told_the_owners_reset_does(self, app, seed_companion):
         """Her card names the owner's reset and password, and no turning it off."""

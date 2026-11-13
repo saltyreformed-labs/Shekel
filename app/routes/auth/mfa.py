@@ -4,8 +4,11 @@ Shekel Budget App -- Auth route package: MFA lifecycle.
 The TOTP multi-factor family, deliberately co-located: login-time
 verification (``/mfa/verify``, consuming the pending state the login
 route in :mod:`~app.routes.auth.credentials` establishes), enrolment
-(``/mfa/setup`` + ``/mfa/confirm``), backup-code regeneration, and
-disablement (GET confirmation + POST).  Each route registers against
+(``/mfa/setup`` + ``/mfa/confirm``) and backup-code regeneration.  There
+is no disablement: no account can turn two-factor off (ruling plan#3604),
+and ``scripts/reset_mfa.py`` is the recovery for a lost authenticator, a
+companion's also the owner's Reset on Settings > Companions.  Each route
+registers against
 the shared ``auth_bp`` from :mod:`~app.routes.auth._bp`; the pending-
 state freshness/cleanup helpers, the replay-logging TOTP verifier, the
 backup-code consumer, and the setup TTL constant come from
@@ -15,10 +18,8 @@ backup-code consumer, and the setup TTL constant come from
 
 import hashlib
 import logging
-from collections.abc import Callable
 from datetime import datetime, timezone
-from functools import wraps
-from typing import NamedTuple, ParamSpec
+from typing import NamedTuple
 
 from flask import (
     current_app,
@@ -29,7 +30,6 @@ from flask import (
     session as flask_session,
     url_for,
 )
-from flask.typing import ResponseReturnValue
 from flask_login import current_user
 
 from cryptography.fernet import InvalidToken
@@ -41,11 +41,9 @@ from app.models.known_device import TRUST_LIFETIME
 from app.models.user import MfaConfig, User
 from app.schemas.validation import (
     MfaConfirmSchema,
-    MfaDisableSchema,
     MfaVerifySchema,
 )
 from app.services import auth_service, mfa_service
-from app.exceptions import AuthError
 from app.rate_limits import limiter
 from app.routes.auth._bp import auth_bp
 from app.routes.auth._helpers import (
@@ -59,7 +57,6 @@ from app.routes.auth._helpers import (
     _known_device,
     _mfa_pending_is_fresh,
     _spend_a_try,
-    _totp_accepted_or_key_failure,
     _verify_totp_with_replay_logging,
 )
 from app.utils.auth_helpers import fresh_login_required
@@ -67,11 +64,9 @@ from app.utils.log_events import (
     AUTH,
     EVT_BACKUP_CODES_REGENERATED,
     EVT_DEVICE_TRUSTED,
-    EVT_MFA_DISABLED,
     EVT_MFA_ENABLED,
     EVT_LOGIN_FAILED,
     EVT_MFA_LOGIN_SUCCESS,
-    EVT_REAUTH_FAILED,
     log_event,
 )
 from app.utils.security_events import (
@@ -81,10 +76,6 @@ from app.utils.security_events import (
 from app.utils.session_helpers import invalidate_other_sessions
 
 logger = logging.getLogger(__name__)
-
-#: A guarded view's own parameters, which :func:`_refused_where_required` keeps.
-_ViewParams = ParamSpec("_ViewParams")
-
 
 def _check_mfa_code(mfa_config, user_id, totp_code, backup_code):
     """Verify a submitted TOTP or backup code; return (valid, used_backup_code).
@@ -795,180 +786,3 @@ def regenerate_backup_codes():
     log_event(logger, logging.INFO, EVT_BACKUP_CODES_REGENERATED, AUTH,
               "Backup codes regenerated", user_id=current_user.id)
     return render_template("auth/mfa_backup_codes.html", backup_codes=codes)
-
-
-def _refused_where_required(
-    view: Callable[_ViewParams, ResponseReturnValue],
-) -> Callable[_ViewParams, ResponseReturnValue]:
-    """Refuse a view that turns off two-factor to a user who must have it.
-
-    Ruling plan#3434: every companion must use two-factor, and there is no
-    switch, so ``/mfa/disable`` refuses her on GET and POST alike, before the
-    view reads or counts any password or code.  The Security page hides the
-    button and says it is required; this answers the URL typed or a stale
-    link.  ``scripts/reset_mfa.py`` still clears it, and she meets setup at
-    her next sign-in.
-
-    Args:
-        view: The view function to guard.
-
-    Returns:
-        The guarded view, which redirects such a user to the Security page,
-        saying why, and runs *view* for anyone else.
-    """
-    @wraps(view)
-    def guarded(
-        *args: _ViewParams.args, **kwargs: _ViewParams.kwargs,
-    ) -> ResponseReturnValue:
-        """Redirect a user who must have two-factor; else run the view."""
-        if current_user.must_have_two_factor:
-            flash(
-                "Two-factor authentication is required for your account and "
-                "cannot be turned off.",
-                "warning",
-            )
-            return redirect(url_for("auth.security"))
-        return view(*args, **kwargs)
-    return guarded
-
-
-@auth_bp.route("/mfa/disable", methods=["GET"])
-@_refused_where_required
-def mfa_disable():
-    """Display the MFA disable confirmation page.
-
-    Requires MFA to be currently enabled. Redirects to security
-    settings if MFA is not enabled.  A user who must have two-factor never
-    reaches it (:func:`_refused_where_required`).
-    """
-    mfa_config = (
-        db.session.query(MfaConfig)
-        .filter_by(user_id=current_user.id)
-        .first()
-    )
-    if not mfa_config or not mfa_config.is_enabled:
-        flash("Two-factor authentication is not enabled.", "info")
-        return redirect(url_for("auth.security"))
-
-    return render_template("auth/mfa_disable.html")
-
-
-@auth_bp.route("/mfa/disable", methods=["POST"])
-@_refused_where_required
-def mfa_disable_confirm():
-    """Process MFA disable after verifying password and TOTP code.
-
-    Clears every piece of stored MFA material -- the TOTP secret,
-    backup codes, the recorded replay-prevention step, and any pending
-    setup ciphertext -- and sets is_enabled to False, via the
-    :func:`mfa_service.clear_mfa_material` rule shared with
-    ``scripts/reset_mfa.py`` so the route and the emergency CLI cannot
-    drift on the field set.  The TOTP step is verified through
-    :func:`mfa_service.verify_totp_code` with replay prevention
-    enforced -- an attacker who has captured the user's password and a
-    recently-used TOTP code cannot use that code to disable MFA, the
-    same defence that ``/mfa/verify`` provides at login.
-
-    A wrong password or code counts toward the lock, and the lock refuses
-    the right ones (ruling plan#3008), with sign-in's one rule for whose
-    attempt it is (plan#2772, ruling plan#3034): a known browser counts on
-    its own record and passes the account's lock, a stranger counts on the
-    account and meets it.  Success does not clear the count: that is a
-    finished sign-in's or re-confirm's (ruling plan#3007).
-
-    A user who must have two-factor never reaches it
-    (:func:`_refused_where_required`), so a wrong password or code there
-    counts nothing and a right pair turns nothing off.
-    """
-    # Schema validates shape before bcrypt is invoked.  current_password
-    # accepts any historical length (legacy short passwords still work
-    # for verification); totp_code is capped at 6 characters so a
-    # DoS-sized string cannot reach verify_totp_code.  See commit C-26.
-    try:
-        disable_data = MfaDisableSchema().load(request.form)
-    except MarshmallowValidationError:
-        flash("Invalid password.", "danger")
-        return redirect(url_for("auth.mfa_disable"))
-
-    current_password = disable_data["current_password"]
-    totp_code = disable_data["totp_code"]
-    device = _known_device(current_user)
-
-    # Verify the user's current password first.
-    try:
-        auth_service.check_signed_in_password(
-            current_user, current_password, "Invalid password.",
-            device=device,
-        )
-    except AuthError as exc:
-        log_event(
-            logger, logging.WARNING, EVT_REAUTH_FAILED, AUTH,
-            f"Disable two-factor failed: {exc}",
-            user_id=current_user.id, ip=request.remote_addr,
-        )
-        flash(str(exc), "danger")
-        return redirect(url_for("auth.mfa_disable"))
-
-    # Load MFA config and verify TOTP code.
-    mfa_config = (
-        db.session.query(MfaConfig)
-        .filter_by(user_id=current_user.id)
-        .first()
-    )
-    if not mfa_config or not mfa_config.is_enabled:
-        flash("Two-factor authentication is not enabled.", "danger")
-        return redirect(url_for("auth.security"))
-
-    # Same verifier as /mfa/verify underneath: emits
-    # ``totp_replay_rejected`` on REPLAY and commits
-    # ``last_totp_timestep`` on ACCEPTED so a code captured at
-    # /mfa/verify cannot be reused at /mfa/disable (and vice versa).
-    # The shared step-up wrapper flashes the operator-side key-failure
-    # message so it wins over the generic invalid-code flash.
-    accepted, key_failure = _totp_accepted_or_key_failure(
-        mfa_config, totp_code, current_user.id,
-    )
-    if key_failure:
-        return redirect(url_for("auth.security"))
-
-    if not accepted:
-        auth_service.record_failed_attempt(current_user, device=device)
-        log_event(
-            logger, logging.WARNING, EVT_REAUTH_FAILED, AUTH,
-            "Disable two-factor failed: bad code",
-            user_id=current_user.id, ip=request.remote_addr,
-        )
-        flash("Invalid authentication code.", "danger")
-        return redirect(url_for("auth.mfa_disable"))
-
-    # Clear all MFA material + disable, via the rule shared with the
-    # emergency reset CLI (see clear_mfa_material's docstring for the
-    # per-field rationale, including the last_totp_timestep reset and
-    # the pending-setup ciphertext).
-    mfa_service.clear_mfa_material(mfa_config)
-    # Stamp the security-event columns in the same transaction as
-    # the MFA-clear so the banner the user sees on next page load
-    # is anchored to the same moment the mfa_configs row was
-    # updated.  Audit F-091 / C-16: an attacker who pivots into the
-    # session and disables MFA cannot prevent the legitimate user
-    # from seeing the alert -- the banner state lives on the
-    # auth.users row, not in the attacker's session cookie.
-    record_security_event(
-        current_user, SecurityEventKind.MFA_DISABLED,
-    )
-    db.session.commit()
-
-    # MFA disable is a security-relevant state change: a user who
-    # disables MFA because they suspect a session is compromised has
-    # done nothing about that session yet.  Force every other live
-    # session to re-authenticate so the disable cannot be silently
-    # exploited by an attacker who already holds a valid cookie.
-    # Called AFTER the MFA-clear commit so a transient DB error in
-    # the helper does not leave MFA-disabled rows tied to a
-    # non-bumped session_invalidated_at.  F-032.
-    invalidate_other_sessions(current_user, "mfa_disabled")
-
-    log_event(logger, logging.INFO, EVT_MFA_DISABLED, AUTH,
-              "MFA disabled", user_id=current_user.id)
-    flash("Two-factor authentication has been disabled.", "success")
-    return redirect(url_for("auth.security"))

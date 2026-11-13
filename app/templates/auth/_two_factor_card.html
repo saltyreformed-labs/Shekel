@@ -6,8 +6,8 @@
 <p class="mb-2">
   <span class="flag-chip"><i class="bi bi-shield-check"></i> Enabled</span>
 </p>
-{# A user who must have two-factor (ruling plan#3434) is told so and has
-   no Disable: /mfa/disable refuses them. #}
+{# A user who must have two-factor (ruling plan#3434) is told so.  No
+   account can turn it off (ruling plan#3604), so the card has no Disable. #}
 {% if current_user.must_have_two_factor %}
 <p class="text-muted small">
   Your account requires two-factor authentication, and it is on.
@@ -16,7 +16,7 @@
 {% else %}
 <p class="text-muted small">
   Your account is protected with two-factor authentication.
-  You can regenerate your backup codes or disable MFA below.
+  You can regenerate your backup codes below.
 </p>
 {% endif %}
 <div class="d-flex gap-2">
@@ -26,11 +26,6 @@
       <i class="bi bi-arrow-repeat"></i> Regenerate Backup Codes
     </button>
   </form>
-  {% if not current_user.must_have_two_factor %}
-  <a href="{{ url_for('auth.mfa_disable') }}" class="btn btn-outline-danger btn-sm">
-    <i class="bi bi-shield-x"></i> Disable Two-Factor Authentication
-  </a>
-  {% endif %}
 </div>
 {% else %}
 <p class="text-muted small">

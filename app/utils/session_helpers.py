@@ -463,8 +463,7 @@ def invalidate_other_sessions(user: User, reason: str) -> None:
             authenticated on the current request, or the wrong cookie
             will be refreshed (see module docstring).
         reason: Short machine-readable label for the audit log
-            (``"password_change"``, ``"mfa_disabled"``,
-            ``"backup_code_consumed"``).  Required, non-empty -- a
+            (``"password_change"``, ``"backup_code_consumed"``).  Required, non-empty -- a
             blank reason defeats the audit trail this helper exists
             to produce.
 

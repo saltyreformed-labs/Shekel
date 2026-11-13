@@ -1,8 +1,9 @@
 """
 Shekel Budget App -- Every password and code guess counts toward the one lock.
 
-The doors: the code form at sign-in, ``/reauth``, ``/change-password`` and
-``/mfa/disable``.  Each counts a wrong answer on the record of the account's
+The doors: the code form at sign-in, ``/reauth`` and ``/change-password``
+(``/mfa/disable`` was one until no account could turn two-factor off, ruling
+plan#3604).  Each counts a wrong answer on the record of the account's
 email (ruling plan#3110) through the one function that also trips the lock,
 each refuses even a right answer while locked, and only a finished sign-in or
 re-confirm clears the count (ruling plan#3007).  The code form also has a
@@ -554,86 +555,6 @@ class TestChangePasswordCounts:
             assert _count(user_id) == 0
 
 
-class TestDisableTwoFactorCounts:
-    """``/mfa/disable`` counts both answers and refuses while locked (ruling plan#3008)."""
-
-    @staticmethod
-    def _still_enabled(user_id: int) -> bool:
-        """Return whether two-factor is still on for *user_id*.
-
-        Args:
-            user_id: The account.
-
-        Returns:
-            True when its config says enabled.
-        """
-        config = db.session.query(MfaConfig).filter_by(user_id=user_id).one()
-        db.session.refresh(config)
-        return config.is_enabled
-
-    def test_a_wrong_password_counts(self, app, stranger_client, seed_user):
-        """One wrong password is one on the count, and two-factor stays on."""
-        with app.app_context():
-            user_id = seed_user["user"].id
-            secret = _secret_and_one_backup_code(user_id)
-
-            response = stranger_client.post("/mfa/disable", data={
-                "current_password": "wrong", "totp_code": code_now(secret),
-            }, follow_redirects=True)
-
-            assert b"Invalid password" in response.data
-            assert _count(user_id) == 1
-            assert self._still_enabled(user_id)
-
-    def test_a_wrong_code_counts(self, app, stranger_client, seed_user):
-        """The right password and a wrong code is one on the count."""
-        with app.app_context():
-            user_id = seed_user["user"].id
-            secret = _secret_and_one_backup_code(user_id)
-
-            response = stranger_client.post("/mfa/disable", data={
-                "current_password": _PASSWORD,
-                "totp_code": _wrong_code(secret),
-            }, follow_redirects=True)
-
-            assert b"Invalid authentication code" in response.data
-            assert _count(user_id) == 1
-            assert self._still_enabled(user_id)
-
-    def test_a_locked_account_refuses_the_right_answers(
-        self, app, stranger_client, seed_user,
-    ):
-        """The right password and code while locked leave two-factor on."""
-        with app.app_context():
-            user_id = seed_user["user"].id
-            secret = _secret_and_one_backup_code(user_id)
-            _set_lock_state(user_id, locked_for=timedelta(minutes=10))
-
-            response = stranger_client.post("/mfa/disable", data={
-                "current_password": _PASSWORD,
-                "totp_code": code_now(secret),
-            }, follow_redirects=True)
-
-            assert _LOCKED_MESSAGE in response.data
-            assert self._still_enabled(user_id)
-
-    def test_success_does_not_clear_the_count(self, app, stranger_client, seed_user):
-        """Clearing is a finished sign-in's or re-confirm's, not this form's."""
-        with app.app_context():
-            user_id = seed_user["user"].id
-            secret = _secret_and_one_backup_code(user_id)
-            _set_lock_state(user_id, count=3)
-
-            response = stranger_client.post("/mfa/disable", data={
-                "current_password": _PASSWORD,
-                "totp_code": code_now(secret),
-            }, follow_redirects=True)
-
-            assert b"has been disabled" in response.data
-            assert not self._still_enabled(user_id)
-            assert _count(user_id) == 3
-
-
 class TestOneCountAcrossEveryDoor:
     """The doors share one count and one lock, and a lock leaves signed-in pages working."""
 
@@ -655,9 +576,10 @@ class TestOneCountAcrossEveryDoor:
             assert _count(user_id) == 2
             assert _locked_until(user_id) is None
 
-            stranger_client.post("/mfa/disable", data={
-                "current_password": "wrong", "totp_code": _NEVER_A_CODE,
-            })
+            # The third door, the code form, from a browser of its own.
+            at_the_code_form = app.test_client()
+            _type_password(at_the_code_form)
+            at_the_code_form.post("/mfa/verify", data={"totp_code": _NEVER_A_CODE})
 
             assert _count(user_id) == 0
             assert _locked_until(user_id) > datetime.now(timezone.utc)
@@ -757,33 +679,6 @@ class TestARefusedGuessLogsItsAddress:
                     "current_password": "wrong",
                     "new_password": _NEW_PASSWORD,
                     "confirm_password": _NEW_PASSWORD,
-                }, **through_nginx(self._CLIENT))
-
-            assert self._addresses(caplog, EVT_REAUTH_FAILED) == [self._CLIENT]
-
-    def test_a_wrong_password_at_disable(self, app, client, seed_user, caplog):
-        """Disable two-factor logs a wrong password."""
-        with app.app_context():
-            self._sign_in(client)
-            secret = _secret_and_one_backup_code(seed_user["user"].id)
-
-            with caplog.at_level(logging.WARNING, logger="app.routes.auth.mfa"):
-                client.post("/mfa/disable", data={
-                    "current_password": "wrong", "totp_code": code_now(secret),
-                }, **through_nginx(self._CLIENT))
-
-            assert self._addresses(caplog, EVT_REAUTH_FAILED) == [self._CLIENT]
-
-    def test_a_wrong_code_at_disable(self, app, client, seed_user, caplog):
-        """Disable two-factor logs a wrong code."""
-        with app.app_context():
-            self._sign_in(client)
-            secret = _secret_and_one_backup_code(seed_user["user"].id)
-
-            with caplog.at_level(logging.WARNING, logger="app.routes.auth.mfa"):
-                client.post("/mfa/disable", data={
-                    "current_password": _PASSWORD,
-                    "totp_code": _wrong_code(secret),
                 }, **through_nginx(self._CLIENT))
 
             assert self._addresses(caplog, EVT_REAUTH_FAILED) == [self._CLIENT]

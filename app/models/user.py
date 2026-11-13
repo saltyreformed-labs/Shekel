@@ -157,8 +157,8 @@ class User(UserMixin, TimestampMixin, db.Model):
         **The one statement of that rule** (ruling plan#3434): every companion
         must, and there is no switch, so it is the role's and nothing stores
         it.  The login gate holds a user it names at setup until they have
-        it, ``/mfa/disable`` refuses them, and the Security page and the setup
-        page say it is required.  None of those reads the role.
+        it, and the Security page and the setup page say it is required.
+        None of those reads the role.
 
         Returns:
             True for a companion, False for an owner.
@@ -170,11 +170,11 @@ class User(UserMixin, TimestampMixin, db.Model):
         """Return whether this user has two-factor authentication turned on.
 
         A row whose setup was started and never confirmed is not two-factor:
-        ``is_enabled`` is what ``/mfa/confirm`` sets, and what ``/mfa/disable``
-        and the one reset act clear
-        (:func:`~app.services.mfa_service.reset_two_factor`), which
+        ``is_enabled`` is what ``/mfa/confirm`` sets, and what the one reset
+        act clears (:func:`~app.services.mfa_service.reset_two_factor`), which
         ``scripts/reset_mfa.py`` and the owner's Reset two-factor for a
-        companion on Settings > Companions both run.
+        companion on Settings > Companions both run.  Nothing else clears it:
+        no account can turn two-factor off (ruling plan#3604).
 
         Returns:
             True when the user's ``auth.mfa_configs`` row is enabled.
@@ -355,7 +355,7 @@ class MfaConfig(TimestampMixin, db.Model):
     See audit findings F-005, F-142 / commit C-09.
 
     Related service: app/services/mfa_service.py
-    Related routes: /mfa/setup, /mfa/confirm, /mfa/verify, /mfa/disable
+    Related routes: /mfa/setup, /mfa/confirm, /mfa/verify
     """
 
     __tablename__ = "mfa_configs"

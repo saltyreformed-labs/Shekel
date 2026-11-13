@@ -25,8 +25,8 @@ signed-in session carries, what the browser holds afterwards (plan#2772) or
 where it lands.
 :func:`_verify_totp_with_replay_logging` (and its
 backup-code sibling :func:`_consume_backup_code`) is shared by
-``/mfa/verify``, ``/mfa/disable``, and the step-up ``/reauth`` so all
-three enforce one replay-prevention policy.
+``/mfa/verify`` and the step-up ``/reauth`` so both enforce one
+replay-prevention policy.
 :func:`_first_validation_message` and :func:`_is_safe_redirect` are the
 cross-module form-error and open-redirect utilities.
 """
@@ -137,7 +137,7 @@ def _browser_standing(user) -> BrowserStanding | None:
     door with a password or code to check: ``/login`` right after it takes the
     lock for a browser :func:`_users_knowing_this_browser` found known,
     ``/mfa/verify`` right after it takes it, and the signed-in doors
-    (``/reauth``, ``/change-password``, ``/mfa/disable``), whose request took
+    (``/reauth``, ``/change-password``), whose request took
     it at its boundary.  So everything the checks turn on judges the browser
     at one moment (plan#2772): the lock, the count and what a success clears,
     at ``/login`` the trusted skip of the code, and at ``/mfa/verify`` and
@@ -458,7 +458,7 @@ def _verify_totp_with_replay_logging(mfa_config, code, user_id):
 
 # Operator-facing flash for an already-authenticated TOTP step that
 # cannot run because the encryption key is missing or rotated away.
-# Shared by /reauth and /mfa/disable via
+# Raised by /reauth through
 # :func:`_totp_accepted_or_key_failure`; /mfa/verify keeps its own
 # variant because its recovery differs (pending login state is cleared
 # and the user is bounced to /login).
@@ -471,14 +471,12 @@ _MFA_KEY_FAILURE_MESSAGE = (
 def _totp_accepted_or_key_failure(mfa_config, totp_code, user_id):
     """Run the step-up TOTP check, flashing the key-failure message.
 
-    The shared shape of the two already-authenticated TOTP gates --
-    step-up ``/reauth`` and ``/mfa/disable`` -- which verify through
-    :func:`_verify_totp_with_replay_logging` and report a decrypt
-    failure (missing ``TOTP_ENCRYPTION_KEY``, ciphertext unreadable
-    under any current Fernet) with the identical operator-actionable
-    danger flash.  Only the failure *response* differs per route
-    (re-render the reauth form vs redirect to security settings), so
-    the caller keeps that decision and this helper owns the
+    The already-authenticated TOTP gate of step-up ``/reauth``, which
+    verifies through :func:`_verify_totp_with_replay_logging` and
+    reports a decrypt failure (missing ``TOTP_ENCRYPTION_KEY``,
+    ciphertext unreadable under any current Fernet) with an
+    operator-actionable danger flash.  The caller keeps its failure
+    *response* (re-render the reauth form), and this helper owns the
     verify + key-failure-flash pair.
 
     Args:

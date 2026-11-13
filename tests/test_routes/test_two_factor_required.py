@@ -4,9 +4,10 @@ Plan#2407, task plan#3445.  A signed-in companion without two-factor reaches
 only its setup, its confirmation and signing out (the login gate's hold,
 ``app/login_gate.py``): a page, an htmx request and a POST are each sent to
 setup, and the POST is not performed.  Once she confirms setup she reaches her
-pages.  She cannot turn it off: ``/mfa/disable`` refuses her and her Security
-page has no Disable.  ``scripts/reset_mfa.py`` still clears it, and she meets
-setup at her next sign-in.  An owner without two-factor is not held.
+pages.  No account can turn it off (ruling plan#3604): ``/mfa/disable`` routes
+nowhere and no Security page has Disable.  ``scripts/reset_mfa.py`` still clears
+it, and she meets setup at her next sign-in.  An owner without two-factor is
+not held.
 
 The hold's policy, its endpoint set and its sweep over every served route are
 pinned beside the anonymous gate's, in ``tests/test_routes/test_auth_required.py``.
@@ -46,11 +47,6 @@ _WHY_HELD = b"Your account requires two-factor authentication. Set it up here to
 
 #: The Security page's sentence for a user who must have two-factor.
 _REQUIRED = b"Your account requires two-factor authentication, and it is on."
-
-_REFUSED = (
-    b"Two-factor authentication is required for your account and cannot "
-    b"be turned off."
-)
 
 _DISABLE_LINK = b'href="/mfa/disable"'
 
@@ -248,8 +244,8 @@ class TestAnOwnerWithoutTwoFactorIsNotHeld:
             assert _WHY_HELD not in response.data
 
 
-class TestSheCannotTurnItOff:
-    """``/mfa/disable`` refuses her, and her Security page has no Disable."""
+class TestNoAccountCanTurnItOff:
+    """No account can turn two-factor off (ruling plan#3604): no door, no Disable."""
 
     @staticmethod
     def _enrolled(app, companion_id):
@@ -260,19 +256,26 @@ class TestSheCannotTurnItOff:
         """
         return sign_in_seed_companion(app), two_factor_secret_of(companion_id)
 
-    def test_the_disable_page_refuses_her(self, app, seed_companion):
-        """GET ``/mfa/disable`` sends her to her Security page, saying why."""
+    @pytest.mark.parametrize("method", ["GET", "POST"])
+    def test_there_is_no_disable_page_for_her(self, app, seed_companion, method):
+        """``/mfa/disable`` routes nowhere: a signed-in companion gets Flask's 404."""
         with app.app_context():
             browser, _ = self._enrolled(app, seed_companion["user"].id)
 
-            response = browser.get("/mfa/disable")
+            response = browser.open("/mfa/disable", method=method)
 
-            assert response.status_code == 302
-            assert response.headers["Location"] == "/security"
-            assert _REFUSED in browser.get("/security").data
+            assert response.status_code == 404
+
+    @pytest.mark.parametrize("method", ["GET", "POST"])
+    def test_there_is_no_disable_page_for_an_owner(self, app, auth_client, method):
+        """The owner, who had the page until ruling plan#3604, gets the same 404."""
+        with app.app_context():
+            response = auth_client.open("/mfa/disable", method=method)
+
+            assert response.status_code == 404
 
     def test_the_right_password_and_code_turn_nothing_off(self, app, seed_companion):
-        """POST with both right is refused before either is read.
+        """A POST of both right answers reaches no view: nothing is read or changed.
 
         Her two-factor stays on with its secret, and the code was never
         checked: the step it would have recorded is still unset.
@@ -286,9 +289,7 @@ class TestSheCannotTurnItOff:
                 "totp_code": code_now(secret),
             })
 
-            assert response.status_code == 302
-            assert response.headers["Location"] == "/security"
-            assert _REFUSED in browser.get("/security").data
+            assert response.status_code == 404
             config = two_factor_row_of(companion_id)
             assert config.is_enabled is True
             assert config.totp_secret_encrypted is not None
@@ -308,14 +309,15 @@ class TestSheCannotTurnItOff:
             assert _DISABLE_LINK not in response.data
             assert b"Regenerate Backup Codes" in response.data
 
-    def test_an_owners_security_page_keeps_disable(self, app, auth_client):
-        """The control: an owner with two-factor still has Disable, and no "required"."""
+    def test_an_owners_security_page_has_no_disable(self, app, auth_client):
+        """An owner with two-factor has no Disable either, and Regenerate stays."""
         with app.app_context():
             response = auth_client.get("/security")
 
             assert response.status_code == 200
-            assert _DISABLE_LINK in response.data
-            assert _REQUIRED not in response.data
+            assert _DISABLE_LINK not in response.data
+            assert b"Disable Two-Factor Authentication" not in response.data
+            assert b"Regenerate Backup Codes" in response.data
 
 
 class TestTheResetScriptStillClearsIt:

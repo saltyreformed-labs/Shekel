@@ -11,7 +11,7 @@ End-to-end coverage for the two findings closed by commit C-09 of the
 
   * F-142 (Low): no structured log event for replay detection.  Closed
     by emitting ``totp_replay_rejected`` from
-    ``app/routes/auth/mfa.py:mfa_verify`` and ``mfa_disable_confirm``
+    ``app/routes/auth/mfa.py:mfa_verify`` and the step-up ``/reauth``
     (via the shared ``_helpers`` verifier) when ``verify_totp_code``
     returns ``REPLAY``.
 
@@ -20,8 +20,8 @@ exercises the verifier in isolation.  This file exercises the route
 glue: the column update is committed across requests, the log event is
 emitted on the right path, the replay-rejection branch returns the
 right HTTP response, and the cross-route invariants (mfa_verify,
-mfa_disable_confirm, mfa_confirm) all interact with
-``last_totp_timestep`` consistently.
+``/reauth``, mfa_confirm) all interact with ``last_totp_timestep``
+consistently.
 
 **The seed owner is made with two-factor** (plan#3600), a fresh secret
 per test (``tests._test_helpers.enable_mfa``), so each test types codes
@@ -38,6 +38,7 @@ import pyotp
 from app.extensions import db
 from app.models.user import MfaConfig
 from app.services import mfa_service
+from tests._seed_owner_fixtures import SEED_USER_EMAIL, SEED_USER_PASSWORD
 from tests._two_factor_sign_in import two_factor_row_of, two_factor_secret_of
 
 
@@ -287,102 +288,48 @@ class TestTotpReplayPreventionAtMfaVerify:
             )
 
 
-class TestTotpReplayPreventionAtMfaDisable:
-    """Replay rejection on the ``/mfa/disable`` (privileged action) route.
+class TestTotpReplayPreventionAtReauth:
+    """Replay rejection on the step-up ``/reauth`` route.
 
-    The disable form is a second factor on a destructive operation:
-    an attacker who has the user's password and a captured TOTP code
-    can use it to weaken the account's auth factors.  C-09's replay
-    prevention must apply on this surface as well, with the same
-    ``totp_replay_rejected`` signal.
+    Re-confirming is a second factor on the privileged actions behind it
+    (a password change, regenerating backup codes): a code an attacker
+    captured at sign-in must not re-confirm a session in the seconds it is
+    still inside its drift window.  ``/reauth`` checks codes through the one
+    verifier ``/mfa/verify`` does, so a step one consumed the other refuses.
+    Until ruling plan#3604 this cross-route case was graded at
+    ``/mfa/disable``, which is gone.
     """
 
-    def test_replay_at_disable_after_login_is_rejected(
-        self, app, auth_client, seed_user,
+    def test_a_code_spent_at_sign_in_cannot_re_confirm(
+        self, app, client, seed_user,
     ):
-        """A code already consumed by /mfa/verify cannot be reused at /mfa/disable.
+        """The code that finished the sign-in is refused at ``/reauth``, its step kept.
 
-        Direct test of the cross-route replay surface: the same step
-        bounds both /mfa/verify and /mfa/disable, so a code consumed
-        on either surface must be rejected on the other.  Without
-        this defense an attacker who captured a code mid-login could
-        use the residual ~30 seconds to rapidly disable MFA before
-        the user gets back to a screen that would let them notice.
+        A real ``/login`` and ``/mfa/verify`` consume the step, so the
+        refusal is the shared step's and not a pre-recorded one.
         """
         with app.app_context():
-            # auth_client is already logged in as the seed user, on a
-            # browser it trusts.  Pre-record a step consumption, as a
-            # /login + /mfa/verify with this step's code leaves it.
+            user_id = seed_user["user"].id
+            secret = _its_two_factor(user_id)
             now_unix = int(time.time())
-            current_step = now_unix // 30
-            secret = _its_two_factor(
-                seed_user["user"].id, last_step=current_step,
-            )
-            consumed_code = pyotp.TOTP(secret).at(now_unix)
+            code = pyotp.TOTP(secret).at(now_unix)
+            client.post("/login", data={
+                "email": SEED_USER_EMAIL, "password": SEED_USER_PASSWORD,
+            })
+            signed_in = client.post("/mfa/verify", data={"totp_code": code})
+            assert signed_in.status_code == 302
+            assert "/mfa" not in signed_in.headers["Location"]
+            spent_step = two_factor_row_of(user_id).last_totp_timestep
+            assert spent_step is not None, "Setup failed: the sign-in spent no step"
 
-            # POST /mfa/disable with the already-consumed code.
-            response = auth_client.post("/mfa/disable", data={
-                "current_password": "testpass",
-                "totp_code": consumed_code,
-            }, follow_redirects=False)
-            assert response.status_code == 302
-            # Redirect target is /mfa/disable (re-show the form),
-            # NOT /settings (which is the success path).
-            assert "/mfa/disable" in response.headers.get("Location", "")
+            response = client.post("/reauth", data={
+                "password": SEED_USER_PASSWORD, "totp_code": code,
+            })
 
-            # MFA must STILL be enabled.
-            mfa_config = (
-                db.session.query(MfaConfig)
-                .filter_by(user_id=seed_user["user"].id)
-                .one()
-            )
-            db.session.refresh(mfa_config)
-            assert mfa_config.is_enabled is True
-            assert mfa_config.totp_secret_encrypted is not None
-            # Step pointer was not advanced by the rejected attempt.
-            assert mfa_config.last_totp_timestep == current_step
-
-    def test_legitimate_disable_advances_last_totp_timestep_then_clears(
-        self, app, auth_client, seed_user,
-    ):
-        """A successful /mfa/disable consumes a step then resets the column.
-
-        The route does two things in one transaction: it ACCEPTS the
-        TOTP code (mutating ``last_totp_timestep`` to the matched
-        step), then disables MFA and clears every column including
-        ``last_totp_timestep``.  Asserting on the final state pins
-        that the disable path uses the verify-then-clear ordering --
-        a refactor that cleared first and verified after would
-        accept any code, including replays, against an empty secret.
-        """
-        with app.app_context():
-            now_unix = int(time.time())
-            secret = _its_two_factor(
-                seed_user["user"].id, last_step=now_unix // 30 - 1,
-            )
-            fresh_code = pyotp.TOTP(secret).at(now_unix)
-
-            response = auth_client.post("/mfa/disable", data={
-                "current_password": "testpass",
-                "totp_code": fresh_code,
-            }, follow_redirects=False)
-            assert response.status_code == 302
-            # The Security page, /security since ruling plan#3435.
-            assert response.headers.get("Location", "") == "/security"
-
-            mfa_config = (
-                db.session.query(MfaConfig)
-                .filter_by(user_id=seed_user["user"].id)
-                .one()
-            )
-            db.session.refresh(mfa_config)
-            assert mfa_config.is_enabled is False
-            assert mfa_config.totp_secret_encrypted is None
-            # last_totp_timestep is reset to NULL so a re-enrollment
-            # under a fresh secret does not inherit the step boundary
-            # recorded against the now-cleared old secret.  Verifies
-            # the route's explicit ``last_totp_timestep = None`` step.
-            assert mfa_config.last_totp_timestep is None
+            # Re-rendered with the refusal, not redirected as a re-confirm is.
+            assert response.status_code == 200
+            assert b"Invalid authentication code." in response.data
+            assert two_factor_row_of(user_id).last_totp_timestep == spent_step
 
 
 class TestMfaConfirmSeedsLastTotpTimestep:

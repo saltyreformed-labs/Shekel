@@ -84,18 +84,17 @@
     Signing in on a trusted device takes your password but not a two-factor
     code. A device stays trusted for {{ trust_days }} days after the code was
     typed on it.
-    {# What forgets every device, for the reader's role: a user who must have
-       two-factor cannot turn it off (ruling plan#3434), and a companion's
-       devices are also forgotten when the owner resets her two-factor (ruling
-       plan#3441) or sets her a new password from Settings > Companions. #}
+    {# What forgets every device, for the reader's role: no account can turn
+       two-factor off (ruling plan#3604), and a companion's devices are also
+       forgotten when the owner resets her two-factor (ruling plan#3441) or
+       sets her a new password from Settings > Companions. #}
     {% if current_user.must_have_two_factor %}
     Changing your password, logging out all other sessions or signing in with
     a backup code forgets every device, and so does the budget's owner
     resetting your two-factor authentication or setting you a new password.
     {% else %}
-    Changing your password, logging out all other sessions, turning off
-    two-factor authentication or signing in with a backup code forgets every
-    device.
+    Changing your password, logging out all other sessions or signing in with
+    a backup code forgets every device.
     {% endif %}
   </p>
   {% if trusted_devices %}

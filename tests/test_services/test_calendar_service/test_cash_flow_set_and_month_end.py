@@ -199,7 +199,7 @@ class TestTheCalendarReadsTheCashFlowSet:
 
         The analytics policy the set twin keeps: a question about THAT
         account, never answered with the primary's calendar.  The loan case
-        is graded end to end in ``test_routes/test_analytics.py``; this is
+        is graded end to end in ``test_routes/test_analytics/test_the_calendar_tab.py``; this is
         the archived arm, which nothing else pins.
         """
         with app.app_context():

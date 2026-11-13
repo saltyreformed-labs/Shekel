@@ -54,7 +54,7 @@ from app.services.row_valuation import settled_figure
 from tests._ledger_reads import nets_by_key_and_day
 from tests._test_helpers import create_settled_cash_transaction
 
-from . import _csv_builder as build
+from tests.test_services.test_statement_import import _csv_builder as build
 
 _SOURCE = StatementSourceEnum.SECU_CHECKING_CSV
 

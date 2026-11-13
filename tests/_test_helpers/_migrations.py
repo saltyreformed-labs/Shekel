@@ -277,9 +277,9 @@ def restore_pay_period_derived_columns(db_session):
     that C4-c is simply the first step to make fire; it is recorded as ledger
     row ``balance:P79`` rather than fixed inside this step.*
 
-    No restore is needed afterwards: the ``db`` fixture drops and re-clones the
-    per-worker database for every test, so a schema this leaves off head cannot
-    reach the next one.
+    No restore is needed afterwards: the ``db`` fixture drops each test's clone
+    of the per-worker database when the test ends, so a schema this leaves off
+    head cannot reach the next one.
 
     **Call it on the session whose transaction is the one holding locks**, and
     in practice that means BEFORE entering a nested ``app.app_context()`` rather

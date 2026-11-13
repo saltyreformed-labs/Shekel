@@ -229,11 +229,15 @@ def pytest_report_header():
 
 
 def pytest_sessionfinish():
-    """Drop the per-pytest-worker database AND emit the profile summary.
+    """Drop the per-pytest-worker database if one stands, AND emit the profile summary.
 
     Pytest invokes this hook at the end of every session -- including
-    failed sessions -- so the per-session DB is cleaned up regardless
-    of pass/fail.  No-op when the xdist master process skipped the
+    failed sessions.  The ``db`` fixture drops each test's database as
+    the test ends and ``setup_database`` drops the bootstrap's, so on
+    an ordinary session the name is already free and this drop finds
+    nothing; it is there for a session that ended with a database
+    standing under the name (a fixture that never reached its
+    teardown).  No-op when the xdist master process skipped the
     bootstrap (``_BOOTSTRAP_RESULT`` is ``None``); only worker
     processes own a DB to drop.
 

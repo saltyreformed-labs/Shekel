@@ -205,11 +205,14 @@ def setup_database(app):
     read these at render time -- a missing entry would break every
     page that references one).
 
-    Database teardown happens in :func:`pytest_sessionfinish` at the
-    bottom of ``tests/conftest.py``: ``DROP DATABASE ... WITH FORCE`` removes
-    the whole per-session DB rather than table-by-table -- faster
-    and less brittle than the previous ``drop_all`` + per-schema
-    cascade.
+    **Then it drops that start-up database**, with the engine released
+    first, as the ``db`` fixture's teardown releases it.  It served no
+    test, and a test's database lives exactly as long as the test
+    (ruling plan#3870): each test's ``db`` clones under this worker's
+    name with no drop before it, so the first one must find the name
+    free, and a world's build takes the name as its scratch the same
+    way.  ``pytest_sessionfinish`` (``tests/conftest.py``) still drops
+    the name if a session ends with a database standing under it.
 
     It also binds the frozen-clock statement rewriter to the engine
     (finding N-65, balance plan step X-h).  **Here, and not lazily when a
@@ -225,6 +228,9 @@ def setup_database(app):
     with app.app_context():
         _refresh_ref_cache_and_jinja_globals(app)
         bind_db_clock_rewriter(_db.engine)
+        _db.session.remove()
+        _db.engine.dispose()
+    _drop_worker_database(_WORKER_DB_NAME, _WORKER_ADMIN_URL)
     yield
 
 
@@ -233,9 +239,10 @@ def _seeded_snapshots(request, app, setup_database):  # pylint: disable=unused-a
     """Every world this run's tests declare, built ONCE on this worker, in one pass.
 
     Requested only by :func:`_declared_world`, from inside the ``db`` fixture of
-    the first test on this worker that declares a world, so it runs with that
-    test's engine released and its environment fixtures applied, which a build
-    needs (:func:`tests._seeded_start_states.built_worlds`).  A test that named
+    the first test on this worker that declares a world, before that test's
+    clone exists, so it runs with the worker's database name free and the
+    test's environment fixtures applied, which a build needs
+    (:func:`tests._seeded_start_states.built_worlds`).  A test that named
     it as an argument would set it up before those fixtures, and the build
     would refuse.  A run whose tests declare no world never builds one.
 
@@ -287,12 +294,11 @@ def db(app, setup_database, request, set_totp_key, disable_hibp_check):  # pylin
     is what says so out loud if the next builder needs a fixture nobody added
     here.
 
-    Drops the per-worker DB and re-clones it from
-    ``shekel_test_template`` via
+    Clones the per-worker DB from ``shekel_test_template`` via
     ``CREATE DATABASE ... TEMPLATE ... STRATEGY WAL_LOG``
-    (Phase 3b of test-performance-implementation-plan.md).  Each
-    test gets bit-for-bit the same start state the prior
-    TRUNCATE+reseed cycle provided:
+    (Phase 3b of test-performance-implementation-plan.md), and drops
+    it when the test ends.  Each test gets bit-for-bit the same start
+    state the prior TRUNCATE+reseed cycle provided:
 
       * ``system.audit_log`` empty -- the template carries zero
         rows by construction; ``scripts/build_test_template.py``
@@ -313,45 +319,50 @@ def db(app, setup_database, request, set_totp_key, disable_hibp_check):  # pylin
     the build truncates it, for the reason the template builder does -- and
     the ref data and cached ids are still the template's, because the snapshot
     is itself a clone of the template.  **What does NOT change is the
-    isolation**: the drop and re-clone below run for every test either way, so
-    a test still cannot see another's writes.  Only the database it is cloned
-    FROM differs.
+    isolation**: the clone below, and the drop when the test ends, run for
+    every test either way, so a test still cannot see another's writes.  Only
+    the database it is cloned FROM differs.
+
+    **A test's database lives exactly as long as the test** (ruling
+    plan#3870).  The clone is made with no drop before it, onto the name the
+    previous test's teardown (or ``setup_database``, for the first test)
+    left free, and dropped in the ``finally`` that follows it, so nothing a
+    test writes is there for the next one.  A drop that failed leaves the
+    name taken, and the next clone refuses it (``already exists``) rather
+    than reuse the database standing there.
 
     Mechanism, in order:
 
-      1. ``setup_rollback`` -- defensive ``session.rollback()`` in
-         case a prior test left a stale transaction.  Empirically
-         a no-op (Phase 0 measured ~0.0 ms).
-      2. Release the engine: ``session.remove()`` detaches the
-         scoped session; ``engine.dispose()`` closes every pooled
-         connection.  Prerequisites for ``DROP DATABASE WITH
-         (FORCE)`` -- the FORCE clause severs leftover backends at
-         the protocol level, but disposing here avoids the race
-         and keeps the engine pool aligned with the freshly-cloned
-         DB on the next session access.  Untimed because the
-         steady-state cost is ~0 ms (the previous test's teardown
-         already disposed).
-      3. ``setup_drop_db`` -- admin-DSN ``DROP DATABASE IF EXISTS
-         {worker_db} WITH (FORCE)``.
-      4. ``setup_clone_template`` -- admin-DSN ``CREATE DATABASE
-         {worker_db} TEMPLATE shekel_test_template STRATEGY
-         WAL_LOG``.  See ``_clone_worker_database`` for why the
-         strategy is named explicitly and what ``FILE_COPY`` cost.
-      5. ``setup_refresh_ref_cache`` -- re-seat the in-process
+      1. Resolve the clone source: the empty template, or the
+         snapshot of the world the test declared.  The first
+         declaring test on this worker builds every declared world
+         here (``_seeded_snapshots``).
+      2. ``setup_clone_template`` -- admin-DSN ``CREATE DATABASE
+         {worker_db} TEMPLATE {source} STRATEGY WAL_LOG``.  See
+         ``_clone_worker_database`` for why the strategy is named
+         explicitly and what ``FILE_COPY`` cost.
+      3. ``setup_refresh_ref_cache`` -- re-seat the in-process
          ref_cache and Jinja globals against the cloned DB.  The
          row IDs are identical to the template's (CLONE preserves
          them), but reseating costs ~5-7 ms and covers the edge
          case where a future migration changes the seeded ID set
          without anyone updating the in-process cache eagerly.
+      4. ``call`` -- the test body.
+      5. ``teardown`` -- release the engine (``session.remove()``
+         detaches the scoped session; ``engine.dispose()`` closes
+         every pooled connection), then admin-DSN ``DROP DATABASE IF
+         EXISTS {worker_db} WITH (FORCE)``.  Disposing first keeps
+         the pool from holding a connection to a dropped database;
+         FORCE severs a backend the test opened itself.
 
     Why the worker DB name is stable across the session: the URL
     the Flask-SQLAlchemy engine binds to at app-creation time is
     derived from ``TEST_DATABASE_URL`` set by
     ``_bootstrap_worker_database``; that URL remains valid across
-    every drop+reclone because only the underlying database is
-    swapped, never the URL.  ``engine.dispose()`` between tests
-    forces the pool to reconnect on the next session access, and
-    the connection re-establishes against the cloned DB at the
+    every test because each test's clone takes the same name,
+    never a new URL.  ``engine.dispose()`` at each teardown forces
+    the pool to reconnect on the next session access, and the
+    connection re-establishes against the next test's clone at the
     same URL.
 
     The ``_profile_step`` wrappers below are no-ops when
@@ -375,78 +386,60 @@ def db(app, setup_database, request, set_totp_key, disable_hibp_check):  # pylin
     nodeid = request.node.nodeid if timings is not None else None
 
     with app.app_context():
-        with _profile_step(timings, "setup_rollback"):
-            # Clear any stale transaction state from a prior test
-            # that raised an exception without committing or
-            # rolling back.  Defensive; empirically a no-op since
-            # the previous teardown's session.remove() detaches
-            # any session and engine.dispose() closes its pool.
-            _db.session.rollback()
-
-        # Release the engine fully so the DROP below cannot race a
-        # held connection.  session.remove() detaches the scoped
-        # session; engine.dispose() closes every pooled connection.
-        # Untimed -- the work is essentially constant and dominated
-        # by Python overhead, not DB round-trips; folding it into
-        # setup_drop_db's timer would blur the DROP measurement.
-        _db.session.remove()
-        _db.engine.dispose()
-
         # WHICH database this test is cloned from -- the empty template, or
         # the snapshot of a world it declared (plan step balance:X-be-2).
-        # Resolved BEFORE the drop because the first declaring test on this
-        # worker builds every declared world, and a build needs a blank worker
-        # database of its own, taking the one it is standing in; resolving
-        # after the clone would throw that clone away.  The engine is already
-        # released above, which is what lets the build freeze the worker
-        # database into a snapshot.  ``None`` clones the empty template.
+        # Resolved BEFORE the clone because the first declaring test on this
+        # worker builds every declared world here, and a build takes this
+        # worker's database name as its scratch, which it needs free: with
+        # this test's clone made first, the build's own clone would refuse
+        # the name.  ``None`` clones the empty template.
         world = _declared_world(request)
         clone_source = None if world is None else world[0]
-
-        with _profile_step(timings, "setup_drop_db"):
-            _drop_worker_database(_WORKER_DB_NAME, _WORKER_ADMIN_URL)
 
         with _profile_step(timings, "setup_clone_template"):
             _clone_worker_database(
                 _WORKER_DB_NAME, _WORKER_ADMIN_URL, clone_source,
             )
 
-        with _profile_step(timings, "setup_refresh_ref_cache"):
-            # Re-seat the in-process ref_cache and Jinja globals
-            # against the cloned DB.  The cloned IDs equal the
-            # template IDs (CREATE DATABASE TEMPLATE preserves
-            # them) so the cache is normally a no-op refresh, but
-            # the explicit reseat covers the edge case where a
-            # future migration changes the seeded ID set and an
-            # unaware test would otherwise hit a Jinja Undefined.
-            # First access to _db.session here triggers a fresh
-            # pool connection to the cloned DB at the (unchanged)
-            # URL the engine has been bound to since app-create.
-            _refresh_ref_cache_and_jinja_globals(app)
-
-        # ``try``/``finally`` so the teardown timer and the CSV row
-        # write both run even when the test raises -- a profile
-        # harness that silently dropped rows for failing tests would
-        # bias the summary toward the passing path.  The outer
-        # ``with _profile_step(..., "call")`` captures the elapsed
-        # time of the ``yield _db`` (i.e. the test body itself);
-        # context manager exit fires after pytest sends back to
-        # this generator, so the timer covers the test exactly.
+        # ``try``/``finally`` from the clone on, so the drop runs however
+        # the rest of setup or the test ends: the database lives exactly as
+        # long as the test.  The teardown timer and the CSV row write run
+        # in it too -- a profile harness that silently dropped rows for
+        # failing tests would bias the summary toward the passing path.
+        # The ``with _profile_step(..., "call")`` captures the elapsed time
+        # of the ``yield _db`` (i.e. the test body itself); context manager
+        # exit fires after pytest sends back to this generator, so the timer
+        # covers the test exactly.
         try:
+            with _profile_step(timings, "setup_refresh_ref_cache"):
+                # Re-seat the in-process ref_cache and Jinja globals
+                # against the cloned DB.  The cloned IDs equal the
+                # template IDs (CREATE DATABASE TEMPLATE preserves
+                # them) so the cache is normally a no-op refresh, but
+                # the explicit reseat covers the edge case where a
+                # future migration changes the seeded ID set and an
+                # unaware test would otherwise hit a Jinja Undefined.
+                # First access to _db.session here triggers a fresh
+                # pool connection to the cloned DB at the (unchanged)
+                # URL the engine has been bound to since app-create.
+                _refresh_ref_cache_and_jinja_globals(app)
+
             with _profile_step(timings, "call"):
                 yield _db
         finally:
             with _profile_step(timings, "teardown"):
-                # Clean up after each test: detach the scoped
-                # session and close the engine pool so the next
-                # test's DROP DATABASE has a clean slate.
-                # Belt-and-braces with the WITH (FORCE) in
-                # _drop_worker_database -- one or the other would
-                # suffice, but both together make the per-test
-                # contract impossible to violate via a leaked
-                # connection.
-                _db.session.remove()
-                _db.engine.dispose()
+                # Detach the scoped session and close the engine pool,
+                # so the pool holds no connection to the database the
+                # drop removes; FORCE severs any backend a test opened
+                # outside the pool.  The drop is in a ``finally`` of its
+                # own: a release that raises (a session rolling back a
+                # connection its test severed) must not leave the
+                # database standing for the next test's clone to refuse.
+                try:
+                    _db.session.remove()
+                    _db.engine.dispose()
+                finally:
+                    _drop_worker_database(_WORKER_DB_NAME, _WORKER_ADMIN_URL)
             _profile_write_row(nodeid, timings)
 
 

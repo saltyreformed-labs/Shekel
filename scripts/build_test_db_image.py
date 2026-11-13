@@ -110,6 +110,10 @@ _IMAGE_REPO = "shekel-test-db"
 # forever.  ``tests/_worker_database.py`` and ``scripts/build_test_template.py``
 # spell the same constant; all THREE must agree.
 _TEMPLATE_DATABASE = "shekel_test_template"
+# The copy of the template :func:`_verify_image` asks its questions of.  The
+# template takes no connections (``scripts/build_test_template.py``'s last
+# step, ruling plan#3870), so the verifier reads what a test reads: a clone.
+_VERIFY_COPY_DATABASE = "shekel_test_template_verify"
 
 # Inputs the key covers no matter what the builder imports.  These shape the
 # template without being reachable by reading its import block: the migration
@@ -556,6 +560,11 @@ def _verify_image(tag: str) -> None:
     simply absent and nothing else would notice until a suite run failed
     confusingly.
 
+    The template takes no connections, so every question about its contents
+    is asked of a copy (:data:`_VERIFY_COPY_DATABASE`), made as each test's
+    database is made.  The copy goes with the container, which the
+    ``finally`` removes with its volume, so nothing drops it.
+
     Args:
         tag: Image reference to verify.
 
@@ -588,9 +597,9 @@ def _verify_image(tag: str) -> None:
         _wait_ready(container)
 
         def ask(database: str, sql: str) -> str:
-            """Return one scalar from the committed image.
+            """Return one scalar from the committed image, or run one statement.
 
-            Re-raises a failed query as :class:`BuildError`.  ``_run`` cannot
+            Re-raises a failed statement as :class:`BuildError`.  ``_run`` cannot
             draw this line: it sees an exit status, and `docker exec` exits
             non-zero both when the DAEMON is unreachable (a fault) and when
             psql rejects the SQL because a relation is missing (a verdict --
@@ -599,10 +608,11 @@ def _verify_image(tag: str) -> None:
 
             Args:
                 database: Database to query inside the committed image.
-                sql: Statement returning exactly one scalar.
+                sql: A query returning exactly one scalar, or a statement
+                    returning none.
 
             Returns:
-                The scalar, stripped.
+                The scalar, stripped; for a statement, psql's command tag.
 
             Raises:
                 BuildError: When the query fails, which means the image does
@@ -635,6 +645,13 @@ def _verify_image(tag: str) -> None:
                 "the declared VOLUME and that the cluster was shut down "
                 "cleanly before committing."
             )
+        # A clone of the template, as each test's database is; ``ask`` reports
+        # a refused copy as a verdict on the image.
+        ask(
+            "postgres",
+            f"CREATE DATABASE {_VERIFY_COPY_DATABASE} "
+            f"TEMPLATE {_TEMPLATE_DATABASE}",
+        )
 
         # EXISTENCE IS NOT ENOUGH, and an earlier draft of this function
         # stopped there while the module docstring claimed it "re-runs the
@@ -649,14 +666,14 @@ def _verify_image(tag: str) -> None:
         # raw `relation "alembic_version" does not exist`, which is true but
         # tells the reader nothing about what to do; measured on a
         # deliberately empty probe image.
-        if ask(_TEMPLATE_DATABASE, "SELECT to_regclass('alembic_version')") == "":
+        if ask(_VERIFY_COPY_DATABASE, "SELECT to_regclass('alembic_version')") == "":
             raise BuildError(
                 f"{tag} has a template database with no alembic_version "
                 "table, so it was never migrated. The template is empty -- "
                 "check that build_test_template.py actually ran, and rebuild "
                 "with --force."
             )
-        stamped = ask(_TEMPLATE_DATABASE, "SELECT version_num FROM alembic_version")
+        stamped = ask(_VERIFY_COPY_DATABASE, "SELECT version_num FROM alembic_version")
         if stamped != head:
             raise BuildError(
                 f"{tag} is stamped {stamped!r} but the migration chain's head "
@@ -673,14 +690,14 @@ def _verify_image(tag: str) -> None:
         # for each of them, and the list itself has one home too
         # (:func:`template_checks`), which a first boot is graded by as well.
         for label, sql, expected in template_checks():
-            answer = ask(_TEMPLATE_DATABASE, sql)
+            answer = ask(_VERIFY_COPY_DATABASE, sql)
             if answer != str(expected):
                 raise BuildError(
                     f"{tag} failed verification ({label}): got {answer!r}, "
                     f"expected {expected}. The image does not match this "
                     "tree -- rebuild with --force."
                 )
-        log_rows = ask(_TEMPLATE_DATABASE, "SELECT count(*) FROM system.audit_log")
+        log_rows = ask(_VERIFY_COPY_DATABASE, "SELECT count(*) FROM system.audit_log")
         if log_rows != "0":
             raise BuildError(
                 f"{tag} ships {log_rows} audit_log rows; the template must "
@@ -789,7 +806,7 @@ def build(tag: str) -> None:
         # build that somehow produced nothing would still exit 0 if its
         # assertions were skipped, and this is the cheapest place to notice.
         for line in builder.stdout.splitlines():
-            if line.startswith(("  Step 3/3", "DONE:")):
+            if line.startswith(("  Step 3/4", "  Step 4/4", "DONE:")):
                 print(f"  builder: {line.strip()}")
         print("  template built; shutting the cluster down cleanly")
         # See point 2 in the module docstring: `docker stop` alone is a race.

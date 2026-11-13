@@ -21,29 +21,26 @@ fixture already relies on.  This file once counted builds across the declaring
 tests, which only meant something with those tests in one process, in order,
 and so needed an ``xdist_group``.
 
-**The two halves are tested apart because only one of them is new.**  That a
-test starts from the world is the FEATURE.  That the test still cannot see
-another test's writes is the CONTRACT the suite already had, and it is the half
-a shared-database design would have traded away -- so it is graded here
-directly, by two tests that each refuse to find the other's row.
-
-**Why an ORDER-FREE isolation control.**  Both isolation arms below assert
-absence and then write, rather than one writing and a later one checking: a
-check-after-write pair proves nothing when the checker happens to run first,
-and under xdist "first" is not a property this file controls.  Written this
-way, whichever runs second is the one that fails if the copies are shared, so
-the control cannot pass by scheduling luck.
+**No test here looks for another test's writes** (ruling plan#3870).  That a
+test starts from the world is the FEATURE, graded here.  That it cannot see
+another test's writes is PostgreSQL's to refuse, and this file grades the
+refusals rather than looking for a leak: no one can connect to a seed, the
+template or a snapshot, so a test writes only to its own clone; and a snapshot
+is created once, so a second world under its name is refused rather than
+overwriting it.  The third refusal, that a test's clone is dropped when the
+test ends and the next clone under that name refuses one left standing, needs
+no test of its own: every test's ``db`` fixture makes that clone.
 """
 
 import ast
 from decimal import Decimal
 from pathlib import Path
 
+import psycopg
 import pytest
 
 from sqlalchemy import text
 
-from app.models.category import Category
 from app.models.user import User
 from tests import _app_fixtures as app_fixtures
 from tests import _seeded_start_states as seeded_states
@@ -72,11 +69,11 @@ def _build_arch_probe_world(db):
 
 
 def _build_arch_second_world(db):
-    """A SECOND world, so the two-worlds-on-one-worker case has an owner.
+    """A SECOND world, whose owner a test can tell from the first world's.
 
     The seam's whole argument against a wider fixture scope is that one
     database cannot hold two modules' states at once.  A snapshot per world is
-    the answer, and nothing graded it until this existed.
+    the answer, so a test declaring this world must be given this one.
 
     Args:
         db: The Flask-SQLAlchemy extension to write through.
@@ -96,17 +93,23 @@ register_seeded_state("arch_probe", _build_arch_probe_world)
 register_seeded_state("arch_probe_2", _build_arch_second_world)
 
 
-#: The marker row both isolation arms write.  One name, because the point is
-#: that each arm finds the table WITHOUT it.
-_ISOLATION_MARKER = "x-be-2 isolation marker"
+def _free_the_worker_name(db):
+    """Release this test's engine and drop its database, for a build the test runs.
 
+    A build takes the worker's database name as its scratch and drops nothing
+    first, so its clone refuses the name while this test's database stands
+    there.  The engine is released first, as the ``db`` fixture releases it
+    before its own drop.  The fixture's teardown then finds the name free: the
+    build drops its scratch however it ends.
 
-def _write_isolation_marker(db, user_id):
-    """Write the marker category this world's isolation arms look for."""
-    db.session.add(Category(
-        user_id=user_id, group_name="Probe", item_name=_ISOLATION_MARKER,
-    ))
-    db.session.commit()
+    Args:
+        db: The test's ``db`` fixture value.
+    """
+    db.session.remove()
+    db.engine.dispose()
+    worker_database._drop_worker_database(
+        worker_database._WORKER_DB_NAME, worker_database._WORKER_ADMIN_URL,
+    )
 
 
 class _CollectedTest:
@@ -148,16 +151,13 @@ class TestADeclaredWorldIsPresentAndPrivate:
     ):
         """World one's owner, not the one world two renamed.
 
-        Both worlds are built in one pass before either's tests run, so if the
-        two shared one snapshot database, the one built second would have
-        overwritten the first: this test or its twin in
-        :class:`TestTwoWorldsCoexistOnOneWorker` fails on every run.
+        The ``db`` fixture cloned this test's database from the snapshot of the
+        world it declared, not from the other world this file declares.
         """
         user = db.session.get(User, seeded_world["user_id"])
         assert user.display_name == "Test User", (
-            f"a test declaring 'arch_probe' was given {user.display_name!r} "
-            f"-- the second world's build overwrote this world's snapshot, so "
-            f"the two are sharing one database"
+            f"a test declaring 'arch_probe' was given {user.display_name!r}, "
+            f"the second world's owner: it was cloned from the wrong snapshot"
         )
 
     def test_the_worlds_own_audit_rows_are_not_a_tests_to_see(
@@ -178,35 +178,25 @@ class TestADeclaredWorldIsPresentAndPrivate:
             f"be counting the SEED's writes as its own"
         )
 
-    def test_isolation_holds_arm_one(self, db, seeded_world):
-        """This copy has no marker row -- then it writes one.
+    @pytest.mark.parametrize("seed", ["snapshot", "template"])
+    def test_no_one_can_connect_to_a_seed(self, db, seed):
+        """PostgreSQL refuses a connection to this world's snapshot and to the template.
 
-        Paired with :meth:`test_isolation_holds_arm_two`; see the module
-        docstring for why both assert-then-write rather than one writing for
-        the other to find.
+        Every test's database is a copy of one of the two, so a connection
+        that wrote to either would change what every later test starts from.
+        Each is created with connections switched off (ruling plan#3870): the
+        snapshot by the build, the template by ``scripts/build_test_template.py``
+        as its last step.  Asked by connecting, as a leak would have to.
         """
-        assert db.session.query(Category).filter_by(
-            item_name=_ISOLATION_MARKER,
-        ).count() == 0, (
-            "another test's write is visible here, so the tests declaring "
-            "this world are sharing one database rather than each holding a "
-            "private clone of the snapshot"
-        )
-        _write_isolation_marker(db, seeded_world["user_id"])
-
-    def test_isolation_holds_arm_two(self, db, seeded_world):
-        """This copy has no marker row -- then it writes one.
-
-        The twin of :meth:`test_isolation_holds_arm_one`.
-        """
-        assert db.session.query(Category).filter_by(
-            item_name=_ISOLATION_MARKER,
-        ).count() == 0, (
-            "another test's write is visible here, so the tests declaring "
-            "this world are sharing one database rather than each holding a "
-            "private clone of the snapshot"
-        )
-        _write_isolation_marker(db, seeded_world["user_id"])
+        name = {
+            "snapshot": seeded_states._seeded_snapshot_name("arch_probe"),
+            "template": worker_database._TEST_TEMPLATE_DATABASE,
+        }[seed]
+        url = worker_database._database_url(worker_database._WORKER_ADMIN_URL, name)
+        with pytest.raises(
+            psycopg.OperationalError, match="is not currently accepting connections",
+        ):
+            psycopg.connect(url).close()
 
 
 class TestAnUndeclaredTestIsUntouched:
@@ -259,31 +249,20 @@ class TestTwoWorldsCoexistOnOneWorker:
     module- or class-scoped fixture is that one database cannot hold two
     modules' states while xdist interleaves them; a snapshot per world is the
     answer.  Every worker that runs a declaring test builds both of this file's
-    worlds in one pass, before either's tests run, so "coexist" holds on every
-    worker this class runs on, and the first world's class checks the other
-    direction.
+    worlds in one pass, so a test here starts from the second world, wherever
+    the first world's tests run.
     """
 
     def test_this_world_is_the_one_declared_not_the_other(
         self, db, seeded_world,
     ):
-        """The owner here is the SECOND world's, though both are built here."""
+        """The owner here is the SECOND world's, the one this class declared."""
         user = db.session.get(User, seeded_world["user_id"])
         assert user.display_name == "Second World Owner", (
             f"a test declaring 'arch_probe_2' was given a database holding "
-            f"{user.display_name!r} -- the two worlds are sharing one snapshot"
+            f"{user.display_name!r}: it was cloned from the wrong snapshot"
         )
         assert seeded_world["display_name"] == "Second World Owner"
-
-    def test_the_first_worlds_marker_row_is_not_here(self, db, seeded_world):
-        """Neither world inherits what tests of the other wrote.
-
-        The first world's isolation arms each commit a marker category. A
-        snapshot shared between the two worlds would carry it here.
-        """
-        assert db.session.query(Category).filter_by(
-            item_name=_ISOLATION_MARKER,
-        ).count() == 0
 
 
 @pytest.fixture()
@@ -317,15 +296,31 @@ class TestTheSeamRefusesWhatItCannotDeliver:
         register_seeded_state("x_be_2_same", builder)
         register_seeded_state("x_be_2_same", builder)
 
-    def test_a_name_too_long_to_survive_postgres_is_refused(self):
-        """PostgreSQL truncates at 63 bytes, and two truncated names collide.
+    def test_two_worlds_truncated_to_one_snapshot_name_are_refused(self, app, db):
+        """The second world's snapshot is refused at its create, not built over the first.
 
-        Refused at REGISTRATION, which runs on every session, rather than at
-        first use -- which would fire only on the run that happened to use both
-        worlds, and only after one had already served the other's tests.
+        PostgreSQL truncates an identifier at 63 bytes, so two world names
+        differing only past that point name ONE snapshot.  A snapshot is
+        created once, with no drop before it (ruling plan#3870), so the second
+        create fails with ``already exists`` rather than overwriting the
+        first, and each world's tests would otherwise have been served the
+        other's.  The two names share their first 64 characters, so they
+        truncate to one on any worker.
         """
-        with pytest.raises(ValueError, match="truncates"):
-            register_seeded_state("w" * 64, lambda db: {})
+        shared = "x_be_2_truncated_" + "w" * 47
+        first, second = f"{shared}_a", f"{shared}_z"
+        register_seeded_state(first, lambda _db: {})
+        register_seeded_state(second, lambda _db: {})
+        _free_the_worker_name(db)
+        try:
+            _build_seeded_snapshot(first, app)
+            with pytest.raises(psycopg.errors.DuplicateDatabase):
+                _build_seeded_snapshot(second, app)
+        finally:
+            worker_database._drop_worker_database(
+                seeded_states._seeded_snapshot_name(first),
+                worker_database._WORKER_ADMIN_URL,
+            )
 
     def test_an_unregistered_world_names_the_ones_that_exist(self, app):
         """A typo in a marker fails with the list, before it touches a database."""
@@ -355,21 +350,14 @@ class TestTheSeamRefusesWhatItCannotDeliver:
         The arm above grades the predicate; this grades that the predicate is
         CALLED.  Deleting the call from ``_build_seeded_snapshot`` left every
         other arm in this file green, which is the whole reason this exists.
-
-        **This test releases the engine first, and must.**  A build drops the
-        worker database ``WITH (FORCE)``, which severs the connection THIS
-        test is holding -- leaving the ``db`` fixture's teardown to roll back
-        a dead connection and report an ERROR after a passing test.  Releasing
-        first is what the ``db`` fixture itself does before its own drop, for
-        the same reason.  The build re-clones, so the database this test is
-        torn down against exists again by the time it returns.
+        The test frees the worker's database name first, as a build needs
+        (:func:`_free_the_worker_name`).
         """
         def rows_not_ids(_db):
             return {"accounts": [1, 2, 3]}
 
         register_seeded_state("x_be_2_wired", rows_not_ids)
-        db.session.remove()
-        db.engine.dispose()
+        _free_the_worker_name(db)
         with pytest.raises(RuntimeError, match="non-scalar values"):
             _build_seeded_snapshot("x_be_2_wired", app)
 
@@ -410,9 +398,8 @@ def _register_counting_worlds(builds, second=None):
 class TestTheOnePass:
     """The list of a run's worlds and the pass that builds it, the build's only caller.
 
-    **The pass tests release the engine first, and must**, for the reason
-    :meth:`TestTheSeamRefusesWhatItCannotDeliver.test_the_refusal_is_WIRED_into_the_build`
-    gives: a build drops the worker database this test is holding.
+    **The pass tests free the worker's database name first, and must**
+    (:func:`_free_the_worker_name`): a build takes that name as its scratch.
     """
 
     def test_the_pass_runs_once_per_worker(self):
@@ -456,8 +443,7 @@ class TestTheOnePass:
         """
         builds = []
         items = _register_counting_worlds(builds)
-        db.session.remove()
-        db.engine.dispose()
+        _free_the_worker_name(db)
         with seeded_states.built_worlds(items, app) as worlds:
             snapshots = [snapshot for snapshot, _ids in worlds.values()]
             assert builds == [_PASS_FIRST, _PASS_SECOND], (
@@ -478,8 +464,7 @@ class TestTheOnePass:
             raise RuntimeError("the second world's builder refuses")
 
         items = _register_counting_worlds([], second=refuses)
-        db.session.remove()
-        db.engine.dispose()
+        _free_the_worker_name(db)
         with pytest.raises(RuntimeError, match="second world's builder refuses"):
             with seeded_states.built_worlds(items, app):
                 pass

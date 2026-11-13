@@ -13,7 +13,8 @@ must-knows; a fact lives in one tier and the other tiers point at it.
 
 - Tests use a real PostgreSQL database (`TEST_DATABASE_URL` or TestConfig defaults).
 - `conftest.py` builds the app once per worker, and the `db` fixture (`tests/_app_fixtures.py`)
-  drops and re-clones each test's database from the template, so nothing is truncated.
+  clones each test's database from the template and drops it when the test ends, so nothing is
+  truncated.
 - Test categories: `test_routes/`, `test_services/`, `test_models/`, `test_integration/`,
   `test_adversarial/`, `test_scripts/`.
 - **Use existing fixtures** from `conftest.py` (`seed_user`, `seed_second_user`, `auth_client`,
@@ -263,11 +264,14 @@ results rather than merely slowing them -- and the verification, not the key, is
 argument.
 
 **Running it by hand** is still the recovery path if you want to inspect the build: it is
-idempotent, dropping and recreating `shekel_test_template` on every run, and prints three steps --
+idempotent, dropping and recreating `shekel_test_template` on every run, and prints four steps --
 drop+create, populate (Alembic chain to `head` + audit infrastructure + reference seed +
 `TRUNCATE system.audit_log`), verify (account-type count, audit trigger count, `system.audit_log`
-row count). It reads `TEST_ADMIN_DATABASE_URL` for the admin DSN (default `postgresql:///postgres`).
-The cluster must already hold the `shekel_app` role, which the bake creates before it builds
+row count), close (`ALLOW_CONNECTIONS false`, ruling plan#3870). Once closed, the template refuses
+every connection, a superuser's included, so inspect a copy:
+`CREATE DATABASE ... TEMPLATE shekel_test_template`, as the image verifier does. It reads
+`TEST_ADMIN_DATABASE_URL` for the admin DSN (default `postgresql:///postgres`). The cluster must
+already hold the `shekel_app` role, which the bake creates before it builds
 (`scripts/build_test_db_image.py`). A template built on a cluster without the role carries none of
 its grants, and the role tests in `tests/test_models/test_audit_migration.py` then fail.
 `SECRET_KEY` is defaulted by the script -- the template DB is never reachable through Gunicorn so
@@ -290,7 +294,7 @@ each writes to its own database. Cluster-scoped state (roles, tablespaces, repli
 cluster-wide settings) is shared by every database on the cluster, so by every worker of the run.
 
 **No test changes cluster state another worker reads** (plan#2954). A database is itself a cluster
-object, and every test drops and creates one, but only under its own worker's names:
+object, and every test creates one and drops it when it ends, but only under its own worker's names:
 `shekel_test_<worker>` and that name's world snapshots (`tests/_worker_database.py`). The one
 cluster-scoped thing every worker reads, the `shekel_app` role, is created by the baked test-db
 image before the template is built (`scripts/build_test_db_image.py`, plan#3636), as the entrypoint
@@ -298,6 +302,13 @@ creates it before it migrates. It exists for the whole run, and a test grants to
 own clone, which goes with that clone. A test that needs other cluster state gets it from the image
 the same way: changed mid-run, it races every other worker, and there is no way to keep it on one
 worker.
+
+**No test checks that the per-test copies are separate, because PostgreSQL refuses every leak**
+(ruling plan#3870). No one can connect to a seed: the template and each world snapshot are created
+with connections switched off, so a test writes only to its own clone. A test's clone is created
+with no drop before it and dropped when the test ends, so one left standing makes the next clone
+under that name refuse (`already exists`) rather than be reused. A snapshot is created once, so a
+second world under its name is refused at its create rather than overwriting the first.
 
 **State a test keeps in its PROCESS is the same.** A module global, a cache or a counter is seen
 only by the tests that happen to run on that worker, in whatever order they run, and any test can

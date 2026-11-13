@@ -4,8 +4,9 @@ Importing this module runs :func:`_bootstrap_worker_database`, which clones this
 database from ``shekel_test_template`` and points ``TEST_DATABASE_URL`` at it, so it must be
 imported before any ``app`` module is: ``tests/conftest.py`` imports it right after the
 profile harness, and it imports nothing from ``app``.  The ``db`` fixture
-(:mod:`tests._app_fixtures`) drops and re-clones the database for every test with
-:func:`_drop_worker_database` and :func:`_clone_worker_database`.
+(:mod:`tests._app_fixtures`) clones the database for every test with
+:func:`_clone_worker_database` and drops it with :func:`_drop_worker_database` when the test
+ends, so a test's database lives exactly as long as the test (ruling plan#3870).
 """
 
 import os
@@ -54,9 +55,9 @@ _HOLD_THE_APP_ROLE_FIRST = (
 
 
 #: What separates a world SNAPSHOT's name from the worker database it was
-#: frozen from (plan step balance:X-be-2).  One constant because three places
-#: depend on the split: the name is built with it, the orphan sweep recovers a
-#: snapshot's OWNER with it, and the length guard measures across it.
+#: frozen from (plan step balance:X-be-2).  One constant because two places
+#: depend on the split: the name is built with it, and the orphan sweep
+#: recovers a snapshot's OWNER with it.
 _SNAPSHOT_INFIX = "__world_"
 
 
@@ -77,6 +78,22 @@ def _like_escape(value):
     return (
         value.replace("\\", "\\\\").replace("_", "\\_").replace("%", "\\%")
     )
+
+
+def _database_url(admin_url, name):
+    """The DSN of database *name*, reached as *admin_url* reaches its own.
+
+    Only the path is replaced, so the scheme, the user, the password and the
+    query (the run cluster's socket directory, ``scripts/test.sh``) survive.
+
+    Args:
+        admin_url: The admin DSN.
+        name: The database to point at.
+
+    Returns:
+        The DSN.
+    """
+    return urlunparse(urlparse(admin_url)._replace(path=f"/{name}"))
 
 
 def _bootstrap_worker_database():
@@ -137,11 +154,16 @@ def _bootstrap_worker_database():
         session DSN.  ``app.config.TestConfig`` reads this at
         class-body evaluation time during the next ``from app
         import ...``; the env var write must precede that import.
+        The database it clones serves no test: ``setup_database``
+        (:mod:`tests._app_fixtures`) drops it once the ref cache has
+        read it, so the first test's clone finds the name free.
 
     Returns:
         ``None`` when bootstrap is skipped (xdist master).
-        ``(db_name, admin_url)`` otherwise; ``pytest_sessionfinish``
-        uses these to DROP the per-session DB after the suite ends.
+        ``(db_name, admin_url)`` otherwise: the ``db`` fixture
+        clones and drops each test's database under ``db_name``, and
+        ``pytest_sessionfinish`` drops it if a session ended with one
+        standing.
 
     Raises:
         RuntimeError: When the template DB is missing, or when
@@ -156,13 +178,12 @@ def _bootstrap_worker_database():
         return None
 
     worker_id = os.environ.get("PYTEST_XDIST_WORKER", "main")
-    # Phase 3b: stable per-worker DB name (no PID suffix).  Per-test
-    # drop+reclone re-uses the SAME name on every test so the
-    # Flask-SQLAlchemy engine's URL stays valid across test boundaries
-    # -- only the underlying database is swapped atomically by
-    # DROP+CREATE.  The PID-bearing form (legacy) leaked into the
-    # cluster's DB list whenever a previous run crashed; orphan
-    # cleanup below catches both forms.
+    # Phase 3b: stable per-worker DB name (no PID suffix).  Every
+    # test's clone takes the SAME name, so the Flask-SQLAlchemy
+    # engine's URL stays valid across test boundaries -- only the
+    # database under it is new.  The PID-bearing form (legacy) leaked
+    # into the cluster's DB list whenever a previous run crashed;
+    # orphan cleanup below catches both forms.
     db_name = f"{_TEST_DATABASE_PREFIX}_{worker_id}"
     admin_url = os.environ.get(
         "TEST_ADMIN_DATABASE_URL", _DEFAULT_ADMIN_URL
@@ -207,10 +228,11 @@ def _bootstrap_worker_database():
             if candidate_orphans:
                 # **A snapshot's own connections say NOTHING about whether it
                 # is in use, and that is what makes the filter below a
-                # different question for it.**  Nothing ever connects to a
-                # snapshot: it is written by ``CREATE DATABASE ... TEMPLATE``
-                # and read only AS a template, by an admin-DSN connection to
-                # another database.  So it never appears in
+                # different question for it.**  Nothing can connect to a
+                # snapshot: it is created by ``CREATE DATABASE ... TEMPLATE``
+                # with ``ALLOW_CONNECTIONS false`` and read only AS a
+                # template, by an admin-DSN connection to another database
+                # (ruling plan#3870).  So it never appears in
                 # ``pg_stat_activity``, the filter can never spare it, and
                 # before this predicate a second invocation dropped a LIVE
                 # run's snapshot -- reproduced twice by review, once as 158
@@ -275,9 +297,7 @@ def _bootstrap_worker_database():
     # bypasses any SQLAlchemy pool state from the admin connection
     # above.  A row count mismatch means the template itself was
     # corrupt; the message names the fix.
-    per_session_url = urlunparse(
-        urlparse(admin_url)._replace(path=f"/{db_name}")
-    )
+    per_session_url = _database_url(admin_url, db_name)
     verify_conn = psycopg.connect(per_session_url)
     try:
         with verify_conn.cursor() as cur:
@@ -314,7 +334,7 @@ _BOOTSTRAP_RESULT = _bootstrap_worker_database()
 
 
 # Pull the worker DB name and admin DSN into module-level constants so
-# the per-test ``db`` fixture (Phase 3b) can drop+reclone without
+# the per-test ``db`` fixture (Phase 3b) can clone and drop without
 # unpacking ``_BOOTSTRAP_RESULT`` on every call.  ``None`` when the
 # bootstrap was skipped (xdist master), in which case the per-test
 # fixture will refuse to run -- the master never executes tests so
@@ -354,13 +374,18 @@ def database_exists(name):
 def _drop_worker_database(db_name, admin_url):
     """Drop the per-worker test database via an admin psycopg connection.
 
-    Phase 3b helper.  Called once per test by the ``db`` fixture
-    (before ``_clone_worker_database`` re-creates it) and at session
-    end by ``pytest_sessionfinish``.
+    Phase 3b helper.  The ``db`` fixture calls it as each test ends,
+    ``setup_database`` for the bootstrap's start-up database, a world's
+    build for its scratch database, and :func:`built_worlds`
+    (:mod:`tests._seeded_start_states`) for each snapshot.  No caller
+    drops a name in order to clone over it: each name is cloned once
+    and dropped once, so a drop that failed makes the next clone under
+    that name refuse (``already exists``) rather than reuse what stood
+    there (ruling plan#3870).
 
-    ``WITH (FORCE)`` (PostgreSQL 13+) terminates any leftover backend
-    that escaped the previous test's ``_db.engine.dispose()``;
-    without it a stuck transaction would block the drop.  Identifier
+    ``WITH (FORCE)`` (PostgreSQL 13+) terminates any backend that
+    escaped this test's ``_db.engine.dispose()``, such as one a test
+    opened itself; without it a stuck transaction would block the drop.  Identifier
     interpolation goes through :mod:`psycopg.sql` so the
     ``shekel_test_*`` name stays safely quoted even though it comes
     from a controlled f-string at module load time -- consistent
@@ -386,10 +411,10 @@ def _drop_worker_database(db_name, admin_url):
 
 
 def _clone_worker_database(db_name, admin_url, template=None):
-    """Re-create the per-worker test DB by cloning ``shekel_test_template``.
+    """Create the per-worker test DB by cloning ``shekel_test_template``.
 
-    Phase 3b helper.  Called once per test by the ``db`` fixture
-    (immediately after ``_drop_worker_database``) to give every test
+    Phase 3b helper.  Called once per test by the ``db`` fixture, under
+    the name the previous test's teardown dropped, to give every test
     the same start state the prior TRUNCATE+reseed cycle provided:
     empty ``system.audit_log``, no rows in ``budget.*`` / ``auth.*`` /
     ``salary.*``, full ref-data seed in ``ref.*``.  The template's

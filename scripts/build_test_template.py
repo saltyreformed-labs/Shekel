@@ -16,7 +16,7 @@ every session, which is what unlocks parallel pytest invocations
 without the per-test ``TRUNCATE`` deadlock that the current shared
 ``shekel_test`` database suffers from.
 
-Three steps, in order:
+Four steps, in order:
 
 1. **Recreate** the template database.  Uses an admin DSN
    (``TEST_ADMIN_DATABASE_URL``, default ``postgresql:///postgres``)
@@ -52,6 +52,10 @@ Three steps, in order:
    (i.e. ``len(AUDITED_TABLES)``), and ``system.audit_log`` is
    empty.  Any mismatch raises :class:`RuntimeError` with a recovery
    hint; the script does not attempt to repair partial state.
+4. **Close** the template to connections (``ALTER DATABASE ...
+   ALLOW_CONNECTIONS false``), so no one can connect to it and write
+   to what every clone copies; ``CREATE DATABASE ... TEMPLATE`` still
+   copies it (ruling plan#3870).  Last, because the verify connects.
 
 Environment variables (read at module load before app import):
 
@@ -583,10 +587,30 @@ def _verify_template_state() -> None:
             )
 
 
-def main() -> int:
-    """Drop, rebuild, populate, and verify the template database.
+def _close_template_to_connections() -> None:
+    """Switch connections to the template off, so no one can write to a seed.
 
-    Prints progress for each of the three phases plus a final
+    Ruling plan#3870: every test's database is a copy of this one, so a
+    connection that wrote to it would change every later test's start
+    state.  PostgreSQL then refuses every connection to it, a superuser's
+    included, and ``CREATE DATABASE ... TEMPLATE`` still copies it
+    (measured on PostgreSQL 18.7, 2026-11-13).  The world snapshots are
+    created closed the same way (``tests/_seeded_start_states.py``).  A
+    rebuild still drops it, as ``DROP DATABASE`` needs no connection to
+    it.  Run after :func:`_verify_template_state`, which connects.
+    """
+    with psycopg.connect(ADMIN_URL, autocommit=True) as conn, conn.cursor() as cur:
+        cur.execute(
+            sql.SQL("ALTER DATABASE {} ALLOW_CONNECTIONS false").format(
+                sql.Identifier(TEMPLATE_DB)
+            )
+        )
+
+
+def main() -> int:
+    """Drop, rebuild, populate, verify and close the template database.
+
+    Prints progress for each of the four phases plus a final
     summary line.  Exits 0 on success; failures propagate as
     exceptions (``psycopg.OperationalError`` on connect issues,
     Alembic errors on migration failure, :class:`RuntimeError` on
@@ -597,19 +621,22 @@ def main() -> int:
     print(f"  Template URL: {TEMPLATE_URL}")
 
     _recreate_template_database()
-    print("  Step 1/3: dropped and recreated empty database.")
+    print("  Step 1/4: dropped and recreated empty database.")
 
     app = create_app("testing")
     _populate_template(app)
-    print("  Step 2/3: migrated to head, applied audit, seeded reference data.")
+    print("  Step 2/4: migrated to head, applied audit, seeded reference data.")
 
     _verify_template_state()
     print(
-        f"  Step 3/3: verified "
+        f"  Step 3/4: verified "
         f"({_EXPECTED_ACCOUNT_TYPE_COUNT} account types, "
         f"{EXPECTED_TRIGGER_COUNT} audit triggers, "
         f"0 audit_log rows)."
     )
+
+    _close_template_to_connections()
+    print("  Step 4/4: closed to connections; it is copied, never connected to.")
 
     print(f"DONE: {TEMPLATE_DB} ready.")
     return 0

@@ -35,9 +35,6 @@ origination assertion -- so the settled effects ride on top of the opening
 and the Checking totals below are ``1000.00 + effect``.  All money is
 ``Decimal`` from strings, with the arithmetic shown per the testing standard.
 """
-# pylint: disable=redefined-outer-name
-# Rationale: ``redefined-outer-name`` is the canonical pytest fixture pattern;
-# test bodies bind fixtures (``auth_client``, ``seed_user``, ...) by name.
 from __future__ import annotations
 
 from datetime import timedelta
@@ -1091,7 +1088,7 @@ class TestCarryForwardPostsSettledSources:
     """Each envelope that carry-forward settles books its confirmed effect."""
 
     def test_carry_forward_posts_partially_spent_envelope(
-        self, app, db, seed_user, seed_periods,
+        self, app, seed_user, seed_periods,
     ):
         """A partially-spent carried envelope's money is its dated purchase's leg.
 
@@ -1129,7 +1126,7 @@ class TestCarryForwardPostsSettledSources:
             _assert_reconciles(scenario_id, checking)
 
     def test_carry_forward_empty_envelope_posts_nothing(
-        self, app, db, seed_user, seed_periods,
+        self, app, seed_user, seed_periods,
     ):
         """An empty carried envelope settles at zero and books nothing.
 

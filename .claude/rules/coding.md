@@ -10,16 +10,15 @@ The must-knows for code in this project. Full standards, with rationale and
 examples: `docs/coding-standards.md` -- read it when a point here needs depth.
 Several rules are enforced by gates (the per-edit hook, the custom pylint
 checkers, CI); fix what a gate flags at the root, never with a bare disable.
-The `code-reviewer` agent restates these rules deliberately, so a review
-carries them even where this file has not loaded; a change to a rule here
-updates that mirror in the same commit.
 
 ## Python
 
 - **`Decimal`, never `float`, for money. Construct from strings:** `Decimal("0.1")`,
   not `Decimal(0.1)` (float imprecision). Applies to defaults, seeds, test
   assertions. Gate: `shekel-decimal-from-float`. `float()` belongs only at a
-  serialization boundary (Chart.js JSON), never in a calculation.
+  serialization boundary (Chart.js JSON), never in a calculation: a `float()` whose
+  result feeds arithmetic or a comparison is a bug, and one serialized at once
+  carries a comment saying so.
 - **Type hints on every signature.** `Decimal` (not `float`) for money, `X | None`
   for nullable, specific collection types -- not bare `list`/`dict`, not `Any`.
 - **Do not rely on truthiness for business logic.** Write `if amount is None:`,
@@ -30,8 +29,12 @@ updates that mirror in the same commit.
   a constant with a good name** -- `PAY_PERIODS_PER_YEAR = 26` was this rule's own
   example until plan step R7a-2a measured it wrong for every non-biweekly
   cadence; `pay_calendar.PayCadence` derives it now.
-- **Keep functions focused** (evaluate decomposition past 50 lines), **guard
-  clauses over deep nesting** (max depth 3), **no mutable default arguments**.
+- **Keep functions focused** (evaluate decomposition past 50 lines; past 100 the
+  length needs a justification), **guard clauses over deep nesting** (max depth 3),
+  **no mutable default arguments** (`[]`, `{}`, `set()`: use `None`).
+- **A state-changing route validates through a Marshmallow schema before any
+  database work**, and checks that each referenced row exists and is the user's
+  before commit.
 - **DRY/SOLID:** verify equivalent logic does not already exist before writing new
   code; extract shared behavior rather than duplicating it.
 - **Catch specific exceptions**, never `except Exception` (gate:
@@ -41,14 +44,34 @@ updates that mirror in the same commit.
   REACH one is a bug, whatever the rule guards (a card's, a row's or a
   transfer's): the code refuses the state first, with an actionable message.
   Why: `docs/coding-standards.md` (Validation).
-- **Substantive docstrings on every module, class, function**; comments explain
-  *why*, not *what*. **snake_case**; organized imports (stdlib / third-party /
-  local). Fix pylint findings, do not suppress them.
+- **Substantive docstrings on every module, class, function**, public and private:
+  what it does in business terms, inputs, return and edge cases, side effects, and
+  for a financial calculation its formula; one that restates the name adds nothing.
+  Comments explain *why*, not *what*. **snake_case**; organized imports (stdlib /
+  third-party / local). Fix pylint findings, do not suppress them: a `too-many-*`
+  smell is fixed by refactoring, never by a widened threshold, and never with
+  `disable=all`.
 - **A justified `# pylint: disable=` carries a `Pylint:` why-comment in a fixed
   place** (gate: `shekel-disable-rationale`): definition-scoped (on a `def`/`class`)
   -> a `` Pylint: ``rule`` (n/limit) -- why `` note in the docstring; statement-scoped
   -> a `` # Pylint: ``rule`` -- why `` comment immediately above the line. Name every
   disabled rule. Full spec in `docs/coding-standards.md`.
+
+## Routes, queries and security
+
+- **Every route is behind the login gate** (`app/login_gate.py`): no view carries
+  `@login_required`, and a route that must be public is named in `PUBLIC_ENDPOINTS`
+  (gate: `tests/test_arch/test_the_login_gate_has_one_home.py`).
+- **Every query touching user data filters by `user_id`** -- a missing ownership
+  check is an IDOR vulnerability. The ownership helpers are in
+  `app/utils/auth_helpers.py`. Security response: 404 for both "not found" and
+  "not yours" (no existence oracle).
+- **Filter soft-deleted rows:** `.filter(Model.is_deleted.is_(False))` unless
+  deleted rows are explicitly needed.
+- **ORM only**, no raw SQL strings. Prevent N+1 with `joinedload` /
+  `selectinload`, on the grid route and the balance reads (`app/services/balance_at/`)
+  especially.
+- **Structured logging** through `log_event()` (`app/utils/log_events.py`).
 
 ## Reference tables
 

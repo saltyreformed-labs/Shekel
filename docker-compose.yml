@@ -38,11 +38,19 @@ services:
     image: postgres:18-alpine@sha256:10a5c69a83035ab5239f5620d708520e8b28f5aa1f2b20143e6024532edadfb5
     container_name: shekel-prod-db
     restart: unless-stopped
-    # Match the postgres:N-alpine line -- patch tags within PG18 and
-    # eventual PG19+ rebuilds, without surfacing the -trixie / -bookworm
-    # / -windowsservercore variants WUD otherwise reports.
+    # WUD, the homelab's update watcher, watches only a container labelled
+    # ``wud.watch=true`` (opt-in since 2026-07-04; ruling plan#3725).  The
+    # tag filter matches the postgres:N-alpine line, without surfacing the
+    # -trixie / -bookworm / -windowsservercore variants WUD otherwise
+    # reports, so WUD sees a new major (19-alpine).  18-alpine itself moves
+    # with every 18.x release and every rebuild, which WUD sees only by
+    # comparing digests.  With digest watching on, WUD reads a failed
+    # lookup as up to date; the homelab's update-stack.sh flags those from
+    # WUD's log.
     labels:
       - "wud.tag.include=^\\d+-alpine$$"
+      - "wud.watch=true"
+      - "wud.watch.digest=true"
     # ``user: postgres`` is load-bearing alongside ``cap_drop: ALL``
     # (audit findings F-055, F-056, F-117 / Commit C-35).  The
     # postgres:18-alpine entrypoint, when it sees uid 0, runs
@@ -154,10 +162,15 @@ services:
     image: valkey/valkey:9.1.3-alpine@sha256:bf09d58e96d6b4524a15396b65b242bbe18beebbcc15a04d8ee75ddac62fae0b
     container_name: shekel-prod-valkey
     restart: unless-stopped
-    # Match the exact-version alpine tags (``<major>.<minor>.<patch>-alpine``)
-    # the pin above uses.
+    # Watched by WUD as the database is, by tag and by digest (its labels
+    # say why; ruling plan#3725).  The tag filter matches the exact-version
+    # alpine tags (``<major>.<minor>.<patch>-alpine``) the pin above uses,
+    # so WUD sees a new version; an exact tag is rebuilt in place on a new
+    # Alpine, which WUD sees by digest.
     labels:
       - "wud.tag.include=^\\d+\\.\\d+\\.\\d+-alpine$$"
+      - "wud.watch=true"
+      - "wud.watch.digest=true"
     # No network at all, not even the internal backend: nothing reaches
     # Valkey over one, and Valkey reaches nothing.  The healthcheck runs
     # inside this container, over the socket.
@@ -295,11 +308,17 @@ services:
     container_name: shekel-prod-app
     restart: unless-stopped
     # `latest` is a moving tag -- no semver to compare. Constrain
-    # candidate tags to literally `latest` (no cross-tag noise) and
-    # enable digest watching so WUD pings whenever the published
-    # `:latest` digest changes (i.e. you've shipped a new build).
+    # candidate tags to literally `latest` (no cross-tag noise), and watch
+    # the container (WUD watches only one labelled ``wud.watch=true``) by
+    # digest, so WUD pings whenever the published `:latest` is a build
+    # production does not run: a release's, built but not yet deployed, or
+    # the weekly rebuild's (docker-publish.yml, ruling plan#3724).  The
+    # production override names the image by digest alone, which WUD 9.8.0
+    # reads as tag `latest` at that digest (its Docker.ts, read 2026-11-13;
+    # ruling plan#3725).
     labels:
       - "wud.tag.include=^latest$$"
+      - "wud.watch=true"
       - "wud.watch.digest=true"
     depends_on:
       db:

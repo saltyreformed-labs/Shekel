@@ -121,7 +121,7 @@ class TestPreviewCarryForwardEmptyAndShortCircuits:
         Defense-in-depth: the route enforces ownership before calling
         the service, but the service repeats the check so a future
         misuse cannot leak data.  Mirrors the security response rule
-        in CLAUDE.md.
+        (``.claude/rules/coding.md``).
         """
         with app.app_context():
             other_period_id = seed_second_periods[0].id

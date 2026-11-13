@@ -81,16 +81,6 @@ Audit reference: F-073, F-078, F-136 of
 shekel-audits/security-2026-04-15/findings.md; commit C-43 of
 shekel-audits/security-2026-04-15/remediation-plan.md.
 """
-# pylint: disable=redefined-outer-name,unused-argument
-# pylint: disable=protected-access
-# Rationale: ``redefined-outer-name`` is the canonical pytest fixture
-# pattern; tests in this file declare local fixtures and consume them
-# under the same names.  ``unused-argument`` is unavoidable for
-# fixture-only requests like ``seed_user`` that ensure conftest
-# fixtures have produced a populated DB but whose return values the
-# assertion does not depend on.  ``protected-access`` is required to
-# read the migration's ``_CONFDELTYPE_TO_LABEL``; its two helpers the
-# tests call directly are public since ruling plan#3737.
 from __future__ import annotations
 
 import importlib.util
@@ -245,9 +235,10 @@ def _fk_ondelete_code(session, schema: str, name: str) -> str | None:
     """Return ``pg_constraint.confdeltype`` for the named FK, or None.
 
     Reads the raw single-character code (``a`` = NO ACTION, ``r`` =
-    RESTRICT, ``c`` = CASCADE, ``n`` = SET NULL).  Callers map to
-    human-readable form via ``_M_C43._CONFDELTYPE_TO_LABEL`` when
-    needed; the raw code is returned here so the test can detect
+    RESTRICT, ``c`` = CASCADE, ``n`` = SET NULL).  Callers assert the
+    letter itself, PostgreSQL's own spelling, so the oracle is the
+    catalog's and never the migration's table under test (ruling
+    plan#3737); the raw code is returned here so the test can detect
     "constraint absent" (None) vs "constraint present with action X"
     in a single read.
     """
@@ -366,8 +357,9 @@ class TestPostUpgradeDbShape:
         list(_M_C43.REF_FK_SPECS),
         ids=[spec[7] for spec in _M_C43.REF_FK_SPECS],
     )
+    @pytest.mark.usefixtures("seed_user")
     def test_ref_fk_has_restrict_and_new_name(
-        self, app, db, seed_user, spec,
+        self, app, db, spec,
     ):
         """Each of the nine ref-FKs carries RESTRICT under the new name.
 
@@ -380,7 +372,7 @@ class TestPostUpgradeDbShape:
         (
             _src_schema, _src_table, _src_col,
             _tgt_schema, _tgt_table, _tgt_col,
-            legacy_name, new_name, expected_ondelete,
+            legacy_name, new_name, _new_ondelete,
         ) = spec
         source_schema = spec[0]
         with app.app_context():
@@ -390,10 +382,9 @@ class TestPostUpgradeDbShape:
                 f"Rebuild the template via "
                 f"`python scripts/build_test_template.py`."
             )
-            assert _M_C43._CONFDELTYPE_TO_LABEL[new_code] == expected_ondelete, (
-                f"FK {source_schema}.{new_name} has ondelete="
-                f"{_M_C43._CONFDELTYPE_TO_LABEL[new_code]!r}, expected "
-                f"{expected_ondelete!r}."
+            assert new_code == "r", (
+                f"FK {source_schema}.{new_name} has confdeltype "
+                f"{new_code!r}, expected 'r' (RESTRICT)."
             )
             # The savings_goals FKs already used the convention name
             # pre-C-43 (the 4f2d894216ad migration installed them
@@ -410,8 +401,9 @@ class TestPostUpgradeDbShape:
                     f"recreate produced a duplicate constraint."
                 )
 
+    @pytest.mark.usefixtures("seed_user")
     def test_transfers_pay_period_id_has_cascade_and_new_name(
-        self, app, db, seed_user,
+        self, app, db,
     ):
         """transfers.pay_period_id carries CASCADE under fk_transfers_pay_period_id.
 
@@ -422,17 +414,16 @@ class TestPostUpgradeDbShape:
         (
             _src_schema, _src_table, _src_col,
             _tgt_schema, _tgt_table, _tgt_col,
-            legacy_name, new_name, expected_ondelete,
+            legacy_name, new_name, _new_ondelete,
         ) = _M_C43.TRANSFERS_PAY_PERIOD_SPEC
         with app.app_context():
             new_code = _fk_ondelete_code(db.session, "budget", new_name)
             assert new_code is not None, (
                 f"Post-upgrade FK budget.{new_name} is missing."
             )
-            assert _M_C43._CONFDELTYPE_TO_LABEL[new_code] == expected_ondelete, (
-                f"FK budget.{new_name} has ondelete="
-                f"{_M_C43._CONFDELTYPE_TO_LABEL[new_code]!r}, expected "
-                f"{expected_ondelete!r} (CASCADE)."
+            assert new_code == "c", (
+                f"FK budget.{new_name} has confdeltype {new_code!r}, "
+                f"expected 'c' (CASCADE)."
             )
             assert not _constraint_exists(db.session, "budget", legacy_name), (
                 f"Legacy FK budget.{legacy_name} is still present "
@@ -496,8 +487,9 @@ class TestPayPeriodIdConsistency:
         ],
         ids=["transactions", "transfers"],
     )
+    @pytest.mark.usefixtures("seed_user")
     def test_pay_period_id_fk_cascades(
-        self, app, db, seed_user, schema, name,
+        self, app, db, schema, name,
     ):
         """Both surviving child FKs that reference pay_periods.id CASCADE.
 
@@ -513,10 +505,9 @@ class TestPayPeriodIdConsistency:
                 f"pay_period_id consistency invariant cannot be "
                 f"asserted."
             )
-            assert _M_C43._CONFDELTYPE_TO_LABEL[code] == "CASCADE", (
-                f"FK {schema}.{name} has ondelete="
-                f"{_M_C43._CONFDELTYPE_TO_LABEL[code]!r}, expected "
-                f"CASCADE.  F-136 invariant broken."
+            assert code == "c", (
+                f"FK {schema}.{name} has confdeltype {code!r}, expected "
+                f"'c' (CASCADE).  F-136 invariant broken."
             )
 
 
@@ -573,8 +564,9 @@ class TestRestrictBehavior:
             finally:
                 db.session.rollback()
 
+    @pytest.mark.usefixtures("seed_user")
     def test_delete_account_type_category_in_use_raises_integrity_error(
-        self, app, db, seed_user,
+        self, app, db,
     ):
         """Deleting a referenced account_type_categories row fails.
 
@@ -610,8 +602,9 @@ class TestUpgradeIdempotent:
     (b) the live catalog still reflects the post-upgrade shape.
     """
 
+    @pytest.mark.usefixtures("seed_user")
     def test_drop_and_recreate_fk_returns_false_for_each_ref_fk(
-        self, app, db, seed_user,
+        self, app, db,
     ):
         """Every ``drop_and_recreate_fk`` call returns False for ref FKs.
 
@@ -639,8 +632,9 @@ class TestUpgradeIdempotent:
                             f"post-C-43 state."
                         )
 
+    @pytest.mark.usefixtures("seed_user")
     def test_drop_and_recreate_fk_returns_false_for_transfers(
-        self, app, db, seed_user,
+        self, app, db,
     ):
         """``drop_and_recreate_fk`` returns False for the transfers FK.
 
@@ -668,8 +662,9 @@ class TestUpgradeIdempotent:
                         "post-C-43 state."
                     )
 
+    @pytest.mark.usefixtures("seed_user")
     def test_full_upgrade_is_noop_on_already_migrated_db(
-        self, app, db, seed_user,
+        self, app, db,
     ):
         """Running ``upgrade()`` against an already-migrated DB succeeds.
 
@@ -734,8 +729,9 @@ class TestUpgradeRecreatesDriftedArtifacts:
     clean DB.
     """
 
+    @pytest.mark.usefixtures("seed_user", "restore_c43_state")
     def test_upgrade_restricts_drifted_ref_fk(
-        self, app, db, seed_user, restore_c43_state,
+        self, app, db,
     ):
         """Reverting a ref-FK to NO ACTION + legacy name; upgrade restores.
 
@@ -783,17 +779,14 @@ class TestUpgradeRecreatesDriftedArtifacts:
                 f"upgrade() did not restore {source_schema}.{new_name}."
             )
             new_code = _fk_ondelete_code(db.session, source_schema, new_name)
-            assert (
-                _M_C43._CONFDELTYPE_TO_LABEL[new_code] == "RESTRICT"
-            ), (
+            assert new_code == "r", (
                 f"upgrade() restored {source_schema}.{new_name} but "
-                f"with ondelete="
-                f"{_M_C43._CONFDELTYPE_TO_LABEL[new_code]!r}, expected "
-                f"RESTRICT."
+                f"with confdeltype {new_code!r}, expected 'r' (RESTRICT)."
             )
 
+    @pytest.mark.usefixtures("seed_user", "restore_c43_state")
     def test_upgrade_cascades_drifted_transfers_pay_period(
-        self, app, db, seed_user, restore_c43_state,
+        self, app, db,
     ):
         """Reverting transfers.pay_period_id to RESTRICT + legacy name; upgrade restores.
 
@@ -834,13 +827,9 @@ class TestUpgradeRecreatesDriftedArtifacts:
             db.session.commit()
 
             new_code = _fk_ondelete_code(db.session, source_schema, new_name)
-            assert (
-                _M_C43._CONFDELTYPE_TO_LABEL[new_code] == "CASCADE"
-            ), (
+            assert new_code == "c", (
                 f"upgrade() restored {source_schema}.{new_name} but "
-                f"with ondelete="
-                f"{_M_C43._CONFDELTYPE_TO_LABEL[new_code]!r}, expected "
-                f"CASCADE."
+                f"with confdeltype {new_code!r}, expected 'c' (CASCADE)."
             )
 
 
@@ -852,8 +841,9 @@ class TestUpgradeRecreatesDriftedArtifacts:
 class TestDowngradeReversesUpgrade:
     """downgrade() reverses every C-43 change symmetrically."""
 
+    @pytest.mark.usefixtures("seed_user", "restore_c43_state")
     def test_downgrade_restores_legacy_ref_fk_names_and_ondeletes(
-        self, app, db, seed_user, restore_c43_state,
+        self, app, db,
     ):
         """After downgrade, every ref-FK carries its pre-C-43 name + NO ACTION.
 
@@ -902,15 +892,15 @@ class TestDowngradeReversesUpgrade:
                 code = _fk_ondelete_code(
                     db.session, source_schema, legacy_name,
                 )
-                assert _M_C43._CONFDELTYPE_TO_LABEL[code] == "NO ACTION", (
+                assert code == "a", (
                     f"downgrade() restored {source_schema}."
-                    f"{legacy_name} with ondelete="
-                    f"{_M_C43._CONFDELTYPE_TO_LABEL[code]!r}, expected "
-                    f"NO ACTION."
+                    f"{legacy_name} with confdeltype {code!r}, expected "
+                    f"'a' (NO ACTION)."
                 )
 
+    @pytest.mark.usefixtures("seed_user", "restore_c43_state")
     def test_downgrade_restores_transfers_pay_period_to_restrict(
-        self, app, db, seed_user, restore_c43_state,
+        self, app, db,
     ):
         """After downgrade, transfers.pay_period_id is RESTRICT under legacy name."""
         # pylint: disable=import-outside-toplevel
@@ -943,14 +933,15 @@ class TestDowngradeReversesUpgrade:
             code = _fk_ondelete_code(
                 db.session, source_schema, legacy_name,
             )
-            assert _M_C43._CONFDELTYPE_TO_LABEL[code] == "RESTRICT", (
+            assert code == "r", (
                 f"downgrade() restored {source_schema}.{legacy_name} "
-                f"but with ondelete={_M_C43._CONFDELTYPE_TO_LABEL[code]!r}"
-                f", expected RESTRICT (the original pre-C-43 clause)."
+                f"but with confdeltype {code!r}, expected 'r' (RESTRICT, "
+                f"the original pre-C-43 clause)."
             )
 
+    @pytest.mark.usefixtures("seed_user", "restore_c43_state")
     def test_full_round_trip_upgrade_downgrade_upgrade(
-        self, app, db, seed_user, restore_c43_state,
+        self, app, db,
     ):
         """upgrade -> downgrade -> upgrade returns the DB to the post-C-43 state.
 
@@ -988,9 +979,9 @@ class TestDowngradeReversesUpgrade:
             new_code = _fk_ondelete_code(
                 db.session, "budget", "fk_transfers_pay_period_id",
             )
-            assert _M_C43._CONFDELTYPE_TO_LABEL[new_code] == "CASCADE", (
+            assert new_code == "c", (
                 "Round trip lost the C-43 transfers.pay_period_id "
-                "CASCADE."
+                f"CASCADE ('c'); confdeltype is {new_code!r}."
             )
 
 
@@ -1125,8 +1116,9 @@ class TestNamingConventionContract:
 class TestHelperReturnValueContracts:
     """The migration's helpers return True iff DDL ran on this call."""
 
+    @pytest.mark.usefixtures("seed_user", "restore_c43_state")
     def test_drop_and_recreate_fk_returns_true_when_creating(
-        self, app, db, seed_user, restore_c43_state,
+        self, app, db,
     ):
         """``drop_and_recreate_fk`` returns True when DDL runs.
 
@@ -1166,8 +1158,9 @@ class TestHelperReturnValueContracts:
                 "contract is broken."
             )
 
+    @pytest.mark.usefixtures("seed_user")
     def test_assert_fk_ondelete_passes_when_clause_matches(
-        self, app, db, seed_user,
+        self, app, db,
     ):
         """``assert_fk_ondelete`` passes silently on the canonical state."""
         with app.app_context():
@@ -1177,8 +1170,9 @@ class TestHelperReturnValueContracts:
                 bind, "ref", "fk_account_types_category_id", "RESTRICT",
             )
 
+    @pytest.mark.usefixtures("seed_user")
     def test_assert_fk_ondelete_raises_on_mismatch(
-        self, app, db, seed_user,
+        self, app, db,
     ):
         """``assert_fk_ondelete`` raises RuntimeError on ondelete mismatch."""
         with app.app_context():
@@ -1188,8 +1182,9 @@ class TestHelperReturnValueContracts:
                     bind, "ref", "fk_account_types_category_id", "CASCADE",
                 )
 
+    @pytest.mark.usefixtures("seed_user")
     def test_assert_fk_ondelete_raises_on_missing(
-        self, app, db, seed_user,
+        self, app, db,
     ):
         """``assert_fk_ondelete`` raises RuntimeError when the FK is absent."""
         with app.app_context():

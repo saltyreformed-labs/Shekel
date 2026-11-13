@@ -393,6 +393,37 @@ def test_a_compose_image_line_moves_its_tag_and_digest(repo):
         (Move("postgres", "18", "18.7", False),), (Move("postgres", "18", "19", True),))
 
 
+#: A compose file pinning Grype as the weekly scan's does, its tag spelling the version after
+#: a ``v`` (ruling plan#3704).
+_SCAN = (f"services:\n  scan:\n    image: anchore/grype:v0.121.2-nonroot@sha256:{_OLD}\n"
+         "    read_only: true\n")
+
+
+@pytest.mark.parametrize(("tag", "found"), [
+    ("v0.121.3-nonroot", Move("anchore/grype", "0.121.2", "0.121.3", False)),
+    ("v0.122.0-nonroot", Move("anchore/grype", "0.121.2", "0.122.0", True)),
+    ("v1.0.0-nonroot", Move("anchore/grype", "0.121.2", "1.0.0", True)),
+], ids=["its patch", "its 0.x minor", "its first major"])
+def test_a_tag_spelling_its_version_after_a_v_moves_its_version(repo, tag, found):
+    """Grype's tag spells its version after a ``v``, which is no part of the version: a patch
+    moves within the major, and a 0.x minor or a 1.0 crosses one, as the digits say."""
+    new = _SCAN.replace(f"v0.121.2-nonroot@sha256:{_OLD}", f"{tag}@sha256:{_NEW}")
+    assert _moved(repo, COMPOSE, _SCAN, new) == (found,)
+
+
+@pytest.mark.parametrize(("old", "new"), [
+    ("v0.121.2-nonroot", "0.121.3-nonroot"), ("0.121.2-nonroot", "v0.121.3-nonroot"),
+], ids=["the v dropped", "a v added"])
+def test_a_move_adding_or_dropping_the_v_moves_more_than_the_version(repo, old, new):
+    """The ``v`` is part of the line's frame, so a move that drops or adds it is refused as
+    more than a version moved."""
+    was = _SCAN.replace("v0.121.2-nonroot", old)
+    now = _SCAN.replace(f"v0.121.2-nonroot@sha256:{_OLD}", f"{new}@sha256:{_NEW}")
+    assert _refusal(repo, COMPOSE, was, now) == (
+        "docker-compose.yml changes more than the version in its image's tag and its digest on "
+        "line 3")
+
+
 @pytest.mark.parametrize(("new", "why"), [
     (_COMPOSE.replace(f"postgres:18-alpine@sha256:{_OLD}",
                       f"evil/postgres:18-alpine@sha256:{_NEW}"),
@@ -639,6 +670,13 @@ def test_a_compose_file_pins_each_image_pinned_by_tag_and_digest(repo):
     under a tag alone, pins none."""
     text = _COMPOSE + "  app:\n    image: ghcr.io/saltyreformed-labs/shekel:latest\n"
     assert _pins(repo, COMPOSE, text) == {Pin("postgres", f"18-alpine@sha256:{_OLD}")}
+
+
+def test_an_image_whose_tag_spells_a_v_is_pinned_from_its_version_on(repo):
+    """Grype's image is pinned at its tag's version through its digest, the ``v`` before the
+    version no part of it, as a release beside a commit is read."""
+    assert _pins(repo, COMPOSE, _SCAN) == {
+        Pin("anchore/grype", f"0.121.2-nonroot@sha256:{_OLD}")}
 
 
 def test_the_publish_workflow_pins_each_action_at_its_commit_and_release(repo):

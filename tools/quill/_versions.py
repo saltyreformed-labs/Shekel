@@ -44,7 +44,11 @@ and only in the files that pin versions (:func:`pins_versions`):
   (``docker-compose*.yml``), each pinning an image by tag and digest
   (``name:<version><variant>@sha256:<digest>``): only the tag's version and the digest
   move, the image's name, the tag's variant (``-alpine``) and the rest of the line as they
-  were.  **An image's version is read from its tag alone** (ruling plan#2474): Docker pulls
+  were.  A tag may spell its version after a ``v`` (``anchore/grype:v0.121.2-nonroot``, the
+  weekly scan's, ruling plan#3704), which is part of the line and no part of the version, as
+  a ``uses:`` line's release is read: the major is read from the digits, and a move that
+  adds or drops the ``v`` moves more than the version.  **An image's version is read from
+  its tag alone** (ruling plan#2474): Docker pulls
   a digest only from the image's own repository, so no other repository's image can stand
   in, and which digests a tag named before cannot be read, so whether a digest is its tag's
   is not asked.
@@ -85,7 +89,9 @@ update moved: each
 package the lock holds at its version, a lock forked by environment pinning each version a
 name holds, and each line of any other such file that pins one, by what it pins and its
 version as the line spells it, the tag's version through the digest
-(``3.14-slim@sha256:<digest>``) or the commit through the release (``<commit> # v7.0.1``).
+(``3.14-slim@sha256:<digest>``, and ``0.121.2-nonroot@sha256:<digest>`` from a tag
+``v0.121.2-nonroot``, the ``v`` no part of it) or the commit through the release
+(``<commit> # v7.0.1``).
 A line pinning by any other form (a tag alone, a tag naming no version, an action of this
 repository's own) pins none this module reads.
 
@@ -130,8 +136,10 @@ _FILE_MODES = ("100644", "100755")
 #: part after.
 _RELEASE = re.compile(r"(?:(?P<epoch>[0-9]+)!)?(?P<release>[0-9]+(?:\.[0-9]+)*)")
 #: An image pinned by tag and digest, the tag a version and a variant: what it pins, the
-#: version, the variant and the digest.
-_IMAGE = (r"(?P<what>[^\s@]+):(?P<version>[0-9]+(?:\.[0-9]+)*)(?P<variant>[A-Za-z0-9_.-]*)"
+#: version, the variant and the digest.  A ``v`` before the version (ruling plan#3704) stands
+#: outside every group, so it is part of the line's frame (:func:`_frame`) and no part of
+#: the version :func:`_major` reads.
+_IMAGE = (r"(?P<what>[^\s@]+):v?(?P<version>[0-9]+(?:\.[0-9]+)*)(?P<variant>[A-Za-z0-9_.-]*)"
           r"@sha256:(?P<exact>[0-9a-f]{64})")
 #: What a package from a registry may change where its version does not move: its files, a
 #: source distribution and wheels, each with its hash.
@@ -192,8 +200,8 @@ class Reason:
 class Pin:
     """One version a file pins (:func:`pinned`): ``what`` (a package, an image, an action)
     at ``version``, a package's as the lock holds it, an image's as its
-    line spells its tag's version through its digest, an action's its commit through its
-    release."""
+    line spells its tag's version through its digest (a ``v`` before the version no part of
+    it), an action's its commit through its release."""
 
     what: str
     version: str

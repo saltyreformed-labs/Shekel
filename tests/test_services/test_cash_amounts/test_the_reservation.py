@@ -221,7 +221,7 @@ class TestTheEntriesRelationshipIsNotASeam:
     """The reduction applies whether or not the caller pre-loaded entries.
 
     The structural fix for CRIT-01 / F-009 / E-25, and the reason
-    :func:`_envelope` above does not re-query with ``selectinload``: symptom #1
+    ``_helpers.py``'s :func:`_envelope` does not re-query with ``selectinload``: symptom #1
     ($160 on the grid against $114.29 on ``/savings`` for one row) was exactly
     this seam, where the rule returned ``effective_amount`` whenever the
     consuming query had not issued the eager load.  The rule now reads

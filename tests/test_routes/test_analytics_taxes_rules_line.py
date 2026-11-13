@@ -12,7 +12,7 @@ pay periods, so its figures are zero, and that one seeds 2026's
 state, renders.
 
 Its own module, written while ``test_analytics.py`` was past the 1,000-line
-ceiling (ruling R-IR); that module is the ``test_analytics/`` package since plan#3558.
+ceiling (ruling R-IR); that module is the ``test_analytics/`` package since plan#3573.
 """
 
 import re

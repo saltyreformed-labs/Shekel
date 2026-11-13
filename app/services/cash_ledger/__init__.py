@@ -63,9 +63,10 @@ this package
 names the loan TERM primitives (``loan_loaders``, ``loan_resolver``,
 ``escrow_calculator``, ``recurring_transfer_query``), none of which names it --
 and the loan READING tier may import this package, which plan step X-au-g-2c-1
-SPENT: ``loan_payment_service.get_payment_history`` prices its feed through
+SPENT: ``loan_payment_service.get_payment_history`` priced its feed through
 :func:`contributions_by_key` rather than through
-``row_valuation.settled_contribution``.  ``balance_at._plan._planned_from_shadows``
+``row_valuation.settled_contribution``, until plan task plan#3388 deleted that
+feed.  ``balance_at._plan._planned_from_shadows``
 -- the SECOND unrouted reader, which a census at that step found where the
 finding had named one -- went through in the same commit, so no reader of an
 unsettled loan-payment row is left outside the model.

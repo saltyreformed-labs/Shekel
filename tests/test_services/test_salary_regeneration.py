@@ -18,7 +18,7 @@ does with plain data:
 What it does with a template-backed profile end to end -- the regenerated
 rows -- is graded where the doors are: ``tests/test_routes/test_salary/`` for
 the salary page and
-``tests/test_routes/test_retirement.py::TestTheRailSavesARaisesEndYear`` for
+``tests/test_routes/test_retirement/test_the_rail_saves.py::TestTheRailSavesARaisesEndYear`` for
 the rail.  Both observed the template's amount move until plan step X-bp,
 which deleted the re-statement (:meth:`TestTheServiceTakesThePassAndReturnsWhatItKept.test_it_prices_no_paycheck_and_states_no_amount`);
 they read the paycheck a fresh pass prices instead.

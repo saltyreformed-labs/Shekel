@@ -36,7 +36,9 @@ def _entered(day):
 _REMOVE_ONE_OPENING = "DELETE FROM budget.account_openings WHERE id = :i"
 
 
-#: Counts an account's opening rows, for the cascade case below: the point
+#: Counts an account's opening rows, for the cascade case
+#: (``test_the_governing_row.py``'s
+#: ``test_disposing_of_the_ACCOUNT_cascades_its_books_away``): the point
 #: there is that SEVERAL are disposed of together, so the number is read
 #: rather than assumed.
 _COUNT_OPENINGS = (
@@ -86,7 +88,8 @@ def _record_two_restatements(account, first, second, *, same_instant):
 def _an_account_with_no_movement(seed_user, name, opened_on):
     """Return an account whose books open on *opened_on* and record nothing.
 
-    Every case in the class below needs one: the matched-line arm is a window
+    Every case in ``test_a_matched_line.py``'s
+    :class:`TestAMatchedLineBoundsTheBooksToo` needs one: the matched-line arm is a window
     INSIDE the movement bound, so an account carrying a movement would have
     the bound beside it answer first and the cases would pass against an arm
     that does nothing.
@@ -116,11 +119,11 @@ def _an_account_with_no_movement(seed_user, name, opened_on):
 def _match_a_group(account, owner_id, early, late):
     """Match two bank lines on *account*, posted *early* and *late*.
 
-    **The SQL lives in ``tests/_test_helpers.py``, once.**  It was copied
-    byte-identically into three test modules until an adversarial
-    test-quality review counted them -- and the query must agree with
-    :data:`app.opening_infrastructure.MATCHED_LINE_DAYS_SQL`'s row set, so
-    three copies were three places for that to drift silently.
+    **The SQL lives in ``tests/_test_helpers/_amount_bases_and_stubs.py``,
+    once.**  It was copied byte-identically into three test modules until
+    an adversarial test-quality review counted them -- and the query must
+    agree with :data:`app.opening_infrastructure.MATCHED_LINE_DAYS_SQL`'s
+    row set, so three copies were three places for that to drift silently.
 
     Args:
         account: The :class:`~app.models.account.Account` to match on.

@@ -54,8 +54,9 @@ service to price a row.  What that package names now are loan TERM primitives
 -- ``loan_loaders``, ``loan_resolver``, ``escrow_calculator``,
 ``recurring_transfer_query`` -- none of which names ``cash_ledger``, so the
 loan READING stack is free to import it, and plan step X-au-g-2c SPENT that
-freedom: ``loan_payment_service.get_payment_history`` prices its feed through
-``cash_ledger.contributions_by_key`` now, not through the accessor below.
+freedom: ``loan_payment_service.get_payment_history`` priced its feed through
+``cash_ledger.contributions_by_key`` from then, not through the accessor below,
+until plan task plan#3388 deleted that feed.
 
 **So this module's split is no longer FORCED, and saying so is the point of
 keeping the history.  What survives is the SEAM; its ADDRESS is now

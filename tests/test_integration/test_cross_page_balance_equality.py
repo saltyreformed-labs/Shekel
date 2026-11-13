@@ -1388,24 +1388,25 @@ class TestLoanCrossPageEquality:
         every surface shows the genesis-ledger confirmed balance (the REAL
         principal paid down), NOT the schedule replay.
 
-        The fixture pins the ledger balance and the un-seeded replay balance;
-        the assertions require them to DIVERGE, so "surfaces == ledger" is
-        non-vacuous: before the C8/C9/C11 switches these surfaces WERE the
-        replay.  This closes the C8 M1 deferral in full: the card, its own
-        schedule table, the trend, and the year-end all agree off-schedule.
+        The ledger balance is pinned to the hand-worked 196,000.00 (the
+        fixture's docstring has the arithmetic), a figure only the actual cash
+        produces: a replay of the contract's $1,498.88 would owe 199,501.12, so
+        "surfaces == ledger" is non-vacuous -- before the C8/C9/C11 switches
+        these surfaces WERE that replay.  They were also asserted unequal to
+        the replay's own balance until plan task plan#3393 deleted its suite
+        assembly (ruling plan#3383); the literal carries that check.  This
+        closes the C8 M1 deferral in full: the card, its own schedule table,
+        the trend, and the year-end all agree off-schedule.
         """
         with app.app_context():
             ctx = cross_page_loan_off_schedule_ctx
             ledger = ctx["ledger"]
-            replay = ctx["replay"]
 
-            # Non-vacuity: the loan is genuinely off-schedule -- the genesis reader
-            # opened it (not None) and its real balance is STRICTLY BELOW the
-            # schedule replay by the extra principal the replay drops.
-            assert ledger is not None, "fixture did not open the loan in the ledger"
-            assert ledger < replay, (
-                f"fixture is not off-schedule: ledger {ledger!r} not < replay "
-                f"{replay!r}; the surface check would be vacuous"
+            # Non-vacuity: the genesis reader opened the loan and reads the
+            # balance the actual cash produces, worked by hand: 200000.00 -
+            # (5000.00 - 1000.00 interest) = 196,000.00.
+            assert ledger == Decimal("196000.00"), (
+                f"fixture ledger {ledger!r} is not the hand-worked 196000.00"
             )
 
             # Every loan surface -- the two C8 scalars AND the two C9 maps --
@@ -1418,14 +1419,6 @@ class TestLoanCrossPageEquality:
             _assert_surfaces_equal(
                 surface_values, ledger, "loan kind (off-schedule)",
             )
-
-            # And crucially none still reads the old schedule-replay value: each
-            # surface -- scalar and map alike -- moved onto the ledger (the flip).
-            for name, value in surface_values.items():
-                assert value != replay, (
-                    f"surface {name!r} still reads the schedule replay "
-                    f"{replay!r}; the read switch did not move it onto the ledger"
-                )
 
             # The C9-deferred DATE-PRECISE scalar: at the last confirmed
             # payment's due date -- the edge of the confirmed domain, where
@@ -1444,7 +1437,6 @@ class TestLoanCrossPageEquality:
                 f"balance_at scalar {scalar!r} != ledger {ledger!r} at the "
                 "last confirmed due date; the C11 scalar half regressed"
             )
-            assert scalar != replay
 
             # Route wiring: the /savings page renders the off-schedule loan.
             resp = auth_client.get("/savings")

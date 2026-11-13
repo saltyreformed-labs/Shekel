@@ -64,7 +64,7 @@ TRUST_LIFETIME = timedelta(days=30)
 KNOWN_LIFETIME = TRUST_LIFETIME
 
 #: The longest User-Agent a record keeps.  It is kept only to name the device
-#: in Settings > Security, and a browser chooses the header's length, so the
+#: on the Security page, and a browser chooses the header's length, so the
 #: service cuts it here rather than letting a long one refuse the sign-in.
 USER_AGENT_MAX_LENGTH = 255
 

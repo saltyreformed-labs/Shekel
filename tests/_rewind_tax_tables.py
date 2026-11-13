@@ -6,8 +6,8 @@ subject is an EARLIER revision's shipped SQL that names them -- C-42's index on
 ``salary.tax_bracket_sets`` -- would meet ``UndefinedTable`` on the head
 template, so it runs X-at-2's own ``downgrade()`` first (ruling **plan#3235**),
 the shape :func:`tests._test_helpers.rewind_paycheck_lines_rename` gives the
-tables a later rename moved.  Kept out of ``tests/_test_helpers.py``, which is
-past the 1,000-line bound already.
+tables a later rename moved.  Kept out of ``tests/_test_helpers.py``, which was
+past the 1,000-line bound then.
 """
 
 from tests._test_helpers import load_migration_module, run_migration_callable

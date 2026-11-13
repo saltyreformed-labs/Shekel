@@ -39,8 +39,10 @@ from pathlib import Path
 from app.enums import AcctTypeEnum
 from app.extensions import db
 from app.models.loan_payment_settings import LoanPaymentSettings
+from app.models.transfer import Transfer
 from app.models.transfer_template import TransferTemplate
 from app.services import balance_at, loan_loaders, loan_payment_service, loan_resolver
+from app.services.cash_ledger import resolve_amount
 from app.utils.dates import add_months, months_between
 from app.utils.money import round_money
 from app.services.balance_at import BalanceContext
@@ -167,19 +169,15 @@ def _create_arm_loan(seed_user, period, *, name="C17 ARM"):
 def _resolver_state(account, loan_params, as_of):
     """Run the resolver against a loan and return the state.
 
-    Loads payment context and anchor events the same way every
+    Loads the loan's contract context and anchor events the same way every
     production surface does, so the test pins the SAME schedule the
     dashboard, payoff calculator, debt-strategy, and year-end summary
     render.
     """
-    ctx = loan_payment_service.load_loan_context(
-        account.id, None, loan_params,
-    )
+    ctx = loan_payment_service.load_loan_context(account.id)
     anchor_events = loan_loaders.load_loan_anchor_facts(loan_params)
     return loan_resolver.resolve_loan(
-        loan_resolver.LoanInputs(
-            loan_params, anchor_events, ctx.payments, ctx.rate_changes,
-        ),
+        loan_resolver.LoanInputs(loan_params, anchor_events, ctx.rate_changes),
         as_of,
     )
 
@@ -732,7 +730,6 @@ def test_a_generated_rows_extra_is_paid_once_in_the_plan(
             origination_date=as_of, payment_day=payment_day,
             account_type=AcctTypeEnum.MORTGAGE,
         )
-        loan_params = loan_params_for(db.session, account.id)
         extra = Decimal("100.00")
         _add_recurring_payment_with_extra(seed_user, account, extra)
         template = (
@@ -746,22 +743,24 @@ def test_a_generated_rows_extra_is_paid_once_in_the_plan(
         db.session.commit()
 
         ctx = BalanceContext.build(seed_user["user"].id, as_of=as_of)
-        loan = loan_payment_service.load_loan_context(
-            account.id, ctx.amounts(), loan_params,
-        )
-        # The feed: every generated row arrives at P&I + extra (rule 4).
-        contractual_pi = loan.contractual_pi
-        projected = [p for p in loan.payments if p.dates.settled_on is None]
-        assert projected, "no generated row reached the feed"
-        for payment in projected:
-            assert payment.amount == contractual_pi + extra
+        # Each generated row priced as the plan prices it: P&I + extra (rule 4),
+        # the P&I the header's amortize(300000, 0.06, 360) (the deleted list's
+        # until plan task plan#3388).
+        contractual_pi = Decimal("1798.65")
+        generated = db.session.query(Transfer).filter(
+            Transfer.transfer_template_id == template.id,
+            Transfer.is_deleted.is_(False),
+        ).order_by(Transfer.due_date).all()
+        assert generated, "the definition generated no row"
+        basis = ctx.amounts()
+        for row in generated:
+            assert resolve_amount(row, basis) == contractual_pi + extra
 
         by_due = {
             installment.due_date: installment
             for installment in balance_at.loan_installments(account, ctx)
         }
-        first = projected[0]
-        installment = by_due[first.dates.due_date]
+        installment = by_due[generated[0].due_date]
         # Paid ONCE: the installment's cash is the row's, nothing rides on
         # top, and the principal is that cash less the month's interest.
         assert installment.cash == contractual_pi + extra

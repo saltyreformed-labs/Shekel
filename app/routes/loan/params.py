@@ -168,9 +168,9 @@ def create_params(account_id):
     # NO origination LoanAnchorEvent is written (the read switch's final
     # commit retired it): the origination anchor is a verbatim copy of the
     # immutable LoanParams fields, so every consumer -- the loan walk
-    # (``loan_ledger.walk_loan_ledger``) and the resolver's replay fallback
-    # -- SYNTHESIZES it from the
-    # params via ``loan_loaders.load_loan_anchor_facts``.  The balance the
+    # (``loan_ledger.walk_loan_ledger``) and the resolver's latest-assertion
+    # start of a view-less contract line -- SYNTHESIZES it from the params via
+    # ``loan_loaders.load_loan_anchor_facts``.  The balance the
     # owner states at setup is a different fact with no other home (plan
     # step R20): a ``tracking_start`` assertion, staged in this same
     # transaction whenever the loan originated BEFORE the day it is stated
@@ -423,10 +423,11 @@ def true_up_balance(account_id):
     Mirrors the checking-account anchor true-up UX (see
     :func:`app.routes.accounts.true_up`) for loan accounts.  The user
     asserts "the lender reports my balance is $X as of date D"; the
-    handler appends a single ``user_trueup`` event and the resolver
-    (:func:`app.services.loan_resolver.resolve_loan`) replays
-    confirmed payments forward from that event to derive every loan-
-    touching display surface.  The table is structurally
+    handler appends a single ``user_trueup`` event, and every loan-touching
+    display surface walks the loan from it on its next read (the resolver,
+    :func:`app.services.loan_resolver.resolve_loan`, replayed confirmed
+    payments forward from it until plan step recurrence:R16-e).  The table is
+    structurally
     append-only -- a correction is expressed as another append, never
     an edit -- so the new event becomes the active anchor without
     mutating any prior row.

@@ -2,8 +2,9 @@
 Integration test for the Section 5.1 loan payment pipeline.
 
 Verifies the end-to-end flow: recurring transfer creation via the loan
-dashboard route -> transfer generation -> payment history query ->
-amortization engine projection -> balance calculator.
+dashboard route -> transfer generation -> the loan dashboard -> balance
+calculator.  The payment-history query between generation and the dashboard
+went with the payment list at plan task plan#3388 (ruling R-R93).
 
 It also verified the transfer invariants over each transfer's two shadow
 rows until plan step ``balance:X-bi-6-4d-2`` made a transfer one row
@@ -18,12 +19,7 @@ from app.models.transfer import Transfer
 from app.models.transfer_template import TransferTemplate
 from app.services import balance_at
 from app.services.balance_at import BalanceContext
-from app.services.loan_payment_service import get_payment_history
-from tests._test_helpers import (
-    amount_basis_for_scenario,
-    create_loan_account,
-    loan_params_for,
-)
+from tests._test_helpers import create_loan_account
 from app.services.obligations_aggregator import todays_price
 from tests._definition_price import newest_price
 
@@ -32,16 +28,15 @@ class TestLoanPaymentPipeline:
     """End-to-end integration test for the Section 5.1 payment pipeline.
 
     Exercises every layer: route -> transfer service -> generated
-    transfers -> payment query -> amortization engine -> balance
-    calculator.  A passing test means the entire payment linkage
-    pipeline works correctly.
+    transfers -> loan dashboard -> balance calculator.  A passing test
+    means the entire payment linkage pipeline works correctly.
     """
 
-    def test_full_payment_pipeline(  # pylint: disable=too-many-locals,too-many-statements
+    def test_full_payment_pipeline(
         self, app, auth_client, seed_user, seed_periods, db,
     ):
         """Full pipeline: create transfer via route, verify the generated
-        transfers, verify payment query, verify balance calculator.
+        transfers, the loan dashboard and the balance calculator.
 
         Steps:
         1. Create a checking account (seed_user already has one) and a
@@ -51,7 +46,7 @@ class TestLoanPaymentPipeline:
         3. Verify the transfer template was created.
         4. Verify the template's transfers were generated, each from
            checking to the mortgage.
-        5. Verify get_payment_history returns correct PaymentRecords.
+        5. (Asked the payment-history query, deleted at plan task plan#3388.)
         6. Verify the loan dashboard renders with payment-aware projections.
         7. Verify the balance calculator produces correct balances for
            the checking account.
@@ -70,7 +65,6 @@ class TestLoanPaymentPipeline:
         """
         with app.app_context():
             checking = seed_user["account"]
-            scenario = seed_user["scenario"]
             periods = seed_periods
 
             # Step 1: Create mortgage account.  The shared factory routes the
@@ -134,21 +128,11 @@ class TestLoanPaymentPipeline:
                 for transfer in transfers
             } == {(checking.id, mortgage.id)}
 
-            # Step 5: Verify get_payment_history returns the payments.
-            params = loan_params_for(db.session, mortgage.id)
-            payments = get_payment_history(
-                mortgage.id, amount_basis_for_scenario(scenario.id),
-                params,
-            )
-            assert len(payments) > 0, "No payments returned from history"
-            for payment in payments:
-                assert isinstance(payment.amount, Decimal)
-                assert payment.amount > 0
-                # Each record carries BOTH dates: the pay period the cash moved
-                # in, and the installment it satisfies.  The payments here are
-                # on-time, so the due date is the payment_day of the period's
-                # own month or the next.
-                assert payment.dates.due_date.day == params.payment_day
+            # Step 5 asked the payment-history query
+            # (``loan_payment_service.get_payment_history``) for these
+            # payments, priced; plan task plan#3388 deleted it with the
+            # payment list it fed (ruling R-R93), and step 4 reads the
+            # transfers the payments are.
 
             # Step 6: Verify the loan dashboard renders successfully
             # with payment-aware data.

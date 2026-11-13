@@ -70,9 +70,11 @@ class LoanAnchorFact:
 
     The single anchor shape BOTH anchor consumers walk (the read switch's
     final commit): the loan walk (``loan_ledger.walk_loan_ledger``) derives
-    its opening / true-up corrections from these, and the loan resolver's replay fallback consumes
-    them as its duck-typed anchor events (it reads ``anchor_date`` /
-    ``anchor_balance`` / ``created_at`` / ``event_id``, all here).  Three
+    its opening / true-up corrections from these, and the loan resolver
+    starts a view-less contract line from the latest of them (it reads its
+    ``anchor_date`` and ``anchor_balance``, ``loan_resolver._payoff``); the
+    resolver's replay fallback consumed them as duck-typed anchor events
+    until plan step recurrence:R16-e deleted it.  Three
     provenances:
 
     * **The origination anchor is SYNTHESIZED from the immutable
@@ -503,8 +505,8 @@ def load_rate_changes(account_id: int) -> list[RateChangeRecord] | None:
     (:func:`app.services.loan_ledger.compute_loan_payment_splits`)
     builds the loan's rate periods from it via
     :func:`app.services.loan_resolver.resolve_periods` -- without paying for
-    the rest of ``load_loan_context``'s payment-history / escrow /
-    contractual-P&I work.
+    the rest of ``load_loan_context``'s escrow work (its payment list and
+    contractual P&I went at plan task plan#3388).
 
     Args:
         account_id: The loan account whose rate history to load.

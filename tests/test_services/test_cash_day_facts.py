@@ -550,7 +550,7 @@ class TestTheDayTheAccountsBooksOpen:
         A range yielding no days is not a statement that the account has no
         books, and answering anything else there would let a caller conclude
         one.  The seeded account's books open 2024-01-04, the day before its
-        origination assertion (``tests/conftest.py``).
+        origination assertion (``build_seed_user``, ``tests/_seed_owner_fixtures.py``).
         """
         with app.app_context():
             series = _series(seed_user, date(2026, 4, 10), date(2026, 4, 1))

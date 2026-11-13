@@ -19,9 +19,10 @@ card, and an "ever paid off" probe each resolving independently
 That was filed as waste.  It was not only waste.  Because there was no single
 resolution to compare against, nothing revealed that one of those eleven -- the
 ``date.max`` "ever paid off" probe -- resolved through a producer that
-*structurally cannot read the genesis ledger* (the confirmed view returns
-``None`` for any ``as_of`` after today), and so answered from the pre-read-switch
-anchor replay, which is blind to how much cash a payment actually moved.  The
+*structurally cannot read the genesis ledger* (the confirmed view returned
+``None`` for any ``as_of`` after today until plan step recurrence:R16-e), and so
+answered from the pre-read-switch anchor replay, which was blind to how much cash
+a payment actually moved.  The
 ten that agreed made the eleventh invisible.  **Redundant derivation is not a
 performance smell; it is where a divergence hides.**
 
@@ -211,8 +212,8 @@ class BalanceContext(RecurrenceMemosMixin):  # pylint: disable=too-many-instance
             read "the caller owns that check (the loaders trust it)" until
             X-i4.*
         scenario: The baseline scenario, or ``None`` for a user with no baseline
-            (the degraded state: a loan then resolves from its anchor with no
-            payment feed, and the seam's cash paths cannot run at all -- see
+            (the degraded state: a loan then resolves from its latest assertion
+            with no history rows, and the seam's cash paths cannot run at all -- see
             :func:`~._memoize.require_scenario`).
         as_of: The resolver's NOW for this pass -- the date each loan is
             RESOLVED at.  Not the date an account is VALUED at (see the module
@@ -445,12 +446,14 @@ class BalanceContext(RecurrenceMemosMixin):  # pylint: disable=too-many-instance
 
         **It RAISES rather than returning ``None``** (plan step X-v2, ruling
         R-BX), which is what keeps the nullable from escaping this object.
-        Seventeen callers read it, and the ones that make the raise
+        Many callers read it (this said seventeen, which a grep at plan task
+        plan#3388 found stale at twenty-six), and the ones that make the raise
         load-bearing are those that SCOPE A QUERY with it rather than read a
         balance -- the grid's transaction load, both calendar entries, the cash
         detail's anchor resolve, the tax report's profile load, the dashboard
-        pulse's unpaid-bill query, the emergency-fund history, the loan route's
-        payment-context load.  A nullable id reaching any of them is a query
+        pulse's unpaid-bill query, the emergency-fund history.  The loan
+        route's payment-context load was one until plan task plan#3388 deleted
+        the payment list it scoped.  A nullable id reaching any of them is a query
         silently scoped to nothing (which reads exactly like an empty account)
         or an ``AttributeError`` on ``None``, which is a failure the
         application's :class:`~app.exceptions.BaselineMissingError` handler
@@ -502,23 +505,21 @@ class BalanceContext(RecurrenceMemosMixin):  # pylint: disable=too-many-instance
         baseline is the degenerate case of their own rule rather than an error:
 
         * :meth:`amounts_or_none` -- the nullable form of this pass's amount
-          basis.  Its callers are the loan bundle and, since plan step
-          salary:X-av-2, the Recurring surface's salary row
+          basis.  Its one caller, since plan step salary:X-av-2, is the
+          Recurring surface's salary row
           (``obligations_aggregator._todays_paycheck``; see that method).
-          ``resolve_loan_bundle``
-          read THIS accessor directly until plan step X-au-g-2c, for the same
-          reason and about the same loan: a loan's payment feed is the ONE
-          scenario-scoped input to its resolution; its params, anchors and rate
-          history are contract facts.  With no baseline the feed is empty and
-          the CONTRACT terms still resolve, which is plan step C8e's rule and
-          what keeps escrow and rate editing working for a user whose baseline
-          is missing (:func:`app.routes.loan._helpers._loan_terms_now`).  It
-          moved one level down because ``load_loan_context`` now takes the basis
-          that PRICES that feed rather than an id that only scopes it, and the
-          nullability is the same nullability.
+          ``resolve_loan_bundle`` read THIS accessor directly until plan step
+          X-au-g-2c and that method from then until plan task plan#3388, for
+          one reason: a loan's payment list was the ONE scenario-scoped input
+          to its resolution, while its params, anchors and rate history are
+          contract facts, so with no baseline the list was empty and the
+          CONTRACT terms still resolved (plan step C8e's rule).  That task
+          deleted the list (ruling R-R93), and the loan's resolution reads no
+          amount basis at all now.
         * :func:`._confirmed_view.confirmed_view` -- the confirmed ledger view
           is scenario-scoped by construction, so with no baseline there is no
-          view and the resolver falls back to its anchor replay.
+          view and the resolver seeds the contract's remaining installments
+          from the loan's latest assertion.
 
         The third is OUTSIDE the seam and takes the nullable for a different
         reason, which is why it is listed apart rather than folded into the
@@ -778,25 +779,19 @@ class BalanceContext(RecurrenceMemosMixin):  # pylint: disable=too-many-instance
         so it adds no third reader of the nullable attribute ruling **R-BY**
         bounds to two.
 
-        **Two callers, and each is one whose own rule has an answer here.**
-        The second, since plan step salary:X-av-2, is
-        ``obligations_aggregator._todays_paycheck``: with no baseline no salary
-        profile is in scope, so no definition is priced as a paycheck and
-        every other definition is priced by its own series (ruling
-        **R-SAL71**; a salary definition is refused one tier down since plan
-        step X-bp, its stored copy being gone), where :meth:`amounts` would
-        refuse the whole page for an owner missing a baseline -- which ruling
-        **R-R30** does only when a definition pays into a configured loan.
-        The first (plan step X-au-g-2c):
-        :func:`._resolution.resolve_loan_bundle`, which
-        already spelled the nullable for the SAME loan and the SAME reason.  A
-        loan's payment feed is its one scenario-scoped input; its params,
-        anchors and rate history are contract facts.  With no baseline the feed
-        is empty and the CONTRACT terms still resolve, which is plan step C8e's
-        rule and what keeps escrow and rate editing working for an owner whose
-        baseline is missing.  That caller took ``ctx.scenario_id_or_none`` and
-        now takes this, because ``load_loan_context`` takes the basis that
-        prices the feed rather than an id that only scopes it.
+        **One caller, and its own rule has an answer here.**  Since plan step
+        salary:X-av-2 it is ``obligations_aggregator._todays_paycheck``: with
+        no baseline no salary profile is in scope, so no definition is priced
+        as a paycheck and every other definition is priced by its own series
+        (ruling **R-SAL71**; a salary definition is refused one tier down
+        since plan step X-bp, its stored copy being gone), where
+        :meth:`amounts` would refuse the whole page for an owner missing a
+        baseline -- which ruling **R-R30** does only when a definition pays
+        into a configured loan.  :func:`._resolution.resolve_loan_bundle` was
+        the other from plan step X-au-g-2c, pricing a loan's payment list --
+        its one scenario-scoped input, empty with no baseline while the
+        CONTRACT terms still resolved (plan step C8e's rule) -- until plan task
+        plan#3388 deleted the list (ruling **R-R93**).
 
         Returns:
             The pass's :class:`~app.services.cash_ledger.AmountBasis`, or

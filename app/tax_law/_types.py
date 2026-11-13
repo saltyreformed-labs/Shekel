@@ -23,15 +23,17 @@ table could.
 them or the column chose otherwise:** every filing status present in each year
 and each state, and FICA in every year; a ladder's rungs ordered by position
 and climbing from zero without a gap to one open top (a child deduction table
-likewise, when a state has one); no empty bracket (its table allowed an upper
-bound EQUAL to the lower one); a state code of two capital letters; a state's
-standard deduction always stated (``$0.00`` where it has none; the column
-allowed ``NULL``); a state's tax type agreeing with its rate -- a flat-rate
-state states one, a state with no income tax none -- and never a type the app
-has no formula for (plan step salary:X-at-3); a figure with more decimal
-places than its column refused where the column silently rounded it, because
-a transcription that disagrees with its scale is a slip to fix, not a figure
-to reinterpret; a law that cannot change once it loads, because every mapping
+likewise, when a state has one); a bracket ladder's rates rising rung by rung,
+and a refundable child credit cap at most the credit (finding plan#3208); no
+empty bracket (its table allowed an upper bound EQUAL to the lower one); a
+state code of two capital letters; a state's standard deduction always stated
+(``$0.00`` where it has none; the column allowed ``NULL``); a state's tax type
+agreeing with its rate -- a flat-rate state states one, a state with no income
+tax none -- and never a type the app has no formula for (plan step
+salary:X-at-3); a figure with more decimal places than its column refused
+where the column silently rounded it, because a transcription that disagrees
+with its scale is a slip to fix, not a figure to reinterpret; a law that
+cannot change once it loads, because every mapping
 in it is a read-only view; no year skipped between two the law carries
 (ruling salary:R-SAL86); and every state listed from the law's first year
 (ruling salary:R-SAL129).
@@ -41,11 +43,15 @@ reads ``standard_deduction``, ``brackets`` (each ``min_income`` / ``max_income``
 / ``rate`` / ``sort_order``), the three credit amounts and the five FICA
 figures off whatever it is handed -- the withholding formula off the federal
 rules' ``withholding_rules`` -- and these carry exactly those names, so the
-calculator prices the law without knowing where it came from.
+calculator prices the law without knowing where it came from.  The federal
+figures reach it as one filing status's slice
+(:class:`app.services.tax_config_service.FederalTaxRules`): that status's
+:class:`FederalRules` with the year's :class:`FederalCredits` beside them,
+because the law states the credits once for every filer (ruling plan#3340).
 """
 
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from decimal import Decimal
 from types import MappingProxyType
 
@@ -119,12 +125,11 @@ def ladder(*rungs: tuple[str, str | None, str]) -> tuple[Bracket, ...]:
 class FederalRules:
     """One filing status's federal income-tax rules for one tax year.
 
-    What :func:`app.services.tax_calculator.calculate_annual_federal_liability`
-    reads -- the tax RETURN's figures: the standard deduction, the bracket
-    ladder, the per-child and per-other-dependent credits and the refundable
-    Additional Child Tax Credit cap per child -- and, through
-    :attr:`withholding_rules`, what
-    :func:`~app.services.tax_calculator.calculate_federal_withholding` reads.
+    What the law states PER FILING STATUS: the tax RETURN's standard
+    deduction and bracket ladder.  The per-child credits the law states once
+    for every filer are the year's (:class:`FederalCredits`, ruling
+    plan#3340), and :class:`app.services.tax_config_service.FederalTaxRules`
+    sets them beside one status's rules for the calculator.
 
     **A paycheck withholds on the year's withholding documents, which can
     print other figures than the return's** (ruling plan#3213, plan step
@@ -135,9 +140,10 @@ class FederalRules:
     (IR-2025-82), so 2025's paychecks withheld on a smaller standard
     deduction and child credit than its return allows, and the difference
     came back as a refund.
-    ``withholding_standard_deduction`` and ``withholding_child_credit_amount``
-    state a withholding figure where it DIFFERS from the return's, and are
-    ``None`` where the withholding documents print the return's figure.
+    ``withholding_standard_deduction`` here and the year's
+    :attr:`FederalCredits.withholding_child_credit_amount` state a
+    withholding figure where it DIFFERS from the return's, and are ``None``
+    where the withholding documents print the return's figure.
     ``None`` is the one way to write a figure the two share: stating it again
     would be a second spelling that a later edit could part from the first, so
     a stated figure equal to the return's is refused.  The law states no
@@ -150,23 +156,12 @@ class FederalRules:
     """
 
     standard_deduction: Decimal
-    child_credit_amount: Decimal
-    other_dependent_credit_amount: Decimal
-    child_credit_refundable_cap: Decimal
     brackets: tuple[Bracket, ...]
     withholding_standard_deduction: Decimal | None = None
-    withholding_child_credit_amount: Decimal | None = None
 
     def __post_init__(self):
-        """Refuse a negative amount, a broken ladder, or a withholding figure as the return's."""
+        """Refuse a negative amount, a ladder broken or not climbing, or a withholding copy."""
         _require_amount(self.standard_deduction, "federal standard_deduction")
-        _require_amount(self.child_credit_amount, "federal child_credit_amount")
-        _require_amount(
-            self.other_dependent_credit_amount, "federal other_dependent_credit_amount",
-        )
-        _require_amount(
-            self.child_credit_refundable_cap, "federal child_credit_refundable_cap",
-        )
         _require_rungs(self.brackets, Bracket, "a bracket ladder")
         if [rung.sort_order for rung in self.brackets] != list(range(len(self.brackets))):
             raise ValueError("a bracket ladder's rungs are ordered by their position")
@@ -174,49 +169,58 @@ class FederalRules:
             [(rung.min_income, rung.max_income) for rung in self.brackets],
             "a bracket ladder",
         )
+        _require_rising_rates(self.brackets)
         _require_withholding_figure(
             self.withholding_standard_deduction, self.standard_deduction,
             "federal withholding_standard_deduction",
         )
+
+
+@dataclass(frozen=True)
+class FederalCredits:
+    """One tax year's per-child federal credits, stated once for every filer.
+
+    The child tax credit and the refundable part of it per qualifying child
+    (IRC sec. 24(a) and (h)), and the credit per other dependent (sec.
+    24(h)(4)): the law states each once for every filing status, so a year
+    states each once (ruling plan#3340).  Until plan step plan#3206 every
+    filing status stated its own copy -- four a year -- and nothing refused
+    copies that disagreed.
+
+    ``withholding_child_credit_amount`` is the per-child credit Form W-4's
+    Step 3 claims where it DIFFERS from the return's, and ``None`` where the
+    W-4 prints the return's (:class:`FederalRules` says why a year can state
+    one).  The W-4 states it once for everyone too, so it lives here with the
+    others (ruling plan#3342).
+
+    The refundable cap is a part of the child credit, so a cap above the
+    credit is a transcription slip and is refused; a cap equal to it, a credit
+    wholly refundable, loads (finding plan#3208).
+    """
+
+    child_credit_amount: Decimal
+    other_dependent_credit_amount: Decimal
+    child_credit_refundable_cap: Decimal
+    withholding_child_credit_amount: Decimal | None = None
+
+    def __post_init__(self):
+        """Refuse a negative amount, a cap above its credit, or a withholding copy."""
+        _require_amount(self.child_credit_amount, "federal child_credit_amount")
+        _require_amount(
+            self.other_dependent_credit_amount, "federal other_dependent_credit_amount",
+        )
+        _require_amount(
+            self.child_credit_refundable_cap, "federal child_credit_refundable_cap",
+        )
+        if self.child_credit_refundable_cap > self.child_credit_amount:
+            raise ValueError(
+                f"federal child_credit_refundable_cap {self.child_credit_refundable_cap} "
+                f"is above the child credit {self.child_credit_amount}: the refundable "
+                "part of a credit is at most the credit"
+            )
         _require_withholding_figure(
             self.withholding_child_credit_amount, self.child_credit_amount,
             "federal withholding_child_credit_amount",
-        )
-
-    @property
-    def withholding_rules(self) -> "FederalRules":
-        """Return the rules federal WITHHOLDING prices on (ruling plan#3213).
-
-        The ONE producer of them:
-        :func:`app.services.tax_calculator.calculate_federal_withholding`
-        reads it off the rules it is handed, so no caller can withhold on the
-        return's figures where the year states others.  These rules
-        themselves when the year states no withholding figure; otherwise a
-        copy with each stated figure in place of the return's, stating none
-        itself (it is already what withholding prices on).
-
-        Returns:
-            The :class:`FederalRules` the withholding formula prices on.
-        """
-        if (
-            self.withholding_standard_deduction is None
-            and self.withholding_child_credit_amount is None
-        ):
-            return self
-        return replace(
-            self,
-            standard_deduction=(
-                self.standard_deduction
-                if self.withholding_standard_deduction is None
-                else self.withholding_standard_deduction
-            ),
-            child_credit_amount=(
-                self.child_credit_amount
-                if self.withholding_child_credit_amount is None
-                else self.withholding_child_credit_amount
-            ),
-            withholding_standard_deduction=None,
-            withholding_child_credit_amount=None,
         )
 
 
@@ -336,7 +340,8 @@ class TaxYearLaw:
     ``sources`` names each published document the year's figures were
     transcribed from, so a reader checking a figure knows where to look and a
     reader adding next year knows what to look for.  The federal rules cover
-    every filing status and FICA is always present, or the year does not load;
+    every filing status, the per-child credits are stated once for all of them
+    (ruling plan#3340), and FICA is always present, or the year does not load;
     a state appears only where the app supports it, and a state the app
     supports is one the law lists (:attr:`TaxLaw.supported_states`).
     """
@@ -344,11 +349,12 @@ class TaxYearLaw:
     tax_year: int
     sources: tuple[str, ...]
     federal: Mapping[FilingStatusEnum, FederalRules]
+    federal_credits: FederalCredits
     fica: FicaRules
     states: Mapping[str, StateYearLaw]
 
     def __post_init__(self):
-        """Refuse a year out of range, missing a filing status or FICA, or citing no source."""
+        """Refuse a year out of range, lacking a status, its credits or FICA, or a source."""
         _freeze(self, "federal", "states")
         if (
             not isinstance(self.tax_year, int)
@@ -365,6 +371,11 @@ class TaxYearLaw:
                     f"{self.tax_year} {status.value} federal rules are FederalRules, "
                     f"not {rules!r}"
                 )
+        if not isinstance(self.federal_credits, FederalCredits):
+            raise ValueError(
+                f"{self.tax_year} federal credits are FederalCredits, "
+                f"not {self.federal_credits!r}"
+            )
         if not isinstance(self.fica, FicaRules):
             raise ValueError(f"{self.tax_year} FICA rules are FicaRules, not {self.fica!r}")
         for state_code, state in self.states.items():
@@ -685,6 +696,32 @@ def _require_climb(bounds: list[tuple[Decimal, Decimal | None]], what: str) -> N
             )
     if bounds[-1][1] is not None:
         raise ValueError(f"{what}: the top rung is open-ended")
+
+
+def _require_rising_rates(brackets: tuple[Bracket, ...]) -> None:
+    """Raise unless each rung of a bracket ladder taxes at a higher rate than the one below.
+
+    The federal income tax is graduated: in every rate table a year cites,
+    each rate is above the rate beneath it.  A rung at or below the rung
+    under it is therefore a transcription slip -- a row copied from the one
+    below and its rate left unchanged, or two rates swapped -- and it would
+    price without a word, since every rung still taxes the income it covers
+    (finding plan#3208).  A rung EQUAL to the one below is refused with the
+    rest: it is one rung written as two.
+
+    Args:
+        brackets: A ladder already checked to climb from zero
+            (:func:`_require_climb`), bottom rung first.
+
+    Raises:
+        ValueError: If a rung's rate is not above the rate of the rung below.
+    """
+    for position, (below, above) in enumerate(zip(brackets, brackets[1:]), start=1):
+        if above.rate <= below.rate:
+            raise ValueError(
+                f"a bracket ladder's rates climb: rung {position} taxes at "
+                f"{above.rate}, not above rung {position - 1}'s {below.rate}"
+            )
 
 
 def _require_nothing_to_deduct(state: StateYearLaw) -> None:

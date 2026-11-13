@@ -108,7 +108,7 @@ class TestCalendarTab:
             # SHELL, whose tab body is fetched by the HTMX request above, so it
             # never reaches the calendar producer at all.  The page answer for
             # this state is graded where a page actually raises, in
-            # ``tests/test_routes/test_no_baseline_policy.py``.
+            # ``tests/test_routes/test_no_baseline_policy/``.
 
     def test_calendar_tab_404_for_amortizing_account(
         self, app, db, auth_client, seed_user, seed_periods,

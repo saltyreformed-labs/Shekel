@@ -14,7 +14,7 @@ from tests._test_helpers import freeze_today
 def _freeze_today_inside_seed_range(monkeypatch):
     """Freeze today to date(2026, 3, 20) so seed_periods tests pass past 2026-05-22.
 
-    This module relies on calendar-anchored seed_periods (Jan-May 2026)
+    Every test in this package relies on calendar-anchored seed_periods (Jan-May 2026)
     and asserts on tax_year=2026, calendar 2026 due_dates, and other
     calendar-anchored values.  Auto-discovery patches every loaded
     module's ``date``/``datetime`` symbols so production code

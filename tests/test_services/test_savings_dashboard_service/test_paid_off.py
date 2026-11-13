@@ -5,7 +5,6 @@ Split from ``tests/test_services/test_savings_dashboard_service.py`` by ``tools/
 R-BAL301).
 """
 
-from datetime import date
 from decimal import Decimal
 
 from app.models.ref import AccountType
@@ -231,30 +230,11 @@ class TestPaidOffReadsTheLedgerNotTheReplay:
     today) and that is BLIND TO MONEY: the replay advances one SCHEDULED step per
     confirmed payment and discards the cash actually paid.
 
-    Each test here pins the fix by ALSO evaluating that retired producer, so the
-    assertion is non-vacuous in both directions: the replay genuinely disagrees
-    with the ledger on this data, and the app now follows the ledger.
+    Each test here also evaluated that retired producer, to show it disagreed
+    with the ledger on the same data, until plan task plan#3393 deleted the
+    replay's suite assembly (ruling plan#3383).  The ledger's own answers stay:
+    paid off at $0.00 owed for the lump sum, still owing for the short payments.
     """
-
-    def _replay_says_paid_off(self, acct, scenario_id):
-        """Return what the RETIRED date.max replay probe would have answered.
-
-        The exact question the old ``_loan_ever_paid_off`` asked: no
-        ``confirmed_view`` (so no ledger), no ``extra_principal``,
-        ``as_of=date.max``.  Assembled by
-        :func:`tests._test_helpers.unseeded_replay_balance`, the suite's ONE
-        anchor replay, which is AMOUNT-FREE since plan step
-        **balance:X-bl-2b** -- this probe reads three dates per payment and no
-        figure, so it never loads the tier that prices one.
-        """
-        # Pylint: import-outside-toplevel -- the file-wide deferred-import
-        # convention for test-local symbols.
-        # pylint: disable=import-outside-toplevel
-        from tests._test_helpers import unseeded_replay_balance
-
-        return unseeded_replay_balance(
-            acct.id, scenario_id, date.max,
-        ) == Decimal("0.00")
 
     def test_off_schedule_payoff_needs_no_trueup_band_aid(
         self, app, db, seed_user, seed_periods_today,
@@ -288,14 +268,6 @@ class TestPaidOffReadsTheLedgerNotTheReplay:
                 settled_on=seed_periods_today[4].start_date,
             )
             db.session.commit()
-
-            # NON-VACUITY: the retired producer disagrees on exactly this data.
-            assert self._replay_says_paid_off(
-                acct, seed_user["scenario"].id,
-            ) is False, (
-                "fixture regressed: the replay must still owe here, or this "
-                "test no longer pins the ledger-vs-replay divergence"
-            )
 
             result = savings_dashboard_service.compute_dashboard_data(
                 BalanceContext.build(seed_user["user"].id),
@@ -338,14 +310,6 @@ class TestPaidOffReadsTheLedgerNotTheReplay:
                     seed_periods_today[idx], amount=Decimal("100.00"),
                 )
             db.session.commit()
-
-            # NON-VACUITY: the retired producer really did call this paid off.
-            assert self._replay_says_paid_off(
-                acct, seed_user["scenario"].id,
-            ) is True, (
-                "fixture regressed: the replay must reach zero here, or this "
-                "test no longer pins the debt-vanishing regression"
-            )
 
             result = savings_dashboard_service.compute_dashboard_data(
                 BalanceContext.build(seed_user["user"].id),

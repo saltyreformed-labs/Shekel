@@ -61,7 +61,7 @@ from tests._test_helpers import (
 
 # The shared synthetic split-loan fixture ($250,000 @ 6%, trued up to $100,000 --
 # distinct so a correct interest figure proves the walk's anchor reset); see
-# SPLIT_LOAN in tests/_test_helpers.py.  _P1/_P2/_P3 are the seed_periods indices
+# SPLIT_LOAN in tests/_test_helpers/_loans.py.  _P1/_P2/_P3 are the seed_periods indices
 # (payment_day=1) due 02-01 / 03-01 / 04-01, in distinct months after the anchor.
 (_ORIGINATION_PRINCIPAL, _ORIGINATION_DATE, _RATE, _ANCHOR_BALANCE,
  _ANCHOR_DATE, _P1, _P2, _P3) = SPLIT_LOAN

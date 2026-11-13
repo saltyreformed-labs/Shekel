@@ -11,7 +11,7 @@ import pytest
 from app.exceptions import ValidationError
 from app.services import anchor_service, balance_at, cash_ledger
 from app.services.balance_at._assertions import assertion_corrections
-from tests.conftest import SEED_USER_BOOTSTRAP_START
+from tests._seed_owner_fixtures import SEED_USER_BOOTSTRAP_START
 from tests._test_helpers import (
     account_never_asserted,
     all_periods,

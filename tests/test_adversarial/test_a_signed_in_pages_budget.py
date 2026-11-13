@@ -49,8 +49,8 @@ _PER_MINUTE = 30
 _OWNERS_ADDRESS = "7.7.7.7"
 
 #: The page every test spends, holding Change password and Log out all other
-#: sessions.
-_SECURITY_PAGE = "/settings?section=security"
+#: sessions: the Security page, a page of its own since ruling plan#3435.
+_SECURITY_PAGE = "/security"
 
 #: What the security page shows, so a 200 is the page and not some other one.
 _THE_PAGE = b"Log Out All Other Sessions"

@@ -408,7 +408,7 @@ def continue_paydays(user_id: int, num_periods: int) -> "list[PayPeriod]":
     and neither is asked: the earliest day recorded IS the floor, so it
     cannot fall under it, and it falls before the second planned payday, so
     it cannot skip one.  A fence that cannot fire is not asked, which is the
-    goal state ``CLAUDE.md``'s design doctrine names for every fence.
+    goal state ``CLAUDE.md`` rule 14 names for every fence.
 
     **What it replaced, and why the replacement is the calendar's own
     walk.**  ``pay_period_admin.extend_pay_periods`` used to hand

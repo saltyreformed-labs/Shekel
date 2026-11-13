@@ -1,11 +1,11 @@
 """Registers the ``tests`` package for pytest's assertion rewriting, and nothing else: the
-suite's fixtures and hooks live in ``tests/conftest.py``.
+suite's hooks live in ``tests/conftest.py``, which registers its fixtures.
 
 pytest rewrites the asserts of a test module (``python_files``), of a ``conftest.py``, of a
 module named on the command line and of a module registered for rewriting (pytest registers
 its plugins itself; any other module is registered by
 :func:`pytest.register_assert_rewrite`).  A helper module under ``tests``
-(``tests/_test_helpers.py``, a split package's ``_helpers.py``) is none of the first three,
+(``tests/_test_helpers/_rows.py``, a split package's ``_helpers.py``) is none of the first three,
 so unregistered its failing assert raises an ``AssertionError`` carrying only the assert's
 own message, if it has one, and none of the values it compared; and a passing one never
 reaches pytest's ``pytest_assertion_pass`` hook, which ``tools/testrecord`` records.

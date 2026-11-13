@@ -104,7 +104,7 @@ for a fence, the kind is this record's reading.
 | T-98 | `tests/test_routes/test_recurrence_picker.py:415` (its property half) | a script reading a property the server stopped sending | a Python and JS contract |
 | T-204 | `tests/test_deploy/test_proxy_trust_and_headers.py:310` and five more sites | trusted-proxy ranges disagreeing across nginx, compose and gunicorn | one network fact in three formats |
 | T-222 | `tests/test_routes/test_url_id_converter.py:53` | an integer route rule that escaped the row-id converter | it grades that the converter reached every rule |
-| T-223 | `tests/test_routes/test_no_baseline_policy.py:787`, `:944` | a page that fails for an owner with no baseline scenario | a state the rulings keep legal (`recurrence:R-R30`) |
+| T-223 | `tests/test_routes/test_no_baseline_policy/test_the_sweep.py:31`, `:189` | a page that fails for an owner with no baseline scenario | a state the rulings keep legal (`recurrence:R-R30`) |
 
 ### Regression locks of a removed spelling that stays writable (3)
 
@@ -206,7 +206,8 @@ keys `salary.paycheck_lines`, the table DC-09 reads, or DC-09 stays.
   commit-boundary grader and `X-d`'s per-visible-date assert; `X-ek` decides.
 - T-91's second list, graded by an arm at `X-dh` rather than deleted; `X-dz` deletes it.
 - T-216, the code-reviewer agent's mirror of the rules, rewritten and kept by `X-cx`'s last card and
-  `X-bi-6-4d-2`.
+  `X-bi-6-4d-2`; deleted by plan#3652 on the developer's word (ruling plan#3649): the agent keeps no
+  copy of the rules, and the rules only the copy held moved into `.claude/rules/`.
 - A-39 and A-16's `$0.00` arm, the reconcile panel's and the loan walk's, by `X-db`'s one refusal at
   the status seam.
 - T-60's two producers of whether a docker daemon is safe, by `X-bt`'s one predicate.

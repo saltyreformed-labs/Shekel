@@ -44,7 +44,7 @@ from tests._test_helpers import (
     load_migration_module,
     restore_pay_period_derived_columns,
 )
-from tests.conftest import SEED_USER_BOOTSTRAP_START
+from tests._seed_owner_fixtures import SEED_USER_BOOTSTRAP_START
 
 _MIGRATION_FILENAME = "c81f0a5b3e27_the_anchor_balance_has_one_home.py"
 

@@ -54,7 +54,7 @@ from decimal import Decimal
 
 from app.models.account import Account
 from app.services.installment_calendar import installment_paid_by
-from app.services.loan_ledger import LoanLedgerWalk
+from app.services.loan_ledger import LoanLedgerWalk, latest_recorded_on
 from app.services.loan_resolver import ConfirmedLedgerView
 from app.services.amortization_engine import AmortizationRow
 from app.services.rate_period_engine import (
@@ -218,8 +218,11 @@ def confirmed_view(
 
     The loan resolver's confirmed SEED (plan step E1d-b): the confirmed balance
     owed as of ``ctx.as_of`` -- the FOLD of the loan's recorded events -- bundled
-    with the ledger-derived confirmed schedule rows, or ``None`` to fall back to
-    the resolver's anchor replay.  The seam's whole-loan read
+    with the ledger-derived confirmed schedule rows and the date of the last
+    event it folded (:func:`~app.services.loan_ledger.latest_recorded_on`, where
+    the contract's remaining installments start after, ruling plan#3382), or
+    ``None`` to seed the resolver from the loan's latest assertion instead.  The
+    seam's whole-loan read
     (:func:`~app.services.balance_at._resolution.resolve_loan_bundle`) threads it
     into every resolution, and the loan-detail route's what-if composers read it
     for the same seed, so the loan card, the amortization table's confirmed rows,
@@ -234,14 +237,12 @@ def confirmed_view(
     value on the publicly re-exported context, which is the one thing its plan /
     payoff caches are careful not to do.
 
-    Returns ``None`` on four guards, so a caller's fallback to the anchor replay
-    is exactly the pre-switch behaviour:
+    Returns ``None`` on three guards, and the resolver then seeds the contract's
+    remaining installments from the loan's latest assertion, with no history:
 
     * ``ctx.scenario_id_or_none`` is ``None`` (no baseline scenario to scope the
       walk to -- one of the seam's two degenerate-case readers of the nullable,
       ruling R-BX);
-    * ``ctx.as_of`` is after today (a future date is a forward projection, out of
-      the confirmed view's domain -- the resolver projects it);
     * *account* is not a configured loan (its walk carries no opening fact, so it
       has no :class:`~app.models.loan_params.LoanParams`);
     * ``ctx.as_of`` PRECEDES the loan's ``origination_date`` -- nothing has happened
@@ -249,6 +250,15 @@ def confirmed_view(
       forward projection (outage B-1: it collapsed a 360-row schedule to zero rows
       and held $200,000 flat forever).  The same rule is stated in full on
       :func:`app.services.balance_at.positions`'s not-yet-originated branch.
+
+    **A pass dated after today is answered like any other** (plan step
+    recurrence:R16-e, ruling plan#3382).  It returned ``None`` until then, on
+    the ground that "the resolver projects it": the resolver's anchor replay
+    stepped the payments settled by such a date along the schedule.  That replay
+    is deleted, and the walk is already bounded to the facts visible by the
+    pass's ``as_of`` (:meth:`~app.services.balance_at.BalanceContext.loan_walk`),
+    so the view of a later date is the record as it will stand then; the guard
+    was also the view's one read of the process clock.
 
     **One case the retired posting view returned ``None`` for, this does NOT: a
     BROKEN loan** (originated, no OPENING posting -- a cold cache or a what-if
@@ -266,9 +276,9 @@ def confirmed_view(
 
     Returns:
         The :class:`~app.services.loan_resolver.ConfirmedLedgerView`, or ``None``
-        to fall back to the resolver's anchor replay.
+        for the resolver to seed from the loan's latest assertion.
     """
-    if ctx.scenario_id_or_none is None or ctx.as_of > date.today():
+    if ctx.scenario_id_or_none is None:
         return None
     walk = ctx.loan_walk(account)
     origination_date = _origination_date(walk)
@@ -277,4 +287,7 @@ def confirmed_view(
     return ConfirmedLedgerView(
         balance=fold_from_walk(walk, [ctx.as_of])[ctx.as_of],
         history_rows=_history_rows_from_walk(walk, origination_date),
+        # Never None here: the walk holds the loan's opening (the guard just
+        # above found it), and an assertion is a recorded fact.
+        last_recorded_on=latest_recorded_on(walk.stream),
     )

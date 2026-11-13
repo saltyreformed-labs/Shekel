@@ -229,9 +229,9 @@ class TestLoanNotYetOriginated:
         origination event simply has not happened yet.
 
         The SCHEDULE must survive: it is what the projection walks once
-        the loan closes, and filtering the anchor out of ``_replay_from_anchor``
-        (rather than the balance following the events) would have collapsed it
-        to nothing.
+        the loan closes, and filtering the anchor out of the old anchor replay
+        (``_replay_from_anchor``, deleted with walk 3 at plan step recurrence:R16-e; rather than the
+        balance following the events) would have collapsed it to nothing.
         """
         with app.app_context():
             acct = self._upcoming_mortgage(seed_user, db.session)
@@ -308,9 +308,11 @@ class TestLoanNotYetOriginated:
             db.session.commit()
 
             bctx = BalanceContext.build(seed_user["user"].id)
-            resolved = resolved_loan(acct, bctx)
-            # The two clauses that would otherwise conspire.
-            assert any(p.dates.is_confirmed for p in resolved.context.payments)
+            # The two clauses that would otherwise conspire.  The record is read
+            # as the seam's own "has it been paid?" reads it (plan task
+            # plan#3387); the payment list this read until plan task plan#3388
+            # is deleted.
+            assert bctx.loan_walk(acct).settled_splits
             assert balance_at.balance_at(acct, bctx, bctx.as_of) == self.ZERO
 
             figures = balance_at.loan_figures(acct, bctx)
@@ -674,12 +676,14 @@ class TestBrokenLoanFailsLoud:
         So under the old reader this loan reads as owing $239,761.08 --
         ``is_retired`` False and a REAL payoff date -- while its page shows
         $0.00.  Under D2a both follow the fold: retired, paid off, no forward
-        payoff to date.  The replay figure is pinned in-test so the divergence
-        (the control's teeth) is proven, not assumed.
+        payoff to date.  The fold's hand-worked $0.00 is the control's teeth:
+        the replay's $239,761.08 is a different figure.  The replay's own
+        balance was also asserted in-test until plan task plan#3393 deleted its
+        suite assembly (ruling plan#3383).
         """
         # pylint: disable=import-outside-toplevel
         from tests._test_helpers import (
-            create_settled_transfer, unseeded_replay_balance,
+            create_settled_transfer,
         )
 
         with app.app_context():
@@ -699,15 +703,6 @@ class TestBrokenLoanFailsLoud:
                 settled_on=periods[1].start_date,
             )
             db.session.commit()
-
-            # The control's teeth: the money-blind replay genuinely diverges.
-            # The suite's ONE assembly of it, on the AMOUNT-FREE feed since plan
-            # step balance:X-bl-2b -- the replay reads three dates per payment
-            # and no figure.
-            replayed = unseeded_replay_balance(
-                acct.id, seed_user["scenario"].id, date.today(),
-            )
-            assert replayed == Decimal("239761.08")
 
             bctx = BalanceContext.build(seed_user["user"].id)
             # The fold: the whole cash paid the loan off.

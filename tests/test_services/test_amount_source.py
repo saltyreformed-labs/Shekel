@@ -2338,7 +2338,7 @@ _CLOCK_PRODUCERS = frozenset({
 })
 
 
-def _clock_calls_in(package_dir):
+def _clock_calls_in(root):
     """Return ``["<path>:<line>: <expression>", ...]`` for every clock call under it.
 
     An AST walk rather than a grep: a grep for ``date.today`` matches the word
@@ -2347,7 +2347,7 @@ def _clock_calls_in(package_dir):
     clock producer counts.
 
     Args:
-        package_dir: A :class:`pathlib.Path` to walk (recursively).
+        root: A :class:`pathlib.Path`, a module read alone or a directory walked.
 
     Returns:
         One human-readable location string per clock call found, in path order.
@@ -2356,7 +2356,7 @@ def _clock_calls_in(package_dir):
     import ast  # pylint: disable=import-outside-toplevel
 
     found = []
-    for path in sorted(package_dir.rglob("*.py")):
+    for path in [root] if root.is_file() else sorted(root.rglob("*.py")):
         for node in ast.walk(ast.parse(path.read_text())):
             if not isinstance(node, ast.Call):
                 continue
@@ -2394,7 +2394,7 @@ class TestTheAmountModelReadsNoClock:
     empty for the wrong reason -- a broken walker and a clock-free package
     return the same thing.  ``test_the_walker_can_see_a_clock_call`` shows the
     walker firing; ``test_the_scan_reaches_this_package`` shows it reading THIS
-    directory, which the first cannot, since it walks a different one.
+    directory, which the first cannot, since it reads one module outside it.
 
     The shapes this does not catch are enumerated on :data:`_CLOCK_PRODUCERS`,
     including the transitive one an adversarial review used to slip a wall-clock
@@ -2417,29 +2417,29 @@ class TestTheAmountModelReadsNoClock:
 
         Without this the assertion below is satisfied by a walker that parses
         nothing: an empty list is what "no clock" and "measured nothing" both
-        look like.  ``loan_payment_service._context`` resolves the loan CARD's
-        escrow at ``date.today()`` -- legitimately, because the card answers
-        what the owner pays THIS month -- so it is a stable positive.
+        look like.  ``loan_payment_service.load_loan_context`` resolves the
+        loan CARD's escrow at ``date.today()`` -- legitimately: the card answers
+        what the owner pays THIS month -- a stable positive, read as the module
+        file alone, since its parent ``app/services`` holds other clock calls.
         """
         # Pylint: import-outside-toplevel -- the file-wide test convention.
         import pathlib  # pylint: disable=import-outside-toplevel
 
         # Pylint: import-outside-toplevel -- the file-wide test convention.
-        import app.services.loan_payment_service as package  # pylint: disable=import-outside-toplevel
+        import app.services.loan_payment_service as module  # pylint: disable=import-outside-toplevel
 
-        found = _clock_calls_in(pathlib.Path(package.__file__).parent)
+        found = _clock_calls_in(pathlib.Path(module.__file__))
         assert found, (
-            "the walker found no clock call in loan_payment_service, where the "
-            "loan card's escrow is resolved at date.today() -- so it is "
-            "measuring nothing and the absence it reports elsewhere is empty"
+            "no clock call found in loan_payment_service.py, where the card's "
+            "escrow is resolved at date.today(): the walker measures nothing"
         )
 
     def test_the_scan_reaches_this_package(self):
         """The cash_ledger scan reads real files, and enough of them.
 
-        The positive control above walks ``loan_payment_service`` -- a
-        DIFFERENT directory -- so it cannot tell whether the scan of THIS one
-        read anything.  Without this, "no clock in the amount model" and
+        The positive control above reads ``loan_payment_service.py`` -- one
+        module OUTSIDE this package -- so it cannot tell whether the scan of
+        THIS one read anything.  Without this, "no clock in the amount model" and
         "resolved a path with no ``.py`` in it" are the same empty list.
         """
         scanned = sorted(

@@ -115,10 +115,11 @@ def income_legs(
     **The single derivation of "which payments are settled, and in what
     order"** (plan step **balance:X-bl-2a**).  Every settled-payment consumer
     reaches this one -- the fold's event stream
-    (:func:`app.services.loan_ledger.loan_event_stream`), the escrow
-    forward-only guard, the resolver's payment feed, and the stored ledger's
-    per-payment principal reader until plan step balance:X-bi-6-3's second leaf
-    deleted it -- so no two of them can classify a payment differently.  It was
+    (:func:`app.services.loan_ledger.loan_event_stream`) and the escrow
+    forward-only guard; the priced payment list was one until plan task
+    plan#3388 deleted it, and the stored ledger's per-payment principal reader
+    until plan step balance:X-bi-6-3's second leaf deleted it -- so no two of
+    them can classify a payment differently.  It was
     two narrowed queries and a third rule in
     ``loan_payment_service.get_payment_history``, which read ``txn.status.is_settled``
     where these filtered on ``settled_status_ids()``; the two agreed under a
@@ -233,9 +234,11 @@ def settled_income_legs(
     balance:X-bi-6-5's third leaf: the status-band rule refuses that state
     at commit.
 
-    Two bounds the resolver's
-    :func:`app.services.rate_period_engine.is_confirmed_payment_eligible` filter
-    applies are deliberately ABSENT:
+    Two bounds the resolver's replay applied through
+    ``rate_period_engine.is_confirmed_payment_eligible`` (the replay and that
+    predicate both deleted at plan step recurrence:R16-e; the lower bound's
+    one spelling is ``rate_period_engine.due_after_anchor``) are deliberately
+    ABSENT here:
 
     * **No post-anchor LOWER bound.**  The fold walks EVERY settled payment from
       origination, because an anchor is a running-balance RESET
@@ -253,7 +256,8 @@ def settled_income_legs(
 
       **That bound is the payment's SETTLED day, not its pay period, on every
       reader** -- the fold's since step C2 (:func:`app.services.loan_ledger.payment_visible_on`),
-      the resolver's replay since plan step **X-an**.  This paragraph used to say
+      and the resolver's replay's from plan step **X-an** until plan step
+      recurrence:R16-e deleted that replay.  This paragraph used to say
       the readers' PERIOD bound kept an early-settled payment out of every
       displayed balance until its period began, and finding **N-187** is that
       sentence being false in both directions at once: an early-settled payment
@@ -270,9 +274,11 @@ def settled_income_legs(
     later takes a later id; the transfer's id is immune to that.  The order is
     immaterial to the guards (they take a ``min`` / ``max`` / set), and
     load-bearing for the walk, so it
-    is applied ONCE here rather than by each caller.  The resolver's
-    biweekly-collision redistribution (a display fix) is NOT applied, and is
-    immaterial to a sequentially walked running balance.  ``pay_period`` is
+    is applied ONCE here rather than by each caller.  The biweekly-collision
+    slot assignment the resolver's replay applied
+    (``amortization_engine.slotted_dates``, deleted with that replay's date
+    feed at plan task plan#3389) was never applied here, and is immaterial to
+    a sequentially walked running balance.  ``pay_period`` is
     eager-loaded HERE, which reads it itself as the sort key.
 
     Args:

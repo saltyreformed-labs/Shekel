@@ -17,8 +17,8 @@ rewinds.
 and comes back last.  Dropping the flag alone would take that CHECK with the
 column and nothing would put it back.
 
-It lives beside its callers because ``tests/_test_helpers.py`` is over the
-1,000-line limit (plan#2000) and takes no new lines.
+It lives beside its callers because ``tests/_test_helpers.py`` was over the
+1,000-line limit (plan#2000) and took no new lines.
 """
 from tests._test_helpers import load_migration_module, run_migration_callable
 

@@ -40,11 +40,9 @@ from app.services import (
 )
 from app.services.balance_at import BalanceContext
 from tests._test_helpers import (
-    amount_basis_for_scenario,
     create_loan_account,
     create_settled_transfer,
     loan_params_for,
-    unseeded_replay_balance,
 )
 
 
@@ -156,26 +154,11 @@ def _settle_one_payment(seed_user, loan_account, period):
     )
     # COMMITTED before the surfaces are read (plan step balance:X-i3).  The
     # whole point of this test is that the loan CARD -- rendered by a request
-    # -- reports the same balance the replay does, and a request cannot see a
+    # -- reports the hand-computed balance, and a request cannot see a
     # settle this fixture never committed.  ``expire_all`` alone dropped the
     # identity map without making the rows visible to anyone else.
     db.session.commit()
     db.session.expire_all()
-
-
-def _replay_window(account_id, scenario_id):
-    """Return the anchor + settled-payment replay balance as of today.
-
-    The sanity-floor window the deleted ``LoanState.current_balance`` carried
-    (plan step D2a): :func:`tests._test_helpers.unseeded_replay_balance`, the
-    suite's ONE assembly of that replay, so the hand-computed pins below keep
-    their values while the display surfaces under test read the seam.
-
-    It took a loaded ``LoanContext`` -- and so the whole pricing tier -- until
-    plan step **balance:X-bl-2b** put the replay on the amount-free feed.  It
-    takes the SCENARIO now, because that is all the feed needs to be scoped.
-    """
-    return unseeded_replay_balance(account_id, scenario_id, date.today())
 
 
 def _loan_card_principal(auth_client, account_id):
@@ -244,7 +227,9 @@ def test_fixed_loan_card_equals_savings_equals_resolver_before_settle(
     Fresh fixed-rate mortgage with one origination event and zero
     confirmed payments.  Both display surfaces must show
     ``$300,000.00`` exactly -- the seam-folded balance for
-    ``as_of = date.today()`` (the anchor replay agrees, the sanity floor).
+    ``as_of = date.today()``.  It also checked the old anchor replay as a
+    sanity floor until plan task plan#3393 deleted that replay's suite
+    assembly (ruling plan#3383); the two literal checks below need none.
 
     Pre-Commit-15 this would have rendered the stored
     ``LoanParams.current_principal`` ($300,000) on the loan card and
@@ -256,12 +241,6 @@ def test_fixed_loan_card_equals_savings_equals_resolver_before_settle(
     """
     with app.app_context():
         account = _create_fixed_loan(seed_user)
-
-        replayed = _replay_window(account.id, seed_user["scenario"].id)
-        assert replayed == FIXED_PRINCIPAL, (
-            f"Sanity floor: the anchor replay should report {FIXED_PRINCIPAL} "
-            f"for a fresh loan, got {replayed}."
-        )
 
         card_balance = _loan_card_principal(auth_client, account.id)
         debt_balance = _savings_debt_card_total_debt(seed_user["user"].id)
@@ -297,13 +276,9 @@ def test_fixed_loan_card_equals_savings_after_settle(  # C15-1 / C15-6
         account = _create_fixed_loan(seed_user)
         _settle_one_payment(seed_user, account, seed_periods[3])
 
-        scenario_id = seed_user["scenario"].id
-        assert _replay_window(account.id, scenario_id) == BALANCE_AFTER_ONE_SETTLE
-
         # F-008 / F-015 / F-016 / symptom #5 re-pin: loan card display
         # equals the seam-folded balance, not the stored
-        # ``current_principal`` column.  Arithmetic above; same Decimal
-        # the replay window reports.
+        # ``current_principal`` column.  Arithmetic above.
         card_balance = _loan_card_principal(auth_client, account.id)
         assert card_balance == BALANCE_AFTER_ONE_SETTLE, (
             f"Loan card displayed {card_balance}, expected "
@@ -350,15 +325,11 @@ def test_arm_monthly_payment_card_equals_resolver_constant(  # C15-2
     with app.app_context():
         account, loan_params = _create_arm_loan(seed_user)
 
-        ctx = loan_payment_service.load_loan_context(
-            account.id, amount_basis_for_scenario(seed_user["scenario"].id),
-            loan_params,
-        )
+        ctx = loan_payment_service.load_loan_context(account.id)
         resolver_state = loan_resolver.resolve_loan(
             loan_resolver.LoanInputs(
                 loan_params,
                 loan_loaders.load_loan_anchor_facts(loan_params),
-                ctx.payments,
                 ctx.rate_changes,
             ),
             date.today(),

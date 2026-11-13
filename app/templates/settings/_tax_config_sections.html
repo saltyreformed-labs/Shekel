@@ -111,24 +111,32 @@
           </button>
         </h6>
         <div class="{{ 'collapse show' if loop.first else 'collapse' }}" id="federal-brackets-{{ year.tax_year }}">
+          {# The law states the per-child credits once for every filer (ruling
+             plan#3340), so the year shows them once.  A paycheck withholds on
+             the return's figures unless the year's withholding documents print
+             others (ruling plan#3213): the W-4's child credit is the year's,
+             Pub 15-T's standard deduction each status's. #}
+          {% set credits = year.federal_credits %}
+          <div class="mb-3 small">
+            <span class="text-muted">Child Credit:</span> {{ money(credits.child_credit_amount) }}
+            <span class="ms-3 text-muted">Other Dependent Credit:</span> {{ money(credits.other_dependent_credit_amount) }}
+            {% if credits.withholding_child_credit_amount is not none %}
+            <div>
+              <span class="text-muted">Paychecks withhold on (Form W-4):</span>
+              <span class="ms-1 text-muted">Child Credit</span> {{ money(credits.withholding_child_credit_amount) }}
+            </div>
+            {% endif %}
+          </div>
           {% for status, rules in year.federal.items() %}
           <div class="mb-3">
             <h6>
               {{ status.value|replace('_', ' ')|title }}
               <small class="text-muted">(Std. Deduction: {{ money(rules.standard_deduction) }})</small>
             </h6>
+            {% if rules.withholding_standard_deduction is not none %}
             <div class="mb-2 small">
-              <span class="text-muted">Child Credit:</span> {{ money(rules.child_credit_amount) }}
-              <span class="ms-3 text-muted">Other Dependent Credit:</span> {{ money(rules.other_dependent_credit_amount) }}
-            </div>
-            {# The rules a paycheck withholds on are these themselves unless the
-               year's withholding documents print other figures (ruling plan#3213). #}
-            {% set withholding = rules.withholding_rules %}
-            {% if withholding is not sameas rules %}
-            <div class="mb-2 small">
-              <span class="text-muted">Paychecks withhold on (Pub 15-T and Form W-4):</span>
-              <span class="ms-1 text-muted">Std. Deduction</span> {{ money(withholding.standard_deduction) }},
-              <span class="text-muted">Child Credit</span> {{ money(withholding.child_credit_amount) }}
+              <span class="text-muted">Paychecks withhold on (Pub 15-T):</span>
+              <span class="ms-1 text-muted">Std. Deduction</span> {{ money(rules.withholding_standard_deduction) }}
             </div>
             {% endif %}
             <table class="table table-sm table-bordered mb-2 mw-px-500">

@@ -22,11 +22,17 @@ the image's python's run in 2 s; and the scan, its database downloaded fresh, in
 **What it saw** (rulings plan#3788, plan#3875, plan#3876).  Grype's JSON lists only what it
 matched, so an interpreter with no CVE leaves no trace there.  So the scanner's one run writes
 too its catalog of every package it read (:func:`catalogued`), and the image's own python
-reports its version and the file it runs from (:func:`reported`).  :func:`seen` refuses the
-scan unless every package a match names is one the catalog lists, so the findings are of that
-catalog, and unless the catalog lists the interpreter at that version, found at that file:
-Grype finds the interpreter by its binary alone, and a scan that stopped finding it would read
-clean without having looked.
+reports its version, the file it runs from, its venv and its platform (:func:`reported`).
+:func:`seen` refuses the scan unless every package a match names is one the catalog lists, so
+the findings are of that catalog, and unless the catalog lists the interpreter at that version,
+found at that file: Grype finds the interpreter by its binary alone, and a scan that stopped
+finding it would read clean without having looked.  :func:`held` refuses it unless the Python
+packages the catalog lists in that venv are the lock's set for the image exactly, each at its
+locked version (ruling plan#3877): the set the developer's uv works out (:func:`locked`) from
+the lock at the commit the image was built from, for the groups that commit's Dockerfile
+installs (:func:`chosen`, ruling plan#3884), filtered to the platform and version the image's
+python reported (:func:`told`).  A set worked out wrong refuses the scan, never passes it,
+unless Grype misses the very package the set does.
 
 **The one judge.**  A match counts when Grype knows its fix (its ``fix.state`` is ``fixed``) and
 the highest rating any source gives it is HIGH or CRITICAL (ruling plan#3720): the match's own,
@@ -48,15 +54,16 @@ mention anyone, or spell a marker that ``quill sync`` reads.  The catalog and th
 read so too, and refused where they are not as Grype and the scan's own probe write them.  A
 scan refused is never read as a clean one.
 
-**It imports the standard library alone**, with :mod:`tools.update.app` and
-``scripts/private_cluster.py``, which do too, so it runs on an interpreter given no installed
-package (ruling plan#3825).
+**It imports the standard library alone**, with :mod:`tools.update.app`,
+:mod:`tools.ci.gitcmd` and ``scripts/private_cluster.py``, which do too, so it runs on an
+interpreter given no installed package (ruling plan#3825).
 """
 from __future__ import annotations
 
 import json
 import os
 import re
+import shlex
 import subprocess
 import tempfile
 from collections.abc import Callable, Mapping, Sequence
@@ -64,6 +71,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from scripts import private_cluster
+from tools.ci.gitcmd import git
 from tools.update.app import marker
 
 #: Grype's ratings, lowest first, as it reads each, ignoring case: ``ParseSeverity``, which reads
@@ -125,11 +133,62 @@ _LOCATION = re.compile(r"syft:location:[0-9]+:path")
 #: classifier finds at the interpreter's file (measured 2026-11-13 on production's image).
 INTERPRETER = ("binary", "python")
 #: What the image's own python runs (the probe of ``docker-compose.scan.yml``, ruling
-#: plan#3876): one line of JSON, its version and the real path of the file it runs from.
-REPORT = ("import json, os, platform, sys; print(json.dumps({'version': "
-           "platform.python_version(), 'executable': os.path.realpath(sys.executable)}))")
+#: plan#3876): one line of JSON, its version, the real path of the file it runs from, its venv
+#: (``sys.prefix``), and what the lock's conditions test of its platform: its implementation,
+#: operating system and machine, with its C library, which names the platform uv is told.
+REPORT = ("import json, os, platform, sys; print(json.dumps({"
+          "'version': platform.python_version(), "
+          "'executable': os.path.realpath(sys.executable), 'prefix': sys.prefix, "
+          "'implementation': sys.implementation.name, 'platform': sys.platform, "
+          "'machine': platform.machine(), 'libc': platform.libc_ver()[0]}))")
 #: A file the report names: an absolute path whose every part :data:`_LISTABLE` could list.
 _EXECUTABLE = re.compile(r"(?:/[A-Za-z0-9._+~-]+)+")
+#: The implementation ``uv tree`` works the lock's set out for, as its ``--python`` names it.
+#: uv evaluates the lock's implementation conditions, and works the set out on an interpreter
+#: it finds for itself, the one ``--python`` names (measured 2026-11-13 at uv 0.13.7: the lock
+#: with its two ``!= 'PyPy'`` conditions turned ``==`` left out psycopg-c, cffi and pycparser;
+#: with no ``--python``, ``uv python find`` there named this checkout's active venv; and
+#: ``--python pypy``, with no PyPy here, refused, exit 2), so the scan names it: CPython, the
+#: one the image's base image runs.  An image whose python reports another is refused, never
+#: worked out as CPython.
+IMPLEMENTATION = "cpython"
+#: The operating system and C library of the one platform the scan tells uv, as the image's
+#: python names them (``sys.platform``, ``platform.libc_ver``): Linux with glibc, which uv names
+#: ``<machine>-unknown-linux-gnu``.  uv refuses a machine it does not name so (measured
+#: 2026-11-13: ``armv7l`` refused, exit 2).
+PLATFORM = ("linux", "glibc")
+#: The files of the commit the image was built from that ``uv tree`` reads (ruling plan#3877):
+#: the project, which declares its groups, and its lock.  ``.python-version`` is not among
+#: them: it names the interpreter uv finds, which ``--python`` names instead (measured
+#: 2026-11-13: the same 42 entries with it and without it).
+LOCK_FILES = ("pyproject.toml", "uv.lock")
+#: The file of that commit that built the image: its one ``uv sync`` chooses the groups the
+#: image installs (ruling plan#3884).
+DOCKERFILE = "Dockerfile"
+#: The flags of that ``uv sync`` that change nothing the lock's set holds: two change how it
+#: installs, and ``--no-install-project`` leaves out the project, which the lock holds as a
+#: virtual package (``package = false``), a source uv never installs and :func:`locked` leaves
+#: out whatever the flag.
+_UNCHOSEN = frozenset({"--locked", "--compile-bytecode", "--no-install-project"})
+#: The flags of that ``uv sync`` that choose the groups it installs, which ``uv tree`` takes as
+#: they stand: the one taking no group, and the one taking the group after it.
+_NO_DEFAULT_GROUPS = "--no-default-groups"
+_GROUP = "--group"
+#: The schema ``uv tree``'s JSON names (``schema.version``): its preview one, the one it writes
+#: (measured 2026-11-13 at uv 0.13.7, which warns it may change); any other is refused.
+TREE_SCHEMA = "preview"
+#: The kinds of a tree's entry that name no package of their own: the workspace, and a
+#: package's extra or the project's group, each an object naming it (measured 2026-11-13).
+_WORKSPACE = "workspace"
+_NAMED_KINDS = frozenset({"extra", "group"})
+#: The kind of a tree's entry that is a package.
+_PACKAGE = "package"
+#: The source of a package uv never installs: a virtual one, such as the project itself.
+_VIRTUAL = "virtual"
+#: What PEP 503 folds into one ``-`` in a package's name: the venv is held to the lock by the
+#: name each normalizes to, PEP 503's identity of a package, not by how Grype or uv spells it
+#: (measured 2026-11-13: each tool spelled every one of the venv's 41 names normalized).
+_FOLDED = re.compile(r"[-_.]+")
 #: The longest an inspect, a save, a load, the probe's run or a removal may take: the save of
 #: production's image took 0.8 s, its load 2 s and the probe 2 s (2026-11-13), so a daemon still
 #: busy after this is a daemon that is not answering.
@@ -137,20 +196,25 @@ DOCKER_SECONDS = 120
 #: The longest the scanner may take: 42 s on 2026-11-13, most of it its database's download
 #: (ruling plan#3708), so a run past this is one whose download or scan has stalled.
 SCAN_SECONDS = 1800
+#: The longest ``uv tree`` may take: 9 ms on 2026-11-13, reading the lock offline, so a uv
+#: still running after this is one that has hung.
+UV_SECONDS = 60
 
 
 class NotAScan(ValueError):
     """The scanner's answer is no scan as Grype writes one, read with no list of CVEs known to
     be exploited, holds what a counted match cannot name, or names no commit the scanned image
-    was built from; its catalog or the image's python's report is not as written; or the scan
-    did not see what the image runs (:func:`seen`); the message says what and where."""
+    was built from; its catalog, the image's python's report, ``uv tree``'s answer or the
+    Dockerfile's ``uv sync`` is not as written, or names a platform uv cannot be told; or the
+    scan did not see what the image runs (:func:`seen`, :func:`held`); the message says what and
+    where."""
 
 
 class ScanFailed(RuntimeError):
-    """The scan could not run: a docker command failed or did not finish, the deploy script
-    names no container, the daemon the scanner would run on is not rootless, or the image it
-    loaded is not production's or was not removed; the message says which, and what docker
-    said."""
+    """The scan could not run: a docker or uv command failed or did not finish, the deploy
+    script names no container, the daemon the scanner would run on is not rootless, or the image
+    it loaded is not production's or was not removed; the message says which, and what docker
+    or uv said."""
 
 
 @dataclass(frozen=True)
@@ -203,11 +267,19 @@ class Catalogued:
 
 @dataclass(frozen=True)
 class Interpreter:
-    """What the image's own python reports of itself (:func:`reported`): its ``version``, and
-    ``executable``, the real path of the file it runs from."""
+    """What the image's own python reports of itself (:func:`reported`): its ``version``;
+    ``executable``, the real path of the file it runs from; ``prefix``, its venv; and its
+    ``implementation`` (``sys.implementation.name``), ``platform`` (``sys.platform``),
+    ``machine`` (``platform.machine``) and ``libc``, its C library (``platform.libc_ver``'s,
+    empty where it names none)."""
 
     version: str
     executable: str
+    prefix: str
+    implementation: str
+    platform: str
+    machine: str
+    libc: str
 
 
 #: How the scan runs one docker command: on the daemon given (as ``DOCKER_HOST`` spells it),
@@ -215,6 +287,10 @@ class Interpreter:
 #: take; what it writes on its standard output, which a failure raises
 #: :class:`ScanFailed` for instead.
 Docker = Callable[[str, Sequence[str], Mapping[str, str], int], bytes]
+#: How the scan runs ``uv``: in the directory given, with its arguments and the seconds it may
+#: take; what it writes on its standard output, which a failure raises :class:`ScanFailed` for
+#: instead.
+Uv = Callable[[Path, Sequence[str], int], bytes]
 
 
 def _value(node: object, key: str, kind: type, where: str):
@@ -399,11 +475,12 @@ def catalogued(written: bytes) -> tuple[Catalogued, ...]:
 
 def reported(answer: bytes) -> Interpreter:
     """What the image's own python reports of itself, its probe's ``answer`` (:data:`REPORT`,
-    ruling plan#3876).
+    ruling plan#3876).  Its C library is read as it stands, an empty one too, which
+    :func:`told` refuses.
 
     Raises:
-        NotAScan: ``answer`` is no report as the probe writes it, or names a version or a file
-            that cannot be listed.
+        NotAScan: ``answer`` is no report as the probe writes it, or names a version, a file, a
+            venv, an implementation, an operating system or a machine that cannot be listed.
     """
     where = "the image's python's report"
     try:
@@ -412,8 +489,13 @@ def reported(answer: bytes) -> Interpreter:
         raise NotAScan(f"{where}: {error}") from error
     if not _EXECUTABLE.fullmatch(executable := _value(report, "executable", str, where)):
         raise NotAScan(f"{where} names a file it runs from that cannot be listed")
+    if not _EXECUTABLE.fullmatch(prefix := _value(report, "prefix", str, where)):
+        raise NotAScan(f"{where} names a venv that cannot be listed")
     return Interpreter(_listable(_value(report, "version", str, where), f"{where}'s version"),
-                       executable)
+                       executable, prefix,
+                       *(_listable(_value(report, key, str, where), f"{where}'s {key}")
+                         for key in ("implementation", "platform", "machine")),
+                       _value(report, "libc", str, where))
 
 
 def seen(scan: object, catalog: Sequence[Catalogued], interpreter: Interpreter) -> None:
@@ -441,6 +523,151 @@ def seen(scan: object, catalog: Sequence[Catalogued], interpreter: Interpreter) 
                        "interpreter the image runs, so the scan did not see it")
 
 
+def _normalized(name: str) -> str:
+    """``name``, a Python package's, as PEP 503 normalizes it: in lower case, each run of
+    ``-``, ``_`` and ``.`` one ``-``."""
+    return _FOLDED.sub("-", name).lower()
+
+
+def held(catalog: Sequence[Catalogued], venv: str, lock: frozenset[tuple[str, str]]) -> None:
+    """Refuse the scan unless the Python packages ``catalog`` lists in ``venv``, each found at a
+    file under it, are ``lock`` exactly, the lock's set for the image (:func:`locked`), each by
+    its normalized name and its version: none missing, none at another version, and none the
+    set does not hold (the module's paragraph on what it saw).  A Python package found outside
+    the venv, the base image's own, is no package the lock installs, and is not read here.
+
+    Raises:
+        NotAScan: a package the catalog lists in the venv names what cannot be listed, or the
+            two differ; the message names each package of the set the catalog does not list,
+            and each the catalog lists that the set does not hold, so a package at another
+            version is named in both.
+    """
+    found = frozenset(
+        (_normalized(_listable(item.package, "the name of a python package the catalog lists in "
+                                             f"{venv}")),
+         _listable(item.version, f"the version of the python package {item.package!r} the "
+                                 f"catalog lists in {venv}"))
+        for item in catalog if item.kind == "python"
+        and any(path.startswith(f"{venv}/") for path in item.paths))
+    said = [f"{heading}: {', '.join(f'{name} {version}' for name, version in sorted(packages))}"
+            for heading, packages in (("missing from it, as the lock holds them", lock - found),
+                                      ("in it, but not in the lock's set", found - lock))
+            if packages]
+    if said:
+        raise NotAScan(f"Grype's catalog of the venv {venv} is not the lock's set for the image, "
+                       "so the scan did not see every locked package at its locked version: "
+                       + "; ".join(said))
+
+
+def locked(answer: bytes) -> frozenset[tuple[str, str]]:
+    """The lock's set for the image, each package by its normalized name and its version, as
+    ``uv tree``'s ``answer``, its JSON, lists it (ruling plan#3877): each entry of the kind
+    package, but one whose source is virtual, which uv never installs (the project itself).  The
+    workspace's entry, and that of a package's extra or of the project's group, name no package
+    of their own.
+
+    Raises:
+        NotAScan: ``answer`` is no tree as uv writes one: no JSON, of a schema other than
+            :data:`TREE_SCHEMA`, or an entry, its kind, or a package's source, name or version
+            not as uv writes them.
+    """
+    where = "uv tree's answer"
+    try:
+        tree = parsed(answer)
+    except NotAScan as error:
+        raise NotAScan(f"{where}: {error}") from error
+    schema = _value(_value(tree, "schema", dict, where), "version", str, f"{where}'s schema")
+    if schema != TREE_SCHEMA:
+        raise NotAScan(f"{where} is of the schema {schema!r}, where the scan reads uv's "
+                       f"{TREE_SCHEMA!r} alone")
+    found = set()
+    for key, entry in _value(tree, "resolution", dict, where).items():
+        at = f"{where}'s entry {key!r}"
+        kind = entry.get("kind") if isinstance(entry, dict) else None
+        if kind == _WORKSPACE or (isinstance(kind, dict) and len(kind) == 1
+                                  and all(isinstance(named, str) and name in _NAMED_KINDS
+                                          for name, named in kind.items())):
+            continue
+        if kind != _PACKAGE:
+            raise NotAScan(f"{at} is of the kind {kind!r}, which uv does not write")
+        if _VIRTUAL not in _value(entry, "source", dict, at):
+            found.add((_normalized(_listable(entry.get("name"), f"{at}'s name")),
+                       _listable(entry.get("version"), f"{at}'s version")))
+    return frozenset(found)
+
+
+def chosen(dockerfile: str) -> tuple[str, ...]:
+    """The flags choosing the groups the image installs, in their order, as ``dockerfile``, the
+    Dockerfile of the commit the image was built from, runs ``uv sync`` (ruling plan#3884):
+    read by Docker's rules for its default ``\\`` escape, a comment line and a blank one dropped
+    wherever they stand, and each RUN instruction's commands parted where the shell parts them.
+
+    Raises:
+        NotAScan: the Dockerfile runs ``uv sync`` other than once, or with a flag whose effect on
+            what it installs the scan does not know (none of :data:`_UNCHOSEN`,
+            :data:`_NO_DEFAULT_GROUPS` and :data:`_GROUP`), or names a group that cannot be
+            listed, or a RUN instruction holds words the shell cannot part.
+    """
+    kept = "\n".join(line for line in dockerfile.splitlines()
+                     if line.strip() and not line.lstrip().startswith("#"))
+    syncs = []
+    for instruction in re.sub(r"\\[ \t]*\n", " ", kept).splitlines():
+        keyword, *shell = instruction.split(None, 1)
+        if keyword.upper() != "RUN" or not shell:
+            continue
+        lexer = shlex.shlex(shell[0], posix=True, punctuation_chars=True)
+        lexer.whitespace_split = True
+        try:
+            words = [*lexer, ";"]
+        except ValueError as error:
+            raise NotAScan(f"the Dockerfile the image was built by runs {instruction!r}, which "
+                           f"the shell cannot part: {error}") from error
+        command: list[str] = []
+        for word in words:
+            if word.strip(lexer.punctuation_chars):
+                command.append(word)
+                continue
+            if command[:2] == ["uv", "sync"]:
+                syncs.append(command[2:])
+            command = []
+    if len(syncs) != 1:
+        raise NotAScan(f"the Dockerfile the image was built by runs uv sync {len(syncs)} times "
+                       "where it runs it once, so the scan cannot tell which groups it installs")
+    flags, found = iter(syncs[0]), []
+    for flag in flags:
+        if flag == _GROUP:
+            found += [flag, _listable(next(flags, None), f"the group its uv sync's {_GROUP} "
+                                                         "names")]
+        elif flag == _NO_DEFAULT_GROUPS:
+            found.append(flag)
+        elif flag not in _UNCHOSEN:
+            raise NotAScan(f"the Dockerfile the image was built by runs uv sync with {flag!r}, "
+                           "a flag whose effect on what it installs the scan does not know")
+    return tuple(found)
+
+
+def told(interpreter: Interpreter) -> tuple[str, ...]:
+    """What ``uv tree`` is told of the image, as ``interpreter``, its own python, reports it
+    (ruling plan#3877): the implementation it works the lock's set out for
+    (:data:`IMPLEMENTATION`), the platform, ``<machine>-unknown-linux-gnu`` (:data:`PLATFORM`),
+    and the version.
+
+    Raises:
+        NotAScan: the image runs another implementation, operating system or C library, which
+            the scan cannot tell uv, so the scan is refused rather than worked out for another.
+    """
+    if interpreter.implementation != IMPLEMENTATION:
+        raise NotAScan(f"the image's python is {interpreter.implementation}, where the scan has "
+                       f"uv work the lock's set out for {IMPLEMENTATION} alone")
+    if (interpreter.platform, interpreter.libc) != PLATFORM:
+        raise NotAScan(f"the image's python runs on {interpreter.platform} with the C library "
+                       f"{interpreter.libc!r}, where the scan can tell uv {PLATFORM[0]} with "
+                       f"{PLATFORM[1]} alone")
+    return ("--python", IMPLEMENTATION,
+            "--python-platform", f"{interpreter.machine}-unknown-linux-gnu",
+            "--python-version", interpreter.version)
+
+
 def container(root: Path) -> str:
     """The name of production's app container, as the checkout at ``root``'s deploy script
     defaults ``SHEKEL_CONTAINER_NAME`` to it (:data:`DEPLOY_SCRIPT`).
@@ -456,6 +683,28 @@ def container(root: Path) -> str:
     return names[0]
 
 
+def _ran(command: Sequence[str], named: str, seconds: int, *,
+         env: Mapping[str, str] | None = None, cwd: Path | None = None) -> bytes:
+    """``command`` run with ``env`` as its environment (None, this process's) in ``cwd`` (None,
+    this process's), its standard output.
+
+    Raises:
+        ScanFailed: it exits other than 0, saying its last line of error, or does not finish
+            within ``seconds``; ``named`` names it.
+        OSError: it cannot be run.
+    """
+    try:
+        done = subprocess.run(command, capture_output=True, check=False, timeout=seconds,
+                              env=env, cwd=cwd)
+    except subprocess.TimeoutExpired as error:
+        raise ScanFailed(f"{named} did not finish within {seconds} s") from error
+    if done.returncode:
+        said = done.stderr.decode("utf-8", errors="replace").strip().splitlines()
+        raise ScanFailed(f"{named} exited {done.returncode}: "
+                         f"{said[-1] if said else 'it said nothing'}")
+    return done.stdout
+
+
 def _docker(daemon: str, arguments: Sequence[str], added: Mapping[str, str],
             seconds: int) -> bytes:
     """The scan's :data:`Docker`: ``docker`` run with ``arguments`` on ``daemon``, its
@@ -466,18 +715,44 @@ def _docker(daemon: str, arguments: Sequence[str], added: Mapping[str, str],
             finish within ``seconds``.
         OSError: docker cannot be run.
     """
-    try:
-        done = subprocess.run(["docker", *arguments], capture_output=True, check=False,
-                              timeout=seconds,
-                              env={**os.environ, **added, "DOCKER_HOST": daemon})
-    except subprocess.TimeoutExpired as error:
-        raise ScanFailed(f"docker {arguments[0]} on {daemon} did not finish within {seconds} "
-                         "s") from error
-    if done.returncode:
-        said = done.stderr.decode("utf-8", errors="replace").strip().splitlines()
-        raise ScanFailed(f"docker {arguments[0]} on {daemon} exited {done.returncode}: "
-                         f"{said[-1] if said else 'it said nothing'}")
-    return done.stdout
+    return _ran(["docker", *arguments], f"docker {arguments[0]} on {daemon}", seconds,
+                env={**os.environ, **added, "DOCKER_HOST": daemon})
+
+
+def _uv(directory: Path, arguments: Sequence[str], seconds: int) -> bytes:
+    """The scan's :data:`Uv`: the developer's ``uv``, the first on the path (ruling
+    plan#3877), run with ``arguments`` in ``directory``, its standard output.
+
+    Raises:
+        ScanFailed: uv exits other than 0, saying its last line of error, or does not finish
+            within ``seconds``.
+        OSError: uv cannot be run.
+    """
+    return _ran(["uv", *arguments], f"uv {arguments[0]}", seconds, cwd=directory)
+
+
+def _locks(root: Path, commit: str, interpreter: Interpreter,
+           uv: Uv) -> frozenset[tuple[str, str]]:
+    """The lock's set for the image built from ``commit`` (:func:`locked`; ruling plan#3877):
+    the commit's :data:`LOCK_FILES`, read from the git of the checkout at ``root``, written to a
+    directory of the scan's own, deleted however the run ends, where ``uv tree`` works the set
+    out from the lock alone, offline, for the groups the commit's :data:`DOCKERFILE` chooses
+    (:func:`chosen`, ruling plan#3884) and the image :func:`told` tells it of.
+
+    Raises:
+        GitError: git cannot read a file at ``commit``.
+        NotAScan: as :func:`chosen`, :func:`told` and :func:`locked` raise it.
+        ScanFailed: uv failed or did not finish.
+        OSError: as writing the files or running uv raises it.
+    """
+    arguments = ["tree", "--frozen", "--offline", *told(interpreter), "--format", "json",
+                 *chosen(git(root, "cat-file", "blob", f"{commit}:{DOCKERFILE}"))]
+    with tempfile.TemporaryDirectory(prefix="shekel-scan-lock-") as directory:
+        for name in LOCK_FILES:
+            (Path(directory) / name).write_text(
+                git(root, "cat-file", "blob", f"{commit}:{name}"), encoding="utf-8")
+        answer = uv(Path(directory), arguments, UV_SECONDS)
+    return locked(answer)
 
 
 def _rootless() -> str:
@@ -538,30 +813,21 @@ def _probed(docker: Docker, daemon: str, run: Sequence[str], added: Mapping[str,
         _removed(docker, daemon, image, failure)
 
 
-def scanned(root: Path, docker: Docker = _docker) -> Scanned:
-    """One scan of the image production is running, from the checkout at ``root`` (the module's
-    first paragraphs): the rootless daemon asked first, so a scan it would refuse reads nothing
-    of production; then production's container's image read and saved to a file of the scan's
-    own; the image's own python run there (:func:`_probed`); the file scanned there, the
-    scanner writing its catalog to a second file; then judged, and refused unless it saw what
-    the image runs (:func:`seen`).  The files are deleted with their directory however the scan
-    ends.
+def _read(root: Path, docker: Docker, scanner: str,
+          image: str) -> tuple[Interpreter, bytes, tuple[Catalogued, ...]]:
+    """What the scan reads of ``image``, production's, on ``scanner``, the rootless daemon, from
+    the checkout at ``root``: the image saved off production's daemon to a file of the scan's
+    own; the image's own python run there (:func:`_probed`), its report; and the file scanned
+    there, the scanner's answer and the catalog it writes to a second file.  The files are
+    deleted with their directory however the read ends.
 
     Raises:
-        ScanFailed: the scan could not run (:class:`ScanFailed`).
-        NotAScan: the scanner's answer is no scan, names no commit, or saw not what the image
-            runs, or its catalog or the image's python's report is not as written
-            (:func:`judged`, :func:`revision`, :func:`catalogued`, :func:`reported`,
-            :func:`seen`).
-        OSError: as reading the deploy script, making the files or running docker raises it.
+        ScanFailed: a docker command failed or did not finish, or the probe's image was not
+            loaded or not removed (:func:`_probed`).
+        NotAScan: the image's python's report or the catalog is not as written
+            (:func:`reported`, :func:`catalogued`).
+        OSError: as making the files or running docker raises it.
     """
-    scanner = _rootless()
-    name = container(root)
-    image = docker(PRODUCTION, ["inspect", "--format", "{{.Image}}", name], {},
-                   DOCKER_SECONDS).decode("utf-8", errors="replace").strip()
-    if not _DIGEST.fullmatch(image):
-        raise ScanFailed(f"production's container {name} runs {image!r}, which is no image "
-                         "digest")
     with tempfile.TemporaryDirectory(prefix="shekel-scan-") as directory:
         saved = Path(directory) / "image.tar"
         docker(PRODUCTION, ["save", "--output", str(saved), image], {}, DOCKER_SECONDS)
@@ -580,8 +846,39 @@ def scanned(root: Path, docker: Docker = _docker) -> Scanned:
         run = ["compose", "--file", str(root / COMPOSE), "run", "--rm", "--no-TTY"]
         interpreter = reported(_probed(docker, scanner, run, added))
         answer = docker(scanner, [*run, "scan"], added, SCAN_SECONDS)
-        catalog = catalogued(written.read_bytes())
+        return interpreter, answer, catalogued(written.read_bytes())
+
+
+def scanned(root: Path, docker: Docker = _docker, uv: Uv = _uv) -> Scanned:
+    """One scan of the image production is running, from the checkout at ``root`` (the module's
+    first paragraphs): the rootless daemon asked first, so a scan it would refuse reads nothing
+    of production; then production's container's image read, by its digest, and saved, probed
+    and scanned (:func:`_read`); then judged, and refused unless it saw what the image runs
+    (:func:`seen`) and every package the lock installs there, at its locked version
+    (:func:`held`), the lock's set worked out by ``uv`` (:func:`_locks`).
+
+    Raises:
+        ScanFailed: the scan could not run (:class:`ScanFailed`).
+        NotAScan: the scanner's answer is no scan, names no commit, or saw not what the image
+            runs, or its catalog, the image's python's report, uv's tree or the Dockerfile's
+            ``uv sync`` is not as written (:func:`judged`, :func:`revision`,
+            :func:`catalogued`, :func:`reported`, :func:`seen`, :func:`told`, :func:`chosen`,
+            :func:`locked`, :func:`held`).
+        GitError: git cannot read a file of the commit the image was built from.
+        OSError: as reading the deploy script, making the files or running docker or uv
+            raises it.
+    """
+    scanner = _rootless()
+    name = container(root)
+    image = docker(PRODUCTION, ["inspect", "--format", "{{.Image}}", name], {},
+                   DOCKER_SECONDS).decode("utf-8", errors="replace").strip()
+    if not _DIGEST.fullmatch(image):
+        raise ScanFailed(f"production's container {name} runs {image!r}, which is no image "
+                         "digest")
+    interpreter, answer, catalog = _read(root, docker, scanner, image)
     scan = parsed(answer)
     found = judged(scan)
     seen(scan, catalog, interpreter)
-    return Scanned(image, revision(scan), tuple(found))
+    commit = revision(scan)
+    held(catalog, interpreter.prefix, _locks(root, commit, interpreter, uv))
+    return Scanned(image, commit, tuple(found))

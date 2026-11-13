@@ -1,0 +1,207 @@
+{
+  "schema": {
+    "version": "preview"
+  },
+  "workspace_root": "/tmp/shekel-scan-lock-q7fz2k1m",
+  "workspace": {
+    "path": "/tmp/shekel-scan-lock-q7fz2k1m",
+    "id": "workspace+/tmp/shekel-scan-lock-q7fz2k1m"
+  },
+  "roots": [
+    {
+      "id": "shekel:server==0@virtual+/tmp/shekel-scan-lock-q7fz2k1m"
+    },
+    {
+      "id": "shekel==0@virtual+/tmp/shekel-scan-lock-q7fz2k1m"
+    }
+  ],
+  "inverted": false,
+  "members": [
+    {
+      "name": "shekel",
+      "path": "/tmp/shekel-scan-lock-q7fz2k1m",
+      "id": "shekel==0@virtual+/tmp/shekel-scan-lock-q7fz2k1m"
+    }
+  ],
+  "resolution": {
+    "alembic==1.20.0@registry+https://pypi.org/simple": {
+      "name": "alembic",
+      "version": "1.20.0",
+      "source": {
+        "registry": {
+          "url": "https://pypi.org/simple"
+        }
+      },
+      "kind": "package",
+      "dependencies": [
+        {
+          "id": "mako==1.4.3@registry+https://pypi.org/simple"
+        },
+        {
+          "id": "sqlalchemy==2.1.4@registry+https://pypi.org/simple"
+        },
+        {
+          "id": "typing-extensions==4.16.0@registry+https://pypi.org/simple"
+        }
+      ],
+      "wheels": [
+        {
+          "url": "https://files.pythonhosted.org/packages/3f/27/78a89b55b0904d222183164e079b4ca56208e94eff1d35ad1f1ad5be9b06/alembic-1.20.0-py3-none-any.whl",
+          "hashes": {
+            "sha256": "77eb101048d95f982c0353e9233404889dcd7a6fc244c107836c0e2fc9cf7d9d"
+          },
+          "size": 268719,
+          "upload_time": "2026-09-11T19:09:12.88Z",
+          "filename": "alembic-1.20.0-py3-none-any.whl"
+        }
+      ]
+    },
+    "gunicorn==26.2.0@registry+https://pypi.org/simple": {
+      "name": "gunicorn",
+      "version": "26.2.0",
+      "source": {
+        "registry": {
+          "url": "https://pypi.org/simple"
+        }
+      },
+      "kind": "package",
+      "dependencies": [],
+      "wheels": [
+        {
+          "url": "https://files.pythonhosted.org/packages/fe/85/7522a52e5e2f42faf1a129113ab63e548c42e103e9af395b7bfe65e403e2/gunicorn-26.2.0-py3-none-any.whl",
+          "hashes": {
+            "sha256": "bd249d0b3f7972f7432f0a6b6ff3b3ee2d129f70cd1ff6c09a9dd9e29a2b88e3"
+          },
+          "size": 228389,
+          "upload_time": "2026-08-24T15:05:57.67Z",
+          "filename": "gunicorn-26.2.0-py3-none-any.whl"
+        }
+      ]
+    },
+    "psycopg-c==3.3.6@registry+https://pypi.org/simple": {
+      "name": "psycopg-c",
+      "version": "3.3.6",
+      "source": {
+        "registry": {
+          "url": "https://pypi.org/simple"
+        }
+      },
+      "kind": "package",
+      "dependencies": []
+    },
+    "psycopg[c]==3.3.6@registry+https://pypi.org/simple": {
+      "name": "psycopg",
+      "version": "3.3.6",
+      "source": {
+        "registry": {
+          "url": "https://pypi.org/simple"
+        }
+      },
+      "kind": {
+        "extra": "c"
+      },
+      "dependencies": [
+        {
+          "id": "psycopg-c==3.3.6@registry+https://pypi.org/simple",
+          "marker": "implementation_name != 'pypy'"
+        },
+        {
+          "id": "psycopg==3.3.6@registry+https://pypi.org/simple"
+        }
+      ]
+    },
+    "shekel:server==0@virtual+/tmp/shekel-scan-lock-q7fz2k1m": {
+      "name": "shekel",
+      "version": "0",
+      "source": {
+        "virtual": "/tmp/shekel-scan-lock-q7fz2k1m"
+      },
+      "kind": {
+        "group": "server"
+      },
+      "dependencies": [
+        {
+          "id": "gunicorn==26.2.0@registry+https://pypi.org/simple"
+        }
+      ]
+    },
+    "shekel==0@virtual+/tmp/shekel-scan-lock-q7fz2k1m": {
+      "name": "shekel",
+      "version": "0",
+      "source": {
+        "virtual": "/tmp/shekel-scan-lock-q7fz2k1m"
+      },
+      "kind": "package",
+      "dependencies": [
+        {
+          "id": "alembic==1.20.0@registry+https://pypi.org/simple"
+        },
+        {
+          "id": "bcrypt==5.0.0@registry+https://pypi.org/simple"
+        },
+        {
+          "id": "cryptography==50.0.2@registry+https://pypi.org/simple"
+        },
+        {
+          "id": "flask-limiter==4.1.1@registry+https://pypi.org/simple"
+        },
+        {
+          "id": "flask-login==0.6.3@registry+https://pypi.org/simple"
+        },
+        {
+          "id": "flask-migrate==4.1.0@registry+https://pypi.org/simple"
+        },
+        {
+          "id": "flask-sqlalchemy==3.1.1@registry+https://pypi.org/simple"
+        },
+        {
+          "id": "flask-wtf==1.3.0@registry+https://pypi.org/simple"
+        },
+        {
+          "id": "flask==3.1.3@registry+https://pypi.org/simple"
+        },
+        {
+          "id": "marshmallow==4.3.1@registry+https://pypi.org/simple"
+        },
+        {
+          "id": "psycopg[c]==3.3.6@registry+https://pypi.org/simple"
+        },
+        {
+          "id": "pyotp==2.10.0@registry+https://pypi.org/simple"
+        },
+        {
+          "id": "python-dotenv==1.2.4@registry+https://pypi.org/simple"
+        },
+        {
+          "id": "python-json-logger==4.2.0@registry+https://pypi.org/simple"
+        },
+        {
+          "id": "qrcode[pil]==8.2@registry+https://pypi.org/simple"
+        },
+        {
+          "id": "requests==2.34.2@registry+https://pypi.org/simple"
+        },
+        {
+          "id": "sqlalchemy==2.1.4@registry+https://pypi.org/simple"
+        },
+        {
+          "id": "valkey==6.2.0@registry+https://pypi.org/simple"
+        },
+        {
+          "id": "werkzeug==3.1.9@registry+https://pypi.org/simple"
+        }
+      ],
+      "dependency_groups": [
+        {
+          "name": "server",
+          "id": "shekel:server==0@virtual+/tmp/shekel-scan-lock-q7fz2k1m"
+        }
+      ]
+    },
+    "workspace+/tmp/shekel-scan-lock-q7fz2k1m": {
+      "kind": "workspace",
+      "path": "/tmp/shekel-scan-lock-q7fz2k1m",
+      "dependencies": []
+    }
+  }
+}

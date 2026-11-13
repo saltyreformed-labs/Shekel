@@ -2,7 +2,9 @@
 scanner's JSON judged as data, each CVE with a fix rated HIGH or CRITICAL by any source counted,
 and each Grype marks known exploited, at any rating, with a fix or without; and the scan itself
 (ruling plan#3822), production's image read on its daemon and scanned on the rootless one, run
-with a stand-in for docker.  The scan judged is a trimmed copy of a real one,
+with a stand-in for docker, and the lock's set worked out by a stand-in for uv from this
+checkout's own commit (rulings plan#3877, plan#3884), answering ``recorded/tree.json``
+(``test_scan_lock.py``).  The scan judged is a trimmed copy of a real one,
 ``recorded/scan.json``: seven of the 422 matches Grype v0.121.2 made on dev's image 2026-11-13,
 each whole, with the scan's own source, distro and descriptor, its CVE ids, descriptions and
 links invented (ruling plan#3841).  None is marked known exploited.  A case the real scan does
@@ -14,6 +16,7 @@ from __future__ import annotations
 import copy
 import json
 import os
+import platform
 import re
 import stat
 import subprocess
@@ -24,6 +27,7 @@ import pytest
 
 from scripts import private_cluster
 from tools.ci.arcs import REPO
+from tools.ci.gitcmd import GitError, git
 from tools.update import scan
 from tools.update.app import marker, markers
 
@@ -31,6 +35,8 @@ from tools.update.app import marker, markers
 RECORDED = Path(__file__).resolve().parent / "recorded" / "scan.json"
 #: The trimmed copy of a real catalog, the scanner's second report (ruling plan#3875).
 CATALOGUED = RECORDED.with_name("catalog.json")
+#: The trimmed copy of a real ``uv tree``, the lock's set for the image (ruling plan#3877).
+TREE = RECORDED.with_name("tree.json")
 #: The one match of the recorded scan that counts: the interpreter's CRITICAL CVE.
 _CRITICAL = scan.Counted("CVE-2026-1999903", "binary", "python", "3.14.8",
                          ("3.11.18", "3.12.16", "3.13.18", "3.14.10", "3.15.2", "3.16.0"),
@@ -395,8 +401,9 @@ def test_the_module_imports_with_no_package_installed():
 _ROOTLESS = "unix:///run/user/1000/docker.sock"
 #: The digest the stand-in's production container runs.
 _IMAGE = "sha256:" + "4f19" * 16
-#: The commit the stand-in's image was built from.
-_BUILT_FROM = "0123456789abcdef" * 2 + "01234567"
+#: The commit the stand-in's image was built from: this checkout's own, so the scan reads the
+#: lock and the Dockerfile of a commit its git holds.
+_BUILT_FROM = git(REPO, "rev-parse", "HEAD").strip()
 
 
 def _labelled(labels: object) -> dict:
@@ -407,8 +414,16 @@ def _labelled(labels: object) -> dict:
 
 
 #: What the stand-in's image's python reports of itself: the interpreter the recorded catalog
-#: lists (``recorded/catalog.json``), at its version and file.
-_REPORTED = {"version": "3.14.8", "executable": "/usr/local/bin/python3.14"}
+#: lists (``recorded/catalog.json``), at its version and file, the venv it lists the lock's
+#: packages in, and production's platform.
+_REPORTED = {"version": "3.14.8", "executable": "/usr/local/bin/python3.14", "prefix": "/opt/venv",
+             "implementation": "cpython", "platform": "linux", "machine": "x86_64",
+             "libc": "glibc"}
+#: What the stand-in's uv is run with: the lock's set for that image and the groups the
+#: Dockerfile installs (ruling plan#3884).
+_TREE = ["tree", "--frozen", "--offline", "--python", "cpython", "--python-platform",
+         "x86_64-unknown-linux-gnu", "--python-version", "3.14.8", "--format", "json",
+         "--no-default-groups", "--group", "server"]
 
 
 def _command(arguments: list[str]) -> str:
@@ -463,6 +478,30 @@ class _Docker:
         return self.answers[command]
 
 
+class _Uv:
+    """A stand-in for uv (:data:`tools.update.scan.Uv`): each call recorded, as its arguments
+    and its seconds, with each file of the directory it ran in, by name, and its text; it
+    answers ``answer``, the recorded tree, or fails where ``fails``."""
+
+    def __init__(self, answer: bytes = TREE.read_bytes(), fails: bool = False) -> None:
+        """A stand-in answering ``answer``, or failing where ``fails``."""
+        self.calls: list[tuple[list[str], int]] = []
+        self.files: dict[str, str] = {}
+        self.directory: Path | None = None
+        self.answer = answer
+        self.fails = fails
+
+    def __call__(self, directory, arguments, seconds) -> bytes:
+        """One uv command, as the class says."""
+        self.calls.append((list(arguments), seconds))
+        self.directory = directory
+        self.files = {path.name: path.read_text(encoding="utf-8")
+                      for path in directory.iterdir()}
+        if self.fails:
+            raise scan.ScanFailed("uv tree failed")
+        return self.answer
+
+
 @pytest.fixture(name="rootless")
 def _rootless(monkeypatch):
     """The cluster module's daemon, the rootless one, says it is rootless."""
@@ -492,10 +531,12 @@ def test_a_scan_reads_production_on_its_daemon_and_scans_the_saved_file_on_the_r
     on the rootless daemon the saved file is loaded, the image's own python run in it and the
     loaded image removed (ruling plan#3876), then the scanner reads the file, world-readable,
     and writes its catalog to a file made for it to write (ruling plan#3875), each run handed
-    every variable the compose file names; the commit is the scanned image's label; and the
-    files are gone once the scan ends (ruling plan#3822)."""
-    docker = _Docker()
-    assert scan.scanned(REPO, docker) == scan.Scanned(_IMAGE, _BUILT_FROM, (_CRITICAL,))
+    every variable the compose file names; the commit is the scanned image's label; uv works
+    out the lock's set from that commit's lock, for the groups its Dockerfile installs and the
+    platform the image's python reported (rulings plan#3877, plan#3884); and the files are
+    gone once the scan ends (ruling plan#3822)."""
+    docker, uv = _Docker(), _Uv()
+    assert scan.scanned(REPO, docker, uv) == scan.Scanned(_IMAGE, _BUILT_FROM, (_CRITICAL,))
     saved = str(_saved(docker))
     added = {"SCAN_IMAGE": saved, "SCAN_CATALOG": str(Path(saved).with_name("catalog.json")),
              "SCAN_PROBE": _IMAGE}
@@ -509,15 +550,63 @@ def test_a_scan_reads_production_on_its_daemon_and_scans_the_saved_file_on_the_r
         (_ROOTLESS, [*_RUN, "scan"], added, scan.SCAN_SECONDS)]
     assert docker.modes == (0o644, 0o666)
     assert not Path(saved).parent.exists()
+    assert uv.calls == [(_TREE, scan.UV_SECONDS)]
+    assert uv.files == {name: git(REPO, "cat-file", "blob", f"{_BUILT_FROM}:{name}")
+                        for name in ("pyproject.toml", "uv.lock")}
+    assert uv.directory is not None and not uv.directory.exists()
 
 
 def test_the_probe_s_script_reports_this_interpreter_as_the_scan_reads_it():
     """The script the probe runs, run by this interpreter: its report reads as this one's
-    version and the real path of the file it runs from."""
+    version, the real path of the file it runs from, its venv and its platform."""
     done = subprocess.run([sys.executable, "-I", "-c", scan.REPORT], capture_output=True,
                           check=True)
     assert scan.reported(done.stdout) == scan.Interpreter(
-        ".".join(map(str, sys.version_info[:3])), os.path.realpath(sys.executable))
+        ".".join(map(str, sys.version_info[:3])), os.path.realpath(sys.executable), sys.prefix,
+        sys.implementation.name, sys.platform, platform.machine(), platform.libc_ver()[0])
+
+
+@pytest.mark.usefixtures("rootless")
+def test_a_venv_that_is_not_the_lock_s_set_refuses_the_scan():
+    """uv's set for the image lacking a package the catalog lists in the venv: the scan is
+    refused, naming it (ruling plan#3788), the lock's files gone all the same."""
+    tree = json.loads(TREE.read_text(encoding="utf-8"))
+    del tree["resolution"]["alembic==1.20.0@registry+https://pypi.org/simple"]
+    uv = _Uv(json.dumps(tree).encode())
+    with pytest.raises(scan.NotAScan, match="in it, but not in the lock's set: alembic 1.20.0$"):
+        scan.scanned(REPO, _Docker(), uv)
+    assert uv.directory is not None and not uv.directory.exists()
+
+
+@pytest.mark.usefixtures("rootless")
+def test_a_uv_that_fails_fails_the_scan_its_lock_s_files_gone():
+    """A uv that cannot work the set out is a scan that could not run, never a clean one."""
+    uv = _Uv(fails=True)
+    with pytest.raises(scan.ScanFailed, match="^uv tree failed$"):
+        scan.scanned(REPO, _Docker(), uv)
+    assert uv.directory is not None and not uv.directory.exists()
+
+
+@pytest.mark.usefixtures("rootless")
+def test_an_image_built_from_a_commit_this_checkout_lacks_runs_no_uv():
+    """The lock is read from the git of the checkout the scan runs from, which must hold the
+    commit the image was built from: one it lacks fails the scan, uv never run."""
+    lacking = "0123456789abcdef" * 2 + "01234567"
+    uv = _Uv()
+    with pytest.raises(GitError, match=f"cat-file blob {lacking}:Dockerfile"):
+        scan.scanned(REPO, _Docker(scan=json.dumps(_labelled({scan.REVISION: lacking})).encode()),
+                     uv)
+    assert not uv.calls
+
+
+@pytest.mark.usefixtures("rootless")
+def test_an_image_whose_python_uv_cannot_be_told_of_runs_no_uv():
+    """An image whose python is no CPython is refused before uv runs (ruling plan#3877)."""
+    uv = _Uv()
+    with pytest.raises(scan.NotAScan, match="the image's python is pypy"):
+        scan.scanned(REPO, _Docker(probe=json.dumps({**_REPORTED, "implementation": "pypy"})
+                                   .encode()), uv)
+    assert not uv.calls
 
 
 @pytest.mark.usefixtures("rootless")
@@ -528,7 +617,7 @@ def test_the_loaded_image_is_removed_before_the_scanner_runs_however_the_probe_e
     runs."""
     docker = _Docker(failing=frozenset({failing}))
     with pytest.raises(scan.ScanFailed, match=f"^docker {failing} failed$"):
-        scan.scanned(REPO, docker)
+        scan.scanned(REPO, docker, _Uv())
     commands = [_command(arguments) for _, arguments, _, _ in docker.calls]
     assert commands[2:] == ["load", "probe", "rm", *(["scan"] if failing == "scan" else [])]
 
@@ -542,7 +631,7 @@ def test_a_removal_that_fails_is_reported_never_read_as_a_clean_scan(probe_fails
     said = (f"the copy of production's image loaded onto {_ROOTLESS} was not removed: docker rm "
             "failed" + (", after this failure: docker probe failed" if probe_fails else ""))
     with pytest.raises(scan.ScanFailed, match=f"^{re.escape(said)}$"):
-        scan.scanned(REPO, docker)
+        scan.scanned(REPO, docker, _Uv())
     assert "scan" not in [_command(arguments) for _, arguments, _, _ in docker.calls]
 
 
@@ -552,7 +641,7 @@ def test_a_load_that_names_another_image_runs_no_probe():
     image is still removed."""
     docker = _Docker(load=b"Loaded image: shekel:latest\n")
     with pytest.raises(scan.ScanFailed, match=f"loaded no image {_IMAGE}, production's"):
-        scan.scanned(REPO, docker)
+        scan.scanned(REPO, docker, _Uv())
     assert [_command(arguments) for _, arguments, _, _ in docker.calls][2:] == ["load", "rm"]
 
 
@@ -569,7 +658,7 @@ def test_a_scan_that_did_not_see_the_interpreter_is_refused(answers, said):
     all the same."""
     docker = _Docker(**answers)
     with pytest.raises(scan.NotAScan, match=re.escape(said)):
-        scan.scanned(REPO, docker)
+        scan.scanned(REPO, docker, _Uv())
     assert not _saved(docker).parent.exists()
 
 
@@ -584,7 +673,7 @@ def test_a_scanner_daemon_not_rootless_refuses_the_scan_before_production_is_rea
     monkeypatch.setenv("SHEKEL_ALLOW_HOST_DOCKER", "1")
     docker = _Docker()
     with pytest.raises(scan.ScanFailed, match=f"docker's default daemon {said}: start it"):
-        scan.scanned(REPO, docker)
+        scan.scanned(REPO, docker, _Uv())
     assert not docker.calls
 
 
@@ -595,7 +684,7 @@ def test_a_container_that_names_no_image_digest_saves_nothing(image):
     """What the inspect answers is a digest or the scan stops there."""
     docker = _Docker(image=image)
     with pytest.raises(scan.ScanFailed, match="which is no image digest"):
-        scan.scanned(REPO, docker)
+        scan.scanned(REPO, docker, _Uv())
     assert [arguments[0] for _, arguments, _, _ in docker.calls] == ["inspect"]
 
 
@@ -606,7 +695,7 @@ def test_the_saved_file_is_deleted_however_the_scan_fails(failing):
     behind."""
     docker = _Docker(failing=frozenset({failing}))
     with pytest.raises(scan.ScanFailed, match=f"docker {failing} failed"):
-        scan.scanned(REPO, docker)
+        scan.scanned(REPO, docker, _Uv())
     assert not _saved(docker).parent.exists()
 
 
@@ -620,7 +709,7 @@ def test_a_scanned_image_naming_no_commit_is_refused(labels):
     is refused: dev's recorded image, built with no label, among them."""
     docker = _Docker(scan=json.dumps(_labelled(labels)).encode())
     with pytest.raises(scan.NotAScan, match="names no commit it was built from"):
-        scan.scanned(REPO, docker)
+        scan.scanned(REPO, docker, _Uv())
     with pytest.raises(scan.NotAScan, match="names no commit it was built from"):
         scan.revision(_recorded())
 
@@ -629,7 +718,7 @@ def test_a_scanned_image_naming_no_commit_is_refused(labels):
 def test_a_scanner_answer_that_is_no_scan_is_refused():
     """What the scanner writes is judged as data: no JSON is no scan."""
     with pytest.raises(scan.NotAScan, match="it is no JSON"):
-        scan.scanned(REPO, _Docker(scan=b"Error: no image"))
+        scan.scanned(REPO, _Docker(scan=b"Error: no image"), _Uv())
 
 
 @pytest.mark.parametrize("lines, count", [([], 0), (['CONTAINER_NAME="${SHEKEL_CONTAINER_NAME'
@@ -694,7 +783,7 @@ def test_each_docker_command_runs_on_the_daemon_the_scan_names(tmp_path, monkeyp
     this process holds, and only the compose runs, the probe's and the scanner's, the saved
     file's path."""
     log = _on_path(tmp_path, monkeypatch, f"echo {_IMAGE}")
-    done = scan.scanned(REPO)
+    done = scan.scanned(REPO, uv=_Uv())
     assert (done.image, done.revision, done.found) == (_IMAGE, _BUILT_FROM, (_CRITICAL,))
     inspect, save, load, probe, remove, run = log.read_text(encoding="utf-8").splitlines()
     assert inspect == save.replace("save", "inspect", 1) == (
@@ -714,7 +803,7 @@ def test_a_docker_command_that_fails_says_its_last_line_of_error(inspect, said, 
     """docker's exit status and the last line it wrote on its error stream are the failure's."""
     _on_path(tmp_path, monkeypatch, inspect)
     with pytest.raises(scan.ScanFailed, match=f"docker inspect on {scan.PRODUCTION} {said}$"):
-        scan.scanned(REPO)
+        scan.scanned(REPO, uv=_Uv())
 
 
 @pytest.mark.usefixtures("rootless")
@@ -723,4 +812,50 @@ def test_a_docker_command_that_does_not_finish_in_time_fails(tmp_path, monkeypat
     _on_path(tmp_path, monkeypatch, "exec sleep 5")
     monkeypatch.setattr(scan, "DOCKER_SECONDS", 1)
     with pytest.raises(scan.ScanFailed, match="did not finish within 1 s"):
-        scan.scanned(REPO)
+        scan.scanned(REPO, uv=_Uv())
+
+
+# -- the scan's uv, a real process -----------------------------------------------------------
+
+#: A stand-in ``uv`` on the path: it records its arguments, one to a line, and each file of the
+#: directory it runs in, then answers the recorded tree, or fails as uv does with no PyPy.
+_FAKE_UV = """#!/bin/sh
+printf '%s\\n' "$@" > "$UV_TEST_LOG"
+ls -A >> "$UV_TEST_LOG"
+case "$UV_TEST_FAILS" in
+  yes) echo 'warning: a warning first' >&2; echo 'error: No interpreter found' >&2; exit 2 ;;
+esac
+cat "$UV_TEST_TREE"
+"""
+
+
+def _uv_on_path(tmp_path: Path, monkeypatch, fails: bool = False) -> Path:
+    """A stand-in ``uv`` first on the path (:data:`_FAKE_UV`), failing where ``fails``; its
+    log's path."""
+    binary = tmp_path / "uv-bin" / "uv"
+    binary.parent.mkdir()
+    binary.write_text(_FAKE_UV, encoding="utf-8")
+    binary.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{binary.parent}{os.pathsep}{os.environ['PATH']}")
+    monkeypatch.setenv("UV_TEST_TREE", str(TREE))
+    monkeypatch.setenv("UV_TEST_LOG", str(tmp_path / "uv-log"))
+    monkeypatch.setenv("UV_TEST_FAILS", "yes" if fails else "no")
+    return tmp_path / "uv-log"
+
+
+@pytest.mark.usefixtures("rootless")
+def test_the_scan_runs_the_developer_s_uv_in_a_directory_holding_the_lock_alone(tmp_path,
+                                                                              monkeypatch):
+    """The real uv runner, the scan's own: the first ``uv`` on the path, run in a directory
+    holding the commit's project and lock and nothing else, with the tree's arguments."""
+    log = _uv_on_path(tmp_path, monkeypatch)
+    assert scan.scanned(REPO, _Docker()).found == (_CRITICAL,)
+    assert log.read_text(encoding="utf-8").splitlines() == [*_TREE, "pyproject.toml", "uv.lock"]
+
+
+@pytest.mark.usefixtures("rootless")
+def test_a_uv_that_fails_says_its_last_line_of_error(tmp_path, monkeypatch):
+    """uv's exit status and the last line it wrote on its error stream are the failure's."""
+    _uv_on_path(tmp_path, monkeypatch, fails=True)
+    with pytest.raises(scan.ScanFailed, match="^uv tree exited 2: error: No interpreter found$"):
+        scan.scanned(REPO, _Docker())

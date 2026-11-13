@@ -10,6 +10,7 @@ day, whose packages it names are at the versions this catalog lists them."""
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -20,8 +21,14 @@ from tools.update import scan
 RECORDED = Path(__file__).resolve().parent / "recorded" / "scan.json"
 CATALOGUED = RECORDED.with_name("catalog.json")
 #: The interpreter production's image runs, as its own python reports it (measured
-#: 2026-11-13: ``3.14.8``, run from ``/usr/local/bin/python3.14``).
-_RUNS = scan.Interpreter("3.14.8", "/usr/local/bin/python3.14")
+#: 2026-11-13: ``3.14.8``, run from ``/usr/local/bin/python3.14``, its venv ``/opt/venv``, on
+#: Linux with glibc on x86_64).
+_RUNS = scan.Interpreter("3.14.8", "/usr/local/bin/python3.14", "/opt/venv", "cpython", "linux",
+                         "x86_64", "glibc")
+#: That report as the probe's script writes it.
+_REPORT = {"version": "3.14.8", "executable": "/usr/local/bin/python3.14", "prefix": "/opt/venv",
+           "implementation": "cpython", "platform": "linux", "machine": "x86_64",
+           "libc": "glibc"}
 
 
 def _catalog() -> dict:
@@ -90,8 +97,8 @@ def test_a_catalog_that_lists_not_the_interpreter_the_image_runs_is_refused(chan
         scan.seen(scanned, scan.catalogued(_written(catalog)), _RUNS)
 
 
-@pytest.mark.parametrize("interpreter", [scan.Interpreter("3.14.9", _RUNS.executable),
-                                         scan.Interpreter(_RUNS.version, "/usr/bin/python3")],
+@pytest.mark.parametrize("interpreter", [replace(_RUNS, version="3.14.9"),
+                                         replace(_RUNS, executable="/usr/bin/python3")],
                          ids=["another_version", "another_file"])
 def test_an_interpreter_the_catalog_does_not_list_is_refused(interpreter):
     """The image's python reporting another version, or another file, than the catalog's
@@ -158,27 +165,46 @@ def test_a_catalog_that_is_no_json_is_refused():
         scan.catalogued(b"[]")
 
 
-def test_the_image_s_report_reads_as_its_version_and_file():
+def test_the_image_s_report_reads_as_its_version_file_venv_and_platform():
     """The report the probe's script writes, one line of JSON."""
-    assert scan.reported(b'{"version": "3.14.8", "executable": "/usr/local/bin/python3.14"}\n'
-                         ) == _RUNS
+    assert scan.reported(json.dumps(_REPORT).encode() + b"\n") == _RUNS
+
+
+def test_a_c_library_the_image_names_none_of_is_read_as_an_empty_one():
+    """``platform.libc_ver`` names none where it finds none (a musl image's, say), which is
+    read as it stands, for the platform uv is told to refuse (``test_scan_lock.py``)."""
+    assert scan.reported(json.dumps({**_REPORT, "libc": ""}).encode()) == replace(_RUNS, libc="")
+
+
+def _without(key: str) -> bytes:
+    """The report with no ``key``."""
+    return json.dumps({name: value for name, value in _REPORT.items() if name != key}).encode()
+
+
+def _with(**values: object) -> bytes:
+    """The report with ``values`` in place of its own."""
+    return json.dumps({**_REPORT, **values}).encode()
 
 
 @pytest.mark.parametrize(("report", "said"), [
     (b"Traceback (most recent call last):", "report: it is no JSON"),
     (b"[]", "report holds no executable"),
-    (b'{"version": "3.14.8"}', "report holds no executable"),
-    (b'{"executable": "/usr/local/bin/python3.14"}', "report holds no version"),
-    (b'{"version": "3.14.8 <!-- -->", "executable": "/usr/local/bin/python3.14"}',
-     "report's version is"),
-    (b'{"version": 3.14, "executable": "/usr/local/bin/python3.14"}', "report holds no version"),
-    (b'{"version": "3.14.8", "executable": "python3.14"}',
-     "report names a file it runs from that"),
-    (b'{"version": "3.14.8", "executable": "/usr/local/bin/python 3"}',
-     "report names a file it runs from that"),
-    (b'{"version": "3.14.8", "executable": "/"}', "report names a file it runs from that"),
-], ids=["no_json", "no_object", "no_executable", "no_version", "a_version_unlistable",
-        "a_version_no_string", "a_relative_file", "a_file_with_a_space", "the_root"])
+    *((_without(key), f"report holds no {key}") for key in _REPORT),
+    (_with(version="3.14.8 <!-- -->"), "report's version is"),
+    (_with(version=3.14), "report holds no version"),
+    (_with(executable="python3.14"), "report names a file it runs from that"),
+    (_with(executable="/usr/local/bin/python 3"), "report names a file it runs from that"),
+    (_with(executable="/"), "report names a file it runs from that"),
+    (_with(prefix="venv"), "report names a venv that"),
+    (_with(prefix="/opt/venv/"), "report names a venv that"),
+    (_with(implementation="c`python`"), "report's implementation is"),
+    (_with(platform=""), "report's platform is"),
+    (_with(machine="x86 64"), "report's machine is"),
+    (_with(libc=None), "report holds no libc"),
+], ids=["no_json", "no_object", *(f"no_{key}" for key in _REPORT), "a_version_unlistable",
+        "a_version_no_string", "a_relative_file", "a_file_with_a_space", "the_root",
+        "a_relative_venv", "a_venv_ending_in_a_slash", "an_implementation_unlistable",
+        "no_platform_named", "a_machine_unlistable", "a_libc_no_string"])
 def test_a_report_not_as_the_probe_writes_one_is_refused(report, said):
     """Read as data, as the scanner's answer is: a report the probe's script does not write is
     refused, never read as an interpreter seen."""

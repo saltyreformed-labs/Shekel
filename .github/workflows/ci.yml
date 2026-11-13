@@ -819,7 +819,7 @@ jobs:
 
       - name: docker compose schema validation
         run: |
-          for f in docker-compose.yml docker-compose.dev.yml; do
+          for f in docker-compose.yml docker-compose.dev.yml docker-compose.scan.yml; do
               docker compose -f "${f}" config --no-interpolate -q
           done
           docker compose -f docker-compose.yml -f deploy/docker-compose.prod.yml config --no-interpolate -q

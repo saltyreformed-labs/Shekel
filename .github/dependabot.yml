@@ -64,11 +64,12 @@ updates:
     commit-message:
       prefix: "chore(deps)"
 
-  # The compose files' service images (postgres, valkey, nginx pins).  The
-  # postgres and valkey digests must each move in docker-compose.yml and
-  # docker-compose.dev.yml in the SAME commit (their comments say so), so
-  # both files sit under one directory entry.  Each image opens a PR of its
-  # own, a major included.
+  # The compose files' service images (postgres, valkey, nginx pins, and
+  # docker-compose.scan.yml's Grype, the weekly image scan's scanner, ruling
+  # plan#3706).  The postgres and valkey digests must each move in
+  # docker-compose.yml and docker-compose.dev.yml in the SAME commit (their
+  # comments say so), so both files sit under one directory entry.  Each
+  # image opens a PR of its own, a major included.
   - package-ecosystem: docker-compose
     directory: /
     schedule:

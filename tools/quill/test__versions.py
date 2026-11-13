@@ -711,7 +711,7 @@ _ACTION = (f"runs:\n  using: composite\n  steps:\n"
 
 @pytest.mark.parametrize(("path", "pinning"), [
     (LOCK, True), (DOCKERFILE, True), (COMPOSE, True), ("docker-compose.dev.yml", True),
-    (PUBLISH, True), (".github/workflows/ci.yml", True),
+    ("docker-compose.scan.yml", True), (PUBLISH, True), (".github/workflows/ci.yml", True),
     (".github/actions/install-lock/action.yml", True), ("pyproject.toml", False),
     ("app/__init__.py", False), (".github/dependabot.yml", False),
     ("deploy/docker-compose.yml", False), (".github/workflows/old/ci.yml", False),

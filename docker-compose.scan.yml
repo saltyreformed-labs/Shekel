@@ -1,0 +1,61 @@
+# Shekel Budget App -- the weekly image scan's scanner
+#
+# Grype (ruling plan#3704) reads the app image a scan job saved as a file
+# and writes, on its standard output, every CVE it matches there as JSON;
+# .github/workflows/updates.yml's ``scan`` job runs it and hands the JSON to
+# the report, which judges it (tools/update/scan.py; rulings plan#3710,
+# plan#3720).  Run, from the repository's root, as:
+#
+#   SCAN_IMAGE=/path/to/image.tar \
+#       docker compose -f docker-compose.scan.yml run --rm --no-TTY scan
+#
+# THE PIN (ruling plan#3706).  The service's image line is the one home of
+# Grype's version and bytes: the tag says which release, the digest (its
+# multi-arch index's) pins what runs, so a tag moved or a download swapped
+# cannot change it.  Dependabot's ``docker-compose`` entry moves it each
+# Monday after its 7-day cooldown, and the daily queue lands the move with
+# no card (tools/quill/_versions.py reads Grype's ``v``-spelled tag, ruling
+# plan#3704).  The ``-nonroot`` variant runs as uid 65532, not root.
+#
+# THE DATABASE (ruling plan#3708).  Grype downloads its vulnerability
+# database fresh on every run, into the tmpfs below, from Anchore's own
+# host, and refuses to scan with one built more than 120 hours ago or when
+# it cannot check for a newer one: each setting is written here, so the
+# refusal rests on no default.  No cache is restored between runs (ruling
+# plan#2471).  Grype's check for a newer Grype is off: the pin above is
+# what moves it.
+#
+# WHAT IT HOLDS.  The image file, read-only, and nothing else of the
+# runner's: no Docker socket, no secret, no port.  Its root filesystem is
+# read-only, every capability is dropped and none can be gained.
+name: shekel-scan
+
+services:
+  scan:
+    image: anchore/grype:v0.121.2-nonroot@sha256:1a0788d4ebdfcc19e4d6378041ac26877ca6c444f85a4dba31438c81b671db6e
+    command: ["docker-archive:/scan/image.tar", "--output", "json"]
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    environment:
+      GRYPE_DB_CACHE_DIR: /tmp/grype-db
+      GRYPE_DB_AUTO_UPDATE: "true"
+      GRYPE_DB_REQUIRE_UPDATE_CHECK: "true"
+      GRYPE_DB_VALIDATE_AGE: "true"
+      GRYPE_DB_MAX_ALLOWED_BUILT_AGE: 120h
+      GRYPE_CHECK_FOR_APP_UPDATE: "false"
+    tmpfs:
+      - /tmp:size=6g,mode=1777
+    volumes:
+      - type: bind
+        source: ${SCAN_IMAGE:?SCAN_IMAGE must name the saved image file to scan}
+        target: /scan/image.tar
+        read_only: true
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 8g
+          pids: 256

@@ -28,7 +28,6 @@ htmx sends it (:func:`buttons_in`, :meth:`Operator.press`).
 
 import json
 import os
-from datetime import datetime, timezone
 from html.parser import HTMLParser
 from pathlib import Path
 from urllib.parse import urlencode, urlsplit
@@ -39,7 +38,7 @@ from app import create_app
 from app.extensions import db, login_manager
 from app.rate_limits import limiter
 from app.utils.error_fragments import DESIGNED_FRAGMENT_HEADER
-from app.utils.session_helpers import login_session_stamps
+from tests.manual.forged_sign_in import signed_in_client
 
 #: The flash categories that mean a door REFUSED.  Read after every submission,
 #: because two of the account-10 repair's doors answered a refusal with ``302``
@@ -345,6 +344,11 @@ class Operator:
     def __init__(self, app, sheet: "Sheet", user_id: int):
         """Forge the owner's session and open a client.
 
+        The one forged sign-in of the scripts here
+        (:func:`~tests.manual.forged_sign_in.signed_in_client`), which stops
+        the rehearsal before its first act when the app does not let the
+        session in: an owner without two-factor is held at its setup.
+
         Args:
             app: The Flask application, from :func:`connect`, which disables
                 what refuses a forged session or a machine's pace.
@@ -353,17 +357,8 @@ class Operator:
                 acts touch.
         """
         self.sheet = sheet
-        self.client = app.test_client()
+        self.client = signed_in_client(app, user_id)
         self.user_id = user_id
-        with self.client.session_transaction() as session:
-            session["_user_id"] = str(self.user_id)
-            session["_fresh"] = True
-            session["_id"] = None
-            # The stamps a sign-in writes, the user's among them: ``load_user``
-            # refuses a session without them (plan#2173).
-            session.update(login_session_stamps(
-                datetime.now(timezone.utc), self.user_id,
-            ))
         self.acts = 0
         #: What the last submission flashed, ``[(category, message), ...]``:
         #: a door that answers by flashing, such as the statement import,

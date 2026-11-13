@@ -13,11 +13,11 @@ banner's link, a password change (ruling plan#3437: she changes her own),
 logging out her other sessions, forgetting a device, re-confirming her
 password, and dismissing the banner with no referring page.
 
-**The companion signs in with her password and only then gets two-factor**
-(:func:`_companion_with_two_factor`), so the one code a test types (a re-confirm)
-is the first her secret ever accepts: replay prevention refuses a second code
-inside one thirty-second step.  Trusted devices are made through the service,
-as a trusting sign-in would make them.
+**The companion signs in through her shared sign-in, on a browser she trusts**
+(:func:`_companion_with_two_factor`), which types no code, so the one code a
+test types (a re-confirm) is the first her secret ever accepts: replay
+prevention refuses a second code inside one thirty-second step.  Trusted
+devices are made through the service, as a trusting sign-in would make them.
 """
 
 import sqlalchemy
@@ -26,10 +26,10 @@ from app.extensions import db
 from app.models.user import MfaConfig, User
 from app.services import auth_service, mfa_service
 from tests._companions import text_of
-from tests._test_helpers import enable_mfa
 from tests._trusted_devices import SAFARI_IPHONE, is_trusted, trust
 from tests._two_factor_sign_in import (
-    SEED_COMPANION_PASSWORD, code_now, sign_in_seed_companion_by_password,
+    SEED_COMPANION_PASSWORD, code_now, sign_in_seed_companion,
+    sign_in_seed_companion_by_password, two_factor_secret_of,
 )
 
 
@@ -46,12 +46,10 @@ _HER_PAGE = "/companion/"
 def _companion_with_two_factor(app, companion_id):
     """Return a signed-in companion browser and her two-factor secret.
 
-    She signs in first and gets two-factor after, so no code has been typed
-    for her secret yet (the module docstring says why).
+    Her shared sign-in types no code, so none has been typed for her secret
+    yet (the module docstring says why).
     """
-    browser = sign_in_seed_companion_by_password(app)
-    secret = enable_mfa(db.session, companion_id)
-    return browser, secret
+    return sign_in_seed_companion(app), two_factor_secret_of(companion_id)
 
 
 def _lands_on_the_security_page(browser, response):
@@ -139,14 +137,14 @@ class TestThePage:
 class TestWhatForgetsEveryDevice:
     """The Trusted Devices card names what forgets them for the reader's role.
 
-    Plan#3521: a companion cannot turn two-factor off (ruling plan#3434), and
-    the owner's reset forgets her devices (ruling plan#3441).
+    Plan#3521: no account can turn two-factor off (ruling plan#3604, which
+    widened ruling plan#3434's rule for a companion), and the owner's reset
+    forgets her devices (ruling plan#3441).
     """
 
     _OWNERS = (
-        "Changing your password, logging out all other sessions, turning off "
-        "two-factor authentication or signing in with a backup code forgets "
-        "every device."
+        "Changing your password, logging out all other sessions or signing in "
+        "with a backup code forgets every device."
     )
     _COMPANIONS = (
         "Changing your password, logging out all other sessions or signing in "
@@ -155,13 +153,17 @@ class TestWhatForgetsEveryDevice:
         "password."
     )
 
-    def test_an_owner_is_told_turning_it_off_does(self, app, auth_client):
-        """The owner's card names turning two-factor off, and no owner's reset."""
+    def test_an_owner_is_told_what_forgets_them(self, app, auth_client):
+        """The owner's card names no turning two-factor off, and no owner's reset.
+
+        No account can turn it off (ruling plan#3604).
+        """
         with app.app_context():
             page = text_of(auth_client.get("/security").get_data(as_text=True))
 
             assert self._OWNERS in page
             assert self._COMPANIONS not in page
+            assert "turning off two-factor" not in page
 
     def test_a_companion_is_told_the_owners_reset_does(self, app, seed_companion):
         """Her card names the owner's reset and password, and no turning it off."""

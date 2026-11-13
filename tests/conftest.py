@@ -109,6 +109,7 @@ from tests._seed_owner_fixtures import (
     bare_periods,
     bare_user,
     bare_user_with_cadence,
+    no_two_factor_client,
     seed_periods,
     seed_periods_52,
     seed_periods_today,

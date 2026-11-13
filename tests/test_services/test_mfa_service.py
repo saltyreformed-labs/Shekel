@@ -1022,8 +1022,8 @@ class TestMultiFernetKeyHandling:
 class TestClearMfaMaterial:
     """Tests for clear_mfa_material() and has_mfa_material().
 
-    The shared field-set rule consumed by the /mfa/disable route and
-    scripts/reset_mfa.py.  Both functions are pure in-place row
+    The field-set rule of the one reset act, which scripts/reset_mfa.py
+    and the owner's Reset of a companion's two-factor run.  Both functions are pure in-place row
     operations, so the tests construct in-memory MfaConfig instances
     (no DB) mirroring the state-machine policy tests.
     """

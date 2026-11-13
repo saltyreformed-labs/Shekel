@@ -25,6 +25,7 @@ from app.models.salary_profile import SalaryProfile
 from app.models.salary_raise import SalaryRaise
 from app.models.transaction import Transaction
 from app.models.transaction_template import TransactionTemplate
+from tests._seed_owner_fixtures import SEED_USER_EMAIL, SEED_USER_PASSWORD, log_in_seed_user
 from tests._test_helpers import (
     cadence_payload,
     last_covered_day,
@@ -94,11 +95,10 @@ class TestLoginDoubleSubmit:
         and the session remains functional after each login. Verifies
         session integrity is preserved across double-submit."""
         with app.app_context():
-            data = {"email": "test@shekel.local", "password": "testpass"}
+            data = {"email": SEED_USER_EMAIL, "password": SEED_USER_PASSWORD}
 
-            # First login.
-            resp1 = client.post("/login", data=data, follow_redirects=False)
-            assert resp1.status_code == 302
+            # First login: the shared sign-in, on a browser the owner trusts.
+            log_in_seed_user(client)
 
             # Verify session is live after FIRST login.
             protected_resp1 = client.get("/settings")

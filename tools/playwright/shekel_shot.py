@@ -23,8 +23,12 @@ The saved state contains a live dev auth cookie, so it is written to
 
 Credentials
 -----------
-MFA is disabled on the dev users, so login is email + password only.  The email
-and password are resolved, in order, from:
+Every account signs in with its password and then a two-factor code (plan#3452).
+The dev copy's account has the dev key as its two-factor, written by
+``tools/dev_two_factor.py``, and this helper signs in through that module's
+one sign-in, which types that key's current code at ``/mfa/verify``
+(``SHEKEL_DEV_TOTP_SECRET``, that module's docstring).  The
+email and password are resolved, in order, from:
 
 1. ``SHEKEL_DEV_LOGIN_EMAIL`` / ``SHEKEL_DEV_LOGIN_PASSWORD`` in the process env;
 2. the same two keys in the repo-root ``.env``;
@@ -32,7 +36,7 @@ and password are resolved, in order, from:
 
 If none resolve (or the password no longer matches the cloned dev user), fall
 back to a one-time manual capture: ``capture --manual`` opens a real browser
-window for you to log in by hand, then saves the state.
+window for you to log in by hand, code and all, then saves the state.
 
 Usage
 -----
@@ -65,14 +69,23 @@ from playwright.sync_api import sync_playwright
 
 # ``tools/playwright/shekel_shot.py`` -> repo root is two parents up.
 REPO_ROOT = Path(__file__).resolve().parents[2]
-ENV_FILE = REPO_ROOT / ".env"
+# Python puts the SCRIPT's own directory on ``sys.path``, not the checkout's
+# root, so the root is added for the dev key's module below.
+sys.path.insert(0, str(REPO_ROOT))
+
+# Pylint: ``wrong-import-position`` -- this import must FOLLOW the ``sys.path``
+# line above, which is what makes ``tools`` importable when run as a script.
+# pylint: disable=wrong-import-position
+from tools.dev_two_factor import (  # noqa: E402
+    LOGIN_PATH, read_env_file, sign_in_with_dev_key, signed_in, why_not_signed_in,
+)
+# pylint: enable=wrong-import-position
+
 STATE_PATH = Path(__file__).resolve().parent / ".auth" / "state.json"
 
 DEFAULT_BASE_URL = "http://127.0.0.1:5000"
-LOGIN_PATH = "/login"
 # A page that requires authentication; an unauthenticated hit 302-redirects to
-# ``/login?next=...`` so "/login" appearing in the settled URL means "logged
-# out".
+# ``/login?next=...``, and a half-finished sign-in stays under ``/mfa/``.
 AUTHED_PROBE_PATH = "/"
 
 # Navigation timeout for normal page loads and the automated-login redirect.
@@ -97,34 +110,6 @@ USER_AGENT = (
 )
 
 
-def _read_env_file(keys: tuple[str, ...]) -> dict[str, str]:
-    """Return the requested ``KEY=VALUE`` pairs found in the repo-root ``.env``.
-
-    A minimal dependency-free parser: only ``KEY=VALUE`` lines are honoured,
-    ``#`` comments and blanks are skipped, and surrounding quotes are stripped.
-    Missing file or missing keys simply yield an absent entry.
-
-    Args:
-        keys: The env-var names to extract.
-
-    Returns:
-        A mapping of found key to value (only keys present in the file appear).
-    """
-    wanted = set(keys)
-    found: dict[str, str] = {}
-    if not ENV_FILE.exists():
-        return found
-    for raw_line in ENV_FILE.read_text(encoding="utf-8").splitlines():
-        line = raw_line.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        name, _, value = line.partition("=")
-        name = name.strip()
-        if name in wanted:
-            found[name] = value.strip().strip("'\"")
-    return found
-
-
 def _resolve_credentials() -> tuple[str | None, str | None, str]:
     """Resolve the dev login email/password and the source they came from.
 
@@ -141,7 +126,7 @@ def _resolve_credentials() -> tuple[str | None, str | None, str]:
     if env_email and env_password:
         return env_email, env_password, "process env (SHEKEL_DEV_LOGIN_*)"
 
-    override = _read_env_file(("SHEKEL_DEV_LOGIN_EMAIL", "SHEKEL_DEV_LOGIN_PASSWORD"))
+    override = read_env_file(("SHEKEL_DEV_LOGIN_EMAIL", "SHEKEL_DEV_LOGIN_PASSWORD"))
     if override.get("SHEKEL_DEV_LOGIN_EMAIL") and override.get("SHEKEL_DEV_LOGIN_PASSWORD"):
         return (
             override["SHEKEL_DEV_LOGIN_EMAIL"],
@@ -149,7 +134,7 @@ def _resolve_credentials() -> tuple[str | None, str | None, str]:
             ".env (SHEKEL_DEV_LOGIN_*)",
         )
 
-    seed = _read_env_file(("SEED_USER_EMAIL", "SEED_USER_PASSWORD"))
+    seed = read_env_file(("SEED_USER_EMAIL", "SEED_USER_PASSWORD"))
     if seed.get("SEED_USER_EMAIL") and seed.get("SEED_USER_PASSWORD"):
         return seed["SEED_USER_EMAIL"], seed["SEED_USER_PASSWORD"], ".env (SEED_USER_*)"
 
@@ -160,46 +145,18 @@ def _is_authenticated(page: Page, base_url: str) -> bool:
     """Return True if ``page`` can load an authenticated route without redirect.
 
     Navigates to the auth-only probe path and checks that the settled URL did
-    not bounce to ``/login``.
+    not bounce to ``/login`` or stop at a two-factor page.
 
     Args:
         page: An open Playwright page.
         base_url: The dev app origin, e.g. ``http://127.0.0.1:5000``.
 
     Returns:
-        True when still authenticated, False when redirected to login.
+        True when still authenticated, False when redirected to login or held
+        at two-factor.
     """
     page.goto(base_url + AUTHED_PROBE_PATH, wait_until="domcontentloaded")
-    return LOGIN_PATH not in page.url
-
-
-def _perform_login(page: Page, base_url: str, email: str, password: str) -> bool:
-    """Fill and submit the login form, returning whether it authenticated.
-
-    The form has no "Remember me" box since plan#2173 deleted it; the saved
-    storage state carries the session cookie itself, which is what reuse rests
-    on.  CSRF needs no special handling: the real browser submits the rendered form's
-    hidden token with the matching session cookie.
-
-    Args:
-        page: An open Playwright page.
-        base_url: The dev app origin.
-        email: Login email.
-        password: Login password.
-
-    Returns:
-        True when the submit redirected away from ``/login`` (success), False
-        when it stayed on the login page (bad credentials or a form error).
-    """
-    page.goto(base_url + LOGIN_PATH, wait_until="domcontentloaded")
-    page.fill("#email", email)
-    page.fill("#password", password)
-    page.click('button[type="submit"]')
-    try:
-        page.wait_for_url(lambda url: LOGIN_PATH not in url, timeout=NAV_TIMEOUT_MS)
-    except PlaywrightTimeoutError:
-        return False
-    return True
+    return signed_in(page.url)
 
 
 def _save_state_after_auth(page: Page, context, base_url: str, source: str) -> None:
@@ -264,17 +221,17 @@ def capture(base_url: str, manual: bool, headed: bool) -> Path:
                     f"{MANUAL_LOGIN_TIMEOUT_MS // 1000}s...",
                     file=sys.stderr,
                 )
-                page.wait_for_url(
-                    lambda url: LOGIN_PATH not in url,
-                    timeout=MANUAL_LOGIN_TIMEOUT_MS,
-                )
+                page.wait_for_url(signed_in, timeout=MANUAL_LOGIN_TIMEOUT_MS)
                 _save_state_after_auth(page, context, base_url, "manual login")
             else:
-                if not _perform_login(page, base_url, email, password):
+                if not sign_in_with_dev_key(
+                    page, base_url, email, password, NAV_TIMEOUT_MS,
+                ):
                     raise SystemExit(
-                        f"Automated login failed for {email} (source: {source}). "
-                        "The saved dev password may be stale -- set "
-                        "SHEKEL_DEV_LOGIN_PASSWORD in .env, or use --manual."
+                        f"Automated login failed for {email} (source: {source}).  "
+                        f"{why_not_signed_in(page.url, email)}  A stale password "
+                        "is set as SHEKEL_DEV_LOGIN_PASSWORD in .env.  Or use "
+                        "--manual."
                     )
                 _save_state_after_auth(page, context, base_url, f"login as {email}")
         finally:
@@ -331,7 +288,8 @@ def _screenshot_once(playwright, target: str, out_path: Path, full_page: bool) -
 
     Returns:
         True if the screenshot was taken; False if the saved state was stale
-        (the target redirected to ``/login``), in which case nothing is written.
+        (the target redirected to ``/login`` or a two-factor page), in which
+        case nothing is written.
     """
     browser = playwright.chromium.launch(headless=True)
     context = browser.new_context(
@@ -346,7 +304,7 @@ def _screenshot_once(playwright, target: str, out_path: Path, full_page: bool) -
             # HTMX polling can keep the network busy; the DOM is loaded enough
             # to shoot, so fall through rather than fail the screenshot.
             pass
-        if LOGIN_PATH in page.url:
+        if not signed_in(page.url):
             return False
         out_path.parent.mkdir(parents=True, exist_ok=True)
         page.screenshot(path=str(out_path), full_page=full_page)

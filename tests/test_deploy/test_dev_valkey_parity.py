@@ -2,8 +2,9 @@
 service and app meet over the socket volume exactly as ``docker-compose.yml``'s do, so a change
 to how production reaches its store meets dev first.
 
-An interim fence, as ``test_image_supply_chain.py``'s class holding the two files' images is
-(ruling plan#2560): each file still spells how the two meet, finding plan#2635, which its owner
+An interim fence, as ``test_image_supply_chain/test_compose_pins.py``'s class holding the two
+files' images is (ruling plan#2560): each file still spells how the two meet, finding
+plan#2635, which its owner
 step plan#2561 (one home for what the two files share) answers, deleting this module; a
 service file both extend cannot carry the top-level volume, so that step must find the
 volume's home too.  The socket itself, its volume and its permissions are graded against a

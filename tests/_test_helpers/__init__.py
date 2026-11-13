@@ -75,6 +75,7 @@ from ._migrations import (
 )
 from ._users_and_eras import (
     enable_mfa,
+    store_backup_codes,
     register_form_data,
     cadence_form_values,
     shift_form_value,

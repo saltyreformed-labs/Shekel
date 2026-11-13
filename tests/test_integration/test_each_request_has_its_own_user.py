@@ -36,6 +36,15 @@ import pytest
 from flask import Flask, g, redirect
 from flask_login import login_user
 
+from tests._other_user_fixtures import (
+    SECOND_USER_EMAIL,
+    SECOND_USER_PASSWORD,
+    SEED_SECOND_USER_EMAIL,
+    SEED_SECOND_USER_PASSWORD,
+)
+from tests._seed_owner_fixtures import OWNERS_PAGE
+from tests._two_factor_sign_in import sign_in_from_a_trusted_browser
+
 #: The user menu's header, which renders the request's ``current_user``.
 _SIGNED_IN_AS = re.compile(r'<h6 class="dropdown-header">([^<]*)</h6>')
 
@@ -45,15 +54,6 @@ _CSRF_TOKEN = re.compile(r'name="csrf_token" value="([^"]+)"')
 #: A page every signed-in owner can open and an anonymous request is turned
 #: away from by the login gate.
 _PAGE = "/settings"
-
-#: The credentials ``seed_second_user`` writes (``tests/conftest.py``).  A
-#: drifted copy would fail the identity assertions loudly, never silently.
-_SECOND_USER_EMAIL = "second@shekel.local"
-_SECOND_USER_PASSWORD = "secondpass12"
-
-#: The credentials the ``second_user`` fixture writes (``tests/conftest.py``).
-_OTHER_USER_EMAIL = "other@shekel.local"
-_OTHER_USER_PASSWORD = "otherpass"
 
 
 def _signed_in_as(response):
@@ -104,20 +104,18 @@ def _assert_runs_anonymously(client):
 
 
 def _log_in(client, email, password):
-    """Sign *client* in through the real login form.
+    """Sign *client* in through the shared sign-in, on a browser the account trusts.
 
-    The 302 alone proves nothing -- an already-signed-in request is answered
-    with the same redirect -- so every caller asserts the identity next.
+    Its redirect to the owner's page alone proves nothing -- an
+    already-signed-in request is answered with the same redirect -- so every
+    caller asserts the identity next.
 
     Args:
         client: The test client to sign in.
         email: The account's email.
         password: The account's password.
     """
-    response = client.post("/login", data={"email": email, "password": password})
-    assert response.status_code == 302, (
-        f"login as {email} answered {response.status_code}"
-    )
+    sign_in_from_a_trusted_browser(client, email, password, OWNERS_PAGE)
 
 
 @pytest.fixture(name="signed_in_clients")
@@ -177,7 +175,7 @@ class TestClientsMadeAndSignedInMidTest:
         _assert_runs_as(*signed_in_clients["B"])
 
         third_client = app.test_client()
-        _log_in(third_client, _OTHER_USER_EMAIL, _OTHER_USER_PASSWORD)
+        _log_in(third_client, SECOND_USER_EMAIL, SECOND_USER_PASSWORD)
         _assert_runs_as(third_client, second_user["user"].display_name)
 
         _assert_runs_as(*signed_in_clients["A"])
@@ -196,7 +194,7 @@ class TestClientsMadeAndSignedInMidTest:
         assert auth_client.post("/logout").status_code == 302
         _assert_runs_anonymously(auth_client)
 
-        _log_in(auth_client, _SECOND_USER_EMAIL, _SECOND_USER_PASSWORD)
+        _log_in(auth_client, SEED_SECOND_USER_EMAIL, SEED_SECOND_USER_PASSWORD)
         _assert_runs_as(auth_client, seed_second_user["user"].display_name)
 
         _assert_runs_anonymously(app.test_client())

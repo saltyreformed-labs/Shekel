@@ -144,9 +144,8 @@
        ({% if account %}) -- never on the create form.  Reached via each
        cockpit card's kebab -> Edit, so every account type can be deleted from
        one shared surface, including Savings and Credit Card, which have no
-       per-type detail page.  The route is confirm-modal + fresh-login gated;
-       this matches the app's established danger-zone pattern
-       (auth/mfa_disable.html). #}
+       per-type detail page.  The route is confirm-modal + fresh-login
+       gated. #}
     {% if account %}
     <div class="card border-danger mt-4">
       <div class="card-body">

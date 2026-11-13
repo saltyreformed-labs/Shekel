@@ -21,8 +21,8 @@ A device is trusted while :attr:`KnownDevice.trusted_at` is less than
 :data:`TRUST_LIFETIME` ago AND not before its user's
 ``session_invalidated_at``, so every existing writer of that column (log out
 all sessions, a password change, the owner's companion password reset or
-deactivation, turning two-factor off (``/mfa/disable`` or the emergency
-``scripts/reset_mfa.py``), a backup-code sign-in,
+deactivation, a reset of two-factor (the emergency ``scripts/reset_mfa.py``
+or the owner's Reset of a companion's), a backup-code sign-in,
 ``scripts/rotate_sessions.py``) ends every trust with no write of its own.
 
 **What the row does NOT store is the design.**  There is no expiry column, no

@@ -35,7 +35,9 @@ routes 404 for an account of another kind by design, so the DIFF is the signal
 and an absolute status is not.  A server error is the exception, and so is a
 statement partial answering anything but ``200``: either is printed and the
 exit status is 1, so a sweep that rendered nothing cannot pass as a diff of
-two equal sizes (the snapshot is written either way).
+two equal sizes (the snapshot is written either way).  A forged session the
+app does not let in, such as an owner without two-factor, stops it before the
+first route with 2 and no snapshot (``forged_sign_in.py``).
 
 It drives the FIRST user in the database, which on a production clone is the
 real owner; a companion role holds no accounts and would measure nothing.
@@ -44,7 +46,6 @@ real owner; a companion role holds no accounts and would measure nothing.
 import json
 import pathlib
 import sys
-from datetime import datetime, timezone
 
 # Python puts the SCRIPT's own directory on ``sys.path``, not the working
 # directory, so the repository root is added explicitly -- the same line every
@@ -61,7 +62,7 @@ from app.rate_limits import limiter  # noqa: E402
 from app.models.account import Account  # noqa: E402
 from app.models.pay_period import PayPeriod  # noqa: E402
 from app.models.user import User  # noqa: E402
-from app.utils.session_helpers import login_session_stamps  # noqa: E402
+from tests.manual.forged_sign_in import signed_in_client  # noqa: E402
 # pylint: enable=wrong-import-position
 
 #: The whole-page and self-refresh surfaces that read a per-period balance, and
@@ -213,16 +214,10 @@ def main(out_path):
             for row in db.session.query(PayPeriod).filter_by(user_id=user_id)
             .order_by(PayPeriod.start_date).all()
         ]
-    client = app.test_client()
-    with client.session_transaction() as session:
-        session["_user_id"] = str(user_id)
-        session["_fresh"] = True
-        session["_id"] = None
-        # The stamps a sign-in writes, the user's among them: ``load_user``
-        # refuses a session without them (plan#2173).
-        session.update(login_session_stamps(
-            datetime.now(timezone.utc), user_id,
-        ))
+    # Stops here, before any route is probed, when the app does not let the
+    # session in: an owner without two-factor is held at its setup, and every
+    # probe would record that redirect.
+    client = signed_in_client(app, user_id)
     snapshot = {route: _probe(client, route) for route in ROUTES}
     for account_id in account_ids:
         for template in ACCOUNT_ROUTES:

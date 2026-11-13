@@ -1,11 +1,13 @@
-"""With no TOTP key, setup says so in place instead of looping a held companion.
+"""With no TOTP key, setup says so in place instead of looping a held user.
 
 Plan#2407, task plan#3514.  With ``TOTP_ENCRYPTION_KEY`` unset the app boots
 with a warning (``app/__init__.py``) and no two-factor key can be made or read.
 Setup and its confirmation once answered that by redirecting to the Security
-page, which the login gate refuses a companion it holds at setup, so it sent
-her straight back: her page, setup, Security, setup, round and round, the
-operator's flash never shown and the flashes piling up in her cookie.
+page, which the login gate refuses a user it holds at setup, so it sent her
+straight back: her page, setup, Security, setup, round and round, the
+operator's flash never shown and the flashes piling up in her cookie.  The
+hold was a companion's then; it is every account's since plan#3452, so an
+owner without two-factor is held there too.
 
 Now ``/mfa/setup`` says so in place, a 200 with no key, QR code or form, for
 every user, and each key failure at ``/mfa/confirm`` lands on it.  With the key
@@ -17,6 +19,7 @@ from urllib.parse import urlsplit
 import pytest
 
 from app.services import mfa_service
+from tests._seed_owner_fixtures import OWNERS_PAGE
 from tests.test_routes.test_auth_required import spy_on_the_hold
 from tests._two_factor_sign_in import (
     code_now, sign_in_seed_companion_by_password, two_factor_row_of,
@@ -91,7 +94,7 @@ def _assert_no_flashes(browser):
 
 
 class TestWithTheKeyUnset:
-    """Setup says so in place, and nothing sends a held companion round a loop."""
+    """Setup says so in place, and nothing sends a held user round a loop."""
 
     def test_a_held_companion_gets_setups_message_in_place(
         self, app, seed_companion, monkeypatch, holds,
@@ -128,17 +131,28 @@ class TestWithTheKeyUnset:
         assert holds == [("GET", _HER_PAGE, _HER_ENDPOINT)]
         _assert_no_flashes(browser)
 
-    def test_an_owners_setup_shows_the_same_message(
-        self, auth_client, seed_user, monkeypatch,
+    def test_an_owners_page_sends_him_to_setup_once_which_says_the_same(
+        self, no_two_factor_client, seed_user, monkeypatch, holds,
     ):
-        """An owner, who is never held, gets the same in-place answer."""
+        """An owner without two-factor is held too (plan#3452): one hop, the same answer.
+
+        His dashboard sends him to setup, which says why he is there and that
+        the key is missing, in place: no loop, no flash.  Nothing is written:
+        his row stays as the reset left it, disabled and holding no key.
+        """
         _unset_the_key(monkeypatch)
 
-        response = auth_client.get(_SETUP)
+        response = no_two_factor_client.get(OWNERS_PAGE, follow_redirects=True)
 
-        assert _WHY_HELD not in _assert_says_the_key_is_missing(response)
-        assert two_factor_row_of(seed_user["user"].id) is None
-        _assert_no_flashes(auth_client)
+        assert [
+            urlsplit(hop.headers["Location"]).path for hop in response.history
+        ] == [_SETUP]
+        assert _WHY_HELD in _assert_says_the_key_is_missing(response)
+        assert holds == [("GET", OWNERS_PAGE, "dashboard.page")]
+        row = two_factor_row_of(seed_user["user"].id)
+        assert row.is_enabled is False
+        assert not mfa_service.has_mfa_material(row)
+        _assert_no_flashes(no_two_factor_client)
 
     def test_confirm_with_the_key_gone_lands_on_setup_which_says_so(
         self, app, seed_companion, monkeypatch, holds,
@@ -228,12 +242,13 @@ class TestWithTheKeySet:
         assert _KEY_MISSING not in page
         assert holds == []
 
-    def test_an_owners_setup_can_set_it_up(self, auth_client):
-        """The owner's setup carries every way in and says nothing of a missing key."""
-        response = auth_client.get(_SETUP)
+    def test_an_owners_setup_can_set_it_up(self, no_two_factor_client):
+        """An owner's setup, two-factor reset, says why and carries every way in."""
+        response = no_two_factor_client.get(_SETUP)
 
         assert response.status_code == 200, response.status_code
         page = _page(response)
+        assert _WHY_HELD in page
         assert _APP_LINK in page
         assert _QR_CODE in page
         assert _CONFIRM_FORM in page

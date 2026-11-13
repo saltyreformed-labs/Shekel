@@ -37,10 +37,9 @@ from app.utils.session_helpers import (
     SESSION_LAST_ACTIVITY_KEY,
     SESSION_USER_ID_KEY,
 )
-from tests._seed_owner_fixtures import SEED_USER_EMAIL, SEED_USER_PASSWORD
-
-_SECOND_EMAIL = "second@shekel.local"
-_SECOND_PASSWORD = "secondpass12"
+from tests._other_user_fixtures import SEED_SECOND_USER_EMAIL, SEED_SECOND_USER_PASSWORD
+from tests._seed_owner_fixtures import OWNERS_PAGE, SEED_USER_EMAIL, SEED_USER_PASSWORD
+from tests._two_factor_sign_in import sign_in_from_a_trusted_browser
 
 
 def _minted_cookie(app, user_id):
@@ -80,14 +79,8 @@ def _remembered_client(app, user_id):
 
 
 def _signed_in_client(app, email, password):
-    """Return a fresh client signed in through the real form (no two-factor)."""
-    browser = app.test_client()
-    response = browser.post("/login", data={
-        "email": email, "password": password,
-    })
-    assert response.status_code == 302, (
-        f"Setup failed: sign-in as {email} returned {response.status_code}"
-    )
+    """Return a fresh client signed in through the shared sign-in, on a trusted browser."""
+    browser = sign_in_from_a_trusted_browser(app.test_client(), email, password, OWNERS_PAGE)
     assert browser.get("/dashboard").status_code == 200, (
         f"Setup failed: {email} is not signed in"
     )
@@ -164,8 +157,8 @@ class TestACookieOnAnotherUsersRefusedSessionSignsNobodyIn:
     @pytest.mark.usefixtures("seed_second_user")
     def test_another_users_session_signed_out_elsewhere(self, app, seed_user):
         """B is signed out from another browser; A's cookie on B's session is refused."""
-        browser = _signed_in_client(app, _SECOND_EMAIL, _SECOND_PASSWORD)
-        elsewhere = _signed_in_client(app, _SECOND_EMAIL, _SECOND_PASSWORD)
+        browser = _signed_in_client(app, SEED_SECOND_USER_EMAIL, SEED_SECOND_USER_PASSWORD)
+        elsewhere = _signed_in_client(app, SEED_SECOND_USER_EMAIL, SEED_SECOND_USER_PASSWORD)
         assert elsewhere.post("/invalidate-sessions").status_code == 302
 
         browser.set_cookie(COOKIE_NAME, _minted_cookie(app, seed_user["user"].id))
@@ -185,8 +178,8 @@ class TestACookieOnAnotherUsersRefusedSessionSignsNobodyIn:
         """
         assert auth_client.post("/invalidate-sessions").status_code == 302
         assert seed_user["user"].session_invalidated_at is not None
-        browser = _signed_in_client(app, _SECOND_EMAIL, _SECOND_PASSWORD)
-        elsewhere = _signed_in_client(app, _SECOND_EMAIL, _SECOND_PASSWORD)
+        browser = _signed_in_client(app, SEED_SECOND_USER_EMAIL, SEED_SECOND_USER_PASSWORD)
+        elsewhere = _signed_in_client(app, SEED_SECOND_USER_EMAIL, SEED_SECOND_USER_PASSWORD)
         assert elsewhere.post("/invalidate-sessions").status_code == 302
 
         browser.set_cookie(COOKIE_NAME, _minted_cookie(app, seed_user["user"].id))

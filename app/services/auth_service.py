@@ -318,7 +318,7 @@ def verify_password(plain_password, password_hash):
       mappings) and the empty string both return ``False`` without
       reaching bcrypt.  Every authentication route gates on a
       Marshmallow schema with ``min=1`` length (``LoginSchema``,
-      ``ReauthSchema``, ``MfaDisableSchema``, ``ChangePasswordSchema``),
+      ``ReauthSchema``, ``ChangePasswordSchema``),
       so an empty plaintext only reaches this function when the
       caller is broken; treating it as a non-match is safer than
       round-tripping bcrypt's empty-string hash.
@@ -630,8 +630,8 @@ def check_signed_in_password(
 ) -> guess_record_service.Held | None:
     """Check a signed-in door's password, counting a wrong one toward the lock.
 
-    The one password check of ``/reauth``, ``/change-password`` and
-    ``/mfa/disable``, with sign-in's one rule for whose attempt it is
+    The one password check of ``/reauth`` and ``/change-password``, with
+    sign-in's one rule for whose attempt it is
     (plan#2772, ruling plan#3034): a known browser, *device*, passes the
     account's lock and counts a wrong password on its own record, and a
     stranger meets the lock and counts on the account.  The lock is checked

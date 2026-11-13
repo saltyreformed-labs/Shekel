@@ -27,10 +27,6 @@ from decimal import Decimal
 
 import pytest
 
-# Pylint: ``shekel-private-module-import`` -- a test of a service's INTERNALS
-# reaches for them by name, which is the convention this package's own test
-# modules already keep (``test_bars``, ``test_candidates``, ``test_reconcile``).
-# pylint: disable=shekel-private-module-import
 from app.exceptions import ValidationError
 from app.models.account_opening import AccountOpening
 from app.models.statement_line_skip import StatementLineSkip
@@ -64,7 +60,7 @@ from tests._ledger_reads import account_net, nets_by_key_and_day
 from tests._test_helpers import open_books_before_the_first_assertion
 from tests.test_services.test_statement_import.test_anchor import _seed_import
 
-from ._builders import (
+from tests.test_services.test_statement_match._builders import (
     a_bank_line,
     a_scope,
     a_sighting,

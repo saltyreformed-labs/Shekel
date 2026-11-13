@@ -54,6 +54,7 @@ from app.routes.salary._bp import salary_bp
 from app.routes.salary._helpers import (
     _PROFILE_UPDATE_FIELDS,
     _create_schema,
+    _edit_page,
     _line_cadence_context,
     _get_investment_accounts,
     _raise_card_context,
@@ -370,7 +371,7 @@ def create_profile():
 
     logger.info("user_id=%d created salary profile %d", current_user.id, profile.id)
     flash(f"Salary profile '{profile.name}' created.", "success")
-    return redirect(url_for("salary.edit_profile", profile_id=profile.id))
+    return _edit_page(profile.id).to_response()
 
 
 @salary_bp.route("/salary/<int:profile_id>/edit")
@@ -447,7 +448,7 @@ def update_profile(profile_id):
     errors = _update_schema.validate(request.form)
     if errors:
         flash("Please correct the highlighted errors and try again.", "danger")
-        return redirect(url_for("salary.edit_profile", profile_id=profile_id))
+        return _edit_page(profile_id).to_response()
 
     data = _update_schema.load(request.form)
 
@@ -464,7 +465,7 @@ def update_profile(profile_id):
             "were editing.  Please reload and try again.",
             "warning",
         )
-        return redirect(url_for("salary.edit_profile", profile_id=profile_id))
+        return _edit_page(profile_id).to_response()
 
     # ONE read pass for the POST (task plan#3106): the calendar the pay-period
     # pair is checked against below and the regeneration after the edits are
@@ -485,7 +486,7 @@ def update_profile(profile_id):
             )
         except ValidationError as refused:
             flash(str(refused), "danger")
-            return redirect(url_for("salary.edit_profile", profile_id=profile_id))
+            return _edit_page(profile_id).to_response()
 
     for field_name, value in data.items():
         if field_name in _PROFILE_UPDATE_FIELDS:
@@ -516,14 +517,14 @@ def update_profile(profile_id):
                 "This salary profile was changed by another action while "
                 "you were editing.  Please reload and try again."
             ),
-            redirect=RedirectTarget("salary.edit_profile", {"profile_id": profile_id}),
+            redirect=_edit_page(profile_id),
         ),
         error_ctx=DbErrorContext(
             logger=logger,
             log_message="user_id=%d failed to update salary profile %d",
             log_args=(current_user.id, profile_id),
             flash_message="Failed to update salary profile. Please try again.",
-            redirect=RedirectTarget("salary.edit_profile", {"profile_id": profile_id}),
+            redirect=_edit_page(profile_id),
         ),
     )
     if response is not None:
@@ -531,7 +532,7 @@ def update_profile(profile_id):
 
     logger.info("user_id=%d updated salary profile %d", current_user.id, profile_id)
     flash(f"Salary profile '{profile.name}' updated.", "success")
-    return redirect(url_for("salary.edit_profile", profile_id=profile_id))
+    return _edit_page(profile_id).to_response()
 
 
 @salary_bp.route("/salary/<int:profile_id>/delete", methods=["POST"])
@@ -642,7 +643,7 @@ def reactivate_profile(profile_id):
 
     if profile.is_active:
         flash(f"Salary profile '{profile.name}' is already active.", "info")
-        return redirect(url_for("salary.edit_profile", profile_id=profile_id))
+        return _edit_page(profile_id).to_response()
 
     profile.is_active = True
     if profile.template:
@@ -658,14 +659,14 @@ def reactivate_profile(profile_id):
                 "This salary profile was changed by another action.  "
                 "Please reload and try again."
             ),
-            redirect=RedirectTarget("salary.edit_profile", {"profile_id": profile_id}),
+            redirect=_edit_page(profile_id),
         ),
         error_ctx=DbErrorContext(
             logger=logger,
             log_message="user_id=%d failed to reactivate salary profile %d",
             log_args=(current_user.id, profile_id),
             flash_message="Failed to reactivate salary profile. Please try again.",
-            redirect=RedirectTarget("salary.edit_profile", {"profile_id": profile_id}),
+            redirect=_edit_page(profile_id),
         ),
     )
     if response is not None:
@@ -673,4 +674,4 @@ def reactivate_profile(profile_id):
 
     logger.info("user_id=%d reactivated salary profile %d", current_user.id, profile_id)
     flash(f"Salary profile '{profile.name}' reactivated.", "success")
-    return redirect(url_for("salary.edit_profile", profile_id=profile_id))
+    return _edit_page(profile_id).to_response()

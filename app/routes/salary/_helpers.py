@@ -204,12 +204,14 @@ def _regenerate_salary_transactions(
 
 
 def _edit_page(profile_id: int) -> RedirectTarget:
-    """Where every refused or failed line-item submission sends the user: the profile's edit page.
+    """The profile's edit page as a redirect target: the salary package's one spelling of it.
 
     Twelve literal spellings of one target until plan step salary:R15-c
     added four more; one function is the answer to a review that counted them.
     It moved here from ``items.py`` with task plan#3136, so the responders
-    below, which spelled the target twice more, reach the one home too.
+    below, which spelled the target twice more, reach the one home too.  The
+    pay list's doors take it since task plan#3579, and the profile and pay
+    stub doors, which spelled it fifteen more times, since task plan#3796.
     """
     return RedirectTarget("salary.edit_profile", {"profile_id": profile_id})
 

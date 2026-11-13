@@ -267,6 +267,31 @@ def terms_of(raises) -> "tuple[RaiseTerms, ...]":
     return tuple(RaiseTerms.of(raise_obj) for raise_obj in (raises or ()))
 
 
+def recorded_pay_holds(landed: date, opens: date) -> bool:
+    """Whether pay recorded from an entry opening on *opens* holds a raise landing on *landed*.
+
+    **The one statement of the day recorded pay holds a raise through**
+    (ruling **plan#3091**, amending R-SAL59's "on or before its payday" since
+    task plan#3100): recorded pay includes only the raises dated on or before
+    the first day its paycheck pays for, so an application landing on or
+    before *opens* is in the entry's amount already, and one landing after it
+    raises that amount.  Pricing reads it through
+    :func:`applications_between`, which keeps the applications the entry it
+    walks from does not hold; :meth:`~app.services.payroll_basis.PayrollBasis
+    .raise_in_pay` finds the entry holding each application by it, for the
+    raise doors' refusal and the Raises card's label.  It was spelled at both
+    until task plan#3778, a comparison and its complement.
+
+    Args:
+        landed: The day a raise application lands on.
+        opens: The first day the entry's paycheck pays for.
+
+    Returns:
+        ``True`` when *landed* is on or before *opens*.
+    """
+    return landed <= opens
+
+
 def applications_between(raises, after, through):
     """Return every raise APPLICATION landing after *after* and on or before *through*.
 
@@ -279,8 +304,7 @@ def applications_between(raises, after, through):
     ``6740ce13e174`` dated, since each was dated on its month's 1st.  *after*
     is the first day the paycheck of the pay entry being raised pays for: an
     entry REPLACES every forecast raise dated on or before that day, because
-    the pay it records already holds them (ruling **plan#3091**, amending
-    R-SAL59's "on or before its payday" since task plan#3100).
+    the pay it records already holds them (:func:`recorded_pay_holds`).
 
     **APPLICATIONS are ordered by the date each one lands on**, not by the
     raise they belong to.  Raise application is non-commutative (a flat
@@ -316,7 +340,7 @@ def applications_between(raises, after, through):
     applications = sorted(
         _applications(raises or (), through), key=lambda a: a[:2],
     )
-    return [a for a in applications if a[0] > after]
+    return [a for a in applications if not recorded_pay_holds(a[0], after)]
 
 
 def raise_pay(pay, raise_obj, periods_per_year):
@@ -432,5 +456,6 @@ __all__ = [
     "applications_between",
     "end_year_of",
     "raise_pay",
+    "recorded_pay_holds",
     "terms_of",
 ]

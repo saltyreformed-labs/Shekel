@@ -31,6 +31,7 @@ from app.services.salary_raises import (
     RaiseTerms,
     applications_between,
     raise_pay,
+    recorded_pay_holds,
     terms_of,
 )
 from app.utils.money import ZERO, round_money
@@ -664,10 +665,13 @@ class PayrollBasis:
         Ruling **R-SAL95** on the day each entry opens (ruling **plan#3091**),
         for the raise doors' refusal and the Raises card's label alike
         (:mod:`app.services.raise_in_pay` works the examples).  Each
-        application is HELD by the first entry opening on or after the day it
-        lands, whose recorded pay includes it, and one before the first entry
-        by that entry (**R-SAL59**).  It REACHES pay when the walk applies it
-        (the walk to the day it lands applied it, :meth:`raises_applied_on`)
+        application is HELD by the first entry whose recorded pay holds it
+        (:func:`~app.services.salary_raises.recorded_pay_holds`, the one
+        statement of that day, which the walk's
+        :func:`~app.services.salary_raises.applications_between` reads too),
+        and one before the first entry by that entry (**R-SAL59**).  It
+        REACHES pay when the walk applies it (the walk to the day it lands
+        applied it, :meth:`raises_applied_on`)
         and some paycheck PAYS a day of it before an entry holds it: no entry
         does, or it is paid before the holder's payday (:meth:`_paid_before`,
         the banner's rule).  The walk read prices *raise_obj* ALONE
@@ -692,7 +696,10 @@ class PayrollBasis:
         held: "dict[_Entry, list[int]]" = {}
         reaches = False
         for landed, _rank, terms in applications_between(alone.raises, date.min, through):
-            holder = next((entry for entry in self._pay_list if entry.opens >= landed), None)
+            holder = next(
+                (entry for entry in self._pay_list if recorded_pay_holds(landed, entry.opens)),
+                None,
+            )
             reaches = reaches or (
                 (landed, terms) in alone.raises_applied_on(landed)
                 and (holder is None or self._paid_before(holder.payday, landed))

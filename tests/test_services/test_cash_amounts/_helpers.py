@@ -29,7 +29,7 @@ _POSTED_ON = date(2026, 1, 21)
 # `test_the_accounts_assertion_history_is_not_an_input` is the control that
 # says so.  Which statement CLEARED a movement is the walk's question, and a
 # PURCHASE's own link is graded there rather than here:
-# `test_cash_walk.py`'s
+# `test_cash_walk/test_the_clearing_and_order.py`'s
 # `TestARecordedClearingFactMayNotMoveALineAcrossAStatement
 # ::test_a_PURCHASE_carries_its_OWN_link_not_its_parents` on the read side, and
 # `test_account_posting_service.py`'s

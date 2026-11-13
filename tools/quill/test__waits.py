@@ -1,7 +1,8 @@
 """``quill sync``'s pass over the weekly update's waits (:mod:`_waits`, rulings plan#3619,
-plan#3620): a card filed for each thing the update told that no card holds, over the in-memory
-tracker (:class:`_fake.FakeTracker`, whose client :class:`_fake.FakeGitHub` answers the pass's
-reads) and the ``code`` fixture's real git.
+plan#3620, plan#3722): a card filed for each pull request or issue the update told a thing on
+while no card for it is open, and each later thing told there put on that card, over the
+in-memory tracker (:class:`_fake.FakeTracker`, whose client :class:`_fake.FakeGitHub` answers the
+pass's reads) and the ``code`` fixture's real git.
 
 What the update told is as GitHub answered it on 2026-11-13 (PR 667, 668, 669 of the code
 repository and #676): the App's comments word for word, its login ``shekel-updates``, and the
@@ -13,6 +14,7 @@ import pytest
 
 from tools.quill import _waits
 from tools.quill._fake import FakeTracker, run
+from tools.quill._tracker import Comment
 from tools.quill.setup_tracker import FILING
 from tools.update import app
 
@@ -37,6 +39,25 @@ _RED = ("@SaltyReformed This pull request moves pinned versions alone, but its c
 _RED_MARK = _RED.splitlines()[-1]
 #: Where the code repository's pull requests live.
 _PULL = "https://github.com/saltyreformed-labs/Shekel/pull/{}"
+#: PR 667's lock refresh title.
+_LOCK = "chore(deps): the Monday lock refresh moves 17 packages"
+
+
+def _line(where, mark):
+    """The line a card or quill's comment on one holds for the thing ``mark`` names, told on
+    ``where``: spelled here apart from :func:`_waits.told_line`, so a test pins its form."""
+    return f"<!-- quill: told on {where} --> {mark}"
+
+
+#: PR 669's two lines, in its markers' order.
+_TWO_LINES = tuple(_line("PR 669", mark) for mark in _TWO_MARKS)
+
+
+def _red(head):
+    """The queue's comment saying PR 667 is red at ``head``, as :data:`_RED` says it at its
+    own, and its marker: a later Monday's."""
+    mark = app.marker(f"red {head}")
+    return _RED.replace("8518a3f40f86", head).replace(_RED_MARK, mark), mark
 
 
 def _comment(number, body, at, login=app.APP, ident=1):
@@ -58,11 +79,20 @@ def _issue(number, title, login=app.ACTIONS, at="2026-11-16T14:20:00Z"):
                     "- refresh: failure", "url": f"https://github.com/o/Shekel/issues/{number}"}
 
 
-def _rumdl(tracker):
-    """PR 669 open, holding its one comment of the App's, of two markers."""
-    tracker.github.pulls = [_pull(
-        669, "chore(deps): rumdl from 0.2.78 to 0.3.2, waiting for a card",
-        _comment(669, _TWO, "2026-11-06T20:05:54Z", ident=6694294810))]
+def _rumdl(tracker, number=669, ident=6694294810):
+    """PR 669, or another pull request ``number`` moving the same capped requirements, open,
+    holding its one comment of the App's, of two markers."""
+    tracker.github.pulls.append(_pull(
+        number, "chore(deps): rumdl from 0.2.78 to 0.3.2, waiting for a card",
+        _comment(number, _TWO, "2026-11-06T20:05:54Z", ident=ident)))
+
+
+def _lock(tracker, *heads):
+    """PR 667 open, holding its red comment at 8518a3f40f86 and one more at each of ``heads``,
+    a Monday apart, as the queue tells red once for each head."""
+    tracker.github.pulls.append(_pull(667, _LOCK, _comment(667, _RED, "2026-11-09T23:09:14Z"), *(
+        _comment(667, _red(head)[0], f"2026-11-{16 + 7 * week}T23:09:14Z", ident=2 + week)
+        for week, head in enumerate(heads))))
 
 
 def _todo(tracker, *numbers):
@@ -110,21 +140,22 @@ def test_a_comment_no_card_holds_is_filed_once_high_at_the_top(code, capsys):
         f"`{_PULL.format(669)}#issuecomment-6694294810`", "", "```text", words, "```", "",
         "`quill sync` filed this card for it (ruling plan#3619), holding Priority High at the "
         "top of the board (ruling plan#3620). The words above say what waits; the session that "
-        "claims this card takes it, and sets the card's Effort.", "", *_TWO_MARKS])
+        "claims this card takes it, and sets the card's Effort.", "", *_TWO_LINES])
     _todo(tracker, 2)
     assert run(tracker, code, "sync") == 0
     assert capsys.readouterr().out == ""
     assert len(tracker.writes) == 4
 
 
-def test_a_marker_any_card_holds_files_nothing_open_closed_or_by_hand(code, capsys):
-    """A card holding the comment's markers in its text, however it came to: filed by hand
-    with them added (plan#2957's, at this card's landing), or closed since as not planned, or
-    shipped: nothing is filed, and the every-card read is made."""
+def test_what_any_card_holds_files_nothing_open_closed_or_by_hand(code, capsys):
+    """A card holding the comment's lines at the end of its text, however it came to: filed by
+    hand with them added (plan#2957's, at this card's landing), or closed since as not planned,
+    or shipped, so a closed card still holds them: nothing is filed or put on it, and the
+    every-card read is made."""
     for state in ({}, {"is_open": False, "state_reason": "NOT_PLANNED"},
                   {"is_open": False, "state_reason": "COMPLETED"}):
         tracker = FakeTracker()
-        tracker.add(2957, body="Read rumdl's changelog.\n\n" + "\n".join(_TWO_MARKS), **state)
+        tracker.add(2957, body="Read rumdl's changelog.\n\n" + "\n".join(_TWO_LINES), **state)
         _todo(tracker, 2957)
         _rumdl(tracker)
         assert run(tracker, code, "sync") == 0
@@ -133,16 +164,27 @@ def test_a_marker_any_card_holds_files_nothing_open_closed_or_by_hand(code, caps
         assert _waits.every_text(tracker.place) in tracker.github.queries
 
 
-def test_a_comment_with_one_marker_no_card_holds_is_filed(code, capsys):
-    """A comment holding a marker a card holds beside one no card holds (a later major on a
-    pull request a card already waits on) is filed, its card holding both."""
+def test_a_comment_with_one_thing_an_open_card_holds_and_one_more_is_put_on_it(code, capsys):
+    """A comment holding a thing the card open for its pull request holds beside one it does
+    not (a later major on a pull request a card already waits on) is put on that card, in a
+    comment of quill's holding both lines; with the card closed, it is filed a card of its own
+    holding both (ruling plan#3722)."""
     tracker = FakeTracker()
-    tracker.add(5, body=_TWO_MARKS[0])
+    tracker.add(5, body=_TWO_LINES[0])
     _todo(tracker, 5)
     _rumdl(tracker)
     assert run(tracker, code, "sync") == 0
+    assert capsys.readouterr().out == (
+        "put the update's PR 669, told at 2026-11-06T20:05:54Z, on plan#5, the card open for it "
+        "(ruling plan#3722)\n")
+    assert [write[:2] for write in tracker.writes] == [("comment", 5)]
+    assert tracker.writes[0][2].endswith("\n\n" + "\n".join(_TWO_LINES))
+    closed = FakeTracker()
+    closed.add(5, body=_TWO_LINES[0], is_open=False, state_reason="COMPLETED")
+    _rumdl(closed)
+    assert run(closed, code, "sync") == 0
     assert "filed plan#6\n" in capsys.readouterr().out
-    assert tracker.bodies[6].endswith("\n".join(_TWO_MARKS))
+    assert closed.bodies[6].endswith("\n\n" + "\n".join(_TWO_LINES))
 
 
 def test_nothing_told_reads_no_card_and_files_nothing(code, capsys):
@@ -165,7 +207,7 @@ def test_an_unfinished_filing_is_finished_not_filed_again(code, capsys):
     off the board, the pass cut short.  The pass finishes it, writing what it lacks, and files
     no other; ``sync``'s own REPORT of the unfinished filing, made before the pass, exits 1."""
     tracker = FakeTracker()
-    tracker.add(9, body="\n".join(_TWO_MARKS), on_board=False, labels=("filing", "tooling"),
+    tracker.add(9, body="\n".join(_TWO_LINES), on_board=False, labels=("filing", "tooling"),
                 arc="tooling", title="Shekel PR 669: earlier")
     _rumdl(tracker)
     assert run(tracker, code, "sync") == 1
@@ -196,7 +238,7 @@ def test_the_alerts_open_issue_is_filed_once_and_no_other_issue(code, capsys):
     assert run(tracker, code, "sync") == 0
     assert capsys.readouterr().out == _filed_lines(1, title, "issue 680",
                                                    "2026-11-16T14:20:00Z")
-    assert tracker.bodies[1].endswith("\n\n" + app.marker("alert 680"))
+    assert tracker.bodies[1].endswith("\n\n" + _line("issue 680", app.marker("alert 680")))
     _todo(tracker, 1)
     assert run(tracker, code, "sync") == 0
     assert capsys.readouterr().out == ""
@@ -206,15 +248,13 @@ def test_two_things_told_are_filed_oldest_first_the_newest_on_top(code, capsys):
     """PR 667's red comment and PR 669's, read newest first: each filed, the older first, so
     the newer sits at the top."""
     tracker = FakeTracker()
+    _lock(tracker)
     _rumdl(tracker)
-    tracker.github.pulls.insert(0, _pull(
-        667, "chore(deps): the Monday lock refresh moves 17 packages",
-        _comment(667, _RED, "2026-11-09T23:09:14Z")))
     assert run(tracker, code, "sync") == 0
     out = capsys.readouterr().out
     assert out.index("PR 669") < out.index("PR 667")
     assert tracker.board.items == [2, 1]
-    assert tracker.bodies[2].endswith(_RED_MARK)
+    assert tracker.bodies[2].endswith("\n\n" + _line("PR 667", _RED_MARK))
 
 
 def test_a_card_the_check_refuses_is_a_report_and_nothing_is_written(code, capsys,
@@ -320,3 +360,144 @@ def test_every_cards_text_is_read_open_and_closed():
     """The read of which markers cards hold lists closed cards too, so a card shipped or
     dropped still holds what it was filed for."""
     assert "states: [OPEN, CLOSED]" in _waits.every_text(FakeTracker.place)
+
+
+def test_the_same_comment_on_two_pull_requests_files_two_cards(code, capsys):
+    """Two pull requests moving the same capped requirements are each told the walk's same
+    refusals, so their comments hold the same markers: each is filed a card of its own, and the
+    card open for PR 669 holds nothing of PR 671's, nor takes it (finding 1 of plan#3613's
+    review)."""
+    tracker = FakeTracker()
+    _rumdl(tracker)
+    _rumdl(tracker, 671, ident=6694299999)
+    assert run(tracker, code, "sync") == 0
+    assert capsys.readouterr().out.count("filed plan#") == 2
+    assert tracker.bodies[1].endswith("\n\n" + "\n".join(_TWO_LINES))
+    assert tracker.bodies[2].endswith("\n\n" + "\n".join(
+        _line("PR 671", mark) for mark in _TWO_MARKS))
+    held = FakeTracker()
+    held.add(2957, body="\n".join(_TWO_LINES))
+    _todo(held, 2957)
+    _rumdl(held)
+    _rumdl(held, 671, ident=6694299999)
+    assert run(held, code, "sync") == 0
+    assert "filed plan#2958\n" in capsys.readouterr().out
+    assert [write[:2] for write in held.writes if write[0] in ("create", "comment")] == [
+        ("create", 2958)]
+
+
+@pytest.mark.parametrize("text", [
+    "\n".join(_TWO_MARKS),
+    "The App's comments on PR 669 hold " + " and ".join(_TWO_MARKS) + ".",
+    "\n".join(f"- `{line}`" for line in _TWO_LINES),
+    "```\n" + "\n".join(_TWO_LINES) + "\n```",
+    "Append:\n\n" + "\n".join("    " + line for line in _TWO_LINES),
+    "\n".join(_TWO_LINES) + "\n\nAppend those lines to plan#2957.",
+    "\n".join(f"<!-- quill: told on PR 669 --> {mark} {mark}" for mark in _TWO_MARKS),
+], ids=["markers alone", "prose", "code spans", "fenced block", "indented block",
+        "prose after", "two markers on a line"])
+def test_a_line_or_marker_quoted_anywhere_but_the_end_holds_nothing(code, capsys, text):
+    """A card quoting the queue's markers or the pass's lines anywhere but in the run of lines
+    ending its text, as plan#3676's spec quoted all five of PR 667-669's (finding 4 of
+    plan#3613's review), holds nothing: the comment is filed a card."""
+    tracker = FakeTracker()
+    tracker.add(3676, body=text)
+    _todo(tracker, 3676)
+    _rumdl(tracker)
+    assert run(tracker, code, "sync") == 0
+    assert "filed plan#3677\n" in capsys.readouterr().out
+    assert not _waits.holds(text)
+
+
+def test_the_lines_ending_a_text_are_what_it_holds():
+    """:func:`_waits.holds` reads the run of lines ending a text, blank lines and a carriage
+    return after each aside, each line's where and its one marker."""
+    text = "Prose.\r\n\r\n" + "\r\n".join(_TWO_LINES) + "\r\n\r\n"
+    assert _waits.holds(text) == {("PR 669", mark) for mark in _TWO_MARKS}
+    assert _waits.told_line("PR 669", _TWO_MARKS[0]) == _TWO_LINES[0]
+
+
+def test_a_later_red_goes_on_the_card_open_for_its_pull_request(code, capsys):
+    """PR 667 told red on 11-09, whose card is open, then red again at the next Monday's head:
+    the later red is put on that card in a comment of quill's, which mentions no one, and no
+    card is filed; the next pass, reading that comment, writes nothing (ruling plan#3722)."""
+    tracker = FakeTracker()
+    tracker.add(2955, body="Land the lock refresh.\n\n" + _line("PR 667", _RED_MARK))
+    _todo(tracker, 2955)
+    _lock(tracker, "c0ffee123456")
+    said, mark = _red("c0ffee123456")
+    assert run(tracker, code, "sync", "--dry-run") == 0
+    assert capsys.readouterr().out == (
+        "would put the update's PR 667, told at 2026-11-16T23:09:14Z, on plan#2955, the card "
+        "open for it (ruling plan#3722)\n")
+    assert not tracker.writes
+    assert run(tracker, code, "sync") == 0
+    assert capsys.readouterr().out == (
+        "put the update's PR 667, told at 2026-11-16T23:09:14Z, on plan#2955, the card open "
+        "for it (ruling plan#3722)\n")
+    words = said.split("\n\n<!--", maxsplit=1)[0]
+    assert tracker.writes == [("comment", 2955, "\n".join([
+        f"The weekly update told this later on Shekel's PR 667, at 2026-11-16T23:09:14Z: "
+        f"`{_PULL.format(667)}#issuecomment-2`", "", "```text", words, "```", "",
+        "`quill sync` put it on this card, the one open for PR 667, rather than filing another "
+        "(ruling plan#3722).", "", _line("PR 667", mark)]))]
+    assert run(tracker, code, "sync") == 0
+    assert capsys.readouterr().out == ""
+    assert len(tracker.writes) == 1
+
+
+def test_a_red_told_after_its_card_closed_is_filed_a_card_of_its_own(code, capsys):
+    """PR 667's card closed, shipped or dropped, holding its first red and the next Monday's
+    in quill's comment on it: the third Monday's red is filed a new card holding it alone, and
+    neither earlier one is filed or put again (ruling plan#3722)."""
+    first, second = _red("c0ffee123456")[1], _red("decade654321")[1]
+    for reason in ("COMPLETED", "NOT_PLANNED"):
+        tracker = FakeTracker()
+        tracker.add(2955, body=_line("PR 667", _RED_MARK), is_open=False, state_reason=reason)
+        tracker.notes[2955] = [Comment(tracker.app_login, "2026-11-17T02:00:00Z",
+                                       "Later.\n\n" + _line("PR 667", first))]
+        _lock(tracker, "c0ffee123456", "decade654321")
+        assert run(tracker, code, "sync") == 0
+        assert "filed plan#2956\n" in capsys.readouterr().out
+        assert tracker.bodies[2956].endswith("\n\n" + _line("PR 667", second))
+        assert [write[0] for write in tracker.writes].count("comment") == 0
+
+
+def test_two_reds_in_one_pass_file_one_card_and_put_the_later_on_it(code, capsys):
+    """PR 667's red at two heads, no card for it yet: the older is filed a card and the later
+    put on that card, each said in a dry run first, which writes nothing (ruling plan#3722)."""
+    tracker = FakeTracker()
+    _lock(tracker, "c0ffee123456")
+    assert run(tracker, code, "sync", "--dry-run") == 0
+    assert capsys.readouterr().out == (
+        "would file the update's PR 667, told at 2026-11-09T23:09:14Z, which no card holds "
+        f"(ruling plan#3619): {'Shekel PR 667: ' + _LOCK!r}\n"
+        "would put the update's PR 667, told at 2026-11-16T23:09:14Z, on the card this pass "
+        "would file for it above (ruling plan#3722)\n")
+    assert not tracker.writes
+    assert run(tracker, code, "sync") == 0
+    assert capsys.readouterr().out.endswith(
+        "put the update's PR 667, told at 2026-11-16T23:09:14Z, on plan#1, the card open for it "
+        "(ruling plan#3722)\n")
+    assert [write[:2] for write in tracker.writes if write[0] in ("create", "comment")] == [
+        ("create", 1), ("comment", 1)]
+    assert tracker.writes[-1][2].endswith(
+        "\n\n" + _line("PR 667", _red("c0ffee123456")[1]))
+
+
+def test_only_quills_comments_hold_and_the_lowest_open_card_takes_a_later_thing(code, capsys):
+    """A person's comment holding the later red's line holds nothing, so that red is put on
+    the card open for PR 667; of two open for it, the lowest numbered, one closed aside."""
+    tracker = FakeTracker()
+    for number in (2955, 2990):
+        tracker.add(number, body=_line("PR 667", _RED_MARK))
+    tracker.add(2950, body=_line("PR 667", _RED_MARK), is_open=False, state_reason="COMPLETED")
+    _todo(tracker, 2955, 2990)
+    tracker.notes[2955] = [Comment("SaltyReformed", "2026-11-17T02:00:00Z",
+                                   _line("PR 667", _red("c0ffee123456")[1]))]
+    _lock(tracker, "c0ffee123456")
+    assert run(tracker, code, "sync") == 0
+    assert capsys.readouterr().out == (
+        "put the update's PR 667, told at 2026-11-16T23:09:14Z, on plan#2955, the card open "
+        "for it (ruling plan#3722)\n")
+    assert [write[:2] for write in tracker.writes] == [("comment", 2955)]

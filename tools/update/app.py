@@ -5,8 +5,8 @@ developer the alert's and the release-due job's issues mention (rulings plan#246
 the queue's comments mention no one, ruling plan#3622); and the one home
 of what the update's record is read by (ruling plan#3619): each bot the update acts as, by the
 login GitHub's GraphQL names it, and the marker the App's comments hold for each thing they
-tell, which the queue writes and reads back and ``quill sync`` files a card for
-(``tools/quill/_waits.py``).
+tell, which the queue writes and reads back and ``quill sync`` files a card for, or puts on the
+card open for that pull request (``tools/quill/_waits.py``, ruling plan#3722).
 
 A leaf of the standard library and :mod:`tools.ci.gitcmd`: the alert, which runs with no
 installed package (``python3 -S``), imports it, and so does quill.

@@ -28,8 +28,9 @@ Dependabot or by the App, as GraphQL names a bot: by its slug, ``dependabot``, w
 
 **What is told** is a comment from the App on the pull request, written once for each thing
 it tells (:func:`_told`), which mentions no one (ruling plan#3622): what reaches the developer
-is the card ``quill sync`` files for it (ruling plan#3619, below).  The comments written before
-plan#3627 open mentioning him; their markers are read as any other's.
+is the card ``quill sync`` files for the pull request, or puts it on while one is open for it
+(rulings plan#3619, plan#3722, below).  The comments written before plan#3627 open mentioning
+him; their markers are read as any other's.
 
 - **removed from the merge queue at its head**: GitHub took it out of the queue (a check
   failed on top of ``dev``, say) after testing the head it has now, which the removal says:
@@ -57,8 +58,9 @@ Each comment holds a marker for each thing it tells, a digest of it, so nothing 
 request carries is spelled inside an HTML comment (:func:`tools.update.app.marker`, its one
 form).  The App's own comments are the one record of what was told, read here only when there
 is something to tell (:func:`_markers`), and read by ``quill sync`` too, which files a card for
-each comment holding a marker no card holds (ruling plan#3619); a marker in anyone else's
-comment counts for nothing.
+each thing told that no card for its pull request holds, or puts it on the card open for that
+pull request (rulings plan#3619, plan#3722); a marker in anyone else's comment counts for
+nothing.
 
 **Why the queue and not auto-merge** (measured 2026-10-31): GitHub's ``AutoMergeRequest`` holds
 no head commit, and its documentation turns auto-merge off on a push only when the pusher has

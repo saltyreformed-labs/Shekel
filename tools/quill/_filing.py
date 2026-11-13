@@ -724,12 +724,13 @@ def cmd_file(args, tracker: Tracker, root: Path) -> int:
 
 
 def _write(tracker: Tracker, filing: _Filing, earlier: Card | None,
-           before: Card | None) -> None:
+           before: Card | None) -> Card:
     """Every write of ``filing``, decided over already, each printed as it lands: ``earlier``,
     the card an earlier run made, finished, the field values it lacks written first
     (:func:`_refield`), or with none a new card created (:func:`_created`), then its
     suggested Priority (:func:`_suggest`), then the rest of its filing (:func:`_finish`), a
-    task placed above ``before`` when the filing names one."""
+    task placed above ``before`` when the filing names one.  The card filed or finished, as
+    read before its last writes."""
     card = earlier
     if card is None:
         card = _created(tracker, filing.draft, filing.milestone)
@@ -740,6 +741,7 @@ def _write(tracker: Tracker, filing: _Filing, earlier: Card | None,
         _refield(tracker, card, filing.draft)
     _suggest(tracker, card, filing.draft.suggestion)
     _finish(tracker, card, filing, before)
+    return card
 
 
 def _suggest(tracker: Tracker, card: Card, suggestion: Suggestion | None) -> None:

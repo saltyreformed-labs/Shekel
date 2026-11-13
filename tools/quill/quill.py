@@ -779,8 +779,9 @@ def cmd_sync(args, tracker: Tracker, root: Path) -> int:
     :func:`_tasks.put_on_board`); and last write the board's Status of every card it holds
     from git (rulings plan#1873, plan#1905, :func:`_status.sync_statuses`).  Each is display
     of the plan, so a failed write in one costs nothing above it; run again, it makes the
-    writes still owed.  Last, file a card for each wait the weekly update told that no card
-    holds (rulings plan#3619, plan#3620, :func:`_waits.file_waits`).
+    writes still owed.  Last, file a card for each pull request or issue the weekly update
+    told a wait on while no card for it is open, and put each later wait told there on that
+    card (rulings plan#3619, plan#3620, plan#3722, :func:`_waits.file_waits`).
 
     Prints a REPORT for each thing a person must fix in the tracker, which makes
     it exit 1, and a HISTORY line for each thing ``dev`` and ``main`` already hold

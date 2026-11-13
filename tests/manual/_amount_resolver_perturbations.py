@@ -135,8 +135,9 @@ def _apply_own_column(records):
 
     An OWN row is re-priced through the sanctioned act; a DERIVED row's column
     is EMPTY and its rival is written past the mapping -- the only way to
-    construct a state ``amount_ownership`` has no member for.  See the module
-    docstring for why ``state_own_amount`` cannot be used there.
+    construct a state ``amount_ownership`` has no member for.  See
+    ``verify_amount_resolver.py``'s module docstring for why
+    ``state_own_amount`` cannot be used there.
 
     **The write is VERIFIED to have landed, and that is what makes the derived
     half self-evidencing.**  The OWN half is graded positively -- those rows

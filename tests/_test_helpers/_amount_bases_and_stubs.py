@@ -34,7 +34,10 @@ def rendered_transfer_amount(xfer) -> str:
     Returns:
         The rendered figure as the form's string, ready to post.
     """
-    from app.services.cash_ledger import (  # pylint: disable=import-outside-toplevel
+    # Pylint: ``import-outside-toplevel`` -- this module imports no app or ORM
+    # symbols at top level (its collection-time-safety convention).
+    # pylint: disable=import-outside-toplevel
+    from app.services.cash_ledger import (
         derived_amount_basis, resolve_transfer_amount,
     )
 
@@ -187,8 +190,9 @@ def match_two_lines(db_session, account, owner_id, early, late):
         early: The earlier line's posting day.
         late: The later one's.
     """
-    # pylint: disable=import-outside-toplevel  -- same circular-dep avoidance
-    # as the loan helpers in ``_loans.py``.
+    # Pylint: ``import-outside-toplevel`` -- this module imports no app or ORM
+    # symbols at top level (its collection-time-safety convention).
+    # pylint: disable=import-outside-toplevel
     import sqlalchemy as _sa
 
     db_session.execute(_sa.text(_A_MATCHED_GROUP), {
@@ -219,7 +223,9 @@ def write_past_the_amount_seam(row, value):
     derived answer is invariant under a rival figure (a definition's row
     under its own column, a generated transfer's leg under its parent's) and
     the one that proves the database refuses a declared row carrying one;
-    and the hand-run ``tests/manual/verify_amount_resolver.py``.  Each is
+    and the hand-run ``tests/manual/verify_amount_resolver.py``'s own-column
+    perturbation, ``_apply_own_column`` in
+    ``tests/manual/_amount_resolver_perturbations.py``.  Each is
     constructing the shape :class:`~app.models.amount_ownership.AmountOwnership`
     has no member for, so none of them can go through the seam.
 
@@ -273,8 +279,9 @@ def make_flat_paycheck_line(profile, name, amount, kind):
     Returns:
         The flushed :class:`~app.models.paycheck_line.PaycheckLine`.
     """
-    # pylint: disable=import-outside-toplevel  -- same circular-dep
-    # avoidance as the loan helpers in ``_loans.py``.
+    # Pylint: ``import-outside-toplevel`` -- this module imports no app or ORM
+    # symbols at top level (its collection-time-safety convention).
+    # pylint: disable=import-outside-toplevel
     from app import ref_cache
     from app.enums import CalcMethodEnum
     from app.extensions import db
@@ -309,8 +316,9 @@ def build_pay_stub_world(owner):
     Returns:
         ``(profile, {"health", "vision", "dental", "roth", "phone": line})``.
     """
-    # pylint: disable=import-outside-toplevel  -- same circular-dep
-    # avoidance as the loan helpers in ``_loans.py``.
+    # Pylint: ``import-outside-toplevel`` -- this module imports no app or ORM
+    # symbols at top level (its collection-time-safety convention).
+    # pylint: disable=import-outside-toplevel
     from app.enums import PaycheckLineKindEnum
     from app.extensions import db
 

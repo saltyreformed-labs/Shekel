@@ -18,7 +18,11 @@
 #
 # Run it from ~/projects/Shekel once that checkout is fast-forwarded to main,
 # the checkout shekel-deploy runs from, with the time shekel-deploy started
-# as SINCE (card X-cx L9's /release skill is to do both).
+# as SINCE (card X-cx L9's /release skill is to do both).  After a rollback
+# to an older image, run the copy at the commit that image was built from,
+# its org.opencontainers.image.revision label: a check added since grades
+# what that image never promised (ruling plan#3701; docs/runbook/
+# 2_deployment.md 2.6, step 4, holds the commands).
 #
 # A KNOWN FALSE FAILURE (finding BAL-628, owner X-do): after an in-place
 # RESTART of the same container, not after a deploy (which creates a fresh

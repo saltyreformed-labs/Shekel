@@ -590,14 +590,27 @@ P=/opt/docker/shekel; S=<step 1's snapshot directory>; B=<step 1's .env copy>
 
 It puts back today's pin, both compose files and the Valkey copy, makes the database container again
 without the new mounts and the app on today's image, whose own start deploys as the superuser, and
-removes the migrate container, an orphan to today's files. Then `verify_prod_deploy.sh` must print
-`VERIFY OK`. The database needs no change: `shekel_owner` keeps every object, and the superuser
-reaches them all. What else step 1 changed stays, and today's image runs alike with it: the owner's
-password file, which the database's `shekel_owner` holds and a later run of step 1 keeps; the
-provisioning script's copy; `app_role_password` at 0644, which today's app reads as the file's
-owner; and the shared `nginx.conf`'s one comment line. A later deploy of today's image makes any new
-table the superuser's, which a retry's step 2 hands to the owner. Production is then behind `main`,
-as after any rolled-back release.
+removes the migrate container, an orphan to today's files. The database needs no change:
+`shekel_owner` keeps every object, and the superuser reaches them all. What else step 1 changed
+stays, and today's image runs alike with it: the owner's password file, which the database's
+`shekel_owner` holds and a later run of step 1 keeps; the provisioning script's copy;
+`app_role_password` at 0644, which today's app reads as the file's owner; and the shared
+`nginx.conf`'s one comment line. A later deploy of today's image makes any new table the
+superuser's, which a retry's step 2 hands to the owner. Production is then behind `main`, as after
+any rolled-back release.
+
+Then the check today's image passed at its own release grades it: the copy at the commit the image
+was built from, which its label names (ruling plan#3701). It must print `VERIFY OK`:
+
+```bash
+rev=$(docker inspect shekel-prod-app --format '{{index .Config.Labels "org.opencontainers.image.revision"}}') \
+    && [ -n "$rev" ] && f=$(mktemp) \
+    && git -C ~/projects/Shekel show "$rev:deploy/verify_prod_deploy.sh" > "$f" \
+    && bash "$f" "<the time step 3 started>"; echo "exit=$?"
+```
+
+This checkout's copy fails there by design: it also checks that gunicorn holds no superuser or owner
+password, and today's image holds the superuser's.
 
 **5. After `VERIFY OK`, the nightly audit cleanup.** Its unit,
 `/etc/systemd/system/shekel-audit-cleanup.service` (its reference copy beside the compose files),
@@ -651,7 +664,10 @@ reconcile script with only those changed), to an image of this card's branch mer
   said `it needs no restore`, and the block exited 0. One whose migration committed before its app
   failed: `the dump must be restored before it starts`; 2.3's step 3 refused as above, and with that
   table dropped, steps 3 and 4 and the block exited 0. Each ended on today's image and today's
-  files, byte for byte, with `VERIFY OK` and every object still the owner's.
+  files, byte for byte, with `VERIFY OK` from today's check (the same bytes as `c9a43df68`'s, the
+  copy step 4 now runs) and every object still the owner's. On 2026-11-13 step 4's verify block, run
+  against a container of today's image, read its label, `c9a43df68`, and ran that commit's check;
+  against an image with no label it stopped at the label and ran none.
 - **A retry after each rollback.** Step 1 kept the owner's password file each time. Step 2 handed
   over what was made in between: after the first, the one table made as the superuser (a stand-in
   for a later release of today's image, as today's own start made none); after the second, nothing.

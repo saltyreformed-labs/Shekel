@@ -9,13 +9,23 @@ daemon is needed and no test here is ``@pytest.mark.docker``: CI and a local
 
 The stub answers the three calls the check makes: ``docker ps`` (the
 container's status line), ``docker exec`` (one probe per URL, answered from a
-table) and ``docker logs`` (the log since the deploy on stdout and on stderr,
-as docker passes both through, or a failure).
+table, and the two reads of what gunicorn holds) and ``docker logs`` (the log
+since the deploy on stdout and on stderr, as docker passes both through, or a
+failure).
+
+The two reads of what gunicorn holds (card plan#2166) are not answered from a
+table: the stub runs the check's own program, here, on stand-ins for the
+container's two paths.  Gunicorn's ``/proc/1/environ`` is a real process's,
+started with the environment a test gives it, so the program reads the
+kernel's own format; ``/run/secrets`` is a directory of files.  A read of any
+other path is refused, so a check that reads elsewhere fails rather than
+reading this host's.
 """
 from __future__ import annotations
 
 import os
 import pathlib
+import shutil
 import subprocess
 import textwrap
 
@@ -33,6 +43,32 @@ _GOOD_PROBES = {
     "/login": "200 ",
 }
 
+#: Begins every value a test gives gunicorn, in its environment or its secret
+#: files, so a test can find one anywhere the check printed or passed it.
+_VALUE = "value-never-printed-"
+#: Gunicorn's environment after a good deploy: the web server's own
+#: settings and credentials, the web login's URL among them, and no other.
+_GOOD_ENVIRON = {
+    "DATABASE_URL_APP": f"postgresql://shekel_app:{_VALUE}app@db:5432/shekel?sslmode=require",
+    "APP_ROLE_PASSWORD": f"{_VALUE}app",
+    "SECRET_KEY": f"{_VALUE}key",
+    "TOTP_ENCRYPTION_KEY": f"{_VALUE}totp",
+    "TOTP_ENCRYPTION_KEY_OLD": "",
+    "VALKEY_PASSWORD": f"{_VALUE}store",
+    "FLASK_ENV": "production",
+    "TZ": "America/New_York",
+}
+#: The web server's secret files after a good deploy (deploy/docker-compose.prod.yml).
+_GOOD_SECRET_FILES = ("secret_key", "app_role_password", "totp_encryption_key",
+                      "valkey_password")
+#: The variables and secret files that carry the superuser's or the owner's
+#: password, which gunicorn must not hold, in the order the check asks.
+_CREDENTIAL_VARIABLES = ("POSTGRES_PASSWORD", "POSTGRES_PASSWORD_FILE", "DB_PASSWORD",
+                         "DATABASE_URL", "OWNER_ROLE_PASSWORD", "PGPASSWORD")
+_CREDENTIAL_FILES = ("postgres_password", "owner_role_password")
+#: The stand-in for gunicorn: a process that waits, holding its environment.
+_SLEEP = shutil.which("sleep")
+
 
 def _write_fake_docker(bin_dir: pathlib.Path) -> None:
     """Install a scripted ``docker`` stub onto a PATH directory.
@@ -49,10 +85,23 @@ def _write_fake_docker(bin_dir: pathlib.Path) -> None:
         case "$1" in
         ps) printf '%s\\n' "$FAKE_STATUS" ;;
         exec)
-            # The probe's last argument is the URL path; its answer is the
-            # table line naming that path.  FAKE_EXEC_RC models an exec
-            # that fails and prints nothing.
+            # FAKE_EXEC_RC models an exec that fails and prints nothing.
             [ "$FAKE_EXEC_RC" != "0" ] && exit "$FAKE_EXEC_RC"
+            # exec CONTAINER python -c PROGRAM ARGUMENT...: a read of what
+            # gunicorn holds runs its own program here, on the stand-in
+            # for the one path it may read.
+            case "$6" in
+            environ|files)
+                case "$6 $7" in
+                "environ /proc/1/environ") path="$FAKE_ENVIRON" ;;
+                "files /run/secrets") path="$FAKE_SECRETS" ;;
+                *) printf 'stub: a read of %s\\n' "$7" >&2; exit 97 ;;
+                esac
+                exec python3 -c "$5" "$6" "$path" "${@:8}"
+                ;;
+            esac
+            # The probe's last argument is the URL path; its answer is the
+            # table line naming that path.
             url="${!#}"
             while IFS=' ' read -r path answer; do
                 if [ "$path" = "$url" ]; then
@@ -103,7 +152,11 @@ class _Production:
     def verify(self, *args: str, status: str = "Up 31 seconds (healthy)",
                probes: dict[str, str] | None = None, exec_rc: str = "0",
                logs: str = "booted", logs_stderr: str = "", logs_rc: str = "0",
-               container: str | None = None) -> subprocess.CompletedProcess:
+               container: str | None = None,
+               gunicorn_env: dict[str, str] | None = None,
+               secret_files: tuple[str, ...] | None = _GOOD_SECRET_FILES,
+               environ_path: pathlib.Path | None = None,
+               secrets_path: pathlib.Path | None = None) -> subprocess.CompletedProcess:
         """Run the real check.
 
         Args:
@@ -116,6 +169,14 @@ class _Production:
                 or docker's own error.
             logs_rc: Exit status of ``docker logs``.
             container: ``SHEKEL_CONTAINER_NAME``, or absent for the default.
+            gunicorn_env: Gunicorn's whole environment, or
+                :data:`_GOOD_ENVIRON` when absent.
+            secret_files: The files under its ``/run/secrets``, each holding a
+                value, or ``None`` for no such directory.
+            environ_path: Read in place of ``/proc/1/environ``, or the
+                stand-in gunicorn's own when absent.
+            secrets_path: Read in place of ``/run/secrets``, or the directory
+                of ``secret_files`` when absent.
 
         Returns:
             The completed process.
@@ -125,6 +186,11 @@ class _Production:
             f"{path} {answer}\n"
             for path, answer in {**_GOOD_PROBES, **(probes or {})}.items()),
             encoding="utf-8")
+        secrets_dir = self.root / "secrets"
+        if secret_files is not None:
+            secrets_dir.mkdir()
+            for name in secret_files:
+                (secrets_dir / name).write_text(f"{_VALUE}{name}", encoding="utf-8")
         env = {key: value for key, value in os.environ.items()
                if key != "SHEKEL_CONTAINER_NAME"}
         env.update({
@@ -136,13 +202,24 @@ class _Production:
             "FAKE_LOGS": logs,
             "FAKE_LOGS_STDERR": logs_stderr,
             "FAKE_LOGS_RC": logs_rc,
+            "FAKE_SECRETS": str(secrets_path or secrets_dir),
         })
         if container is not None:
             env["SHEKEL_CONTAINER_NAME"] = container
-        return subprocess.run(
-            ["bash", str(_VERIFY_SCRIPT), *args], env=env, capture_output=True,
-            text=True, timeout=60, check=False,
-        )
+        assert _SLEEP, "no sleep on PATH to stand in for gunicorn"
+        # Popen returns once the exec has happened, so the stand-in's
+        # environ is already its own, not this process's; leaving the block
+        # waits for the killed stand-in.
+        with subprocess.Popen([_SLEEP, "60"], env=(
+                _GOOD_ENVIRON if gunicorn_env is None else gunicorn_env)) as gunicorn:
+            try:
+                env["FAKE_ENVIRON"] = str(environ_path or f"/proc/{gunicorn.pid}/environ")
+                return subprocess.run(
+                    ["bash", str(_VERIFY_SCRIPT), *args], env=env, capture_output=True,
+                    text=True, timeout=60, check=False,
+                )
+            finally:
+                gunicorn.kill()
 
 
 def _said(result: subprocess.CompletedProcess, calls: list[str]) -> str:
@@ -191,9 +268,17 @@ def test_a_good_deploy_reads_verify_ok(production):
     assert [call.rsplit(" ", 1)[-1] for call in calls[1:5]] == list(_GOOD_PROBES), (
         _said(result, calls))
     assert all(call.startswith("exec shekel-prod-app python -c ")
-               for call in calls[1:5]), _said(result, calls)
-    assert calls[5:] == [
+               for call in calls[1:7]), _said(result, calls)
+    assert calls[5].endswith(" environ /proc/1/environ DATABASE_URL_APP "
+                             + " ".join(_CREDENTIAL_VARIABLES)), _said(result, calls)
+    assert calls[6].endswith(" files /run/secrets " + " ".join(_CREDENTIAL_FILES)), (
+        _said(result, calls))
+    assert calls[7:] == [
         "logs --since 2026-10-13T10:39:38-04:00 shekel-prod-app"], _said(result, calls)
+    assert result.stdout.splitlines()[5:7] == [
+        "ok   gunicorn's environment names no superuser or owner credential",
+        "ok   gunicorn's secret files hold no superuser or owner password",
+    ], _said(result, calls)
     assert ("log lines with Traceback/ERROR in the last "
             "2026-10-13T10:39:38-04:00: 0") in result.stdout, _said(result, calls)
 
@@ -214,9 +299,9 @@ def test_the_container_name_comes_from_the_deploy_s_variable(production):
     assert result.stdout.startswith("container probe-app: "), _said(result, calls)
     assert calls[0] == "ps --filter name=probe-app --format {{.Status}}", (
         _said(result, calls))
-    assert all(call.startswith("exec probe-app ") for call in calls[1:5]), (
+    assert all(call.startswith("exec probe-app ") for call in calls[1:7]), (
         _said(result, calls))
-    assert calls[5] == "logs --since 10m probe-app", _said(result, calls)
+    assert calls[7] == "logs --since 10m probe-app", _said(result, calls)
 
 
 @pytest.mark.parametrize("fault, says", [
@@ -254,3 +339,120 @@ def test_each_fault_alone_reads_verify_failed(production, fault, says):
     assert result.returncode == 1, _said(result, calls)
     assert says in result.stdout, _said(result, calls)
     assert result.stdout.splitlines()[-1] == "VERIFY FAILED", _said(result, calls)
+
+
+def _held_and_failed(result: subprocess.CompletedProcess, calls: list[str],
+                     says: str) -> None:
+    """Assert a run failed on ``says`` alone, printing no value it was given.
+
+    Args:
+        result: The completed run.
+        calls: The stub's calls, in order.
+        says: The one line the fault must print.
+    """
+    lines = result.stdout.splitlines()
+    assert result.returncode == 1, _said(result, calls)
+    assert says in lines, _said(result, calls)
+    assert [line for line in lines if line.startswith("FAIL")] == [says], _said(result, calls)
+    assert lines[-1] == "VERIFY FAILED", _said(result, calls)
+    assert _VALUE not in result.stdout + result.stderr + "\n".join(calls), (
+        _said(result, calls))
+
+
+@pytest.mark.parametrize("variable", _CREDENTIAL_VARIABLES)
+def test_each_credential_variable_in_gunicorn_s_environment_fails(production, variable):
+    """One variable that carries the superuser's or the owner's password, in
+    gunicorn's environment beside the web server's own: the check fails, naming it and
+    printing no value."""
+    result = production.verify(gunicorn_env={**_GOOD_ENVIRON, variable: f"{_VALUE}{variable}"})
+    _held_and_failed(result, production.calls,
+                     f"FAIL gunicorn's environment names {variable}")
+
+
+def test_a_credential_variable_held_blank_still_fails(production):
+    """``DATABASE_URL`` named with an empty value fails all the same: the check reads
+    names, so a variable that should not be there fails while it is blank, as the compose
+    files' own test grades what each service is given."""
+    result = production.verify(gunicorn_env={**_GOOD_ENVIRON, "DATABASE_URL": ""})
+    _held_and_failed(result, production.calls, "FAIL gunicorn's environment names DATABASE_URL")
+
+
+def test_a_value_that_names_a_credential_is_not_a_name(production):
+    """A value holding ``POSTGRES_PASSWORD=`` is not that variable: the check splits each
+    entry at its first ``=`` and reads the name before it, and the web login's
+    ``DATABASE_URL_APP`` is not ``DATABASE_URL``."""
+    result = production.verify(gunicorn_env={
+        **_GOOD_ENVIRON, "NOTE": "POSTGRES_PASSWORD=x DATABASE_URL=y PGPASSWORD=z"})
+    calls = production.calls
+    assert result.returncode == 0, _said(result, calls)
+    assert result.stdout.splitlines()[-1] == "VERIFY OK", _said(result, calls)
+
+
+def test_gunicorn_as_today_s_image_starts_it_fails_both_reads(production):
+    """Gunicorn holding what ``main``'s ``entrypoint.sh`` gives it before plan#2166 -- the
+    superuser's password loaded from its file and re-exported in a database URL and in
+    ``DB_PASSWORD`` -- with that file mounted: both reads fail, naming each.  Measured
+    alike on 2026-11-13 on the rootless daemon, with production's image (``main`` at
+    ``c9a43df68``) under production's hardening."""
+    result = production.verify(
+        gunicorn_env={**_GOOD_ENVIRON, "POSTGRES_PASSWORD": f"{_VALUE}superuser",
+                      "DATABASE_URL": f"postgresql://shekel_user:{_VALUE}superuser@db/shekel",
+                      "DB_PASSWORD": f"{_VALUE}superuser"},
+        secret_files=(*_GOOD_SECRET_FILES, "postgres_password"))
+    calls = production.calls
+    lines = result.stdout.splitlines()
+    assert result.returncode == 1, _said(result, calls)
+    assert [line for line in lines if line.startswith("FAIL")] == [
+        "FAIL gunicorn's environment names POSTGRES_PASSWORD DB_PASSWORD DATABASE_URL",
+        "FAIL gunicorn's secret files hold postgres_password",
+    ], _said(result, calls)
+    assert lines[-1] == "VERIFY FAILED", _said(result, calls)
+    assert _VALUE not in result.stdout + result.stderr + "\n".join(calls), (
+        _said(result, calls))
+
+
+def test_an_environment_without_the_web_login_s_url_is_not_gunicorn_s(production):
+    """A PID 1 whose environment names no ``DATABASE_URL_APP`` is not the gunicorn the
+    entrypoint execs (an init in front of it holds only what the container was created
+    with): the read proves nothing, and the check fails rather than passing on it."""
+    result = production.verify(gunicorn_env={
+        key: value for key, value in _GOOD_ENVIRON.items() if key != "DATABASE_URL_APP"})
+    _held_and_failed(result, production.calls,
+                     "FAIL: /proc/1/environ is not gunicorn's: it names no DATABASE_URL_APP")
+
+
+def test_an_environment_it_cannot_read_fails(production, tmp_path):
+    """No ``/proc/1/environ`` to read: the check fails rather than finding nothing held."""
+    result = production.verify(environ_path=tmp_path / "no-such-process" / "environ")
+    _held_and_failed(result, production.calls,
+                     "FAIL: could not read gunicorn's environment, /proc/1/environ")
+
+
+@pytest.mark.parametrize("secret_file", _CREDENTIAL_FILES)
+def test_each_credential_file_in_gunicorn_s_secrets_fails(production, secret_file):
+    """The superuser's or the owner's password file mounted beside the web server's own:
+    the check fails, naming it and printing no value."""
+    result = production.verify(secret_files=(*_GOOD_SECRET_FILES, secret_file))
+    _held_and_failed(result, production.calls,
+                     f"FAIL gunicorn's secret files hold {secret_file}")
+
+
+def test_no_secrets_directory_holds_no_credential_file(production):
+    """No ``/run/secrets`` at all, as a container given no secret file has: it holds
+    neither password's file, so that read passes."""
+    result = production.verify(secret_files=None)
+    calls = production.calls
+    assert result.returncode == 0, _said(result, calls)
+    assert ("ok   gunicorn's secret files hold no superuser or owner password"
+            in result.stdout.splitlines()), _said(result, calls)
+    assert result.stdout.splitlines()[-1] == "VERIFY OK", _said(result, calls)
+
+
+def test_secrets_it_cannot_read_fail(production, tmp_path):
+    """A ``/run/secrets`` that cannot be listed (here a file, not a directory): the check
+    fails rather than finding nothing held."""
+    not_a_directory = tmp_path / "secrets-file"
+    not_a_directory.write_text("", encoding="utf-8")
+    result = production.verify(secrets_path=not_a_directory)
+    _held_and_failed(result, production.calls,
+                     "FAIL: could not read gunicorn's secret files, /run/secrets")

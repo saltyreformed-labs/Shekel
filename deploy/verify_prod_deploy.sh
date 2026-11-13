@@ -11,6 +11,9 @@
 #   * Anonymous probes from INSIDE it (no port is exposed): /health is 200; a
 #     private URL and an unknown URL both 302 to /login (the login gate's
 #     default deny, ruling bank_import:R-BI4); /login is 200.
+#   * Gunicorn holds no superuser or owner credential (card plan#2166): its
+#     environment names none of the variables that carry one, and its secret
+#     files hold neither password.  Names only: no value is printed.
 #   * Its log since SINCE was read, and holds no Traceback or ERROR line.
 #
 # Run it from ~/projects/Shekel once that checkout is fast-forwarded to main,
@@ -72,6 +75,61 @@ expect /health 200
 expect /dashboard 302 /login
 expect /no-such-url-xyz 302 /login
 expect /login 200
+
+# What gunicorn must not hold: the variables that carry the superuser's or the
+# owner's password (one inside a database URL), named whatever their value, a
+# blank one included, and the two passwords' secret files.
+CREDENTIAL_VARIABLES=(POSTGRES_PASSWORD POSTGRES_PASSWORD_FILE DB_PASSWORD DATABASE_URL
+    OWNER_ROLE_PASSWORD PGPASSWORD)
+CREDENTIAL_FILES=(postgres_password owner_role_password)
+
+held() { # held <environ|files> <path> <name>...: those of the names held at path
+    # Prints them on one line, in the order asked, and exits non-zero when it
+    # cannot read the path.  The values are read inside the container and
+    # never leave it.  A directory that does not exist holds no file.
+    docker exec "$CONTAINER" python -c "
+import os, sys
+kind, path, names = sys.argv[1], sys.argv[2], sys.argv[3:]
+if kind == 'environ':
+    with open(path, 'rb') as f:
+        present = {entry.partition(b'=')[0].decode('ascii', 'replace')
+                   for entry in f.read().split(b'\0')}
+else:
+    try:
+        present = set(os.listdir(path))
+    except FileNotFoundError:
+        present = set()
+print(' '.join(name for name in names if name in present))
+" "$@"
+}
+
+# Gunicorn's environment is PID 1's, as /proc/1/environ shows it: the
+# entrypoint execs gunicorn, so PID 1 holds what the entrypoint exported,
+# from the secret files too, where a `docker exec` holds only what the
+# container was created with.  The read must name DATABASE_URL_APP, which the
+# entrypoint exports just before that exec: one without it is not gunicorn's
+# (an init in front of it, say) and proves nothing.
+if ! got=$(held environ /proc/1/environ DATABASE_URL_APP "${CREDENTIAL_VARIABLES[@]}"); then
+    echo "FAIL: could not read gunicorn's environment, /proc/1/environ"
+    ok=1
+elif [ "${got%% *}" != DATABASE_URL_APP ]; then
+    echo "FAIL: /proc/1/environ is not gunicorn's: it names no DATABASE_URL_APP"
+    ok=1
+elif [ "$got" != DATABASE_URL_APP ]; then
+    echo "FAIL gunicorn's environment names ${got#DATABASE_URL_APP }"
+    ok=1
+else
+    echo "ok   gunicorn's environment names no superuser or owner credential"
+fi
+if ! got=$(held files /run/secrets "${CREDENTIAL_FILES[@]}"); then
+    echo "FAIL: could not read gunicorn's secret files, /run/secrets"
+    ok=1
+elif [ -n "$got" ]; then
+    echo "FAIL gunicorn's secret files hold ${got}"
+    ok=1
+else
+    echo "ok   gunicorn's secret files hold no superuser or owner password"
+fi
 
 # Read first, then counted: piped straight into `grep -c`, a `docker logs`
 # that failed counted zero error lines and passed this check.

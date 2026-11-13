@@ -51,8 +51,10 @@ dump is never mistaken for a deploy's restore point.
    container, re-reads the stamp, and either re-pins the previous digest or refuses (2.3).
 
 After a deploy, `deploy/verify_prod_deploy.sh <the deploy's start time>`, run from this checkout,
-checks production read-only: health, the login gate's redirects, and the log since the deploy. Its
-header names its checks, and the one false failure it knows (BAL-628, after an in-place restart).
+checks production read-only: health, the login gate's redirects, that gunicorn holds no superuser or
+owner password in its environment or its secret files (names only, no value printed), and the log
+since the deploy. Its header names its checks, and the one false failure it knows (BAL-628, after an
+in-place restart).
 
 **The canonical copy is `deploy/shekel-deploy.sh` in this repo**, and
 `/opt/docker/scripts/shekel-deploy.sh` is a symlink to it. That means

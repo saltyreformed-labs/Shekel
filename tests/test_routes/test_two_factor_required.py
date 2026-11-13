@@ -237,6 +237,8 @@ class TestAnOwnerWithoutTwoFactorIsHeldAtSetup:
 
     ``no_two_factor_client`` is the seed owner after the reset act took his
     two-factor away (``scripts/reset_mfa.py``), signed in with his password.
+    An owner registration made, with no two-factor row at all, is held in
+    ``tests/test_routes/test_auth/test_registration.py``.
     """
 
     def test_his_dashboard_and_settings_send_him_to_setup_which_says_why(

@@ -86,7 +86,9 @@ def set_totp_key():
     *The 2026-11-12 measurement behind the ruling (267 cases of one route sweep
     errored ``InvalidToken``) was taken while the shared sign-in typed a code;
     the trusted browser chosen instead decrypts nothing, so no sweep meets it
-    now.*  A test that needs a key of its own, or none,
+    now.*  ``TestAWorldsTwoFactorSecretIsReadInEveryTest``
+    (``tests/test_arch/test_a_seeded_start_state_is_built_once.py``) fails
+    under a key per test.  A test that needs a key of its own, or none,
     still sets or deletes it with ``monkeypatch``, which puts this one back
     after it.
     """

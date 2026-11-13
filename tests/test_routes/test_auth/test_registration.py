@@ -18,7 +18,15 @@ from app.schemas.validation.pay_periods import PERIOD_BATCH_MAX
 from app.utils.dates import display_today
 from tests._seed_owner_fixtures import OWNERS_PAGE
 from tests._test_helpers import enable_mfa, register_form_data
-from tests._two_factor_sign_in import sign_in_from_a_trusted_browser
+from tests._two_factor_sign_in import (
+    redirect_path,
+    sign_in_by_password,
+    sign_in_from_a_trusted_browser,
+    two_factor_row_of,
+)
+from tests.test_routes.test_auth_required import spy_on_the_hold
+
+_SETUP = "/mfa/setup"
 
 
 class TestRegistration:
@@ -294,6 +302,52 @@ class TestRegistration:
             # Should redirect to grid, not back to login.
             location = login_resp.headers.get("Location", "")
             assert "login" not in location
+
+    def test_a_registered_owners_first_sign_in_is_held_at_setup(
+        self, app, client, monkeypatch,
+    ):
+        """A new owner's password signs them in to two-factor setup, and their pages send them back.
+
+        Registration writes no two-factor row at all, which makes it the
+        commonest way an owner without two-factor reaches production
+        (plan#3452).  So this is the hold's no-row branch for an owner, where
+        ``no_two_factor_client`` is an owner a reset left with a row that is
+        off.  The password lands them on the dashboard, which the hold sends
+        to setup; setup opens, and Settings sends them back to it.
+        """
+        holds = spy_on_the_hold(monkeypatch)
+        with app.app_context():
+            client.post("/register", data=register_form_data(
+                email="held-owner@example.com",
+                display_name="Held Owner",
+                password="securepass123",
+                confirm_password="securepass123",
+            ))
+            owner = db.session.query(User).filter_by(
+                email="held-owner@example.com",
+            ).one()
+            assert two_factor_row_of(owner.id) is None, (
+                "registration wrote a two-factor row, so this case no longer "
+                "starts from an owner with none"
+            )
+            sign_in_by_password(
+                client, "held-owner@example.com", "securepass123", OWNERS_PAGE,
+            )
+
+            first_page = client.get(OWNERS_PAGE)
+            setup = client.get(_SETUP)
+            settings = client.get("/settings")
+
+            assert first_page.status_code == 302, first_page.status_code
+            assert redirect_path(first_page) == _SETUP
+            assert setup.status_code == 200, setup.status_code
+            assert b"Verify and Enable" in setup.data
+            assert settings.status_code == 302, settings.status_code
+            assert redirect_path(settings) == _SETUP
+            assert holds == [
+                ("GET", OWNERS_PAGE, "dashboard.page"),
+                ("GET", "/settings", "settings.show"),
+            ]
 
     def test_register_success_new_user_sees_empty_grid(
         self, app, client, seed_user, seed_periods_today

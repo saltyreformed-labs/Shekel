@@ -52,7 +52,7 @@ now lands the pinned statement first, where the race can be reported.
 
 import logging
 
-from flask import abort, flash, redirect, url_for
+from flask import Response, abort, flash, redirect, url_for
 
 from app.models.transfer_template import TransferTemplate
 from app.routes._commit_helpers import (
@@ -66,6 +66,7 @@ from app.routes._transfer_lifecycle import (
     unarchive_transfer_definition,
 )
 from app.routes.transfers._bp import transfers_bp
+from app.services.cash_ledger import is_card_payment_definition
 from app.utils import archive_helpers
 from app.utils.auth_helpers import get_or_404, require_owner
 
@@ -73,6 +74,46 @@ logger = logging.getLogger(__name__)
 
 #: Where every door here sends the user, refused or done.
 _LIST = RedirectTarget("transfers.list_transfer_templates")
+
+#: The refusal of this page's Archive or Delete of a card's worked-out payment
+#: (task plan#3757).  Every card has one payment (plan#1033's amendment of
+#: 2026-11-05, task plan#2933), so the payment stops and starts with its card:
+#: the card's own Archive, Unarchive and Delete take it with them (tasks
+#: plan#3697, plan#3754).  An archive by hand would leave an active card with
+#: no payment, and a delete by hand would leave an archived card none to
+#: bring back.  Formatted with the payment's name and its card's.  It names
+#: what an owner who pays less than the card works out can do today.
+CARD_PAYMENT_GOES_WITH_ITS_CARD = (
+    "'{payment}' pays '{card}', and every card has one payment, so it is "
+    "archived and deleted only with '{card}'. To pay less on a payday, type "
+    "the amount over that payday's row. To pay from another account, edit it."
+)
+
+
+def _card_payment_refusal(template: TransferTemplate) -> Response | None:
+    """Refuse this page's Archive or Delete of a card's worked-out payment.
+
+    Asked first, before anything reads or writes: the act is never this
+    page's, whatever the card's state or the payment's history.  A fixed
+    payment into a card is a plain transfer (ruling plan#2666) and passes.
+
+    Args:
+        template: The owner-checked :class:`TransferTemplate`.
+
+    Returns:
+        ``None`` for any transfer but a card's worked-out payment; else the
+        redirect to the list, :data:`CARD_PAYMENT_GOES_WITH_ITS_CARD`
+        flashed.
+    """
+    if not is_card_payment_definition(template):
+        return None
+    flash(
+        CARD_PAYMENT_GOES_WITH_ITS_CARD.format(
+            payment=template.name, card=template.to_account.name,
+        ),
+        "warning",
+    )
+    return _LIST.to_response()
 
 
 def _stale_context(log_label, template_id):
@@ -96,6 +137,9 @@ def archive_transfer_template(template_id):
     (:func:`~app.routes._transfer_lifecycle.archive_transfer_definition`).  Where the template
     was a loan's standing payment, the next-oldest transfer into that loan is
     promoted and its start re-derived (the same act, ruling **R-R85**).
+    **A card's worked-out payment is refused** (task plan#3757,
+    :data:`CARD_PAYMENT_GOES_WITH_ITS_CARD`): it is archived only with its
+    card.
 
     Optimistic locking (commit C-18 / F-010): the template's
     ``version_id`` is enforced by SQLAlchemy on the
@@ -106,6 +150,9 @@ def archive_transfer_template(template_id):
     template = get_or_404(TransferTemplate, template_id)
     if template is None:
         abort(404)
+    refused = _card_payment_refusal(template)
+    if refused is not None:
+        return refused
 
     ctx = _stale_context("archive_transfer_template", template_id)
     archived = archive_transfer_definition(template, ctx)
@@ -176,6 +223,10 @@ def hard_delete_transfer_template(template_id):
     this docstring listed five transfer invariants the deletion kept; all but
     the one above were about the shadows.
 
+    **A card's worked-out payment is refused first** (task plan#3757,
+    :data:`CARD_PAYMENT_GOES_WITH_ITS_CARD`): it is deleted only with its
+    card, which takes it through the same act's writes (task plan#3754).
+
     Two-path logic:
       - History exists (Paid transfers, or a transfer whose leg holds a
         payment -- plan step ``credit_card:CC-5-4a-4``, ruling
@@ -205,6 +256,9 @@ def hard_delete_transfer_template(template_id):
     template = get_or_404(TransferTemplate, template_id)
     if template is None:
         abort(404)
+    refused = _card_payment_refusal(template)
+    if refused is not None:
+        return refused
 
     if archive_helpers.transfer_template_has_paid_history(template.id):
         return _archive_instead_of_delete(

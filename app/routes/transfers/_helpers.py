@@ -49,11 +49,13 @@ _xfer_update_schema = TransferUpdateSchema()
 #: ``LOAN_PAYMENT_CANNOT_CHANGE_DESTINATION``: its amount is the card's to work
 #: out, so it pays the card it was set up for, and the database holds its
 #: settings to that card (``fk_card_payment_settings_payment``).  Formatted
-#: with the payment's name.
+#: with the payment's name.  It named the payment's archive as the way to stop
+#: paying the card until task plan#3757, which refuses that archive: the
+#: payment is archived and deleted only with its card.
 CARD_PAYMENT_CANNOT_CHANGE_DESTINATION = (
     "'{payment}' works out what to pay from its card's balance, so it pays "
-    "that card only. Archive it to stop paying the card, or set up a new "
-    "transfer to pay another account."
+    "that card only, and is archived and deleted only with it. To pay "
+    "another account, set up a new transfer."
 )
 
 #: The refusal of a repeat on each statement's due date into anything but a

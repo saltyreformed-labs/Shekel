@@ -22,6 +22,7 @@ from app.models.transfer_template import TransferTemplate
 from app.models.user import User, UserSettings
 from app.models.ref import AccountType
 from app.services.auth_service import hash_password
+from app.services import transfer_service
 
 
 #: The out-of-band swap that carries the balance acknowledgement into
@@ -443,3 +444,18 @@ def _retype_into_a_card(auth_client, seed_user):
         to_account_id=savings.id,
     ).one()
     return savings, payment
+
+
+def _archive_by_hand(payment):
+    """Archive a card's payment alone, as the Recurring page did before task plan#3757.
+
+    No door does it since that task, which archives a card's payment only
+    with its card; data written before it can hold an active card whose
+    payment is archived.  Written as that page's archive wrote it: each live
+    row soft-deleted through the transfer service (none holds a payment
+    here), then the definition's flag.  Committed.
+    """
+    for row_id in _live_rows(payment.id):
+        transfer_service.delete_transfer(row_id, payment.user_id, soft=True)
+    payment.is_active = False
+    db.session.commit()

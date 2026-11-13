@@ -162,6 +162,9 @@
                     <i class="bi bi-arrow-counterclockwise"></i>
                   </button>
                 </form>
+                {#- A card's worked-out payment is deleted only with its card
+                    (task plan#3757, ``ArchivedRow.goes_with_its_card``). #}
+                {%- if not row.goes_with_its_card %}
                 <form method="POST" action="{{ url_for('transfers.hard_delete_transfer_template', template_id=t.id) }}"
                       class="d-inline"
                       data-confirm="Permanently delete this recurring transfer? This cannot be undone.">
@@ -170,6 +173,7 @@
                     <i class="bi bi-trash"></i>
                   </button>
                 </form>
+                {%- endif %}
               </td>
             </tr>
             {% endfor %}

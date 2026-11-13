@@ -141,6 +141,7 @@ from app.models.recurrence_rule import RecurrenceRule
 from app.models.transfer_template import TransferTemplate
 from app.services.account_projection import pays_a_card
 from app.services.balance_at import BalanceContext
+from app.services.cash_ledger import is_card_payment_definition
 from app.services.obligations_aggregator import (
     RecurringTemplate,
     TodaysPrice,
@@ -236,6 +237,17 @@ class RecurringRow:
     amount: Decimal
     pays_a_card: bool
 
+    @property
+    def goes_with_its_card(self) -> bool:
+        """Whether this row is a card's worked-out payment, archived only with its card.
+
+        :func:`~app.services.cash_ledger.is_card_payment_definition` asked of
+        the row's own definition: such a payment is archived and deleted only
+        with its card (task plan#3757), so the page offers it no Archive.  A
+        fixed payment into a card is a plain transfer, and ``False``.
+        """
+        return is_card_payment_definition(self.template)
+
 
 @dataclass(frozen=True)
 class ArchivedRow:
@@ -265,6 +277,16 @@ class ArchivedRow:
     template: RecurringTemplate
     recurrence: RecurrenceDescription | None
     amount: Decimal
+
+    @property
+    def goes_with_its_card(self) -> bool:
+        """Whether this row is a card's worked-out payment, deleted only with its card.
+
+        :attr:`RecurringRow.goes_with_its_card`'s question, asked of an
+        archived definition, so the drawer offers it no Delete (task
+        plan#3757).
+        """
+        return is_card_payment_definition(self.template)
 
 
 @dataclass(frozen=True)

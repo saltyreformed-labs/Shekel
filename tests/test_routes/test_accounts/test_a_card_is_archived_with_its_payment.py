@@ -26,6 +26,7 @@ from tests._test_helpers import create_account_of_type
 
 from ._helpers import (
     _add_card,
+    _archive_by_hand,
     _bump_account_version_outside_session,
     _flashes,
     _live_rows,
@@ -121,11 +122,14 @@ class TestArchivingACardArchivesItsPayment:
     def test_a_payment_already_archived_is_left_as_it_is(
         self, app, auth_client, seed_user,
     ):
-        """With its payment archived on the Recurring page first, only the card archives."""
+        """With its payment archived by hand first, only the card archives.
+
+        The Recurring page refuses that archive since task plan#3757; data
+        from before it can hold the state (:func:`_archive_by_hand`).
+        """
         with app.app_context():
             card, payment = _add_card(auth_client, seed_user)
-            auth_client.post(f"/transfers/{payment.id}/archive")
-            _flashes(auth_client)
+            _archive_by_hand(payment)
 
             auth_client.post(f"/accounts/{card.id}/archive")
 
@@ -195,11 +199,14 @@ class TestUnarchivingACardBringsItsPaymentBack:
     def test_an_active_cards_unarchive_restores_no_payment(
         self, app, auth_client, seed_user,
     ):
-        """A stale tab's Unarchive on an active card leaves its archived payment archived."""
+        """A stale tab's Unarchive on an active card leaves its archived payment archived.
+
+        The payment is archived by hand, as data from before task plan#3757
+        can hold (:func:`_archive_by_hand`).
+        """
         with app.app_context():
             card, payment = _add_card(auth_client, seed_user)
-            auth_client.post(f"/transfers/{payment.id}/archive")
-            _flashes(auth_client)
+            _archive_by_hand(payment)
 
             auth_client.post(f"/accounts/{card.id}/unarchive")
 

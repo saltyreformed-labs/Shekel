@@ -23,6 +23,7 @@ owner retries against fresh row state.
 """
 
 import logging
+from dataclasses import dataclass
 
 from flask import Response, abort, flash, redirect, url_for
 from flask_login import current_user
@@ -58,6 +59,7 @@ from app.services import (
     ledger_account_service,
     transfer_service,
 )
+from app.services.cash_ledger import is_card_payment_definition
 from app.utils import archive_helpers
 from app.utils.auth_helpers import fresh_login_required, get_or_404, require_owner
 
@@ -131,6 +133,76 @@ def _other_transfer_definitions(account_id: int, payment: TransferTemplate | Non
     return query
 
 
+@dataclass(frozen=True)
+class _NamedByTransfers:
+    """The refusal of an archive or a delete while transfer definitions name the account.
+
+    Its sentence names what to do about each kind of definition (task
+    plan#3757).  Another card's worked-out payment that this account pays
+    is archived and deleted only with its card, so the owner cannot clear it
+    by hand as the sentence asks of the others: it is named, with the two
+    ways out, changing the account it pays from or archiving (deleting)
+    the card first.  A refusal naming no card's payment reads as it did
+    before that task.
+
+    Attributes:
+        lead: The sentence that opens the refusal.
+        others: What to do about the definitions that are no card's payment.
+        card_payment: What to do about a card's payment, formatted with the
+            payment's name and its card's.
+    """
+
+    lead: str
+    others: str
+    card_payment: str
+
+    def sentence(self, blockers: list[TransferTemplate]) -> str:
+        """Return the refusal for *blockers*, the definitions naming the account.
+
+        Args:
+            blockers: The owner's transfer definitions the refusal counted,
+                at least one (:func:`_other_transfer_definitions`).
+
+        Returns:
+            The lead, then :attr:`others` when any blocker is no card's
+            payment, then :attr:`card_payment` for each one that is.
+        """
+        payments = [t for t in blockers if is_card_payment_definition(t)]
+        parts = [self.lead]
+        if len(payments) < len(blockers):
+            parts.append(self.others)
+        parts.extend(
+            self.card_payment.format(payment=t.name, card=t.to_account.name)
+            for t in payments
+        )
+        return " ".join(parts)
+
+
+#: The archive's refusal while an ACTIVE recurring transfer names the account.
+_ARCHIVE_REFUSAL = _NamedByTransfers(
+    lead=(
+        "Cannot archive this account -- it is used by active recurring "
+        "transfers."
+    ),
+    others="Archive those recurring transfers first.",
+    card_payment=(
+        "'{payment}' is archived only with '{card}': edit it to pay from "
+        "another account, or archive '{card}' first."
+    ),
+)
+
+#: The delete's refusal while any recurring transfer, archived ones included,
+#: names the account (its key is ``RESTRICT``).
+_DELETE_REFUSAL = _NamedByTransfers(
+    lead="Cannot delete this account -- it is used by recurring transfers.",
+    others="Delete those recurring transfers first.",
+    card_payment=(
+        "'{payment}' is deleted only with '{card}': edit it to pay from "
+        "another account, or delete '{card}' first."
+    ),
+)
+
+
 def _archive_with_its_payment(
     account: Account, payment: TransferTemplate | None, ctx: StaleConflictContext,
 ) -> str | Response:
@@ -184,7 +256,11 @@ def archive_account(account_id):
     its projected rows that hold nothing are retired as the Recurring page's
     Archive retires them, and a row holding a recorded payment stays.  Any
     other recurring transfer naming the card still refuses.  A payment
-    already archived is left as it is.
+    already archived is left as it is.  **The account a card's payment comes
+    from is refused with the payment named** (task plan#3757,
+    :data:`_ARCHIVE_REFUSAL`): that payment is archived only with its card,
+    so the refusal sends the owner to change the account it pays from, or
+    to archive the card first.
 
     The Account model carries a ``version_id_col`` (commit C-17), so a
     concurrent mutation interleaving with this archive raises
@@ -198,15 +274,11 @@ def archive_account(account_id):
         abort(404)
 
     payment = _own_payment(account)
-    active_others = _other_transfer_definitions(account_id, payment).filter(
+    blockers = _other_transfer_definitions(account_id, payment).filter(
         TransferTemplate.is_active.is_(True),
-    )
-    if active_others.first():
-        flash(
-            "Cannot archive this account -- it is used by active recurring transfers. "
-            "Archive those recurring transfers first.",
-            "warning",
-        )
+    ).all()
+    if blockers:
+        flash(_ARCHIVE_REFUSAL.sentence(blockers), "warning")
         return redirect(url_for("savings.dashboard"))
 
     with_payment = _archive_with_its_payment(
@@ -372,7 +444,10 @@ def hard_delete_account(account_id):
          the refusal held every card, a card added by mistake included; the
          payment goes with the card instead (step 0), or is archived with
          it where guard 4 archives.  Any other recurring transfer naming the
-         card still refuses.
+         card still refuses.  The account a card's payment comes from is
+         refused with the payment named (task plan#3757,
+         :data:`_DELETE_REFUSAL`): that payment is deleted only with its
+         card.
       3. Recurring-definition guard -- any TransactionTemplate (active or
          archived) on this account that RECURS blocks deletion for the same
          FK reason.  A rule-less definition is a ONE-OFF's (plan step
@@ -454,12 +529,9 @@ def hard_delete_account(account_id):
     # Guard 2: transfer templates with RESTRICT FK, but a card's own payment,
     # which goes with the card (step 0 below).
     payment = _own_payment(account)
-    if _other_transfer_definitions(account_id, payment).first():
-        flash(
-            "Cannot delete this account -- it is used by recurring transfers. "
-            "Delete those recurring transfers first.",
-            "warning",
-        )
+    blockers = _other_transfer_definitions(account_id, payment).all()
+    if blockers:
+        flash(_DELETE_REFUSAL.sentence(blockers), "warning")
         return redirect(url_for("savings.dashboard"))
 
     # Guard 3: RECURRING transaction definitions with RESTRICT FK.  Loaded

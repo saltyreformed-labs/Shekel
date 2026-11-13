@@ -47,10 +47,14 @@
 {# Active-row actions: Edit + Archive (Loop A locked; permanent delete lives
    on the archived drawer). ``noun`` is transaction / transfer so the confirm
    copy reads correctly for both kinds. #}
+{# ``archive_url`` is none for a card's worked-out payment, which is
+   archived only with its card (task plan#3757, ``RecurringRow.goes_with_its_card``):
+   the row offers Edit alone. #}
 {% macro edit_archive_actions(edit_url, archive_url, name, noun) %}
 <a href="{{ edit_url }}" class="btn btn-sm btn-outline-secondary me-1" aria-label="Edit {{ name }}">
   <i class="bi bi-pencil"></i>
 </a>
+{%- if archive_url %}
 <form method="POST" action="{{ archive_url }}" class="d-inline"
       data-confirm="Archive this recurring {{ noun }}? All projected {{ noun }}s will be removed.">
   <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
@@ -58,6 +62,7 @@
     <i class="bi bi-archive"></i>
   </button>
 </form>
+{%- endif %}
 {% endmacro %}
 
 {# Shared column contract (polish audit P-RC3, ruled with S12's table
@@ -202,7 +207,8 @@ data-sort-next="{{ row.next_date.isoformat() if row.next_date else '' }}"
           <td class="text-nowrap text-end">
             {{ edit_archive_actions(
                  url_for('transfers.edit_transfer_template', template_id=t.id),
-                 url_for('transfers.archive_transfer_template', template_id=t.id),
+                 none if row.goes_with_its_card
+                 else url_for('transfers.archive_transfer_template', template_id=t.id),
                  t.name, "transfer") }}
           </td>
         </tr>

@@ -381,7 +381,7 @@ def _restatement_failure(account_id: int, message: str) -> ResponseReturnValue:
 
     The ONE rejection path this door has, and it is the flash-and-redirect
     shape every other write on that page uses (``crud.update_account``,
-    ``crud.archive_account``, ``crud.hard_delete_account``) rather than a
+    ``lifecycle.archive_account``, ``lifecycle.hard_delete_account``) rather than a
     designed HTMX fragment: this is a full-page form POST, so the page it
     returns to re-renders the card from the database with the standing figures
     -- which is the correct thing for a refused submission to show, because

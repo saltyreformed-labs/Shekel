@@ -5,7 +5,7 @@ Shekel Budget App -- Permanently deleting a transaction DEFINITION
 rows it still names**, shared by the two doors that perform it: the
 definition's own hard-delete (``routes/templates/crud.hard_delete_template``)
 and the account hard-delete, which disposes of the rule-less definitions its
-guards let through (``routes/accounts/crud.hard_delete_account``, plan step
+guards let through (``routes/accounts/lifecycle.hard_delete_account``, plan step
 ``balance:X-bi-7a``).  The second door was written against the first's body
 rather than calling it, and an adversarial review of that step reproduced
 the state ruling **R-JE** (finding **N-440**) exists to refuse: a settled,

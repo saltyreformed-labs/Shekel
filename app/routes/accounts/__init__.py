@@ -22,8 +22,11 @@ Module map:
   declaration (leaf module; F-25 cycle-break).
 * :mod:`app.routes.accounts.crud` -- Account CRUD endpoints
   (``list_accounts``, ``new_account``, ``create_account``,
-  ``edit_account``, ``update_account``, ``archive_account``,
-  ``unarchive_account``, ``hard_delete_account``).
+  ``edit_account``, ``update_account``).
+* :mod:`app.routes.accounts.lifecycle` -- An account's archive, unarchive
+  and hard-delete (``archive_account``, ``unarchive_account``,
+  ``hard_delete_account``), split from ``crud`` at task plan#3697 as the
+  transfer routes split theirs (ruling R-R84).
 * :mod:`app.routes.accounts.anchor` -- The grid and Net Worth Cockpit
   anchor true-up endpoints, consumers of
   :func:`app.services.anchor_service.apply_anchor_true_up`.
@@ -129,6 +132,7 @@ from app.routes.accounts._bp import accounts_bp
 # otherwise fire on what is, by design, a deferred-import side-
 # effect registration.
 from app.routes.accounts import crud  # noqa: F401, E402
+from app.routes.accounts import lifecycle  # noqa: F401, E402
 from app.routes.accounts import reconcile  # noqa: F401, E402
 from app.routes.accounts import history  # noqa: F401, E402
 from app.routes.accounts import anchor  # noqa: F401, E402

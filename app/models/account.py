@@ -137,7 +137,7 @@ class Account(
     # what lets an account be deleted at all** (plan step X-f3c-2c).  An
     # assertion is append-only, so the ORM may not delete one -- and this
     # collection's ``cascade="all, delete-orphan"`` made
-    # ``routes/accounts/crud.hard_delete_account`` do exactly that: it loaded
+    # ``routes/accounts/lifecycle.hard_delete_account`` do exactly that: it loaded
     # every assertion and emitted a DELETE per row on the way to deleting the
     # account, which
     # :func:`app.models.append_only.install_append_only_guards` refuses.

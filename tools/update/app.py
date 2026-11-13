@@ -4,9 +4,10 @@ token and naming the repository it acts on, and the branch every update merges i
 developer the alert's and the release-due job's issues mention (rulings plan#2466, plan#2829;
 the queue's comments mention no one, ruling plan#3622); and the one home
 of what the update's record is read by (ruling plan#3619): each bot the update acts as, by the
-login GitHub's GraphQL names it, and the marker the App's comments hold for each thing they
-tell, which the queue writes and reads back and ``quill sync`` files a card for, or puts on the
-card open for that pull request (``tools/quill/_waits.py``, ruling plan#3722).
+login GitHub's GraphQL names it, which bot wrote a node (:func:`bot_of`), and the marker the
+App's comments hold for each thing they tell, which the queue writes and reads back and
+``quill sync`` files a card for, or puts on the card open for that pull request
+(``tools/quill/_waits.py``, ruling plan#3722).
 
 A leaf of the standard library and :mod:`tools.ci.gitcmd`: the alert, which runs with no
 installed package (``python3 -S``), imports it, and so does quill.
@@ -51,6 +52,19 @@ _MARKED = re.compile(re.escape(_MARKER).replace(r"\{\}", "([0-9a-f]{64})"))
 def unset(*names: str) -> list[str]:
     """Each of the variables ``names`` that is unset or empty, in their order."""
     return [name for name in names if not os.environ.get(name, "")]
+
+
+def bot_of(node: dict) -> str | None:
+    """The login of the bot that wrote ``node``, a pull request, issue or comment as GraphQL
+    answers its ``author { __typename login }``: None for a person's, whatever its login, and
+    for an author since deleted, which GitHub answers as null.  A login alone names no bot: a
+    user may hold one a bot's slug spells, as no user held ``shekel-updates`` on 2026-11-13
+    (``gh api users/shekel-updates``: 404) but nothing says none can, and a comment of theirs
+    holding a marker would be read as the App's.  GraphQL's ``__typename`` tells them apart:
+    ``Bot`` for the App's comment on PR 668 and the workflow's issue #676 (measured
+    2026-11-13 13:12 UTC)."""
+    author = node["author"]
+    return author["login"] if author and author["__typename"] == "Bot" else None
 
 
 def marker(told: str) -> str:

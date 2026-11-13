@@ -60,9 +60,16 @@ def _red(head):
     return _RED.replace("8518a3f40f86", head).replace(_RED_MARK, mark), mark
 
 
-def _comment(number, body, at, login=app.APP, ident=1):
-    """A comment on pull request ``number`` as :data:`_waits.PULLS` reads it."""
-    return {"author": {"login": login}, "body": body, "createdAt": at,
+def _by(login, kind="Bot"):
+    """The author GraphQL names: an actor of ``kind`` called ``login``."""
+    return {"__typename": kind, "login": login}
+
+
+def _comment(number, body, at, ident=1, by=(app.APP, "Bot")):
+    """A comment on pull request ``number`` as :data:`_waits.PULLS` reads it, by the actor
+    ``by`` names, its login and its kind (:func:`_by`), the App's bot unless a test says
+    another; None for one since deleted, which GitHub answers as null."""
+    return {"author": by and _by(*by), "body": body, "createdAt": at,
             "url": f"{_PULL.format(number)}#issuecomment-{ident}"}
 
 
@@ -72,9 +79,10 @@ def _pull(number, title, *comments):
             "comments": {"nodes": list(comments), "pageInfo": {"hasNextPage": False}}}
 
 
-def _issue(number, title, login=app.ACTIONS, at="2026-11-16T14:20:00Z"):
-    """An open issue of the code repository as :data:`_waits.ISSUES` reads it."""
-    return {"number": number, "title": title, "author": {"login": login}, "createdAt": at,
+def _issue(number, title, login=app.ACTIONS, at="2026-11-16T14:20:00Z", kind="Bot"):
+    """An open issue of the code repository as :data:`_waits.ISSUES` reads it, opened by an
+    actor of ``kind`` called ``login``."""
+    return {"number": number, "title": title, "author": _by(login, kind), "createdAt": at,
             "body": "@SaltyReformed the weekly update's run failed: https://run\n\n"
                     "- refresh: failure", "url": f"https://github.com/o/Shekel/issues/{number}"}
 
@@ -189,12 +197,16 @@ def test_a_comment_with_one_thing_an_open_card_holds_and_one_more_is_put_on_it(c
 
 def test_nothing_told_reads_no_card_and_files_nothing(code, capsys):
     """No open pull request holds a comment of the App's with a marker -- a person's comment
-    holding one counts for nothing, as an App comment holding none does -- so the pass reads
-    no card's text and files nothing."""
+    holding one counts for nothing, one since deleted's, or a user's holding the App's slug as
+    their login (:func:`tools.update.app.bot_of`), as an App comment holding none does -- so
+    the pass reads no card's text and files nothing."""
     tracker = FakeTracker()
-    tracker.github.pulls = [_pull(5, "feat: work", _comment(5, _RED, "2026-11-09T23:09:14Z",
-                                                             login="SaltyReformed"),
-                                  _comment(5, "no marker", "2026-11-09T23:09:15Z"))]
+    tracker.github.pulls = [_pull(
+        5, "feat: work",
+        _comment(5, _RED, "2026-11-09T23:09:14Z", by=("SaltyReformed", "User")),
+        _comment(5, _RED, "2026-11-09T23:09:14Z", by=(app.APP, "User")),
+        _comment(5, _RED, "2026-11-09T23:09:14Z", by=None),
+        _comment(5, "no marker", "2026-11-09T23:09:15Z"))]
     tracker.github.issues = [_issue(676, "A release is due: dev and main pin different "
                                          "versions")]
     assert run(tracker, code, "sync") == 0
@@ -228,12 +240,14 @@ def test_an_unfinished_filing_is_finished_not_filed_again(code, capsys):
 def test_the_alerts_open_issue_is_filed_once_and_no_other_issue(code, capsys):
     """The alert's open issue, by the workflow's bot and titled as the alert titles one, is
     filed once, its card holding the marker made from its number; the release-due issue (the
-    same bot) and a stranger's issue titled as the alert's are not."""
+    same bot), a stranger's issue titled as the alert's, and one by a user holding the bot's
+    login (:func:`tools.update.app.bot_of`), are not."""
     tracker = FakeTracker()
     tracker.github.issues = [
         _issue(680, "The weekly update failed 2026-11-16"),
         _issue(676, "A release is due: dev and main pin different versions"),
-        _issue(681, "The weekly update failed 2026-11-16", login="someone")]
+        _issue(681, "The weekly update failed 2026-11-16", login="someone", kind="User"),
+        _issue(682, "The weekly update failed 2026-11-16", kind="User")]
     title = "Shekel issue 680: The weekly update failed 2026-11-16"
     assert run(tracker, code, "sync") == 0
     assert capsys.readouterr().out == _filed_lines(1, title, "issue 680",

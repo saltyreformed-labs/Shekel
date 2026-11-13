@@ -10,7 +10,8 @@ stays the one judge of what waits:
   the code repository, :data:`CODE`, holding a marker (:func:`tools.update.app.markers`) for
   each thing the daily queue told (``tools/update/queue.py``): a pull request waiting for a
   card, red at its head, or removed from the merge queue there.  Every open pull request's
-  comments are read, and only the App's count, as the queue reads its own.
+  comments are read, and only the App's count, a bot's by its type and not its login alone
+  (:func:`tools.update.app.bot_of`), as the queue reads its own.
 - each open issue of the code repository the update's alert opened (``tools/update/alert.py``):
   one by the workflow's own bot (:data:`tools.update.app.ACTIONS`) titled as the alert titles
   one (:data:`tools.update.alert.FAILED`).  The alert writes no marker, so this pass makes the
@@ -77,7 +78,7 @@ from tools.quill._tracker import Card, Tracker
 from tools.quill.check import TITLE_CAP, Draft, violations
 from tools.quill.setup_tracker import PLAN, Place
 from tools.update.alert import FAILED
-from tools.update.app import ACTIONS, APP, marker, markers
+from tools.update.app import ACTIONS, APP, bot_of, marker, markers
 
 #: The code repository whose update's record the pass reads: the tracker's organization's
 #: ``Shekel``, which is public, so quill's App token, narrowed to the tracker
@@ -96,8 +97,9 @@ _TOLD_LINE = re.compile(
 #: One thing told as a card holds it: where it was told and the queue's marker for it.
 Thing = tuple[str, str]
 
-#: What the pass reads of a comment: who wrote it, its text, its link and when.
-_COMMENT = "author { login } body url createdAt"
+#: What the pass reads of a comment: who wrote it, a bot or a person
+#: (:func:`tools.update.app.bot_of`), its text, its link and when.
+_COMMENT = "author { __typename login } body url createdAt"
 #: A page of the code repository's open pull requests, each with its first page of comments.
 PULLS = """query($owner: String!, $name: String!, $after: String) {
   repository(owner: $owner, name: $name) {
@@ -122,7 +124,7 @@ COMMENTS = """query($owner: String!, $name: String!, $number: Int!, $after: Stri
 ISSUES = """query($owner: String!, $name: String!, $after: String) {
   repository(owner: $owner, name: $name) {
     issues(states: OPEN, first: 100, after: $after) {
-      nodes { number title body url createdAt author { login } }
+      nodes { number title body url createdAt author { __typename login } }
       pageInfo { hasNextPage endCursor }
     }
   }
@@ -195,12 +197,6 @@ def _comments(github: GitHub, pull: dict) -> list[dict]:
                  f"the comments of {owner}/{name}'s pull request {pull['number']}")[0]
 
 
-def _by(node: dict, login: str) -> bool:
-    """Whether ``node``, a comment or issue, was written by the bot GraphQL names ``login``; a
-    deleted author, which GitHub answers as null, is no bot."""
-    return (node["author"] or {}).get("login") == login
-
-
 def _alert(issue: dict) -> Told:
     """The alert's issue ``issue``, as told: its card holds the marker this pass makes from its
     number, as the alert writes none."""
@@ -219,14 +215,14 @@ def told(github: GitHub) -> list[Told]:
                      f"the open pull requests of {owner}/{name}")
     for pull in pulls:
         for comment in _comments(github, pull):
-            if _by(comment, APP) and (marks := markers(comment["body"])):
+            if bot_of(comment) == APP and (marks := markers(comment["body"])):
                 found.append(Told(f"PR {pull['number']}", pull["title"], comment["url"],
                                   comment["body"], comment["createdAt"], marks))
     issues, _ = paged(partial(github.graphql, ISSUES, owner=owner, name=name),
                       lambda answer: answer["repository"]["issues"],
                       f"the open issues of {owner}/{name}")
     found += [_alert(issue) for issue in issues
-              if _by(issue, ACTIONS) and issue["title"].startswith(FAILED)]
+              if bot_of(issue) == ACTIONS and issue["title"].startswith(FAILED)]
     return sorted(found, key=lambda item: item.when)
 
 

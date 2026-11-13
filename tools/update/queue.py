@@ -113,6 +113,7 @@ from tools.update.app import (
     INTO,
     REPOSITORY_VARIABLE,
     TOKEN_VARIABLE,
+    bot_of,
     marker,
     markers,
     unset,
@@ -164,7 +165,7 @@ _COMMENTS = """query($owner: String!, $name: String!, $number: Int!, $after: Str
   repository(owner: $owner, name: $name) {
     pullRequest(number: $number) {
       comments(first: 100, after: $after) {
-        nodes { author { login } body }
+        nodes { author { __typename login } body }
         pageInfo { hasNextPage endCursor }
       }
     }
@@ -218,7 +219,6 @@ def _tested(removal: dict) -> str | None:
 
 def _pull(node: dict) -> Pull:
     """A pull request as GraphQL's answer to :data:`_FIELDS` describes it."""
-    author = node["author"]
     last = node["commits"]["nodes"]
     rollup = (last[0]["commit"]["statusCheckRollup"]
               if last and last[0]["commit"]["oid"] == node["headRefOid"] else None)
@@ -226,7 +226,7 @@ def _pull(node: dict) -> Pull:
     removal = latest[0] if latest and latest[0]["__typename"] == _REMOVED else None
     return Pull(
         number=node["number"], node=node["id"], branch=node["headRefName"],
-        bot=author["login"] if author and author["__typename"] == "Bot" else None,
+        bot=bot_of(node),
         fork=node["isCrossRepository"], draft=node["isDraft"], queued=node["isInMergeQueue"],
         base=node["baseRefName"], head=node["headRefOid"], mergeable=node["mergeable"],
         merge=(node["potentialMergeCommit"] or {}).get("oid"),
@@ -320,15 +320,15 @@ def _onto(root: Path, pull: Pull) -> str | None:
 
 
 def _markers(queue: Queue, pull: Pull) -> frozenset[str]:
-    """Each marker (:func:`tools.update.app.marker`) in a comment the App wrote on ``pull``,
-    read page by page."""
+    """Each marker (:func:`tools.update.app.marker`) in a comment the App wrote on ``pull``
+    (:func:`tools.update.app.bot_of`), read page by page."""
     owner, name = queue.repository.split("/", 1)
     nodes, _ = paged(partial(queue.github.graphql, _COMMENTS, owner=owner, name=name,
                              number=pull.number),
                      lambda answer: answer["repository"]["pullRequest"]["comments"],
                      f"the comments of pull request #{pull.number} of {queue.repository}")
     return frozenset(found for node in nodes
-                     if (node["author"] or {}).get("login") == queue.app
+                     if bot_of(node) == queue.app
                      for found in markers(node["body"]))
 
 

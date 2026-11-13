@@ -24,7 +24,7 @@ from tools.ci import gitcmd
 from tools.ci.scratch import ISOLATED, commit, commit_files, elsewhere, repository, run
 from tools.ci.scratch import with_origin
 from tools.quill.door import LOCK, GitHub
-from tools.update import queue
+from tools.update import app, queue
 from tools.update.queue import DEPENDABOT, REREAD_SECONDS, REREADS
 
 #: The update App's slug, as its token's mint gives it.
@@ -105,7 +105,7 @@ class _GitHub:  # pylint: disable=too-many-instance-attributes
         self.writes.append(("comment", number, body["body"]))
         if number in self.refuse:
             return _Response(403, {"message": "Resource not accessible by integration"})
-        self.comments.setdefault(number, []).append({"author": {"login": _APP},
+        self.comments.setdefault(number, []).append({"author": _by(_APP),
                                                      "body": body["body"]})
         return _Response(201, {"id": len(self.writes)})
 
@@ -512,6 +512,19 @@ def test_the_queue_starts_only_with_each_of_its_variables(monkeypatch, capsys, w
         "update queue: UPDATE_TOKEN, GITHUB_REPOSITORY unset, so nothing was read\n")
 
 
+def test_the_queue_runs_as_the_app(monkeypatch, world):
+    """With its variables set, the queue runs over the repository they name as the App
+    :data:`tools.update.app.APP`, whose comments alone hold what was told."""
+    monkeypatch.setenv(queue.TOKEN_VARIABLE, "token")
+    monkeypatch.setenv(queue.REPOSITORY_VARIABLE, _REPOSITORY)
+    seen = []
+    monkeypatch.setattr(queue, "run", lambda github, repository, app, root, sleep: seen.append(
+        (repository, app, root)) or 0)
+    assert queue.main([], root=world.work) == 0
+    assert seen == [(_REPOSITORY, app.APP, world.work)]
+    assert app.APP == _APP
+
+
 # -- what is told on each pull request (rulings plan#2450, plan#2467, plan#2468, plan#3622) --
 
 @pytest.mark.parametrize("checks", ["FAILURE", "ERROR"])
@@ -636,21 +649,23 @@ def test_a_major_beside_a_package_added_is_told_once_for_each_major(world):
 
 
 def test_only_the_app_s_own_comments_record_what_was_told(world):
-    """The marker for the head, in a comment by a person and by Dependabot, counts for
-    nothing: the App tells it; its own comment, on the second page of the comments, is
-    found."""
+    """The marker for the head, in a comment by a person, by one since deleted, by a user
+    holding the App's slug as their login (:func:`tools.update.app.bot_of`) and by
+    Dependabot, counts for nothing: the App tells it; its own comment, on the third page of
+    the comments, is found."""
     head, merge = world.pull(7, {LOCK: _lock("12.4.1")})
     marked = _marked(f"red {head}")
     fake = _GitHub([_node(7, head, merge, commits=_checks("FAILURE", head))], page=2)
-    fake.comments[7] = [{"author": {"login": "SaltyReformed"}, "body": marked},
+    fake.comments[7] = [{"author": _by("SaltyReformed", "User"), "body": marked},
                         {"author": None, "body": marked},
-                        {"author": {"login": DEPENDABOT}, "body": marked}]
+                        {"author": _by(_APP, "User"), "body": marked},
+                        {"author": _by(DEPENDABOT), "body": marked}]
     assert _run(world, fake) == (0, [])
     assert len(_written(fake, 7)) == 1
     assert _run(world, fake) == (0, [])
     assert len(_written(fake, 7)) == 1
-    assert [read for read in fake.reads if read[0] == "comments"][-2:] == [
-        ("comments", 7, None), ("comments", 7, "2")]
+    assert [read for read in fake.reads if read[0] == "comments"][-3:] == [
+        ("comments", 7, None), ("comments", 7, "2"), ("comments", 7, "4")]
 
 
 def test_a_refused_comment_fails_the_run_once_every_other_pull_request_is_tried(world,

@@ -53,12 +53,7 @@ from app.services.statement_match import (
     SkipRequest,
 )
 from app.services.statement_match._outcome import FiledMerchant
-
-# Pylint: protected-access -- MintedEnvelopes is an internal collaboration
-# between two PRIVATE modules of this package and has no importer outside
-# it, so exporting it would be the surface rule 13 forbids; a test for a
-# module reaches into it, which is the allowance every sibling here takes.
-from app.services.statement_match import _create  # pylint: disable=protected-access
+from app.services.statement_match import _create
 
 from tests._ledger_reads import linked_key_of, nets_by_key_and_day
 from tests._test_helpers import (
@@ -68,7 +63,7 @@ from tests._test_helpers import (
     last_covered_day,
 )
 
-from ._builders import (
+from tests.test_services.test_statement_match._builders import (
     a_bank_line,
     a_later_period,
     a_purchase,

@@ -231,17 +231,17 @@ class TestACompanionWithoutTwoFactorIsHeldAtSetup:
 class TestAnOwnerWithoutTwoFactorIsNotHeld:
     """The rule is a companion's; an owner without two-factor reaches every page."""
 
-    def test_the_dashboard_and_settings_open(self, app, auth_client, holds):
+    def test_the_dashboard_and_settings_open(self, app, no_two_factor_client, holds):
         """An owner without two-factor opens the dashboard and Settings."""
         with app.app_context():
-            assert auth_client.get("/dashboard").status_code == 200
-            assert auth_client.get("/settings").status_code == 200
+            assert no_two_factor_client.get("/dashboard").status_code == 200
+            assert no_two_factor_client.get("/settings").status_code == 200
             assert holds == []
 
-    def test_the_setup_page_does_not_say_it_is_required(self, app, auth_client):
+    def test_the_setup_page_does_not_say_it_is_required(self, app, no_two_factor_client):
         """The owner's setup page carries no "required" sentence: it is optional."""
         with app.app_context():
-            response = auth_client.get(_SETUP)
+            response = no_two_factor_client.get(_SETUP)
 
             assert response.status_code == 200
             assert _WHY_HELD not in response.data
@@ -307,11 +307,9 @@ class TestSheCannotTurnItOff:
             assert _DISABLE_LINK not in response.data
             assert b"Regenerate Backup Codes" in response.data
 
-    def test_an_owners_security_page_keeps_disable(self, app, auth_client, seed_user):
+    def test_an_owners_security_page_keeps_disable(self, app, auth_client):
         """The control: an owner with two-factor still has Disable, and no "required"."""
         with app.app_context():
-            enable_mfa(db.session, seed_user["user"].id)
-
             response = auth_client.get("/security")
 
             assert response.status_code == 200

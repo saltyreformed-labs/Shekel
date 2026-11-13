@@ -233,7 +233,6 @@ class TestTheReset:
 
         monkeypatch.setattr(mfa_service, "reset_two_factor", recording)
         enable_mfa(db.session, companion_id)
-        enable_mfa(db.session, owner_id)
 
         assert auth_client.post(_reset_url(companion_id)).status_code == 302
         reset_mfa(SEED_USER_EMAIL)
@@ -299,7 +298,6 @@ class TestTheRefusals:
     ):
         """The owner's own id names no companion: refused, the owner's kept."""
         owner_id = seed_user["user"].id
-        enable_mfa(db.session, owner_id)
         companion_id = seed_companion["user"].id
         enable_mfa(db.session, companion_id)
 

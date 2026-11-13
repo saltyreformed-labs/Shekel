@@ -129,16 +129,22 @@ class TestWithTheKeyUnset:
         _assert_no_flashes(browser)
 
     def test_an_owners_setup_shows_the_same_message(
-        self, auth_client, seed_user, monkeypatch,
+        self, no_two_factor_client, seed_user, monkeypatch,
     ):
-        """An owner, who is never held, gets the same in-place answer."""
+        """An owner without two-factor, who is never held, gets the same in-place answer.
+
+        Nothing is written: the owner's row stays as the reset left it,
+        disabled and holding no key.
+        """
         _unset_the_key(monkeypatch)
 
-        response = auth_client.get(_SETUP)
+        response = no_two_factor_client.get(_SETUP)
 
         assert _WHY_HELD not in _assert_says_the_key_is_missing(response)
-        assert two_factor_row_of(seed_user["user"].id) is None
-        _assert_no_flashes(auth_client)
+        row = two_factor_row_of(seed_user["user"].id)
+        assert row.is_enabled is False
+        assert not mfa_service.has_mfa_material(row)
+        _assert_no_flashes(no_two_factor_client)
 
     def test_confirm_with_the_key_gone_lands_on_setup_which_says_so(
         self, app, seed_companion, monkeypatch, holds,
@@ -228,9 +234,9 @@ class TestWithTheKeySet:
         assert _KEY_MISSING not in page
         assert holds == []
 
-    def test_an_owners_setup_can_set_it_up(self, auth_client):
-        """The owner's setup carries every way in and says nothing of a missing key."""
-        response = auth_client.get(_SETUP)
+    def test_an_owners_setup_can_set_it_up(self, no_two_factor_client):
+        """An owner's setup, two-factor reset, carries every way in and no missing key."""
+        response = no_two_factor_client.get(_SETUP)
 
         assert response.status_code == 200, response.status_code
         page = _page(response)

@@ -58,7 +58,7 @@ def _c43_schema(app, db):
 def restore_c43_state(db):
     """Ensure every C-43 artifact is restored after the test.
 
-    Several tests in this module force constraints back to their
+    Several tests in this package force constraints back to their
     pre-C-43 names and ondelete clauses to simulate the production-
     drift state.  This fixture guarantees the post-C-43 state is
     back in place once the test exits, even if the body raised --

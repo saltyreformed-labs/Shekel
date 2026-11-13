@@ -26,9 +26,9 @@ cause un-named ``sa.ForeignKeyConstraint`` calls in pre-C-43
 migrations to render new constraint names that subsequent
 migrations could not drop by their original dialect-default names.
 Forward enforcement is therefore manual: every new constraint in a
-model carries an explicit ``name=`` shaped by the convention.  The
-``TestNamingConventionContract`` class below asserts the
-explicit-name rule for every FK touched by this commit.
+model carries an explicit ``name=`` shaped by the convention.
+``TestNamingConventionContract``, in ``test_the_contracts.py``,
+asserts the explicit-name rule for every FK touched by this commit.
 
 The test suite exercises six invariants:
 

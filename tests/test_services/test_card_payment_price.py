@@ -654,7 +654,8 @@ class TestTheNextRowIsTheOneItsNextDateNames:
     """The definition's figure is its first row still planned on or after the day.
 
     Plan task plan#3700: the row the Recurring page's Next column names, worked
-    out or typed over.  It was the earliest worked-out row still in the plan, so
+    out or typed over (the column reads this same answer since plan#3894,
+    :mod:`tests.test_services.test_the_recurring_page_names_a_card_payment`).  It was the earliest worked-out row still in the plan, so
     an unmarked row dated before the day held the figure, and a typed row was
     passed by.  $800 of groceries on the card Jan 3, counted from that date.
     """

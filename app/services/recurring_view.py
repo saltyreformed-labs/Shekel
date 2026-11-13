@@ -125,9 +125,9 @@ keeps its Amount and its monthly figure, takes no share, says why it is left
 out, and adds nothing to the Transfers subtotal or the band
 (:func:`~app.services.account_projection.pays_a_card`).  A fixed amount sent
 to the card is left out the same way, which is the ruling's stated cost.  A
-payment the card works out has no monthly figure at all, because no one figure
-of it repeats, and its Amount is its next row's (plan task plan#3700,
-``obligations_aggregator``).
+payment the card works out is the exception to the monthly figure: it has
+none, because no one figure of it repeats, and its Amount and Next date are its
+next payment's (plan tasks plan#3700 and plan#3894, ``obligations_aggregator``).
 
 Boundary discipline (``CLAUDE.md`` Architecture): no Flask imports; inputs
 are already-loaded ORM template lists (or any duck-typed equivalent, as the
@@ -208,7 +208,9 @@ class RecurringRow:
             schedule, and a template holds neither.
         next_date: The engine-assigned due date of the next occurrence on
             or after ``as_of``, or ``None`` when the definition has no
-            future recurring occurrence (no rule, or expired).
+            future recurring occurrence (no rule, or expired).  For a card's
+            worked-out payment, the day of the payment *amount* is, ``None``
+            with no row left (:func:`_next_date`, plan task plan#3894).
         share_pct: This row's monthly equivalent as a percentage (0-100) of
             its section's committed monthly total, for the share bar; ``None``
             when the row does not contribute (non-recurring, or
@@ -461,6 +463,31 @@ def _next_occurrence(
     return None if placed is None else placed[1]
 
 
+def _next_date(item: "_PreparedRow", as_of: date) -> date | None:
+    """The row's Next column, from the same answer as its Amount for a card's payment.
+
+    A card's worked-out payment shows its next payment's day
+    (:attr:`~app.services.obligations_aggregator.TodaysPrice.next_row_on`), the
+    one answer its Amount comes from, so a cancelled, paid or moved row cannot
+    leave the Next date on its own day beside the figure of the row after (plan
+    task plan#3894: Jan 16's row cancelled read Next Jan 16 beside Jan 30's
+    $800.00).  Every other definition's figure is a price as of the day, and its
+    Next date is its repeat's next occurrence (:func:`next_placement`).
+
+    Args:
+        item: The prepared row.
+        as_of: The read pass's day.
+
+    Returns:
+        The day, or ``None`` with no next occurrence or no row left.
+    """
+    if is_card_payment_definition(item.template):
+        return item.price.next_row_on
+    if item.reading is None:
+        return None
+    return _next_occurrence(item.rule, item.reading, as_of)
+
+
 @dataclass(frozen=True)
 class _PreparedRow:
     """One template with everything the two row passes need, computed once.
@@ -709,10 +736,7 @@ def _build_section(
             template=item.template,
             equivalent=_unit_pair(item.monthly_full, pay_cadence),
             recurrence=described(item.rule, item.resolved),
-            next_date=(
-                None if item.reading is None
-                else _next_occurrence(item.rule, item.reading, ctx.as_of)
-            ),
+            next_date=_next_date(item, ctx.as_of),
             share_pct=_share_pct(
                 None if item.pays_a_card else item.monthly_full,
                 section_total_full,

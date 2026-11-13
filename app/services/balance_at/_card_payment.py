@@ -393,6 +393,20 @@ def _planned_credits(plan: _CashPlan, calendar: PayCalendar) -> "list[_Credit]":
 
 
 @dataclass(frozen=True)
+class NextCardPayment:
+    """A card payment definition's next payment: its day and what it asks.
+
+    Attributes:
+        dated_on: The first day one of its rows still planned is dated on or
+            after the pass's day.
+        amount: What its rows dated that day ask together.
+    """
+
+    dated_on: date
+    amount: Decimal
+
+
+@dataclass(frozen=True)
 class CardPayments:
     """What one account's worked-out card payments are priced at.
 
@@ -603,40 +617,60 @@ class CardPayments:
         dated_on = period.attribution_day(xfer.due_date)
         return self._price(xfer, dated_on, dated_on, list(self._priced.values()))
 
-    def next_price(self, template_id: int, on: date) -> Decimal:
-        """Return what a definition's next row asks: its first dated on or after *on*.
+    def next_payment(self, template_id: int, on: date) -> "NextCardPayment | None":
+        """Return a definition's next payment: its first day on or after *on*.
 
-        The row the Recurring page's Next column names
-        (``recurring_view.next_placement``, the first occurrence due on or after
-        the pass's day), read as every reader reads it: a worked-out row at the
-        card's figure, a row typed over at its own (plan task plan#3700).  **A row
-        dated before *on* and still unmarked is not next**, whatever it reads: its
-        money is the grid's to show, and the earliest row still in the plan used to
-        answer here, so an unmarked $0.00 row nobody marks (none can be marked Paid)
-        held the figure at $0.00 while the next one asked $800, and a row typed
-        over was passed by for the worked-out row after it.
+        **The one answer the Recurring page reads for both its Next and Amount
+        columns** (plan tasks plan#3700 and plan#3894), so the two cannot name
+        different rows: the first day one of the definition's rows still planned
+        is dated on or after *on*, and what its rows dated that day ask together,
+        each read as every reader reads it -- a worked-out row at the card's
+        figure, a row typed over at its own.  Two rows on one day are one payment
+        that day (a row carried into a paycheck that holds another, plan#3734).
+
+        **A row dated before *on* and still unmarked is not next**, whatever it
+        reads: its money is the grid's to show.  The earliest worked-out row in
+        the plan answered here until plan#3700, so an unmarked $0.00 row (none
+        can be marked Paid) held the figure at $0.00 while the next one asked
+        $800, and a row typed over was passed by.  A cancelled or settled row is
+        not in the plan, so the next is the row after it.  The page's Next date
+        came from the repeat's schedule until plan#3894 and named the cancelled
+        row's day beside the row after's figure.
 
         Args:
             template_id: The definition.
             on: The first day a row can be dated and be next: the pass's day.
 
         Returns:
-            That row's figure, ``0.00`` with none.
+            The :class:`NextCardPayment`, or ``None`` with no row dated then.
         """
-        rows = sorted(
-            (
-                (_planned_day(item, self.calendar), item.transfer.id, item)
-                for item in self.plan.rows
-                if isinstance(item, TransferLeg)
+        by_day: "dict[date, Decimal]" = {}
+        for item in self.plan.rows:
+            if not (
+                isinstance(item, TransferLeg)
                 and item.transfer.transfer_template_id == template_id
-            ),
-            key=lambda dated: dated[:2],
-        )
-        for dated_on, transfer_id, item in rows:
-            if dated_on < on:
+            ):
                 continue
-            if transfer_id in self._priced:
-                return self._priced[transfer_id].amount
-            income, expense = sum_projected([item], self.plan.basis)
-            return income - expense
-        return _ZERO_MONEY
+            dated_on = _planned_day(item, self.calendar)
+            if dated_on >= on:
+                by_day[dated_on] = by_day.get(dated_on, _ZERO_MONEY) + self._figure(item)
+        if not by_day:
+            return None
+        first = min(by_day)
+        return NextCardPayment(dated_on=first, amount=by_day[first])
+
+    def _figure(self, leg: TransferLeg) -> Decimal:
+        """Return what one of the card's planned payment rows asks, as every reader reads it.
+
+        Args:
+            leg: The card's side of a planned transfer into it.
+
+        Returns:
+            The card's figure for a worked-out row; for a row typed over, its own,
+            valued as :func:`_planned_credits` values one.
+        """
+        transfer_id = leg.transfer.id
+        if transfer_id in self._priced:
+            return self._priced[transfer_id].amount
+        income, expense = sum_projected([leg], self.plan.basis)
+        return income - expense

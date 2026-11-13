@@ -117,12 +117,13 @@ Decimal results out.  No Flask imports.
 """
 
 from dataclasses import dataclass
+from datetime import date
 from decimal import Decimal
 from typing import TYPE_CHECKING, Iterable, Union
 
 from app.models.transaction_template import TransactionTemplate
 from app.models.transfer_template import TransferTemplate
-from app.services.balance_at import BalanceContext, next_card_payment_price
+from app.services.balance_at import BalanceContext, next_card_payment
 from app.services.cash_ledger import (
     DefinitionRow,
     definition_cash,
@@ -145,6 +146,9 @@ if TYPE_CHECKING:  # pragma: no cover -- annotations only
 # hint names the two production classes for IDE / pylint
 # consumption.
 RecurringTemplate = Union[TransactionTemplate, TransferTemplate]
+
+# What a card's worked-out payment asks with no row left to price.
+_NO_PAYMENT = Decimal("0.00")
 
 
 def template_rule(template: RecurringTemplate):
@@ -192,10 +196,17 @@ class TodaysPrice:
             (:attr:`~app.services.paycheck_calculator.PeriodInfo.cadence`,
             ruling **R-SAL71**); ``None`` for every other definition, which
             converts at the owner's latest rhythm (:meth:`pay_cadence`).
+        next_row_on: For a card's worked-out payment, the day of the payment
+            *amount* is (:func:`~app.services.balance_at.next_card_payment`),
+            which the Recurring page's Next column shows so the two name one
+            payment (plan task plan#3894); ``None`` when it has no row left, and
+            for every other definition, whose figure is a price as of the day
+            and whose Next date is its repeat's.
     """
 
     amount: Decimal
     paycheck_cadence: "PayCadence | None"
+    next_row_on: date | None = None
 
     @property
     def commits_nothing(self) -> bool:
@@ -242,13 +253,14 @@ def todays_price(
       :func:`~app.services.cash_ledger.definition_cash` -- the contract for a
       payment that tracks its loan, the stated series otherwise, and the
       standing extra in both, because that is what leaves checking;
-    * a card's worked-out payment: what its next row asks of checking, the row
-      dated on or after the pass's day that the Recurring page's Next column
-      names, worked out or typed over
-      (:func:`~app.services.balance_at.next_card_payment_price`, plan task
-      plan#3700), because the rule prices a row off the card's balance and a row
-      imagined on the day would read ``$0.00`` from each due date until the next
-      close.  It is a figure and never a monthly one (:func:`monthly_or_none`);
+    * a card's worked-out payment: what its next payment asks of checking, the
+      first day one of its rows still planned is dated on or after the pass's
+      day, worked out or typed over, and that day carried for the Recurring
+      page's Next column (:func:`~app.services.balance_at.next_card_payment`,
+      plan tasks plan#3700 and plan#3894), because the rule prices a row off
+      the card's balance and a row imagined on the day would read ``$0.00``
+      from each due date until the next close.  It is a figure and never a
+      monthly one (:func:`monthly_or_none`);
     * any other definition: rule 3, its price series as of the day.
 
     **Not the newest stated price**, which is what the stored
@@ -297,6 +309,14 @@ def todays_price(
             amount=paycheck.earnings.net_pay,
             paycheck_cadence=paycheck.period.cadence,
         )
+    if is_card_payment_definition(template):
+        payment = next_card_payment(template, ctx)
+        if payment is None:
+            return TodaysPrice(amount=_NO_PAYMENT, paycheck_cadence=None)
+        return TodaysPrice(
+            amount=payment.amount, paycheck_cadence=None,
+            next_row_on=payment.dated_on,
+        )
     return TodaysPrice(
         amount=_definition_price(template, ctx), paycheck_cadence=None,
     )
@@ -305,7 +325,7 @@ def todays_price(
 def _definition_price(
     template: RecurringTemplate, ctx: BalanceContext,
 ) -> Decimal:
-    """The card's rule, rule 4 or rule 3, for a definition no paycheck prices.
+    """Rule 4 or rule 3, for a definition no paycheck prices and no card works out.
 
     The two arms :func:`~app.services.cash_ledger.definition_cash` decides
     between for a row, decided by the same predicate
@@ -328,8 +348,6 @@ def _definition_price(
         AmountUnresolvable: See :func:`todays_price`.
         BaselineMissingError: See :func:`todays_price`.
     """
-    if is_card_payment_definition(template):
-        return next_card_payment_price(template, ctx)
     subject = (
         f"{type(template).__name__} {template.id}'s price on "
         f"{ctx.as_of.isoformat()}"

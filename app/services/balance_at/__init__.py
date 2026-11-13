@@ -314,7 +314,8 @@ from ._kind_correct import (
     build_maps,
     investment_growth_since_anchor,
 )
-from ._card_payment_doors import next_card_payment_price
+from ._card_payment import NextCardPayment
+from ._card_payment_doors import next_card_payment
 from ._liability import liability_owed_at_dates
 from ._resolution import is_standing_loan_payment
 from ._loan_figures import (
@@ -383,6 +384,7 @@ from ._secured_debt import (
 # returns, not the difference of two independently-computed balance maps
 # (finding N-52).
 __all__ = [
+    "NextCardPayment",
     "ZERO",
     "BalanceContext",
     "BooksSpan",
@@ -439,7 +441,7 @@ __all__ = [
     "loan_what_if_owed_at_dates",
     "loan_principal_paid_in_year",
     "money_account_columns",
-    "next_card_payment_price",
+    "next_card_payment",
     "positions",
     "records_balance_at",
     "rows_counted_from_their_date",

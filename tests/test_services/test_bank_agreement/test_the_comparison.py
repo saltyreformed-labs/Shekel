@@ -10,7 +10,7 @@ from app.services.balance_at import BalanceContext
 from app.services.scenario_resolver import get_baseline_scenario
 from app.services.statement_match._hero import hero as statement_hero
 from tests._test_helpers import append_balance_assertion
-from tests.test_services.test_cash_fold import _instant
+from tests.test_services.test_cash_fold._helpers import _instant
 from tests.test_services.test_outstanding_difference import _settle
 from tests.test_services.test_statement_import.test_anchor import _seed_import
 

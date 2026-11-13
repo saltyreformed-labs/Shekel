@@ -18,7 +18,7 @@ from tests._test_helpers import (
     reassert_balance_on,
     restate_account_opening,
 )
-from tests.test_services.test_cash_fold import _instant
+from tests.test_services.test_cash_fold._helpers import _instant
 
 from ._helpers import _ONE_DAY, _BOOKS_OPEN_ON, _EARLY_AS_OF, _view
 

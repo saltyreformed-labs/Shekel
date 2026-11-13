@@ -56,7 +56,7 @@ from tests._test_helpers import (
     create_account_of_type,
     create_settled_cash_transaction,
 )
-from tests.test_services.test_cash_fold import _instant
+from tests.test_services.test_cash_fold._helpers import _instant
 from tests.test_services.test_statement_import.test_anchor import _seed_import
 
 _FILE_CHAIN = StatementBalanceEvidenceEnum.FILE_CHAIN

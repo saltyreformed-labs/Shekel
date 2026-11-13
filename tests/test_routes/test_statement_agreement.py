@@ -40,7 +40,7 @@ from tests._test_helpers import (
     settle_day_columns,
     cover_bare_settled_row,
 )
-from tests.test_services.test_cash_fold import _instant
+from tests.test_services.test_cash_fold._helpers import _instant
 from tests.test_services.test_outstanding_difference import _settle
 from tests.test_services.test_statement_import.test_anchor import _seed_import
 

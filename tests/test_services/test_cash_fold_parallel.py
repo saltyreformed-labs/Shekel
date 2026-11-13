@@ -42,7 +42,7 @@ from tests._test_helpers import (
     create_settled_cash_transaction,
     last_covered_day,
 )
-from tests.test_services.test_cash_fold import _instant
+from tests.test_services.test_cash_fold._helpers import _instant
 
 
 def _days(first_day, last_day):

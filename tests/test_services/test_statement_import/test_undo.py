@@ -58,7 +58,7 @@ from tests.test_services.test_statement_match._builders import (
     a_transaction,
     an_import,
 )
-from tests.test_services.test_statement_import.test_record import _second_account
+from tests.test_services.test_statement_import.test_record._helpers import _second_account
 
 from . import _csv_builder as build
 

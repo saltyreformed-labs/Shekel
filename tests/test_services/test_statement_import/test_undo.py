@@ -58,9 +58,9 @@ from tests.test_services.test_statement_match._builders import (
     a_transaction,
     an_import,
 )
+from tests.test_services.test_statement_import.test_record import _second_account
 
 from . import _csv_builder as build
-from .test_record import _second_account
 
 _SOURCE = StatementSourceEnum.SECU_CHECKING_CSV
 

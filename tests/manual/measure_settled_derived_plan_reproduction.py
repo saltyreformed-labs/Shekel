@@ -40,7 +40,6 @@ harness reaches no store, so any value serves both sides.
 Prints one line per (rule, type) cell plus every row that does not reproduce.
 """
 
-import json
 import os
 import sys
 from collections import defaultdict
@@ -49,16 +48,21 @@ from decimal import Decimal
 
 sys.path.insert(0, os.getcwd())
 
-from app import create_app, db  # noqa: E402  pylint: disable=wrong-import-position
-from app.enums import TxnTypeEnum  # noqa: E402  pylint: disable=wrong-import-position
-from app import ref_cache  # noqa: E402  pylint: disable=wrong-import-position
-from app.models import Transaction  # noqa: E402  pylint: disable=wrong-import-position
-from app.services.balance_at import BalanceContext  # noqa: E402  pylint: disable=wrong-import-position
-from app.services.cash_ledger import (  # noqa: E402  pylint: disable=wrong-import-position
+# Pylint: ``wrong-import-position`` -- these must follow the path bootstrap
+# above; there is no import order that resolves ``app`` before it runs.
+# pylint: disable=wrong-import-position
+from app import create_app, db
+from app.enums import TxnTypeEnum
+from app import ref_cache
+from app.exceptions import AmountUnresolvable, UnsupportedStateError
+from app.models import Transaction
+from app.services.balance_at import BalanceContext
+from app.services.cash_ledger import (
     derived_amount_basis,
     amount_rule,
     resolve_transaction_amount,
 )
+from app.utils.money import round_money
 
 #: The pair of columns only an amount-source cutover writes together.
 _DECLARED = "{amount_source_id,estimated_amount}"
@@ -98,17 +102,19 @@ def main() -> int:
             kind = ("expense" if txn.transaction_type_id == expense_id
                     else "income")
             key = (amount_rule(txn).value, kind)
+            # A refusal is a RESULT here, not a crash: the two the resolver
+            # documents are recorded, and anything else is a defect that stops
+            # the measurement.
             try:
-                got = Decimal(
-                    resolve_transaction_amount(txn, basis),
-                ).quantize(Decimal("0.01"))
-            except Exception as exc:  # a refusal is a RESULT here, not a crash
+                resolved = resolve_transaction_amount(txn, basis)
+            except (AmountUnresolvable, UnsupportedStateError) as exc:
                 cells[key]["differ"].append(
                     (rec["row_id"], rec["name"], rec["old_plan"],
                      f"REFUSED {type(exc).__name__}"),
                 )
                 continue
-            want = (Decimal(rec["old_plan"]).quantize(Decimal("0.01"))
+            got = round_money(resolved)
+            want = (round_money(Decimal(rec["old_plan"]))
                     if rec["old_plan"] is not None else None)
             if want is not None and got == want:
                 cells[key]["same"] += 1

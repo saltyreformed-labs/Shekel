@@ -69,7 +69,6 @@ IDENTICALLY fresh clones, and diff the two outputs from line 2.
 """
 import dataclasses
 import inspect
-from datetime import timedelta
 
 from app import create_app
 from app.extensions import db
@@ -105,7 +104,12 @@ _CF_KW = (
 # the paydays and the ROUTE populates them.  Import rather than name-check,
 # because the module is what does or does not exist.
 try:
-    from app.routes._period_population import populate_new_periods
+    # Pylint: ``shekel-private-module-import`` -- the harness composes the
+    # extend the way the ROUTE does, and the populate half is the routes
+    # package's own helper, which no public name re-exports.
+    from app.routes._period_population import (  # pylint: disable=shekel-private-module-import
+        populate_new_periods,
+    )
 except ImportError:  # the door still populates itself (pre-R-R38 tree)
     populate_new_periods = None
 
@@ -127,7 +131,7 @@ def cf_argument(user_id):
     return {"calendar": calendar_for(user_id)}
 
 
-def dump_rows(label, txn_ids, xfer_ids, payday_of):
+def dump_rows(label, txn_ids, xfer_ids, payday_for):
     """Print every named row's identity-bearing columns, sorted.
 
     Periods are named by their PAYDAY rather than by
@@ -144,7 +148,7 @@ def dump_rows(label, txn_ids, xfer_ids, payday_of):
     for r in rows:
         print(
             f"{label}\tTXN"
-            f"\ttemplate={r.template_id}\tpayday={payday_of(r.pay_period_id)}"
+            f"\ttemplate={r.template_id}\tpayday={payday_for(r.pay_period_id)}"
             f"\tscenario={r.scenario_id}\tacct={r.account_id}"
             f"\test={r.estimated_amount}\tsettled={settled_figure(r)}"
             f"\tsrc={r.amount_source_id}\tdue={r.due_date}"
@@ -159,7 +163,7 @@ def dump_rows(label, txn_ids, xfer_ids, payday_of):
     for x in xfers:
         print(
             f"{label}\tXFER"
-            f"\ttemplate={x.transfer_template_id}\tpayday={payday_of(x.pay_period_id)}"
+            f"\ttemplate={x.transfer_template_id}\tpayday={payday_for(x.pay_period_id)}"
             f"\tscenario={x.scenario_id}\tfrom={x.from_account_id}"
             f"\tto={x.to_account_id}\tamount={x.amount}"
             f"\tsrc={x.amount_source_id}\tdue={x.due_date}"

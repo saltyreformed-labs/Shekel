@@ -9,22 +9,34 @@ from decimal import Decimal
 import pytest
 
 from app import ref_cache
-from app.enums import TxnTypeEnum
+from app.enums import AcctTypeEnum, TxnTypeEnum
 from app.services import balance_at, liability_sign
 from app.services.scenario_resolver import get_baseline_scenario
 from app.services.balance_at import BalanceContext
-from app.services.balance_at._resolution import resolved_loan
+# Pylint: ``shekel-private-module-import`` -- the fold-count case patches two
+# private producers to count their calls, and the overdue-installment cases
+# read the resolved loan's own schedule as an independent oracle; no public
+# name reaches either.
+from app.services.balance_at import (  # pylint: disable=shekel-private-module-import
+    _asset_fold,
+    _kind_correct,
+    _resolution,
+)
 from tests._test_helpers import (
     all_periods,
     create_account_of_type,
+    create_loan_account,
+    insert_tracking_start_event,
     insert_trueup_event,
     last_covered_day,
+    loan_params_for,
     one_off_row_of,
 )
 
 from ._helpers import _no_baseline, _owed_today, _make_mortgage, _paid_then_trued_loan
 
 
+@pytest.mark.usefixtures("seed_periods_today")
 class TestLiabilityOwedAtDates:
     """``liability_owed_at_dates``: the seam's FORWARD multi-date liability view.
 
@@ -41,7 +53,7 @@ class TestLiabilityOwedAtDates:
     """
 
     def test_amortizing_loan_amortizes_across_future_dates(
-        self, app, db, seed_user, seed_periods_today,
+        self, app, db, seed_user,
     ):
         """A mortgage's owed balance strictly declines across future sample dates.
 
@@ -58,7 +70,6 @@ class TestLiabilityOwedAtDates:
         """
         with app.app_context():
             user_id = seed_user["user"].id
-            scenario = get_baseline_scenario(user_id)
             bctx = BalanceContext.build(user_id)
             periods = all_periods(user_id)
             acct, _params = _make_mortgage(
@@ -90,7 +101,7 @@ class TestLiabilityOwedAtDates:
             assert series[2] < series[1]
 
     def test_today_point_is_the_callers_confirmed_balance(
-        self, app, db, seed_user, seed_periods_today,
+        self, app, db, seed_user,
     ):
         """The today point comes from *current_balances*, never a schedule walk.
 
@@ -108,7 +119,6 @@ class TestLiabilityOwedAtDates:
         """
         with app.app_context():
             user_id = seed_user["user"].id
-            scenario = get_baseline_scenario(user_id)
             bctx = BalanceContext.build(user_id)
             periods = all_periods(user_id)
             acct, _params = _make_mortgage(
@@ -124,7 +134,7 @@ class TestLiabilityOwedAtDates:
             assert owed[acct.id] == [sentinel]
 
     def test_a_card_with_no_rows_reads_its_opening_flat(
-        self, app, db, seed_user, seed_periods_today,
+        self, app, db, seed_user,
     ):
         """A revolving Credit Card with nothing planned reads its fold: the opening, flat.
 
@@ -287,7 +297,7 @@ class TestLiabilityOwedAtDates:
             assert owed[card.id] == [Decimal("500.00")] * 3
 
     def test_each_liability_is_folded_once_per_pass(
-        self, app, db, seed_user, seed_periods_today, monkeypatch,
+        self, app, db, seed_user, monkeypatch,
     ):
         """The band reads each liability's producer ONCE over the whole future axis.
 
@@ -322,10 +332,6 @@ class TestLiabilityOwedAtDates:
             ]
             samples = [today, *future]
 
-            # pylint: disable=import-outside-toplevel -- the private seam
-            # modules are reached only to count the producers' calls.
-            from app.services.balance_at import _asset_fold, _kind_correct
-
             positions_calls: list[list[date]] = []
             fold_calls: list[list[date]] = []
             real_positions = _kind_correct.positions
@@ -356,7 +362,7 @@ class TestLiabilityOwedAtDates:
             assert len(owed[mortgage.id]) == len(owed[card.id]) == 4
 
     def test_no_baseline_scenario_holds_every_liability_flat(
-        self, app, db, seed_user, seed_periods_today,
+        self, app, db, seed_user,
     ):
         """``scenario=None`` is the degenerate case of the SAME rule, not an error.
 
@@ -384,12 +390,11 @@ class TestLiabilityOwedAtDates:
             assert owed[acct.id] == [Decimal("200000.00")] * 2
 
     def test_liability_missing_from_current_balances_is_zero(
-        self, app, db, seed_user, seed_periods_today,
+        self, app, db, seed_user,
     ):
         """An account absent from *current_balances* reads 0, not a KeyError."""
         with app.app_context():
             user_id = seed_user["user"].id
-            scenario = get_baseline_scenario(user_id)
             bctx = BalanceContext.build(user_id)
             card = create_account_of_type(
                 seed_user, db.session, "Credit Card", "Rewards Card",
@@ -404,7 +409,7 @@ class TestLiabilityOwedAtDates:
             assert owed[card.id] == [Decimal("0")]
 
     def test_past_sample_date_raises(
-        self, app, db, seed_user, seed_periods_today,
+        self, app, db, seed_user,
     ):
         """A past date is a LEDGER read, not a projection -- the seam refuses it.
 
@@ -415,7 +420,6 @@ class TestLiabilityOwedAtDates:
         """
         with app.app_context():
             user_id = seed_user["user"].id
-            scenario = get_baseline_scenario(user_id)
             bctx = BalanceContext.build(user_id)
             periods = all_periods(user_id)
             acct, _params = _make_mortgage(
@@ -433,7 +437,7 @@ class TestLiabilityOwedAtDates:
                 )
 
     def test_projection_is_joined_by_date_not_by_position(
-        self, app, db, seed_user, seed_periods_today,
+        self, app, db, seed_user,
     ):
         """Sample dates are joined BY DATE, so their ORDER cannot mis-value the band.
 
@@ -448,7 +452,6 @@ class TestLiabilityOwedAtDates:
         """
         with app.app_context():
             user_id = seed_user["user"].id
-            scenario = get_baseline_scenario(user_id)
             bctx = BalanceContext.build(user_id)
             periods = all_periods(user_id)
             acct, _params = _make_mortgage(
@@ -477,7 +480,7 @@ class TestLiabilityOwedAtDates:
             )
 
     def test_mixed_liability_set_in_one_call(
-        self, app, db, seed_user, seed_periods_today,
+        self, app, db, seed_user,
     ):
         """A loan and a card in ONE call: both arms of the read coexist in one result.
 
@@ -489,7 +492,6 @@ class TestLiabilityOwedAtDates:
         """
         with app.app_context():
             user_id = seed_user["user"].id
-            scenario = get_baseline_scenario(user_id)
             bctx = BalanceContext.build(user_id)
             periods = all_periods(user_id)
             acct, _params = _make_mortgage(
@@ -518,7 +520,7 @@ class TestLiabilityOwedAtDates:
             assert owed[card.id] == [Decimal("500.00"), Decimal("500.00")]
 
     def test_forward_owed_credits_only_future_installments_not_overdue_ones(
-        self, app, db, seed_user, seed_periods_today,
+        self, app, db, seed_user,
     ):
         """The band's forward point folds the PLAN: overdue unpaid installments pay nothing (B-9).
 
@@ -572,7 +574,7 @@ class TestLiabilityOwedAtDates:
             # the sign of the caller's figure.
             assert owed[acct.id][0] == Decimal("200000.00")
 
-            state = resolved_loan(acct, bctx).state
+            state = _resolution.resolved_loan(acct, bctx).state
             forward_rows = sorted(
                 (row for row in state.schedule if not row.is_confirmed),
                 key=lambda row: row.payment_date,
@@ -596,7 +598,7 @@ class TestLiabilityOwedAtDates:
             assert owed[acct.id][1] > owed[acct.id][0]
 
     def test_today_point_ignores_overdue_rows_that_would_understate_the_debt(
-        self, app, db, seed_user, seed_periods_today,
+        self, app, db, seed_user,
     ):
         """An OVERDUE unpaid payment must not shrink the today point.
 
@@ -624,7 +626,7 @@ class TestLiabilityOwedAtDates:
             today = date.today()
             confirmed = Decimal("200000.00")
 
-            state = resolved_loan(acct, bctx).state
+            state = _resolution.resolved_loan(acct, bctx).state
             forward_rows = sorted(
                 (row for row in state.schedule if not row.is_confirmed),
                 key=lambda row: row.payment_date,
@@ -693,7 +695,6 @@ class TestScalarAndMapAgree:
     begun period, ``period.end_date`` for a future one.
     """
 
-    # pylint: disable=too-many-arguments
     def _assert_agrees(self, acct, bctx, periods, shape):
         """Every period: map[p] == balance_at at the day that period is keyed to."""
         bmap = balance_at.balance_map(acct, bctx)
@@ -719,13 +720,6 @@ class TestScalarAndMapAgree:
         ``seed_periods`` in the past and four ahead, so both splice branches run
         for every shape.
         """
-        # pylint: disable=import-outside-toplevel
-        from app.enums import AcctTypeEnum
-        from tests._test_helpers import (
-            create_loan_account, insert_tracking_start_event,
-            insert_trueup_event, loan_params_for,
-        )
-
         with app.app_context():
             periods = seed_periods
             bctx_user = seed_user["user"].id

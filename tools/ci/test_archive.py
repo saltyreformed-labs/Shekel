@@ -10,8 +10,8 @@ from tools.ci import arcs, archive
 
 
 class TestAnArchivedDocumentSaysSoOnItsFirstLine:
-    """CLAUDE.md: anything under an ``archive/`` or ``historical/`` directory says so on its first
-    line."""
+    """Anything under an ``archive/`` or ``historical/`` directory governs nothing (CLAUDE.md), and
+    says so on its first line (:mod:`tools.ci.archive`)."""
 
     def test_every_archived_document_carries_the_banner(self):
         """Every archived document carries the banner."""

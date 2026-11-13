@@ -27,11 +27,13 @@
 #            Dependabot or the App is judged on its trial merge by the landing
 #            check's own walk, and put in dev's merge queue at the head it
 #            judged when it moves pinned versions alone and its checks passed.
-#            The developer is mentioned in a comment of the App's, once for
-#            what it tells, on each that waits for a card (once for each major
-#            it enters), that is red at its head, or that GitHub removed from
-#            the merge queue at its head, which waits for a new head (rulings
-#            plan#2450, plan#2467, plan#2468).
+#            Each that waits for a card (once for each major it enters), that
+#            is red at its head, or that GitHub removed from the merge queue at
+#            its head, which waits for a new head, is told so once in a comment
+#            of the App's, which mentions no one (rulings plan#2450, plan#2467,
+#            plan#2468, plan#3622); the developer's `quill sync` timer files a
+#            card for each pull request so told, and puts each later comment on
+#            it while it is open (rulings plan#3619, plan#3722).
 #   due      every day: says a release is due (rulings plan#2829, plan#2876, which
 #            deliver balance:R-BAL296's weekly release).  One issue, found by its
 #            exact title each run, mentions the developer and lists what a release
@@ -313,7 +315,6 @@ jobs:
         timeout-minutes: 5
         env:
           UPDATE_TOKEN: ${{ steps.token.outputs.token }}
-          UPDATE_APP_SLUG: ${{ steps.token.outputs.app-slug }}
         run: python -m tools.update.queue
 
   due:

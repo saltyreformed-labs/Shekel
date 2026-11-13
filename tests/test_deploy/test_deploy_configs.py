@@ -21,8 +21,9 @@ import subprocess
 from pathlib import Path
 
 import pytest
+import yaml
 
-from tests.test_deploy._compose import BASE_COMPOSE, NGINX_TEST_IMAGE
+from tests.test_deploy._compose import BASE_COMPOSE, NGINX_TEST_IMAGE, service
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEPLOY_DIR = REPO_ROOT / "deploy"
@@ -378,3 +379,29 @@ class TestDeployComposeParses:
             "nginx service does not declare the 'disabled' profile when "
             "rendered with --profile disabled; the override is malformed"
         )
+
+
+class TestWudWatchesTheProductionContainers:
+    """WUD, the homelab's update watcher, watches only a container labelled ``wud.watch=true``
+    (opt-in since 2026-07-04), so these labels are what make it report an update to the
+    database, Valkey or the app (ruling plan#3725): by tag and by digest, as Postgres's
+    ``18-alpine`` and Valkey's exact tags are rebuilt in place, and the app's ``latest`` moves
+    with every build."""
+
+    #: The services ruling plan#3725 has WUD watch.
+    WATCHED = ("db", "valkey", "app")
+
+    def test_each_is_watched_by_tag_and_by_digest(self) -> None:
+        """Each service's ``wud.watch`` labels are exactly the two, each ``true``."""
+        for name in self.WATCHED:
+            watch = [label for label in service(name)["labels"]
+                     if label.startswith("wud.watch")]
+            assert watch == ["wud.watch=true", "wud.watch.digest=true"], name
+
+    def test_the_production_override_leaves_their_labels(self) -> None:
+        """The production override sets no labels on them, so none of the base's is replaced
+        when compose merges the two on the host."""
+        with PROD_COMPOSE_OVERRIDE.open(encoding="utf-8") as fh:
+            override = yaml.safe_load(fh)["services"]
+        for name in self.WATCHED:
+            assert "labels" not in override.get(name, {}), name

@@ -243,10 +243,10 @@ def load_loan_stream(
     records (:func:`_ledger_walks`), which takes every fact.  Nothing here
     reads the clock.
 
-    **The visibility bound, stated once.**  A payment enters iff its cash
-    had moved by *visible_by* -- its SETTLED day, the one
-    clock (:func:`._events.confirmed_shadows_through`, the same set the
-    balance readers count as confirmed) -- and an assertion iff its own date
+    **The visibility bound, stated once.**  A payment enters iff it is
+    visible by *visible_by* -- its SETTLED day, the one clock, or a ``$0.00``
+    close's installment (:func:`._events.confirmed_shadows_through`, the same
+    set the balance readers count as confirmed) -- and an assertion iff its own date
     has arrived (:func:`._visible.anchor_visible_on`), EXCEPT the opening,
     which always enters: a loan's origination assertion is a term of the
     note -- the balance it will owe the day it closes, synthesized from the
@@ -264,10 +264,12 @@ def load_loan_stream(
     last fact that enters (:func:`._replay.with_contract_charges`, ruling
     R-R100), so a dropped payment leaves its installment charged and unpaid
     exactly as a never-recorded one would.  For a pass whose
-    ``as_of`` is on or after every recorded fact -- every production pass,
-    and the only shape the write doors admit (ruling R-EJ refuses a future
-    settle day; the anchor doors bound their date) -- the bound drops nothing
-    and this is the ledger's own stream.
+    ``as_of`` is on or after every recorded fact the bound drops nothing and
+    this is the ledger's own stream.  Every production pass is one (ruling
+    R-EJ refuses a future settle day; the anchor doors bound their date) but
+    for a ``$0.00`` close stated before the installment it skips: it stores
+    no settle day and enters from that installment (ruling R-R107), so a
+    pass before it does not hold it, and neither does the balance.
 
     **"Every production pass" is a CENSUS, not a construction** (2026-09-30,
     plan step recurrence:R16-c-2's ruling R-R117): this function's one caller

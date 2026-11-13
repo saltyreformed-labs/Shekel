@@ -26,7 +26,6 @@ from app.utils.dates import (
     grid_month_on_or_after,
     grid_month_on_or_before,
     grid_months_within,
-    has_settled_by,
     month_ordinal,
     months_between,
     pay_period_label,
@@ -321,58 +320,6 @@ class TestDisplayToday:
 
         monkeypatch.setattr("app.utils.dates.datetime", _FixedDateTime)
         assert display_today() == date(2026, 6, 12)
-
-
-class TestHasSettledBy:
-    """Pins the ONE "had this cash moved yet?" cut (plan step X-an, N-187).
-
-    ``balance_predicates.settled_day``'s companion: that one answers WHICH day
-    a settled row's money moved, this one answers whether the day had arrived.
-    The loan resolver partitions its payment feed into a replayed HISTORY half
-    and a projected PLAN half, and both call this, so the rule has one spelling
-    rather than two that happen to agree.
-
-    The two take OPPOSITE positions on a missing day and that is the contract
-    worth pinning: ``settled_day`` refuses, because its caller holds a row it
-    believes settled; this one answers ``False``, because its callers classify a
-    mixed feed in which a projected row legitimately carries none.
-    """
-
-    def test_a_day_before_the_evaluation_date_has_settled(self):
-        """Cash that moved yesterday has moved."""
-        assert has_settled_by(date(2026, 5, 8), date(2026, 5, 9)) is True
-
-    def test_the_boundary_is_INCLUSIVE(self):
-        """Cash that moved today has moved.
-
-        The fold counts a payment's principal from its settled day itself
-        (``loan_ledger.dated_deltas`` prefix-sums at ``visible_on <= as_of``),
-        so an exclusive bound here would put the resolver one day behind the
-        ledger on every same-day read -- the very drift this predicate exists
-        to remove.
-        """
-        assert has_settled_by(date(2026, 5, 9), date(2026, 5, 9)) is True
-
-    def test_a_day_after_the_evaluation_date_has_not_settled(self):
-        """Cash moving tomorrow had not moved today.
-
-        Reachable on any read of a PAST date, which is where the pay-period
-        proxy this replaced counted a payment the ledger did not (N-187's late
-        half).
-        """
-        assert has_settled_by(date(2026, 5, 10), date(2026, 5, 9)) is False
-
-    def test_no_day_means_not_settled_at_any_date(self):
-        """A payment that has not happened is historical at no date.
-
-        Answering ``False`` rather than raising is what lets ONE predicate
-        classify the whole mixed feed: a Projected loan payment carries no day,
-        and its cash has not moved, so the forward projection owns it.  Probed
-        far past any plausible evaluation date so the answer cannot be an
-        artifact of the comparison.
-        """
-        assert has_settled_by(None, date(2026, 5, 9)) is False
-        assert has_settled_by(None, date(2999, 12, 31)) is False
 
 
 class TestPayPeriodRangeLabel:

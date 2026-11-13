@@ -30,6 +30,7 @@ from decimal import Decimal
 from app.enums import FilingStatusEnum
 from app.tax_law import _north_carolina
 from app.tax_law._types import (
+    FederalCredits,
     FederalRules,
     FicaRules,
     TaxYearLaw,
@@ -56,9 +57,6 @@ SOURCES = (
 _FEDERAL = {
     FilingStatusEnum.SINGLE: FederalRules(
         standard_deduction=Decimal("16600.00"),
-        child_credit_amount=Decimal("2300.00"),
-        other_dependent_credit_amount=Decimal("500.00"),
-        child_credit_refundable_cap=Decimal("1800.00"),
         brackets=ladder(
             ("0.00", "12800.00", "0.1000"),
             ("12800.00", "52025.00", "0.1200"),
@@ -71,9 +69,6 @@ _FEDERAL = {
     ),
     FilingStatusEnum.MARRIED_JOINTLY: FederalRules(
         standard_deduction=Decimal("33200.00"),
-        child_credit_amount=Decimal("2300.00"),
-        other_dependent_credit_amount=Decimal("500.00"),
-        child_credit_refundable_cap=Decimal("1800.00"),
         brackets=ladder(
             ("0.00", "25600.00", "0.1000"),
             ("25600.00", "104050.00", "0.1200"),
@@ -86,9 +81,6 @@ _FEDERAL = {
     ),
     FilingStatusEnum.MARRIED_SEPARATELY: FederalRules(
         standard_deduction=Decimal("16600.00"),
-        child_credit_amount=Decimal("2300.00"),
-        other_dependent_credit_amount=Decimal("500.00"),
-        child_credit_refundable_cap=Decimal("1800.00"),
         brackets=ladder(
             ("0.00", "12800.00", "0.1000"),
             ("12800.00", "52025.00", "0.1200"),
@@ -101,9 +93,6 @@ _FEDERAL = {
     ),
     FilingStatusEnum.HEAD_OF_HOUSEHOLD: FederalRules(
         standard_deduction=Decimal("24925.00"),
-        child_credit_amount=Decimal("2300.00"),
-        other_dependent_credit_amount=Decimal("500.00"),
-        child_credit_refundable_cap=Decimal("1800.00"),
         brackets=ladder(
             ("0.00", "18250.00", "0.1000"),
             ("18250.00", "69650.00", "0.1200"),
@@ -115,6 +104,12 @@ _FEDERAL = {
         ),
     ),
 }
+
+_CREDITS = FederalCredits(
+    child_credit_amount=Decimal("2300.00"),
+    other_dependent_credit_amount=Decimal("500.00"),
+    child_credit_refundable_cap=Decimal("1800.00"),
+)
 
 _FICA = FicaRules(
     ss_rate=Decimal("0.0620"),
@@ -128,6 +123,7 @@ YEAR_2027 = TaxYearLaw(
     tax_year=2027,
     sources=SOURCES,
     federal=_FEDERAL,
+    federal_credits=_CREDITS,
     fica=_FICA,
     states={"NC": _north_carolina.state_year("0.0349")},
 )

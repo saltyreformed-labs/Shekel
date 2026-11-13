@@ -371,7 +371,8 @@ class TestTotpReplayPreventionAtMfaDisable:
                 "totp_code": fresh_code,
             }, follow_redirects=False)
             assert response.status_code == 302
-            assert "/settings" in response.headers.get("Location", "")
+            # The Security page, /security since ruling plan#3435.
+            assert response.headers.get("Location", "") == "/security"
 
             mfa_config = (
                 db.session.query(MfaConfig)

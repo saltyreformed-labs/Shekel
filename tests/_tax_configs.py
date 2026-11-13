@@ -13,7 +13,7 @@ It was the app's ``tax_config_service.load_tax_configs_for_year`` until the
 Taxes tab's report, its last caller there, began reading its law off the
 primary profile's pricer.  A production function with only test callers is
 the shape ruling P54 names, so it lives here; its own module because
-``tests/_test_helpers.py`` is past the 1,000-line ceiling (ruling R-IR).
+``tests/_test_helpers.py`` was past the 1,000-line ceiling (ruling R-IR).
 
 **A test that builds a config set or a paycheck's tax lines BY HAND** -- with
 fake rules, to price exact figures -- builds it through :func:`hand_built_law`
@@ -24,12 +24,13 @@ is a faithful stand-in for the resolver's only when it carries one.
 """
 
 from app.services.tax_config_service import (
+    FederalTaxRules,
     StateTaxRules,
     TaxLawBasis,
     configs_by_year,
     profile_tax_series,
 )
-from app.tax_law import FederalRules, FicaRules
+from app.tax_law import FicaRules
 
 
 def tax_configs_for(profile, tax_year: int) -> dict[str, object]:
@@ -72,7 +73,7 @@ def own_year_rules(tax_year: int) -> TaxLawBasis:
 
 def hand_built_law(
     tax_year: int, *,
-    bracket_set: FederalRules | None,
+    bracket_set: FederalTaxRules | None,
     state_config: StateTaxRules | None,
     fica_config: FicaRules | None,
 ) -> dict[str, object]:

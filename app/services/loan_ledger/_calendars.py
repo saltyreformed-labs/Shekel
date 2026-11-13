@@ -55,8 +55,8 @@ def build_loan_calendar(
     (:func:`app.services.loan_resolver.resolve_periods` over the loan's rate
     history) and its escrow lines with their full version history.  It reads
     the loan's TERMS and never its payment rows, so pricing a payment cannot
-    read the payments it prices (``test_loan_payment_service
-    .test_the_contractual_payment.TestALoansPriceDoesNotReadItsOwnPayments``).
+    read the payments it prices (``test_a_loans_price_reads_its_terms
+    .TestALoansPriceDoesNotReadItsOwnPayments``).
 
     **Pure since plan task plan#2649**: it loaded the rate history and the
     escrow lines itself, one loan at a time, so a read of every loan an owner

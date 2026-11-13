@@ -3,7 +3,7 @@
 Its callers are the route-helper suites under ``tests/test_routes/``
 (``test_recurrence_form_helpers/`` and ``test_recurrence_form_derived_stop.py``),
 so it lives beside them rather than in ``tests/_test_helpers.py``, which stood
-past the 1,000-line ceiling (10,083 lines on 2026-11-10) and takes no new lines
+past the 1,000-line ceiling (10,083 lines on 2026-11-10) and took no new lines
 (rulings R-IR, R-BAL301).  Plan step R7e added it there; task plan#3414 moved
 it here, with its import at module scope.  That module defers its app imports
 because some of its importers run before the Flask app exists; the route

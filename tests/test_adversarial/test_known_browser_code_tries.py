@@ -47,7 +47,7 @@ from tests._limited_app import (
     limited_app, signed_in_browser, stolen_session, through_nginx,
 )
 from tests._test_helpers import enable_mfa
-from tests.conftest import SEED_USER_EMAIL, SEED_USER_PASSWORD
+from tests._seed_owner_fixtures import SEED_USER_EMAIL, SEED_USER_PASSWORD
 
 _SECOND_EMAIL = "second@shekel.local"
 _SECOND_PASSWORD = "secondpass12"

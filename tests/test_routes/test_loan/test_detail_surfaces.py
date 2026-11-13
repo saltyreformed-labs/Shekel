@@ -18,7 +18,7 @@ from tests._test_helpers import (
     freeze_today,
     make_loan_payment_template,
 )
-from tests.conftest import log_in_seed_user
+from tests._seed_owner_fixtures import log_in_seed_user
 from tests.oracles.recurrence_baseline import MONTHLY
 
 from ._helpers import (

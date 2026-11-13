@@ -19,6 +19,7 @@ from app.models.transaction_entry import TransactionEntry
 from app.models.user import User, UserSettings
 from app.services.auth_service import verify_password
 from app.exceptions import AuthError
+from tests._companions import another_owners_companion
 from tests._sign_in import stranger_signs_in
 from tests._test_helpers import figure_source_columns, generate_row_of, make_expense_template
 
@@ -771,21 +772,8 @@ class TestCompanionMgmtGuards:
         _load_companion_or_404 rejects any target whose
         linked_owner_id does not match current_user.id.
         """
-        # Create a companion owned by second_user (not the auth_client owner).
-        from app.services.auth_service import hash_password  # noqa
-
-        foreign_companion = User(
-            email="foreign@shekel.local",
-            password_hash=hash_password("foreignpass"),
-            display_name="Foreign Companion",
-            role_id=ref_cache.role_id(RoleEnum.COMPANION),
-            linked_owner_id=second_user["user"].id,
-        )
-        db.session.add(foreign_companion)
-        db.session.flush()
-        db.session.add(UserSettings(user_id=foreign_companion.id))
-        db.session.commit()
-        foreign_id = foreign_companion.id
+        # A companion owned by second_user (not the auth_client owner).
+        foreign_id = another_owners_companion(second_user["user"].id)
 
         # auth_client (seed_user owner) tries to edit.
         resp = auth_client.post(
@@ -807,20 +795,7 @@ class TestCompanionMgmtGuards:
         self, auth_client, db, seed_user, second_user,
     ):
         """Cross-owner deactivation is blocked by linked_owner_id guard."""
-        from app.services.auth_service import hash_password  # noqa
-
-        foreign_companion = User(
-            email="foreign@shekel.local",
-            password_hash=hash_password("foreignpass"),
-            display_name="Foreign Companion",
-            role_id=ref_cache.role_id(RoleEnum.COMPANION),
-            linked_owner_id=second_user["user"].id,
-        )
-        db.session.add(foreign_companion)
-        db.session.flush()
-        db.session.add(UserSettings(user_id=foreign_companion.id))
-        db.session.commit()
-        foreign_id = foreign_companion.id
+        foreign_id = another_owners_companion(second_user["user"].id)
 
         resp = auth_client.post(
             f"/settings/companions/{foreign_id}/deactivate",
@@ -952,25 +927,13 @@ class TestCompanionSectionRendering:
         assert b"Edit Companion Account" not in resp.data
 
     def test_edit_query_param_ignores_foreign_companion(
-        self, auth_client, db, seed_user, second_user,
+        self, auth_client, seed_user, second_user,
     ):
         """Cannot open the edit form for another owner's companion via ?edit=<id>."""
-        from app.services.auth_service import hash_password  # noqa
-
-        foreign = User(
-            email="foreign@shekel.local",
-            password_hash=hash_password("foreignpass"),
-            display_name="Foreign",
-            role_id=ref_cache.role_id(RoleEnum.COMPANION),
-            linked_owner_id=second_user["user"].id,
-        )
-        db.session.add(foreign)
-        db.session.flush()
-        db.session.add(UserSettings(user_id=foreign.id))
-        db.session.commit()
+        foreign_id = another_owners_companion(second_user["user"].id)
 
         resp = auth_client.get(
-            f"/settings?section=companions&edit={foreign.id}",
+            f"/settings?section=companions&edit={foreign_id}",
         )
         assert resp.status_code == 200
         # Falls back to create form because the foreign row is never
@@ -991,12 +954,6 @@ class TestSettingsRegression:
         resp = auth_client.get("/settings?section=general")
         assert resp.status_code == 200
         assert b"General Settings" in resp.data
-
-    def test_security_section_still_loads(self, auth_client):
-        """?section=security continues to render."""
-        resp = auth_client.get("/settings?section=security")
-        assert resp.status_code == 200
-        assert b"Change Password" in resp.data
 
     def test_settings_update_still_works(self, auth_client, db, seed_user):
         """POST /settings (user preferences update) is unaffected."""

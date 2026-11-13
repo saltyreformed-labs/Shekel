@@ -37,7 +37,6 @@ from app import ref_cache
 from app.enums import InterestAccrualConventionEnum
 from app.services import debt_strategy_service, loan_resolver
 from app.services.amortization_engine import (
-    PaymentDates,
     PeriodTerms,
     ProjectionInputs,
     RateChangeRecord,
@@ -53,7 +52,6 @@ from app.services.loan_ledger import (
     with_contract_charges,
 )
 from app.services.loan_ledger._charges import contract_charges
-from app.services.rate_period_engine import BalanceAnchor, replay_schedule
 from app.utils import money
 from app.utils.money import installment_interest
 from tests._test_helpers import create_loan_account
@@ -67,11 +65,12 @@ _PRINCIPAL = Decimal("100000.00")
 _REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
 
 #: Every module that calls the one interest producer, by the walk it is: the
-#: posted ledger's replay, the contractual schedule (its replay rows and its
-#: walk between two rate periods), the forward projection, and the payoff
-#: strategy.  :class:`TestTheSpiesSeeEveryCaller` holds this to the modules
-#: that hold the producer, by identity, so a sixth module cannot bind it under
-#: any name unspied.
+#: posted ledger's replay, the contractual schedule (its walk between two rate
+#: periods), the forward projection, and the payoff strategy.
+#: :class:`TestTheSpiesSeeEveryCaller` holds this to the modules that hold the
+#: producer, by identity, so a fifth module cannot bind it under any name
+#: unspied.  *The schedule's replay rows (``rate_period_engine.replay_schedule``)
+#: charged through it too until plan step recurrence:R16-e deleted that walk.*
 _WALKS = {
     "replay": "app.services.loan_ledger._replay",
     "schedule": "app.services.rate_period_engine",
@@ -323,37 +322,6 @@ class TestEveryWalkHandsTheProducerTheLoansConvention:
             for call in producer_calls["replay"]
         )
 
-    def test_the_schedule_replay_charges_each_payment_under_it(
-        self, producer_calls, sentinel_convention,
-    ):
-        """``rate_period_engine._replay_payment_row``: each payment's installment window.
-
-        One period, so building it walks nothing forward and every call
-        recorded is a replayed row's: Feb 1's and Mar 1's.
-        """
-        periods = loan_resolver.resolve_periods(_params(), _origination_rate())
-        assert producer_calls["schedule"] == []
-
-        replay_schedule(
-            periods=periods,
-            anchor=BalanceAnchor(balance=_PRINCIPAL, as_of_date=_ORIGINATION),
-            payments=[
-                PaymentDates(period_start=due, due_date=due, settled_on=due)
-                for due in (date(2026, 2, 1), date(2026, 3, 1))
-            ],
-            payment_day=1,
-            as_of=date(2026, 3, 1),
-        )
-
-        assert _windows(producer_calls["schedule"]) == [
-            (date(2026, 1, 1), date(2026, 2, 1)),
-            (date(2026, 2, 1), date(2026, 3, 1)),
-        ]
-        assert all(
-            call.convention is sentinel_convention
-            for call in producer_calls["schedule"]
-        )
-
     def test_the_walk_between_two_periods_charges_under_it(
         self, producer_calls, sentinel_convention,
     ):
@@ -486,7 +454,7 @@ class TestEveryWalkHandsTheProducerTheLoansConvention:
     def test_the_payoff_strategy_charges_each_simulated_month(
         self, producer_calls, sentinel_convention,
     ):
-        """``debt_strategy_service._accrue_interest``: month ``m`` is the month ending ``m`` months in.
+        """``debt_strategy_service._accrue_interest``: month ``m`` ends ``m`` months in.
 
         Started Jan 31, 2026, so the windows re-clamp from the meant day: the
         month to Feb 28, then the month to Mar 31.  A debt carrying the

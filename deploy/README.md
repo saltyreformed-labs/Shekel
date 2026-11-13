@@ -158,10 +158,10 @@ truth.
    ```
 
 A change that needs more than a copy (a renamed `.env` variable, a new file under `secrets/`)
-carries host steps of its own, in `docs/runbook.md` 2.6, which `/release` runs.
+carries host steps of its own, in `docs/runbook/2_deployment.md` 2.6, which `/release` runs.
 
-See `docs/runbook.md` -> "Shared-mode deployment" for full details including the rollback procedure
-and the planned `scripts/config_audit.py` drift check.
+See `docs/runbook/2_deployment.md` -> "Shared-mode deployment" for full details including the
+rollback procedure and the planned `scripts/config_audit.py` drift check.
 
 ## Image Digest Pinning (Commit C-36)
 

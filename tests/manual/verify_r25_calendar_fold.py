@@ -299,7 +299,13 @@ def pure_semi_monthly():
 
 
 def pure_loan_engines():
-    """The rate engine's boundaries, the projection, the slots and both calculators."""
+    """The rate engine's boundaries, the projection and both calculators.
+
+    The schedule-slot walk (``amortization_engine.schedule_dates``) was
+    digested here too, between the projection and the payoff calculator,
+    until plan task plan#3389 deleted it (plan step recurrence:R16-e), so
+    this tree prints one ``PURE`` line fewer than R25's base and branch.
+    """
     periods_digest = _Digest("build_rate_periods")
     for ordinal in MONTHS[:612]:
         for day in (1, 15, 28, 29, 30, 31):
@@ -357,13 +363,6 @@ def pure_loan_engines():
                     for row in rows
                 ])
     print(projection.line())
-
-    slots = _Digest("schedule_dates")
-    for day in DAYS[::5]:
-        for nominal in NOMINAL_DAYS:
-            slots.add(amortization_engine.schedule_dates([day, day], nominal))
-            slots.add(amortization_engine.schedule_dates([day] * 4, nominal))
-    print(slots.line())
 
     payoff = _Digest("calculate_payoff_by_date")
     for ordinal in MONTHS[200:560:4]:

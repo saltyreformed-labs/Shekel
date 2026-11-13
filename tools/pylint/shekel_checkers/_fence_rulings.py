@@ -105,10 +105,13 @@ _LOAN_LEDGER_DEFINING_MODULES = frozenset({
 # The loan-payment LOADER module (plan step D3, from its adversarial review).
 # Its PRIVILEGE is gone -- plan step E1d-b took it off the reader allowlist above
 # with ``confirmed_loan_view`` -- but the scope STAYS, because privilege was never
-# the only reason: this is a public module holding every ingredient of a loan
-# balance (the payment feed, the escrow-netted amounts, the contractual P&I, the
-# whole loaded ``LoanContext``) OUTSIDE W9910's protection, exactly like
-# ``loan_ledger`` and the ``loan_resolver`` tier beside it.  The measured shape
+# the only reason: this is a public module holding ingredients of a loan
+# balance (the loaded ``LoanContext``: the rate-change feed and the escrow
+# lines) OUTSIDE W9910's protection, exactly like ``loan_ledger`` and the
+# ``loan_resolver`` tier beside it.  It held the payment feed, the
+# escrow-netted amounts and the contractual P&I too until plan task plan#3388
+# deleted them (ruling R-R93), and it is one module rather than a package since
+# that task; the key is exact either way.  The measured shape
 # that put it here: a documented public wrapper ``loan_balance_for_tile()``
 # returning ``confirmed_loan_balance_at(...)`` rated 10.00/10 under the full
 # fail-on set (the N-28 shape).  Dropping the scope now would be a LOOSENING
@@ -556,9 +559,14 @@ _FENCED_MODULE_RULINGS = {
             #     and what comes back is still keyed by contract time.
             #   * ``projection_boundary`` returns a ``date`` -- the day after the
             #     loan's latest recorded fact -- and cannot yield a figure.
+            #   * ``latest_recorded_on`` (recurrence:R16-e, ruling plan#3382)
+            #     returns that fact's own ``date``, the one statement
+            #     ``projection_boundary`` steps a day past; it cannot yield a
+            #     figure either.
             #   * ``with_contract_charges`` (recurrence:R16-c-2, ruling R-R100)
             #     returns a stream with its charges attached -- the stream
             #     ruling above plus ``contract_charges``' -- before any replay.
+            "latest_recorded_on",
             "projection_boundary",
             "replay_loan_stream",
             "with_contract_charges",
@@ -614,19 +622,12 @@ _FENCED_MODULE_RULINGS = {
             # since plan step balance:X-bi-6-4b.  It selects records, and
             # carries no balance of any kind.
             "confirmed_shadows_through",
-            # The payment feed's DATE half (plan step balance:X-bl-2a).  It
-            # returns dates and nothing else, and that is structural rather than
-            # incidental: ``PaymentInstallment`` has no money field to fill.  It
-            # selects the loan's payments -- each a leg of its transfer since
-            # plan step balance:X-bi-6-4b -- and states each one's three dates:
-            # the same ruling ``confirmed_shadows_through`` carries, over the
-            # same payments.  It hands back the leg, whose transfer and record
-            # are ORM rows, so a figure is reachable by relationship exactly as
-            # it is from that loader; what it cannot do is sum one, which is
-            # the fence's subject.  (``schedule_dates``, the
-            # slot assignment, is NOT here: it lives in the unfenced pure engine
-            # ``amortization_engine``, which no scoped package covers.)
-            "payment_installments",
+            # ``payment_installments``, the payment feed's DATE half (plan step
+            # balance:X-bl-2a), was ruled here on that loader's ground until
+            # plan task plan#3389 deleted it (plan step recurrence:R16-e).  Its
+            # entry goes in the same edit, for the reason the
+            # ``row_valuation`` entry gives: a ruling for a name the module no
+            # longer defines would un-fence whatever later takes the name.
         }),
     ),
     # The genesis loan-ledger package.  Scoped WHOLE, not one submodule: a new
@@ -778,22 +779,21 @@ _FENCED_MODULE_RULINGS = {
     # was "the one reader-allowlisted module outside the defining package" until
     # plan step E1d-b took it off that allowlist with ``confirmed_loan_view``; the
     # scope stays on the surviving ground (see the constant's comment): a PUBLIC
-    # module holding every ingredient of a loan balance -- the payment feed, the
-    # escrow-netted amounts, the contractual P&I, the whole loaded
+    # module holding ingredients of a loan balance -- the whole loaded
     # ``LoanContext`` -- outside W9910's protection, so a public balance wrapper
     # born here would still be the N-28 shape.
     "app.services.loan_payment_service": (frozenset(), frozenset({
-        # The unified loan-context loader: params, payments, rate changes,
-        # escrow lines -- inputs a resolution is built FROM, no balance.
+        # The loan-context loader: rate changes and escrow lines -- inputs a
+        # resolution is built FROM, no balance.
         "load_loan_context",
-        # Payment ROWS (the transfer-shadow feed), chronological -- records,
-        # not a balance.
-        "get_payment_history",
-        # The contractual P&I sizing rule -- a payment amount, not a balance.
-        "compute_contractual_pi",
-        # PaymentRecord adaptation for the amortization engine -- shaping, no
-        # figure of any kind.
-        "prepare_payments_for_engine",
+        # ``get_payment_history`` (the payment ROWS, priced), ``compute_contractual_pi``
+        # (the contractual P&I sizing rule) and ``prepare_payments_for_engine``
+        # (the escrow-subtraction floor and the slot assignment) were ruled here
+        # as non-producers until plan task plan#3388 DELETED all three with the
+        # payment list (ruling R-R93).  Their entries go in the same edit: a
+        # ruling for a name its module no longer defines would silently un-fence
+        # whatever name later takes it (findings N-28 / N-31), which is what
+        # ``test_classification_sets_match_the_real_fenced_modules`` catches.
         # ``live_cash`` / ``derive_cash`` / ``config_by_transfer`` /
         # ``loan_pricing`` were ruled HERE until plan step X-au-g-2a moved
         # amount rule 4's producer down into ``cash_ledger`` -- and X-au-g-2c-2
@@ -853,13 +853,16 @@ _FENCED_MODULE_RULINGS = {
         # interest.  Its balance field was DELETED at plan step D2a; the
         # schedule rows it carries are the sanctioned display class.
         "resolve_loan",
-        # The scenario composer: replayed history rows + projected forward
-        # slices (schedule ROWS and aggregate interest, no balance-at-T).
+        # The scenario composer: the confirmed view's history rows + projected
+        # forward slices (schedule ROWS and aggregate interest, no balance-at-T).
         "compute_payoff_scenarios",
-        # Rate-period machinery: the level P&I and the annual rate of the
-        # period containing a date -- contract terms, not balances.
-        "compute_monthly_payment_baseline",
-        "current_rate_baseline",
+        # Rate-period machinery: the period set and the projection's terms
+        # off it -- contract terms, not balances.  The level P&I and the
+        # annual rate of the period containing a date
+        # (``compute_monthly_payment_baseline``, ``current_rate_baseline``)
+        # were ruled here too until plan task plan#3498 deleted them
+        # (ruling plan#3496); their entries go in the same edit, for the
+        # reason the ``row_valuation`` entry gives.
         "resolve_periods",
         "engine_terms",
         # How the note accrues interest: the stored convention id read back as

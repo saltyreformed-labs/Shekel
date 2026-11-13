@@ -10,7 +10,7 @@ from app.services import loan_ledger, transfer_service
 from app.services.cash_ledger import amounts_by_key, derived_amount_basis
 from app.services.transfer_legs import leg_of
 from tests._test_helpers import transfer_amount, transfer_side_figure
-from tests.test_integration.test_transfer_settle_freeze import _derived_loan_transfer
+from tests.test_integration.test_transfer_settle_freeze._helpers import _derived_loan_transfer
 from app.models.amount_ownership import AmountOwnership
 from app.services import template_amount_service
 

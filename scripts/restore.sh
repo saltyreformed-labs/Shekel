@@ -353,9 +353,11 @@ restore_backup() {
 
 hand_over_to_owner() {
     # The dump is taken --no-owner --no-privileges (backup.sh), so every
-    # object the restore made is the superuser's and holds no grant.  The
-    # database container's provisioning script, the caller its header names
-    # for this case, hands each one to the owner, shekel_owner, whose deploy
+    # object the restore made is the superuser's and holds no grant, schema
+    # public among them, which the dump drops and makes again.  The database
+    # container's provisioning script, the caller its header names for this
+    # case, hands each one to the owner, shekel_owner, and gives public back
+    # to pg_database_owner, as a fresh database has it; the owner's deploy
     # (the start below) then grants the web login.
     log "INFO" "Handing the restored database to the owner login: ${PROVISION_ROLES}"
     "${HAND_OVER[@]}"

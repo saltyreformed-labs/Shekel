@@ -531,6 +531,36 @@ class TestTheDeploysSqlRunsAsTheOwner:
             assert written.returncode == 0, written.stderr
             assert written.stdout.strip() == "Savings"
 
+    def test_on_a_restored_database_public_is_a_fresh_ones_again(
+        self, tmp_path: Path,
+    ) -> None:
+        """A backup names ``public`` (``scripts/backup.sh``'s ``--schema=public``, with
+        ``--clean``), so its restore drops it and makes it again, as the superuser who runs it,
+        with no grant: the dump's own ``DROP SCHEMA IF EXISTS public`` and ``CREATE SCHEMA
+        public`` (measured 2026-11-13, finding plan#3735).  Once handed over, ``public`` has a
+        fresh database's owner and grants again, and the deploy's SQL, which creates in it,
+        runs as the owner; a second run changes nothing."""
+        owner, app = _password(), _password()
+        with _started(tmp_path, OWNER_ROLE_PASSWORD=owner, APP_ROLE_PASSWORD=app) as cluster:
+            shape = ("SELECT pg_get_userbyid(nspowner), nspacl FROM pg_namespace "
+                     "WHERE nspname = 'public'")
+            fresh = cluster.superuser(shape)
+            cluster.superuser("DROP SCHEMA IF EXISTS public; CREATE SCHEMA public;"
+                              + _APP_SHAPED_SCHEMA)
+            assert cluster.superuser(shape) == f"{_SUPERUSER}|"
+
+            ran = cluster.provision()
+
+            assert ran.returncode == 0, ran.stderr
+            # 8 as the superuser-built database's (two schemas, four tables, two functions),
+            # and public: 9.
+            assert "9 object(s) handed to shekel_owner" in ran.stderr
+            assert cluster.superuser(shape) == fresh
+            self._deploy_sql(cluster, owner)
+            again = cluster.provision()
+            assert again.returncode == 0, again.stderr
+            assert "0 object(s) handed to shekel_owner" in again.stderr
+
     def test_a_database_without_the_web_login_stops_at_its_first_grant(
         self, tmp_path: Path,
     ) -> None:

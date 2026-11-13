@@ -20,7 +20,10 @@
 # findings OPS/SH-03 and OPS/SH-07.
 
 # ── Schema set (single source of truth) ──────────────────────────
-# public  -- alembic_version (migration state); always exists, never CREATEd
+# public  -- alembic_version (migration state).  Named here, so a --clean
+#            dump drops it and makes it again, and a restore as the superuser
+#            leaves it the superuser's: the hand-over gives it back
+#            (deploy/postgres/provision_roles.sh, finding plan#3735)
 # ref     -- lookup/reference tables
 # auth    -- users, sessions, MFA
 # budget  -- pay periods, transactions, accounts, templates
@@ -38,7 +41,7 @@ shekel_pg_dump_schema_flags() {
 }
 
 # Echo the CREATE SCHEMA IF NOT EXISTS statements for the app schemas
-# (public is owned by postgres and always present).
+# (every new database already holds public).
 shekel_create_schema_sql() {
     local schema
     for schema in "${SHEKEL_APP_SCHEMAS[@]}"; do

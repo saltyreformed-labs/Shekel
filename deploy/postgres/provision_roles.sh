@@ -113,8 +113,8 @@ END
 $$;
 
 -- The owner owns the database and everything in it outside the system
--- catalogs.  "public" stays pg_database_owner's, which makes the database's
--- owner its owner without a change.
+-- catalogs.  "public" is pg_database_owner's, which makes the database's
+-- owner its owner without a change of its own.
 DO $$
 DECLARE
     owner_oid CONSTANT oid := 'shekel_owner'::regrole;
@@ -134,6 +134,19 @@ BEGIN
         EXECUTE format('ALTER SCHEMA %I OWNER TO shekel_owner', item.nspname);
         handed := handed + 1;
     END LOOP;
+
+    -- A fresh database's "public" is pg_database_owner's, with USAGE for
+    -- PUBLIC.  A backup names it (backup.sh's --schema=public, with --clean),
+    -- so its restore drops it and makes it again as the superuser who runs
+    -- it, with no grant, and the owner cannot create in it (finding
+    -- plan#3735).  Given back here, the fresh database's grant with it, so a
+    -- restored database's "public" is a fresh one's, owner and grants alike.
+    IF (SELECT nspowner FROM pg_namespace WHERE nspname = 'public')
+            <> 'pg_database_owner'::regrole THEN
+        ALTER SCHEMA public OWNER TO pg_database_owner;
+        GRANT USAGE ON SCHEMA public TO PUBLIC;
+        handed := handed + 1;
+    END IF;
 
     FOR item IN
         SELECT c.oid::regclass AS relation FROM pg_class c

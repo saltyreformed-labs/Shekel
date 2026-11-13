@@ -7,51 +7,41 @@ Section 4 of the runbook, whose contents and quick reference are
 
 ### 4.1 Secret Inventory
 
-The application requires three secrets for production operation. All are stored in `.env` on the
-Proxmox host.
-
-| Secret | Purpose | Generation Command |
-|--------|---------|-------------------|
-| `SECRET_KEY` | Flask session cookie encryption | `python -c "import secrets; print(secrets.token_hex(32))"` |
-| `TOTP_ENCRYPTION_KEY` | Fernet encryption of TOTP secrets in database | `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"` |
-| `POSTGRES_PASSWORD` | PostgreSQL database authentication | Any strong password generator |
-
-For complete secret rotation procedures, see `docs/runbook_secrets.md`.
+The secrets, which service holds each, and where each is kept are `docs/runbook_secrets.md`'s Secret
+Inventory, their one home: the session key, the TOTP keys, and the three database passwords (the
+superuser's, which never leaves the database container; the owner's, the deploy's; the web login's,
+the app's). Production keeps each in a file under `/opt/docker/shekel/secrets/`, and `.env` holds a
+placeholder for it.
 
 ### 4.2 Rotating SECRET_KEY
 
-1. Generate a new key: `python -c "import secrets; print(secrets.token_hex(32))"`
-2. Update `SECRET_KEY` in `.env`
-3. Restart the app: `docker compose restart app`
-4. **Impact:** All active sessions are invalidated. Users must log in again.
+`docs/runbook_secrets.md`, "Rotating SECRET_KEY", then its session invalidation. **Impact:** all
+active sessions are invalidated; users must log in again.
 
 ### 4.3 Rotating TOTP_ENCRYPTION_KEY
 
-**WARNING: Changing this key makes ALL existing MFA enrollments unreadable.**
+`docs/runbook_secrets.md`, "Rotating TOTP_ENCRYPTION_KEY": non-destructive, as the retired key
+decrypts until every secret is re-encrypted, so no user re-enrolls.
 
-1. Disable MFA for all users: `docker exec shekel-prod-app python scripts/reset_mfa.py --all`
-2. Generate a new key:
-   `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`
-3. Update `TOTP_ENCRYPTION_KEY` in `.env`
-4. Restart the app: `docker compose restart app`
-5. Users re-enroll MFA via Settings > Security
+### 4.4 Rotating the database passwords
 
-### 4.4 Rotating POSTGRES_PASSWORD
-
-1. Generate a new password
-2. Update `POSTGRES_PASSWORD` in `.env`
-3. Restart both containers: `docker compose down && docker compose up -d`
+`docs/runbook_secrets.md`, "Rotating APP_ROLE_PASSWORD and OWNER_ROLE_PASSWORD" for the two logins,
+which the database container's provisioning script sets, and "Rotating POSTGRES_PASSWORD" for the
+superuser's, set by hand in that container.
 
 ### 4.5 Resetting MFA for a User
 
 **When:** A user has lost their TOTP device and exhausted all backup codes.
 
 ```bash
-# SSH into the Proxmox host.
-docker exec shekel-prod-app python scripts/reset_mfa.py admin@shekel.local
+# SSH into the Proxmox host.  The reset asks y/N before it changes anything.
+cd /opt/docker/shekel && docker compose run --rm --no-deps --pull never app \
+    python scripts/reset_mfa.py admin@shekel.local
 ```
 
-Output: `MFA has been disabled for admin@shekel.local.`
+It runs in a one-shot container of the app service, as the web login (`docs/runbook.md` 1, Script
+Inventory). Output:
+`MFA has been disabled for admin@shekel.local; their sessions are ended and their trusted devices forgotten.`
 
 The user can now log in with email + password only. They should re-enable MFA via Settings >
 Security after logging in.
@@ -82,28 +72,28 @@ See [§5.3 Key LogQL Queries](5_monitoring.md#53-key-logql-queries).
 
 ### 4.7 Audit Log Retention
 
-Old audit log rows are cleaned up automatically by cron (daily at 3:00 AM). The default retention
-period is 365 days, configurable via the `AUDIT_RETENTION_DAYS` environment variable.
+Old audit log rows are cleaned up automatically by the systemd timer `shekel-audit-cleanup.timer`,
+daily at 03:30 (`docs/runbook.md` 1, Cron Schedule). The default retention period is 365 days,
+configurable via the `AUDIT_RETENTION_DAYS` environment variable, which `docker-compose.yml` gives
+the migrate service. The cleanup runs there, as the database owner: the web login cannot delete an
+audit row.
 
 ```bash
+cd /opt/docker/shekel
+
 # Preview what would be deleted.
-docker exec shekel-prod-app python scripts/audit_cleanup.py --dry-run
+docker compose run --rm --no-deps --pull never migrate python scripts/audit_cleanup.py --dry-run
 
 # Manual cleanup with a custom retention period.
-docker exec shekel-prod-app python scripts/audit_cleanup.py --days 90
+docker compose run --rm --no-deps --pull never migrate python scripts/audit_cleanup.py --days 90
 ```
 
-### 4.8 Backing Up the .env File
+### 4.8 Backing Up the Secrets
 
-The `.env` file contains all three production secrets. Include it in your backup strategy:
-
-```bash
-# Add to the backup cron job (after the database backup):
-cp /opt/shekel/.env /mnt/nas/backups/shekel/env_backup
-```
-
-Alternatively, store the three secrets in a password manager (e.g., Bitwarden, 1Password) as a
-separate recovery path.
+In production `.env` holds placeholders, and each secret is a file under
+`/opt/docker/shekel/secrets/`; a bundled install keeps them in `.env`. Back up whichever holds them,
+encrypted, by `docs/runbook_secrets.md`, "Recommendation: Back Up the secrets store", and keep a
+password-manager copy (Bitwarden, 1Password) as a separate recovery path.
 
 ### 4.9 HSTS Preload Decision
 
@@ -348,12 +338,13 @@ The override:
   postgres -c ssl=on -c ssl_cert_file=... -c ssl_key_file=... -c ssl_min_protocol_version=TLSv1.2 -c ssl_ciphers=...
   ```
 
-- Overrides `DATABASE_URL` on the app service with `?sslmode=require` so the SQLAlchemy engine
-  refuses any connection the server cannot upgrade to TLS.
-- Sets `DB_SSLMODE=require` so `entrypoint.sh` constructs `DATABASE_URL_APP` (the least-privilege
-  `shekel_app` role's URL) with the same `?sslmode=require` posture.
-- Sets `PGSSLMODE=require` so every `psql` call in `entrypoint.sh` picks up the same setting via the
-  standard libpq env var.
+- Sets `DB_SSLMODE=require` on the app and the migrate service, so each entrypoint puts
+  `?sslmode=require` on the URL it builds (`scripts/_entrypoint_lib.sh`): the web login's
+  `DATABASE_URL_APP` and the owner's `DATABASE_URL`. Neither SQLAlchemy engine accepts a connection
+  the server cannot upgrade to TLS.
+- Sets `PGSSLMODE=require` on both, the standard libpq variable, so every libpq connection that
+  names no mode takes it: each entrypoint's wait for the database, and the deploy's `psql`
+  (`scripts/deploy.sh`).
 
 #### 4.12.3 Verifying the TLS channel
 
@@ -412,10 +403,10 @@ If the cert is corrupted or the operator needs to rule out TLS as a cause of an 
 cleartext by removing the override's TLS environment from a fresh shell:
 
 ```bash
-# Comment out (or delete) the db.command, db.volumes mount lines,
-# and app.environment.{DATABASE_URL, DB_SSLMODE, PGSSLMODE} entries
-# in deploy/docker-compose.prod.yml on the host (NOT the repo
-# copy -- this is an emergency-only override).
+# Comment out (or delete) the db.command, db.volumes TLS mount lines,
+# and the DB_SSLMODE and PGSSLMODE entries of app.environment and
+# migrate.environment in deploy/docker-compose.prod.yml on the host
+# (NOT the repo copy -- this is an emergency-only override).
 docker compose \
     -f docker-compose.yml \
     -f deploy/docker-compose.prod.yml \

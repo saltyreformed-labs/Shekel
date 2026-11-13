@@ -413,9 +413,7 @@ services:
   # hashes this file's password into them, and the server flags.
   #
   # The password file, 0640, and the host copy of deploy/valkey/ are
-  # made by scripts/reconcile_prod_to_canonical.sh (steps 3 and 7) on a
-  # fresh host, and by the Valkey cutover (docs/runbook/2_deployment.md 2.6) on the
-  # host that ran Redis.
+  # made by scripts/reconcile_prod_to_canonical.sh (steps 3 and 7).
   # Mode rationale: compose v2 ignores the uid/gid/mode fields on a file
   # secret's reference; the container sees the HOST file.  The valkey
   # image runs as uid 999 gid 1000, and gid 1000 is the operating

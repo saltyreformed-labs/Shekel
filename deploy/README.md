@@ -29,6 +29,17 @@ deploy/
 │                                       conf.d/shekel.conf (per-service
 │                                       vhost included by the file
 │                                       above).
+├── postgres/
+│   ├── provision_roles.sh              The database container's
+│   │                                   first-boot script, mounted in
+│   │                                   every compose file: makes the
+│   │                                   owner and web logins and hands
+│   │                                   the owner every object.  A
+│   │                                   production host keeps a copy at
+│   │                                   /opt/docker/shekel/deploy/
+│   │                                   postgres/ (0755).
+│   └── README.md                       The shared-mode TLS cert and key
+│                                       kept beside it.
 ├── valkey/
 │   ├── users.acl                       Valkey's ACL users and the
 │   │                                   commands each may run, the one
@@ -86,7 +97,8 @@ In shared mode:
 
 - `deploy/docker-compose.prod.yml` joins `shekel-prod-app` to the external `shekel-frontend` bridge
   network (NOT the wider `homelab` network) and parks the bundled `shekel-prod-nginx` service in the
-  `disabled` profile, so `docker compose up -d` starts only `db`, `valkey`, and `app`.
+  `disabled` profile, so `docker compose up -d` starts only `db`, `valkey`, the one-shot `migrate`
+  (the deploy, which exits) and `app`.
 - The shared Nginx (managed under `/opt/docker/nginx/` on the host) proxies traffic to
   `shekel-prod-app:8000` over the `shekel-frontend` bridge, using the vhost in
   `deploy/nginx-shared/conf.d/shekel.conf`. Co-tenants like Jellyfin, Immich, and UniFi remain on
@@ -134,8 +146,13 @@ truth.
    sudo cp docker-compose.yml                        /opt/docker/shekel/docker-compose.yml
    sudo cp deploy/docker-compose.prod.yml            /opt/docker/shekel/docker-compose.override.yml
    sudo cp deploy/valkey/users.acl deploy/valkey/start.sh /opt/docker/shekel/deploy/valkey/
+   sudo cp deploy/postgres/provision_roles.sh        /opt/docker/shekel/deploy/postgres/provision_roles.sh
    ```
 
+   `cp` onto the file that is there keeps its mode (0755, which the database image needs to run it)
+   and the file the running `db` container mounted, so a changed `provision_roles.sh` is the one its
+   next run by hand there uses (`docs/runbook_secrets.md`, "Rotating APP_ROLE_PASSWORD and
+   OWNER_ROLE_PASSWORD").
 3. Validate the Nginx config before reloading:
 
    ```bash

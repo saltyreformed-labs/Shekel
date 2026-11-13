@@ -2,193 +2,121 @@
 
 ## Secret Inventory
 
-The Shekel application requires four required secrets for production operation, plus one optional
-secret used only during a key rotation. All other environment variables have safe defaults or are
-non-sensitive.
+The Shekel application requires five secrets for production operation, plus one optional secret used
+only during a key rotation. All other environment variables have safe defaults or are non-sensitive.
+Each service is given only the secrets it uses (rulings plan#3412, plan#3413): the web server, the
+app service, holds the session key, the TOTP keys and the web login's password; the deploy, the
+migrate service, holds the owner's password alone; the database container holds the three database
+passwords, the superuser's among them, which no other service is given.
 
 | Secret | Purpose | Generation Command | Rotation Impact |
 |--------|---------|-------------------|-----------------|
-| `SECRET_KEY` | Flask session cookie encryption | `python -c "import secrets; print(secrets.token_hex(32))"` | All active sessions are invalidated; users must log in again |
-| `TOTP_ENCRYPTION_KEY` | Fernet encryption of TOTP secrets stored in database | `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"` | Non-destructive when rotated via the documented procedure: place the previous value in `TOTP_ENCRYPTION_KEY_OLD`, then run `scripts/rotate_totp_key.py --confirm` to re-wrap every ciphertext under the new primary |
+| `SECRET_KEY` | Flask session cookie encryption. The app's | `python -c "import secrets; print(secrets.token_hex(32))"` | All active sessions are invalidated; users must log in again |
+| `TOTP_ENCRYPTION_KEY` | Fernet encryption of TOTP secrets stored in database. The app's | `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"` | Non-destructive when rotated via the documented procedure: place the previous value in `TOTP_ENCRYPTION_KEY_OLD`, then run `scripts/rotate_totp_key.py --confirm` to re-wrap every ciphertext under the new primary |
 | `TOTP_ENCRYPTION_KEY_OLD` | Optional comma-separated list of retired Fernet keys used during rotation | -- (existing primary value, moved here at rotation time) | Empty in steady state.  Populated transiently during a key rotation; pruned again after `scripts/rotate_totp_key.py` completes |
-| `POSTGRES_PASSWORD` | PostgreSQL superuser password (owner role `shekel_user`).  Used by `entrypoint.sh` for schema creation, migrations, seed scripts | `python -c "import secrets; print(secrets.token_urlsafe(32))"` | Requires updating both the db service and app service configs simultaneously; restart both containers |
-| `APP_ROLE_PASSWORD` | Least-privilege PostgreSQL DML-only role password (`shekel_app`).  Constructed into `DATABASE_URL_APP` by `entrypoint.sh` and used by Gunicorn at runtime so an in-process RCE cannot drop tables or audit triggers (audit finding F-081, Commit C-13) | `python -c "import secrets; print(secrets.token_urlsafe(32))"` | `entrypoint.sh` reprovisions the `shekel_app` role with the new password on every restart; rotate by updating the source-of-truth secret and recreating the app container |
+| `POSTGRES_PASSWORD` | The database superuser's, `shekel_user` (the image's `POSTGRES_USER`). The database container's alone: no other service is given it, and nothing logs in with it but an operator's break-glass session. The deploy and the web server never use it | `python -c "import secrets; print(secrets.token_urlsafe(32))"` | None on the app or the deploy. Set in the database container by hand ("Rotating POSTGRES_PASSWORD") |
+| `OWNER_ROLE_PASSWORD` | The database owner's, `shekel_owner`: it owns every object and runs the deploy and the owner's maintenance scripts, all in the migrate service, and is not a superuser. The database container's provisioning script, `deploy/postgres/provision_roles.sh`, sets it | `python -c "import secrets; print(secrets.token_urlsafe(32))"` | None while nothing deploys: the next deploy, or the next maintenance script in the migrate service, logs in with the new one |
+| `APP_ROLE_PASSWORD` | The web login's, `shekel_app`: reads and writes data only, granted by the deploy, so an in-process RCE cannot drop tables or audit triggers (audit finding F-081, Commit C-13). The provisioning script sets it, and the app's entrypoint builds `DATABASE_URL_APP` from it | `python -c "import secrets; print(secrets.token_urlsafe(32))"` | From the moment the provisioning script sets it until the app restarts, the running app's new connections are refused |
+
+The provisioning script refuses a login's password shorter than 16 characters, and the app's
+entrypoint the web login's.
 
 ## Where Secrets Are Stored
 
-The Shekel deployment supports two postures for secret storage. Both are operator-grade and either
-is acceptable for production; the file-backed posture is recommended for the shared-mode
-(`deploy/docker-compose.prod.yml`) deployment.
+The Shekel deployment has two postures for secret storage, one per deployment mode: bundled mode,
+the README Quick Start, keeps its secrets in `.env`; shared-mode production
+(`deploy/docker-compose.prod.yml`) keeps them in files.
 
 ### Posture 1 -- Env-backed (`.env` file)
 
-The default posture, used by the bundled-mode quickstart. Secrets live in the `.env` file on the
-host, in the same directory as the `docker-compose.yml` file (`/opt/docker/shekel/.env` for shared
-mode, `/opt/shekel/.env` for bundled mode).
+Bundled mode's. Secrets live in the `.env` file on the host, in the same directory as the
+`docker-compose.yml` file (`/opt/shekel/.env`).
 
 - The `.env` file is excluded from version control (`.gitignore`).
 - The `.env` file should be readable only by root: `chmod 600 .env`.
-- Docker Compose reads `.env` automatically and injects values into container environment variables
-  (`Container.Config.Env`).
+- Docker Compose reads `.env` and gives each service the variables `docker-compose.yml` names for it
+  in its stored environment (`Container.Config.Env`), fixed when the container is made. A changed
+  value reaches a container only when compose makes it again (`docker compose up -d <service>`);
+  `docker compose restart` keeps the old one (measured 2026-11-13).
 - Trade-off: anyone with `docker inspect` access on the host sees the real values; the file at rest
   carries the real values too.
 
 ### Posture 2 -- File-backed (Docker secrets, audit Commit C-38)
 
-Available in shared-mode production (`deploy/docker-compose.prod.yml`). Secrets live in individual
-files under `/opt/docker/shekel/secrets/`, bind-mounted into the container as `/run/secrets/<name>`.
-The `.env` file holds non-sensitive variables and a placeholder for each docker-secret-managed value
-(any non-empty string -- the placeholder satisfies the base file's `${VAR:?...}` interpolation but
-is overwritten at runtime by `entrypoint.sh::_load_secret`).
+Shared-mode production's. Secrets live in individual files under `/opt/docker/shekel/secrets/`, each
+mounted at `/run/secrets/<name>` into the services that use it and no other. The `.env` file holds
+non-sensitive variables and the placeholder `replaced_by_docker_secret` for each file-backed value,
+which the base file's `${VAR:?...}` interpolation needs. No container uses a placeholder: the app's
+and the migrate service's entrypoints read each file with `_load_secret`
+(`scripts/_entrypoint_lib.sh`) and export its value over the variable, the database image and its
+provisioning script and Valkey's `start.sh` read their files themselves, and the override blanks the
+variables it can (all three passwords on the database, `VALKEY_PASSWORD` on Valkey and the app,
+`OWNER_ROLE_PASSWORD` on the migrate service), so a missing file is refused as unset rather than
+tried as a value.
 
-- Files are stored in `/opt/docker/shekel/secrets/`.
-- Recommended permissions: directory `0700` root-owned, files `0600` root-owned.
-- Per-file secrets: `secret_key`, `postgres_password`, `app_role_password`, `totp_encryption_key`
-  (and `totp_encryption_key_old` only during a TOTP key rotation -- see the "Rotating
-  TOTP_ENCRYPTION_KEY" section below).
-- Trade-off: `docker inspect` shows only the placeholder values; the real values live only in the
-  operator-controlled secrets directory.
+The directory is `0700`, owned by the operating user (the uid that runs `docker compose`). Compose
+outside Swarm ignores a secret's `uid`, `gid` and `mode`, so each container reads the host file's
+own owner and mode, and each file's mode follows the users that read it:
+
+| File | Read by | Mode |
+|------|---------|------|
+| `secret_key` | app | `0600` |
+| `totp_encryption_key` | app | `0600` |
+| `app_role_password` | app (logs in with it), db (sets it) | `0644` |
+| `owner_role_password` | migrate (logs in with it), db (sets it) | `0644` |
+| `postgres_password` | db alone | `0644` |
+| `valkey_password` | app, valkey | `0640` |
+
+The app and the migrate service run as uid 1000, the files' owner; the database container runs as
+uid 70 (postgres), which reads through the "other" bits, and the 0700 directory contains them;
+Valkey runs as uid 999 gid 1000, the operating user's group. `totp_encryption_key_old` exists only
+during a TOTP key rotation ("Rotating TOTP_ENCRYPTION_KEY" below).
+
+Trade-off: `docker inspect` shows only the placeholder values; the real values live only in the
+operator-controlled secrets directory.
 
 ### Migrating to Docker secrets
 
-One-time procedure to move from Posture 1 to Posture 2 on an existing shared-mode deployment. Plan a
-maintenance window: the final step recreates both the `app` and `db` containers.
+`scripts/reconcile_prod_to_canonical.sh` (`docs/runbook/2_deployment.md` 2.5) moves a shared-mode
+host to Posture 2 and keeps it there. It writes each file from `.env`'s value when the file is
+missing or empty, refusing a value that is absent or a placeholder, since it must be the one in use;
+makes `owner_role_password`, a new one when `.env` holds no real value; sets every file's mode from
+the table above on every run, a file already there included; and rewrites `.env` with the
+placeholders, keeping the old one as `.env.bak.<timestamp>`. Its closing text prints the recreate:
+the database first, its provisioning script, then the rest of the stack.
 
-1. Confirm you are running shared-mode production (the override `deploy/docker-compose.prod.yml` is
-   active):
+Then confirm the files are what each container reads:
 
-   ```bash
-   docker compose ps
-   # Expect: shekel-prod-app, shekel-prod-db, shekel-prod-valkey
-   ```
+```bash
+cd /opt/docker/shekel
 
-   If the bundled `shekel-prod-nginx` is also present, you are in bundled mode -- docker secrets are
-   not wired in for that path, continue with Posture 1.
+# The stored environment holds the placeholder, not the value.
+docker inspect shekel-prod-app --format '{{ range .Config.Env }}{{ println . }}{{ end }}' | grep -E '^SECRET_KEY='
+# Expect: SECRET_KEY=replaced_by_docker_secret
 
-2. Create the secrets directory with restrictive permissions. Run on the Proxmox host:
+# Each entrypoint logs each file it loaded, at every start.
+docker logs shekel-prod-app 2>&1 | grep '^Loaded '
+# Expect, per start:
+#   Loaded SECRET_KEY from /run/secrets/secret_key.
+#   Loaded APP_ROLE_PASSWORD from /run/secrets/app_role_password.
+#   Loaded TOTP_ENCRYPTION_KEY from /run/secrets/totp_encryption_key.
+#   Loaded VALKEY_PASSWORD from /run/secrets/valkey_password.
+docker logs shekel-prod-migrate 2>&1 | grep '^Loaded '
+# Expect, per deploy since compose made the container:
+#   Loaded OWNER_ROLE_PASSWORD from /run/secrets/owner_role_password.
+```
 
-   ```bash
-   sudo install -d -m 0700 -o root -g root /opt/docker/shekel/secrets
-   ```
-
-3. Write the four required secret values from `.env` into individual files. `printf '%s'` (no
-   trailing newline) is preferred over `echo` so the file contents are exactly the secret bytes; the
-   entrypoint loader strips a trailing newline if `echo` was used by mistake but `printf` is the
-   documented form:
-
-   ```bash
-   # Read each value out of the existing .env into a host shell
-   # variable, then write it through to the secrets directory.  The
-   # awk extracts the value (everything after the first =) so embedded
-   # = signs in the value (rare but legal in random hex/base64) are
-   # preserved.
-   for var in SECRET_KEY POSTGRES_PASSWORD APP_ROLE_PASSWORD TOTP_ENCRYPTION_KEY; do
-       value="$(awk -F= -v k="${var}" '$1==k { sub(/^[^=]*=/, ""); print; exit }' /opt/docker/shekel/.env)"
-       file_name="$(echo "${var}" | tr '[:upper:]' '[:lower:]')"
-       sudo printf '%s' "${value}" | sudo tee /opt/docker/shekel/secrets/${file_name} >/dev/null
-   done
-   sudo chmod 0600 /opt/docker/shekel/secrets/*
-   ```
-
-   Verify each file has the right content:
-
-   ```bash
-   sudo wc -c /opt/docker/shekel/secrets/*
-   # Expect: each file's byte count matches the original env var's length.
-   ```
-
-4. Replace the real values in `/opt/docker/shekel/.env` with placeholder strings. Any non-empty
-   string satisfies the base file's `${VAR:?...}` interpolation; `replaced_by_docker_secret` is the
-   documented form because a forensic reader sees the intent immediately:
-
-   ```diff
-   -SECRET_KEY=<the-real-secret-key>
-   -POSTGRES_PASSWORD=<the-real-postgres-password>
-   -APP_ROLE_PASSWORD=<the-real-app-role-password>
-   -TOTP_ENCRYPTION_KEY=<the-real-totp-encryption-key>
-   +SECRET_KEY=replaced_by_docker_secret
-   +POSTGRES_PASSWORD=replaced_by_docker_secret
-   +APP_ROLE_PASSWORD=replaced_by_docker_secret
-   +TOTP_ENCRYPTION_KEY=replaced_by_docker_secret
-   ```
-
-   `TOTP_ENCRYPTION_KEY_OLD` stays as-is (empty in steady state).
-
-5. Recreate the `db` and `app` containers so the new compose merge takes effect:
-
-   ```bash
-   cd /opt/docker/shekel
-   docker compose up -d --force-recreate db app
-   ```
-
-6. Verify the migration succeeded:
-
-   ```bash
-   # The app's runtime env should show the REAL SECRET_KEY (loaded
-   # from /run/secrets/secret_key by entrypoint.sh::_load_secret).
-   # We do not print the value -- only its length -- so the secret
-   # never lands in shell history or terminal scrollback.
-   docker exec shekel-prod-app sh -c 'echo SECRET_KEY length=${#SECRET_KEY}'
-   # Expect: SECRET_KEY length=64 (or whatever the real key length is).
-
-   # docker inspect should show the placeholder, not the real value.
-   docker inspect shekel-prod-app --format '{{ range .Config.Env }}{{ println . }}{{ end }}' | grep -E '^SECRET_KEY='
-   # Expect: SECRET_KEY=replaced_by_docker_secret
-
-   # entrypoint.sh log lines confirm the file-backed load.
-   docker logs shekel-prod-app 2>&1 | grep '^Loaded '
-   # Expect:
-   #   Loaded SECRET_KEY from /run/secrets/secret_key.
-   #   Loaded POSTGRES_PASSWORD from /run/secrets/postgres_password.
-   #   Loaded APP_ROLE_PASSWORD from /run/secrets/app_role_password.
-   #   Loaded TOTP_ENCRYPTION_KEY from /run/secrets/totp_encryption_key.
-   ```
-
-7. Backup the secrets directory. The host-side files are now the only source of truth for these
-   values; losing them means a full secret rotation. Add to the backup cron job:
-
-   ```bash
-   tar -czf /mnt/nas/backups/shekel/secrets-$(date +%Y%m%d).tar.gz \
-       -C /opt/docker/shekel secrets
-   ```
-
-   Encrypt the backup tarball at rest (gpg, age, or sops) -- the tarball is the equivalent of a
-   master credential bundle.
+`docker exec shekel-prod-app` cannot show a loaded value: an exec'd process gets the stored
+environment, the placeholders. Back up the secrets directory once it holds the files (Recommendation
+below): it is now the only copy of each value.
 
 ### Rolling back to Posture 1
 
-If file-backed secrets cause an issue and you need to revert:
-
-1. Replace each placeholder in `.env` with its real value (recover from the host secrets directory
-   or from your password-manager backup):
-
-   ```bash
-   for var in SECRET_KEY POSTGRES_PASSWORD APP_ROLE_PASSWORD TOTP_ENCRYPTION_KEY; do
-       file_name="$(echo "${var}" | tr '[:upper:]' '[:lower:]')"
-       value="$(sudo cat /opt/docker/shekel/secrets/${file_name})"
-       sudo sed -i "s|^${var}=.*|${var}=${value}|" /opt/docker/shekel/.env
-   done
-   ```
-
-2. Move the secrets directory aside (do NOT delete -- losing the files is irreversible without the
-   password-manager backup):
-
-   ```bash
-   sudo mv /opt/docker/shekel/secrets /opt/docker/shekel/secrets.disabled
-   ```
-
-3. Recreate the affected containers:
-
-   ```bash
-   cd /opt/docker/shekel
-   docker compose up -d --force-recreate db app
-   ```
-
-   `docker compose up` will fail at parse time if any secret referenced in
-   `deploy/docker-compose.prod.yml` is missing its backing file -- that is the trade-off for
-   explicitness. If you want to disable file-backed secrets entirely (rather than just roll them
-   back temporarily), check out a previous git revision of `deploy/docker-compose.prod.yml` from
-   before Commit C-38.
+Shared mode has no Posture 1 to roll back to. Its override blanks the database's three password
+variables, Valkey's and the migrate service's, and compose refuses to parse the files while a
+secret's file is missing, so the files are shared mode's one source. A damaged or lost file is
+restored from the secrets backup (Disaster Recovery, below); a value lost with it is rotated (Secret
+Rotation Procedures).
 
 ## Secret Rotation Procedures
 
@@ -211,8 +139,12 @@ If file-backed secrets cause an issue and you need to revert:
 
      Leave the placeholder in `.env` unchanged.
 
-3. Restart the app container: `docker compose restart app`. The entrypoint reloads the secret on
-   every start, so the rotation is in effect after the restart.
+3. Bring the app up on the new key:
+
+   - **Posture 1:** `docker compose up -d app`, which makes the app container again with the new
+     environment, after the deploy runs in the migrate service. A `restart` would keep the old key.
+   - **Posture 2:** `docker compose restart app`. The entrypoint reads the file at every start.
+
 4. Run the global session-invalidation script (see next section) so that any cookies signed under
    the old key are rejected even if an attacker captured them before the key was rotated.
 5. Impact: all active sessions are invalidated; users must re-authenticate.
@@ -230,8 +162,12 @@ Run after every `SECRET_KEY` rotation, and after any git history rewrite that ex
 historically-leaked key:
 
 ```bash
-docker exec shekel-prod-app python scripts/rotate_sessions.py --confirm
+cd /opt/docker/shekel
+docker compose run --rm --no-deps --pull never app python scripts/rotate_sessions.py --confirm
 ```
+
+It runs in a one-shot container of the app service, as the web login (`docs/runbook.md` 1, Script
+Inventory, says why `docker exec` reaches no login).
 
 The script bumps `session_invalidated_at` to `now()` for every row in `auth.users`. It is idempotent
 (repeated runs simply move the timestamp forward) and emits a structured log event
@@ -329,17 +265,23 @@ The full rotation has four steps and one optional cleanup deploy:
 
      The `totp_encryption_key_old` file is NOT declared in the `secrets:` block of
      `deploy/docker-compose.prod.yml` (because compose requires every declared secret file to
-     exist). Inline- edit the override to add it before bringing the stack back up:
+     exist). Edit the host's copy of the override, `/opt/docker/shekel/docker-compose.override.yml`,
+     to mount it into the app alone, before bringing the app back up:
 
      ```diff
         services:
           app:
             secrets:
-              - secret_key
-              - postgres_password
-              - app_role_password
-              - totp_encryption_key
-     +        - totp_encryption_key_old
+              - source: secret_key
+                target: secret_key
+              - source: app_role_password
+                target: app_role_password
+              - source: totp_encryption_key
+                target: totp_encryption_key
+              - source: valkey_password
+                target: valkey_password
+     +        - source: totp_encryption_key_old
+     +          target: totp_encryption_key_old
         ...
         secrets:
           ...
@@ -349,7 +291,9 @@ The full rotation has four steps and one optional cleanup deploy:
      +      file: /opt/docker/shekel/secrets/totp_encryption_key_old
      ```
 
-     Step 5 below removes the inline edit and the retired-key file after rotation.
+     Step 5 below removes the edit and the retired-key file after rotation. Until then the host copy
+     differs from the repository's (the drift 2.5 of `docs/runbook/2_deployment.md` checks for), so
+     a release waits for step 5.
 
    If `TOTP_ENCRYPTION_KEY_OLD` already has a value (e.g. from an earlier in-progress rotation),
    append the new retired value with a comma -- the application reads the value as a comma-separated
@@ -357,11 +301,16 @@ The full rotation has four steps and one optional cleanup deploy:
    file-backed posture, write the comma-joined string into the file with `printf` (no trailing
    newline) so the file content is exactly the comma-separated list.
 
-3. **Restart the application container so the new key list takes effect.**
+3. **Make the application container again so the new key list takes effect.**
 
    ```bash
-   docker compose restart app
+   cd /opt/docker/shekel   # or /opt/shekel, Posture 1
+   docker compose up -d app
    ```
+
+   Compose makes the app container again, after the deploy runs in the migrate service: in Posture 1
+   for its new environment, in Posture 2 for its new secret mount. A `restart` would keep the
+   container as it was made, without either (measured 2026-11-13 for an environment change).
 
    At this point the application can:
 
@@ -375,8 +324,11 @@ The full rotation has four steps and one optional cleanup deploy:
 4. **Re-wrap every existing ciphertext under the new primary.**
 
    ```bash
-   docker exec shekel-prod-app python scripts/rotate_totp_key.py --confirm
+   docker compose run --rm --no-deps --pull never app python scripts/rotate_totp_key.py --confirm
    ```
+
+   A one-shot container of the app service, which holds both keys (`docs/runbook.md` 1, Script
+   Inventory); in the migrate service the script exits 1, naming the key that service lacks.
 
    The script prints a summary like
 
@@ -410,8 +362,9 @@ The full rotation has four steps and one optional cleanup deploy:
      sudo rm /opt/docker/shekel/secrets/totp_encryption_key_old
      ```
 
-   Run `docker compose up -d --force-recreate app`. The retired key is now permanently retired -- if
-   it was leaked, the leak no longer confers access to the MFA secrets.
+   Run `docker compose up -d app`, which makes the app container again without the retired key,
+   after a deploy. The retired key is now permanently retired -- if it was leaked, the leak no
+   longer confers access to the MFA secrets.
 
    You may leave `TOTP_ENCRYPTION_KEY_OLD` populated longer than necessary if you want a rollback
    window; the only cost is that the retired key continues to be a valid decryption key during that
@@ -440,88 +393,142 @@ If something goes wrong after step 4 completes:
   rows will be detected as "needing rotation" and re-wrapped under the old key) or accept the new
   primary as the steady state.
 
-### Rotating POSTGRES_PASSWORD
+### Rotating APP_ROLE_PASSWORD and OWNER_ROLE_PASSWORD
 
-1. Generate a new password. No specific format is required, but a long random string is recommended:
+A login's password is set in one place, the database container's provisioning script,
+`deploy/postgres/provision_roles.sh` (ruling plan#3413), which reads it where that container holds
+it: the file in Posture 2, the container's environment in Posture 1. So a rotation writes the new
+value there, runs the script, and then brings up the service that logs in with it. Run from the
+directory that holds the compose files, `/opt/docker/shekel` (Posture 2) or `/opt/shekel` (Posture
+1).
 
-   ```bash
-   python -c "import secrets; print(secrets.token_urlsafe(32))"
-   ```
+1. **Write the new value where the database container reads it.**
 
-2. Postgres validates the new password BEFORE the rotation can complete -- the old password must
-   still be in effect when you issue the `ALTER ROLE` command. Update both the running database and
-   the source-of-truth secret in lockstep:
-
-   ```bash
-   # Run while the old password is still active.  Use ${OLD_PASSWORD}
-   # from .env or the secret file -- the docker exec env passthrough
-   # below avoids printing it to terminal scrollback.
-   sudo PGPASSWORD="$(sudo cat /opt/docker/shekel/secrets/postgres_password)" \
-       docker exec -e PGPASSWORD shekel-prod-db \
-       psql -U shekel_user -d shekel \
-       -c "ALTER ROLE shekel_user WITH PASSWORD '<new-password>';"
-   ```
-
-   (Posture 1 operators replace the `cat` above with the value from `.env` directly, e.g. via
-   `grep '^POSTGRES_PASSWORD=' .env`.)
-
-3. Install the new value at the source of truth for your posture:
-
-   - **Posture 1 (env-backed):** update `POSTGRES_PASSWORD` in `.env`. `DATABASE_URL` and
-     `DB_PASSWORD` reference `${POSTGRES_PASSWORD}` and are reconstructed by compose at the next
-     `up`.
-   - **Posture 2 (file-backed):** overwrite the secret file:
+   - **Posture 2:** write the file in place, the value never printed:
 
      ```bash
-     sudo printf '%s' '<new-password>' | \
-         sudo tee /opt/docker/shekel/secrets/postgres_password >/dev/null
-     sudo chmod 0600 /opt/docker/shekel/secrets/postgres_password
+     python3 -I -c 'import secrets; print(secrets.token_urlsafe(32), end="")' \
+         > secrets/app_role_password        # or secrets/owner_role_password
      ```
 
-     Leave the placeholder in `.env` unchanged. The entrypoint reloads the secret on every start and
-     rebuilds `DATABASE_URL` and `DB_PASSWORD` from the new value.
+     `>` rewrites the file that is there, so it keeps its mode (0644) and the database container,
+     which mounted that file, reads the new value. A file replaced by a rename (`mv`, or an editor
+     that saves that way) stays unseen there until the container restarts.
 
-4. Recreate both containers so the new password takes effect:
+   - **Posture 1:** generate a value
+     (`python -c "import secrets; print(secrets.token_urlsafe(32))"`), put it in `.env`'s
+     `APP_ROLE_PASSWORD` (or `OWNER_ROLE_PASSWORD`), and make the database container again so its
+     environment holds it: `docker compose up -d --wait db`. That restarts the database; the app
+     reconnects.
+
+   The script refuses a password shorter than 16 characters; a URL-safe one is needed because each
+   entrypoint puts it in a database URL unencoded.
+
+2. **Set it in the database:**
 
    ```bash
-   cd /opt/docker/shekel  # or wherever your compose files live
-   docker compose up -d --force-recreate db app
+   docker exec shekel-prod-db /docker-entrypoint-initdb.d/10-provision-roles.sh
    ```
 
-5. Verify the app can connect under the new password:
+   It sets both logins' passwords from what the container holds and, on a database it already ran
+   on, changes nothing else: it ends
+   `NOTICE: shekel_owner and shekel_app provisioned; 0 object(s) handed to shekel_owner.`
+
+3. **Bring up the service that logs in with it.**
+
+   - **The web login's:** in Posture 2, `docker compose restart app`, which runs no deploy; the
+     entrypoint reads the file at every start. In Posture 1, `docker compose up -d`, which makes the
+     migrate and app containers again with their new environment, the deploy first. From step 2
+     until then the running app's new connections are refused: its `/health` answered 500 in that
+     window (measured 2026-11-13, Posture 1).
+   - **The owner's:** nothing holds it between deploys. In Posture 2 the next deploy, or the next
+     maintenance script in the migrate service, reads the file. In Posture 1 a
+     `docker compose run ... migrate` makes its container from `.env` as it is now, and the next
+     `docker compose up -d` makes the deploy's again.
+
+4. **Verify** each login, each in a one-shot container of its own service:
 
    ```bash
-   docker exec shekel-prod-app python -c "from app import create_app; create_app().app_context().push(); from app.extensions import db; db.session.execute(db.text('SELECT 1')); print('OK')"
+   docker compose run --rm --no-deps --pull never app sh -c \
+       'psql "$DATABASE_URL_APP" -Atc "SELECT current_user"'     # → shekel_app
+   docker compose run --rm --no-deps --pull never migrate sh -c \
+       'psql "$DATABASE_URL" -Atc "SELECT current_user"'         # → shekel_owner
    ```
+
+Measured 2026-11-13 in Posture 1 on a throwaway stack from card plan#2166's branch, both passwords
+at once: step 1 made the database container again and left the app's, step 2 ended as above, the
+app's `/health` answered 500 until step 3, and step 4 printed each login. Posture 2 was measured
+2026-11-12, the file written in place and step 3's restart.
+
+### Rotating POSTGRES_PASSWORD
+
+Nothing logs in with the superuser's password. Every command that acts as the superuser (the
+backups, the dump `shekel-deploy` takes, a restore, the provisioning script) runs in the database
+container over its own socket, which asks no password, and no other service is given it (ruling
+plan#3412). It matters only to a login over the network, an operator's break-glass session. So a
+rotation changes it in the database and where it is kept, and restarts no service. The image reads
+`POSTGRES_PASSWORD` only when it makes a cluster on an empty volume, so the kept value and the
+database's can part unseen: change both together.
+
+- **Posture 2:** write the file in place, then set the database from it:
+
+  ```bash
+  cd /opt/docker/shekel
+  python3 -I -c 'import secrets; print(secrets.token_urlsafe(32), end="")' > secrets/postgres_password
+  docker exec -i shekel-prod-db psql -U shekel_user -d shekel -v ON_ERROR_STOP=1 --no-psqlrc <<'SQL'
+  \set password `cat /run/secrets/postgres_password`
+  ALTER ROLE shekel_user PASSWORD :'password';
+  SQL
+  ```
+
+- **Posture 1:** generate a value, put it in `.env`'s `POSTGRES_PASSWORD`, make the database
+  container again so its environment holds it (`docker compose up -d --wait db`, which restarts the
+  database), then:
+
+  ```bash
+  docker exec -i shekel-prod-db psql -U shekel_user -d shekel -v ON_ERROR_STOP=1 --no-psqlrc <<'SQL'
+  \getenv password POSTGRES_PASSWORD
+  ALTER ROLE shekel_user PASSWORD :'password';
+  SQL
+  ```
+
+Each prints `ALTER ROLE`. The value crosses into psql from the file or the container's environment,
+never a command line.
+
+Measured 2026-11-13 on the throwaway stack above: after the Posture 1 form, and after the Posture 2
+form read from a file in the database container, a network login as `shekel_user` with the new
+password connected, and one with another password was refused (`password authentication failed`).
 
 ## Disaster Recovery: Reconstructing Secrets
 
-If the Proxmox host is lost and must be rebuilt from scratch:
+If the Proxmox host is lost and must be rebuilt from scratch (the whole sequence is
+`docs/runbook/7_troubleshooting.md` 7.3, "Complete disaster recovery"):
 
-1. **Restore the database** from NAS backups using `scripts/restore.sh` (see backup/restore
-   runbook).
-
-2. **Reconstruct the secrets store** for your posture:
+1. **Reconstruct the secrets store** for your posture:
 
    - **Posture 1 (env-backed):** rebuild `.env` using `.env.example` as a template:
      - `SECRET_KEY`: generate a new one. Users will need to log in again.
      - `TOTP_ENCRYPTION_KEY`: if you have the original key backed up (see recommendation below), use
        it. If not, generate a new one and all users must re-enroll MFA.
-     - `POSTGRES_PASSWORD`: use the password from the restored backup, or set a new one and update
-       the PostgreSQL user password.
-     - `APP_ROLE_PASSWORD`: any sufficiently random secret; `entrypoint.sh` reprovisions the
-       `shekel_app` role with this password on every start.
+     - `POSTGRES_PASSWORD`, `OWNER_ROLE_PASSWORD` and `APP_ROLE_PASSWORD`: generate new. A backup
+       holds no login or password (it is taken `--no-owner --no-privileges`), and the new cluster's
+       first boot makes the superuser from the first and both logins from the next two
+       (`deploy/postgres/provision_roles.sh`).
      - All other variables have defaults or are non-sensitive.
 
    - **Posture 2 (file-backed):** restore `/opt/docker/shekel/secrets/` from your encrypted backup
-     tarball. If the backup is lost too, fall back to Posture 1 above and follow the "Migrating to
-     Docker secrets" procedure after the host is up.
+     tarball. If the backup is lost too, put new values in `.env` as for Posture 1, and the
+     reconcile script ("Migrating to Docker secrets") writes each to its file.
 
-3. **Start the application**:
+2. **Start the application** on its empty database volume, whose first boot makes the three logins:
 
    ```bash
    docker compose up -d
    ```
+
+3. **Restore the database** from NAS backups using `scripts/restore.sh` (see backup/restore
+   runbook), which hands the restored objects to the owner and runs the deploy before the app serves
+   again.
 
 ### Recommendation: Back Up the secrets store
 
@@ -548,6 +555,7 @@ Create a secure note in your password manager with:
 - `SECRET_KEY` value
 - `TOTP_ENCRYPTION_KEY` value
 - `POSTGRES_PASSWORD` value
+- `OWNER_ROLE_PASSWORD` value
 - `APP_ROLE_PASSWORD` value
 - Date each secret was last rotated
 - Posture in use (env-backed vs. file-backed)

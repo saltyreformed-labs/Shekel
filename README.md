@@ -8,7 +8,7 @@ paycheck and projecting balances forward over a ~2-year horizon.
 
 **Two ways to run Shekel:**
 
-- **Docker (recommended):** Download five files, create a volume, run `docker compose up`. No Python
+- **Docker (recommended):** Download six files, create a volume, run `docker compose up`. No Python
   or PostgreSQL install needed. See [Quick Start (Docker)](#quick-start-docker).
 - **From source:** Clone the repo, set up Python, use Docker for databases. See
   [Developer Setup (from source)](#developer-setup-from-source).
@@ -42,13 +42,20 @@ the output for an error before going on:
 ```bash
 docker pull ghcr.io/saltyreformed-labs/shekel:latest
 REV=$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' ghcr.io/saltyreformed-labs/shekel:latest)
-mkdir -p deploy/nginx-bundled deploy/valkey
+mkdir -p deploy/nginx-bundled deploy/valkey deploy/postgres
 curl -f -O "https://raw.githubusercontent.com/saltyreformed-labs/Shekel/${REV:?}/docker-compose.yml"
 curl -f -O "https://raw.githubusercontent.com/saltyreformed-labs/Shekel/${REV:?}/.env.example"
 curl -f -o deploy/nginx-bundled/nginx.conf "https://raw.githubusercontent.com/saltyreformed-labs/Shekel/${REV:?}/deploy/nginx-bundled/nginx.conf"
 curl -f -o deploy/valkey/users.acl "https://raw.githubusercontent.com/saltyreformed-labs/Shekel/${REV:?}/deploy/valkey/users.acl"
 curl -f -o deploy/valkey/start.sh "https://raw.githubusercontent.com/saltyreformed-labs/Shekel/${REV:?}/deploy/valkey/start.sh"
+curl -f -o deploy/postgres/provision_roles.sh "https://raw.githubusercontent.com/saltyreformed-labs/Shekel/${REV:?}/deploy/postgres/provision_roles.sh"
+chmod +x deploy/postgres/provision_roles.sh
 ```
+
+`deploy/postgres/provision_roles.sh` is the database container's first-boot script, which makes the
+database's two logins: the owner, which runs the deploy, and the web server's. `curl` saves it
+without its executable bit, which the `chmod` puts back: the database image runs an executable
+script, but reads any other into its own shell.
 
 ### 3. Configure Environment
 
@@ -60,14 +67,15 @@ Edit `.env` and set these values:
 
 | Variable | Required | Description |
 |---|---|---|
-| `POSTGRES_PASSWORD` | Yes | Choose a strong database password. |
+| `POSTGRES_PASSWORD` | Yes | The database superuser's, which stays in the database container. Run `openssl rand -hex 24` and paste the output. |
 | `SECRET_KEY` | Yes | Run `openssl rand -hex 32` and paste the output. |
+| `OWNER_ROLE_PASSWORD` | Yes | The database owner's, the login the deploy runs as. Run `openssl rand -hex 24` and paste the output. |
 | `APP_ROLE_PASSWORD` | Yes | The app's least-privilege database role. Run `openssl rand -hex 24` and paste the output. |
 | `SHEKEL_VALKEY_PASSWORD` | Yes | The rate limiter's store. Run `openssl rand -hex 24` and paste the output. |
 | `TOTP_ENCRYPTION_KEY` | No | Required before enabling MFA/TOTP. See [MFA Setup](#mfa-setup). |
 | `REGISTRATION_ENABLED` | No | Set to `true` to enable the `/register` endpoint. Default in production: `false` (see [Security](#security)). |
-| `SEED_USER_EMAIL` | No | Login email, `admin@shekel.local` in `.env.example`. While it is set, the first boot creates this user and the two rows below are required. **Remove from `.env` after the first successful boot** (see [Security](#security)). |
-| `SEED_USER_PASSWORD` | With `SEED_USER_EMAIL` | Login password, at least 12 characters. The app refuses to start with `.env.example`'s `ChangeMe!2026`. **Remove from `.env` after the first successful boot** (see [Security](#security)). |
+| `SEED_USER_EMAIL` | No | Login email, `admin@shekel.local` in `.env.example`. While it is set, the first boot's deploy creates this user and the two rows below are required. **Remove from `.env` after the first successful boot** (see [Security](#security)). |
+| `SEED_USER_PASSWORD` | With `SEED_USER_EMAIL` | Login password, at least 12 characters. The deploy refuses to seed `.env.example`'s `ChangeMe!2026`. **Remove from `.env` after the first successful boot** (see [Security](#security)). |
 | `SEED_USER_LAST_PAYDAY` | With `SEED_USER_EMAIL` | The day the seeded owner was last paid, ISO `YYYY-MM-DD`. No default -- Shekel budgets by paycheck and will not invent one. Must fall within one pay cadence of the first boot. |
 | `SEED_USER_CADENCE_DAYS` | No | Days between the seeded owner's paydays. Default: `14`. |
 | `SEED_USER_NUM_PERIODS` | No | How many pay periods to generate ahead. Default: `52`. |
@@ -83,13 +91,17 @@ docker volume create shekel-prod-pgdata
 docker compose up -d
 ```
 
-First startup takes 1-2 minutes while the database is initialized. Check progress with:
+First startup takes 1-2 minutes. The database's first boot makes its logins, then the deploy runs in
+the one-shot `migrate` service (the schema, the reference data, the seeded user) and exits, and only
+then does the app start. Check progress with:
 
 ```bash
-docker compose logs -f app
+docker compose logs -f migrate app
 ```
 
-Look for `=== Starting Application ===` to confirm the app is running.
+Look for `=== Shekel Deploy complete ===` from `migrate`, then `=== Starting Application ===` from
+`app`. `docker compose ps -a` shows `shekel-prod-migrate` as `Exited (0)` once the deploy has
+passed; every later `docker compose up` runs it again before the app.
 
 ### 5. Log In
 
@@ -125,7 +137,17 @@ together, so an update takes both. From your `shekel` directory:
    `SHEKEL_REDIS_PASSWORD`, rename it to `SHEKEL_VALKEY_PASSWORD`, keeping its value. The app now
    names its store itself, the bundled Valkey, so if `.env` sets `RATELIMIT_STORAGE_URI`, delete the
    line: nothing reads it, and a store of your own is no longer supported.
-3. Start the new release:
+3. Once, for an install from before the deploy moved into the `migrate` service: its database has no
+   owner login yet. Add `OWNER_ROLE_PASSWORD` to `.env` (step 3's table), then make the database
+   container again with its new settings and run its provisioning script in it, which makes the
+   owner's login and hands it every table, changing no row:
+
+   ```bash
+   docker compose up -d --wait db
+   docker exec shekel-prod-db /docker-entrypoint-initdb.d/10-provision-roles.sh
+   ```
+
+4. Start the new release:
 
    ```bash
    docker compose pull && docker compose up -d --remove-orphans
@@ -135,7 +157,8 @@ If a `docker-compose.override.yml` of yours pins the app image by digest, put th
 digest there first (`deploy/README.md`, "Updating the digest") and name that pinned image in step
 1's block in place of `ghcr.io/saltyreformed-labs/shekel:latest`. `--remove-orphans` removes each
 container whose service the new `docker-compose.yml` no longer names, as it removes
-`shekel-prod-redis` once Valkey replaces it. Database migrations run automatically on startup.
+`shekel-prod-redis` once Valkey replaces it. Database migrations run in the deploy, in the `migrate`
+service, which every `docker compose up` runs before it starts the app.
 
 ### Stopping and Removing
 
@@ -155,7 +178,9 @@ docker volume rm shekel-prod-pgdata
 
 | Symptom | Fix |
 |---|---|
-| `POSTGRES_PASSWORD` error on startup | Set `POSTGRES_PASSWORD` in your `.env` file. |
+| `POSTGRES_PASSWORD`, `OWNER_ROLE_PASSWORD` or `APP_ROLE_PASSWORD` error on startup | Set it in your `.env` file (step 3's table). |
+| `bind source path does not exist` naming `deploy/postgres/provision_roles.sh` | The database's provisioning script was not downloaded. Run the block of [step 2](#2-download-configuration-files) again, its `chmod` included. |
+| The app container stays `Created` and never starts | The deploy failed, so the app was never started. Run `docker compose logs migrate`: its last lines name the step that failed. A database from before the `migrate` service has no owner login until [Updating](#updating) step 3 runs. |
 | `SECRET_KEY` error on startup | Set `SECRET_KEY` in your `.env` file. Run `openssl rand -hex 32` to generate one. |
 | `shekel-prod-pgdata ... not found` on first run | Run `docker volume create shekel-prod-pgdata` before `docker compose up`. |
 | MFA enable fails with "TOTP_ENCRYPTION_KEY" message | Set `TOTP_ENCRYPTION_KEY` in `.env`. See [MFA Setup](#mfa-setup) for generation instructions. |
@@ -163,9 +188,9 @@ docker volume rm shekel-prod-pgdata
 | Nginx fails with "mount ... not a directory" | `deploy/nginx-bundled/nginx.conf` was missing when the stack started, so Docker made a directory in its place. Remove it with `rmdir deploy/nginx-bundled/nginx.conf` (with `sudo` if Docker runs as root), then run the block of [step 2](#2-download-configuration-files) that downloads the files again from your `shekel` directory. |
 | App does not start or shows blank page | Run `docker compose logs app` and check for error messages. |
 | Container keeps restarting | Run `docker compose logs app` -- a missing required variable or database connection issue is the most common cause. |
-| Container marked unhealthy during first startup | First-time initialization (schema creation, migrations, seeding) can take over 60 seconds. The healthcheck `start_period` allows 120 seconds before failures count. Wait and check `docker compose logs -f app`. |
+| Container marked unhealthy during first startup | The app starts only after the deploy, which on a first boot builds the schema and seeds; its healthcheck `start_period` allows 120 seconds before failures count. Wait and check `docker compose logs -f migrate app`. |
 | `curl` not found inside the container | The slim image does not include curl. Use Python instead: `docker compose exec app python -c "import urllib.request; print(urllib.request.urlopen('http://localhost:8000/health').read().decode())"` |
-| `Can't locate revision identified by ...` | The GHCR image may be older than your database. Update to the latest release ([Updating](#updating)). |
+| `Can't locate revision identified by ...` in `docker compose logs migrate` | The GHCR image may be older than your database. Update to the latest release ([Updating](#updating)). |
 | `VALKEY_PASSWORD is not set` in `docker compose logs app` | Your `docker-compose.yml` is older than the image, so it does not hand the app the rate limiter's password. Follow [Updating](#updating) from step 1. |
 | Signing in fails, and `docker compose logs app` names `redis:6379` | Your configuration files are newer than the image, as when a `docker-compose.override.yml` pins an older digest: an image from before the switch to Valkey looks for a Redis the files no longer start. Follow [Updating](#updating) from step 1. |
 
@@ -183,8 +208,9 @@ In bundled mode the repo's `docker-compose.yml` mounts `deploy/nginx-bundled/ngi
 bundled `shekel-prod-nginx` container. Nothing under `deploy/nginx-shared/` is read.
 
 In shared mode the bundled `shekel-prod-nginx` is parked in the `disabled` profile by
-`deploy/docker-compose.prod.yml`, so only `db`, `valkey`, and `app` start. The shared Nginx (defined
-and managed outside this stack) reaches the app over an external `homelab` Docker network.
+`deploy/docker-compose.prod.yml`, so only `db`, `valkey`, the one-shot `migrate` and `app` start.
+The shared Nginx (defined and managed outside this stack) reaches the app over an external `homelab`
+Docker network.
 
 For full details and the file layout under `deploy/`, see [`deploy/README.md`](deploy/README.md).
 
@@ -323,12 +349,17 @@ If you expose Shekel outside your local network, take these additional steps:
    method, ensure your reverse proxy terminates HTTPS.
 4. **Set your own seed password before the first boot.** The deploy refuses to seed `.env.example`'s
    published `ChangeMe!2026`, so the first boot stops until `SEED_USER_PASSWORD` holds another.
-5. **Scrub seed credentials from `.env` after the first successful boot.** Remove the
-   `SEED_USER_EMAIL` and `SEED_USER_PASSWORD` lines from `.env`, then run
-   `docker compose up -d --force-recreate app` so Docker's stored `Container.Config.Env` no longer
-   carries the password. The seed user already exists in the database; the env values are no longer
-   needed. Verify with `docker exec shekel-prod-app env | grep -c SEED_USER_PASSWORD` -- the count
-   should be `0`.
+5. **Scrub seed credentials from `.env` after the first successful boot.** Only the deploy, the
+   `migrate` service, is given them. Remove the `SEED_USER_EMAIL` and `SEED_USER_PASSWORD` lines
+   from `.env`, then run `docker compose up -d`, which makes the `migrate` container again without
+   them, so Docker's stored `Container.Config.Env` no longer carries the password. The seed user
+   already exists in the database; the env values are no longer needed. Verify that the count is
+   `0`:
+
+   ```bash
+   docker inspect shekel-prod-migrate --format '{{range .Config.Env}}{{println .}}{{end}}' \
+       | grep -c '^SEED_USER_PASSWORD=.'
+   ```
 
 ### General Recommendations
 
@@ -353,10 +384,11 @@ docker exec shekel-prod-app python -c \
 python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
 ```
 
-Paste the output into your `.env` file as `TOTP_ENCRYPTION_KEY=<key>`, then restart the app:
+Paste the output into your `.env` file as `TOTP_ENCRYPTION_KEY=<key>`, then make the app container
+again with it (a `restart` keeps the environment the container was made with):
 
 ```bash
-docker compose restart app
+docker compose up -d app
 ```
 
 You can then enable MFA in Settings > Security > Enable TOTP.
@@ -589,6 +621,7 @@ shekel/
 ├── deploy/                      # Version-controlled deployment configs
 │   ├── nginx-bundled/           #   Bundled-mode Nginx config (default)
 │   ├── nginx-shared/            #   Shared-mode Nginx + vhost (homelab)
+│   ├── postgres/                #   The database's logins script (provision_roles.sh)
 │   └── docker-compose.prod.yml  #   Compose override that selects shared mode
 ├── cloudflared/                 # Cloudflare Tunnel configuration
 ├── .github/workflows/           # CI (lint + test) and Docker image publishing
@@ -599,7 +632,7 @@ shekel/
 ├── docker-compose.dev.yml       # Development Docker Compose (dev DB + test DB)
 ├── Dockerfile                   # Multi-stage production container
 ├── gunicorn.conf.py             # Gunicorn WSGI server configuration
-├── entrypoint.sh                # Container startup (DB init, migrate, seed)
+├── entrypoint.sh                # The web server's startup (secrets, static files, gunicorn)
 ├── .python-version              # The Python version uv, CI and the Dockerfile follow
 ├── pyproject.toml               # Python dependencies and the ranges each may move in
 ├── uv.lock                      # Every package's exact version and sha256

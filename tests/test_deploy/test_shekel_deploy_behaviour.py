@@ -49,9 +49,9 @@ from unittest import mock
 import pytest
 from sqlalchemy import text
 
+from tests._repo_root import REPO_ROOT
 
-_REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
-_DEPLOY_SCRIPT = _REPO_ROOT / "deploy" / "shekel-deploy.sh"
+_DEPLOY_SCRIPT = REPO_ROOT / "deploy" / "shekel-deploy.sh"
 
 _OLD = "sha256:" + "a" * 64
 _NEW = "sha256:" + "b" * 64
@@ -1517,7 +1517,7 @@ class TestTheRunningCheckIsReadFromTheScriptsCheckout:
         shutil.copy2(_DEPLOY_SCRIPT, copy)
         helper = copy.parents[1] / "scripts" / "_container_lib.sh"
         helper.parent.mkdir()
-        shutil.copy2(_REPO_ROOT / "scripts" / "_container_lib.sh", helper)
+        shutil.copy2(REPO_ROOT / "scripts" / "_container_lib.sh", helper)
         result = stack.run(script=copy, health="healthy", **_NO_MIGRATIONS)
         calls = stack.invocations
         assert result.returncode == 0, _said(result, calls)

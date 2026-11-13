@@ -76,7 +76,9 @@
      (app/jinja_filters.py), the status an item is DRAWN as -- Credit for a
      row put on the card, which is stored Paid (plan task plan#3054) -- so
      the mobile card's and the Plan row's badges and labels say what the
-     desktop cell says.
+     desktop cell says; and `draws_blank` (`grid_view_service`), whether a
+     card's payoff row has nothing to pay and so draws no figure (plan task
+     plan#3698), which the three ask alike.
 #}
 
 {% macro mstart(periods, idx) -%}
@@ -467,6 +469,10 @@
   {# What a tick WOULD book, where that is neither the plan nor a recorded
      figure (plan step X-au-c3).  ``none`` for every row without that gap. #}
   {% set will_book = retained[key] %}
+  {#- A card's payoff row with nothing to pay draws no figure (plan task
+      plan#3698, `draws_blank`, as the desktop cell asks); the card's
+      `aria-label` still says it. -#}
+  {% set blank = draws_blank(txn, display_amount, will_book) %}
   {% set es = entry_sums.get(key) if entry_sums is defined else none %}
   {% set show_progress = es is not none and txn.status_id == STATUS_PROJECTED %}
   {% if show_progress %}
@@ -509,7 +515,7 @@
       <span class="font-mono fw-semibold text-nowrap{% if show_progress and over_budget %} text-danger{% endif %}">
         {% if show_progress %}
           {{ money(es.total, cents=false) }} / {{ money(es.budget, cents=false) }}
-        {% else %}
+        {% elif not blank %}
           {{ money(display_amount, cents=false) }}
         {% endif %}
         {{ retained_badge(will_book) }}
@@ -726,6 +732,10 @@
   {# What a tick WOULD book, where that is neither the plan nor a recorded
      figure (plan step X-au-c3).  ``none`` for every row without that gap. #}
   {% set will_book = retained[key] %}
+  {#- A card's payoff row with nothing to pay draws no figure (plan task
+      plan#3698, `draws_blank`), which a screen reader still reads, since
+      this row has no label of its own. -#}
+  {% set blank = draws_blank(txn, display_amount, will_book) %}
   <li class="list-group-item d-flex justify-content-between align-items-center py-2 px-3">
     <span class="text-truncate me-2">
       {{ rk.display_name }}
@@ -747,7 +757,11 @@
       {{- account_chips(txn, account, is_leg) }}
     </span>
     <span class="font-mono fw-semibold text-nowrap">
+      {%- if blank %}
+      <span class="visually-hidden">{{ money(display_amount, cents=false) }}</span>
+      {%- else %}
       {{ money(display_amount, cents=false) }}{{ retained_badge(will_book) }}
+      {%- endif %}
     </span>
   </li>
 {% endfor %}

@@ -31,6 +31,10 @@ Architecture (per CLAUDE.md "Architecture" and
     ``RowKey`` shape; returns plain ``list[RowKey]`` and ``dict``.  One
     read of the session: :func:`drawn_status` takes the status row it draws
     by primary key, from the identity map once loaded (plan task plan#3054).
+    :func:`draws_blank` asks a transfer's definition for its card-payment
+    settings, which pricing the row has already loaded: ``GET /grid`` issued
+    60 statements with it and without it (measured 2026-11-13, plan task
+    plan#3698).
   * No monetary arithmetic.  Status / category / income-vs-expense
     filtering only; every displayed dollar amount still flows through
     ``balance_resolver`` per mobile-first v3 plan Section 1 rule 2.
@@ -43,11 +47,15 @@ Architecture (per CLAUDE.md "Architecture" and
 from collections import namedtuple
 from collections.abc import Iterable
 from datetime import date
+from decimal import Decimal
 
 
+from app import ref_cache
+from app.enums import StatusEnum
 from app.extensions import db
 from app.models.category import Category
 from app.models.ref import Status
+from app.services.cash_ledger import is_card_payment_definition
 from app.services.pay_calendar import DerivedPeriod
 from app.services.status_seam import drawn_status_id
 from app.services.transfer_legs import (
@@ -200,6 +208,44 @@ def drawn_status(item: GridItem) -> Status | None:
     if isinstance(item, TransferLeg):
         return item.status
     return db.session.get(Status, drawn_status_id(item))
+
+
+def draws_blank(
+    item: GridItem, shown: Decimal, will_book: Decimal | None,
+) -> bool:
+    """Return whether *item*'s cell draws no figure: a card's payoff row with nothing to pay.
+
+    Every card has one payment, a payoff row each payday made with the card,
+    blank when nothing is owed (the card's amendment of 2026-11-05, plan task
+    plan#3698).  So a paycheck where the card owes nothing draws no ``$0``,
+    where every paycheck drew one before.  True for a transfer side, Projected,
+    whose definition is the card's worked-out payment
+    (:func:`~app.services.cash_ledger.is_card_payment_definition`), showing
+    ``$0.00`` with nothing a tick would book instead.  The grid cell, the
+    mobile card and the Plan row ask it, each drawing the figure a screen
+    reader still reads and the click the cell still takes.
+
+    False for every other item, a zero included: a ``$0.00`` bill still prints
+    its zero (finding N-344), a ``$0.00`` payoff marked Paid is a record
+    of paying nothing, and one whose tick would book a figure kept from a
+    reverted close (*will_book*) has that figure to show.
+
+    Args:
+        item: A row or a leg.
+        shown: The figure the cell shows: what it recorded, else its plan.
+        will_book: What a tick would book where that is neither, else
+            ``None`` (the cell's ``retained`` map).
+
+    Returns:
+        ``True`` when the cell draws no figure.
+    """
+    return (
+        isinstance(item, TransferLeg)
+        and item.status_id == ref_cache.status_id(StatusEnum.PROJECTED)
+        and shown == Decimal("0.00")
+        and will_book is None
+        and is_card_payment_definition(item.transfer.template)
+    )
 
 
 def row_card_dom_id(row_id: int, prefix: str = "") -> str:

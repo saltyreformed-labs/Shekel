@@ -31,6 +31,7 @@ from app.services.grid_view_service import (
     card_dom_id,
     cell_dom_id,
     cell_key,
+    draws_blank,
     drawn_status,
     leg_dom_id,
 )
@@ -303,6 +304,9 @@ def register_template_filters(app: Flask) -> None:
     # The status an item is drawn as (plan task plan#3054): Credit for a row
     # put on the card, which is stored Paid.
     app.add_template_global(drawn_status, "drawn_status")
+    # Whether a cell draws no figure (plan task plan#3698): a card's payoff
+    # row with nothing to pay.
+    app.add_template_global(draws_blank, "draws_blank")
     app.add_template_filter(to_percent, "to_percent")
     app.add_template_filter(local_datetime, "local_datetime")
     app.add_template_filter(ordinal, "ordinal")

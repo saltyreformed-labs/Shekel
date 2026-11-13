@@ -99,6 +99,10 @@
    recorded and a re-settle honours it.  ``none`` for every row without that
    gap -- the route decides, this template draws. #}
 {% set will_book = retained[key] %}
+{#- A card's payoff row with nothing to pay draws no figure (plan task
+    plan#3698): `grid_view_service.draws_blank`, asked by the mobile card and
+    the Plan row too. -#}
+{% set blank = draws_blank(t, display_amount, will_book) %}
 {% set es = entry_sums.get(key) if entry_sums is defined else none %}
 {% set show_progress = es is not none and t.status_id == STATUS_PROJECTED %}
 {% if show_progress %}
@@ -188,9 +192,19 @@
         {{ money(est_display, cents=false) }}
       </span>
       <span class="fw-semibold font-mono">{{ money(recorded, cents=false) }}</span>
+    {% elif blank %}
+      {# **A card's payoff row with nothing to pay draws no figure, and keeps
+         the space of one** (plan task plan#3698).  Its `$0` is drawn
+         ``invisible`` (visibility: hidden), so ``.txn-open`` keeps the width
+         a click needs (finding N-344, in the arm below) and the cell does not
+         shift its column, while its ``aria-label`` and ``title`` above still
+         say ``$0.00 -- Projected``.  The transfer arrow and the due caption
+         go with the figure; the hover still draws the chip and its tick. #}
+      <span class="font-mono invisible" aria-hidden="true">{{ money(est_display, cents=false) }}</span>
     {% else %}
       {# **A ZERO renders, and until plan step ``bank_import:X-gb`` it did
-         not** -- finding **N-344**'s second limb.  The suppression came from a
+         not** -- finding **N-344**'s second limb, for every zero but a blank
+         payoff row's (the arm above).  The suppression came from a
          2026-06 layout commit with no rationale beyond tidiness, and its cost
          is that a `$0.00` row draws NOTHING inside ``.txn-open``: an
          inline-flex element with no content is zero pixels wide, so the row is
@@ -219,8 +233,8 @@
       {% endif %}
     {% endif %}
 
-    {# Transfer indicator #}
-    {% if is_leg %}
+    {# Transfer indicator, beside a figure #}
+    {% if is_leg and not blank %}
       <i class="bi bi-arrow-left-right text-muted ms-1 small" title="Transfer" aria-label="Transfer"></i>
     {% endif %}
 
@@ -276,7 +290,7 @@
    `grid_view_service.due_captions_by_key`).  Indexed, not guarded: a missing
    map raises where a missing variable would silently caption every row. #}
 {% set due_caption = due_captions[key] %}
-{% if due_caption %}
+{% if due_caption and not blank %}
   <small class="cell-caption d-block fs-mini">Due: {{ due_caption.strftime('%-m/%-d') }}</small>
 {% endif %}
 

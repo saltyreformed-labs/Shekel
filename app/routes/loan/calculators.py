@@ -14,7 +14,6 @@ from datetime import date
 from decimal import Decimal, ROUND_CEILING
 
 from flask import render_template, request
-from flask_login import current_user
 
 from app.enums import InterestAccrualConventionEnum
 from app.routes.loan._bp import loan_bp
@@ -31,9 +30,6 @@ from app.routes.loan._helpers import (
 from app.services import amortization_engine, balance_at, loan_resolver
 from app.services.amortization_engine import AmortizationSummary
 from app.services.installment_calendar import first_installment_date
-from app.services.recurring_transfer_query import (
-    active_recurring_transfer_templates,
-)
 from app.utils.auth_helpers import require_owner
 from app.utils.dates import months_between
 from app.utils.money import round_money
@@ -309,11 +305,11 @@ def payoff_calculate(account_id):
     data = _payoff_schema.load(request.form)
     mode = data["mode"]
 
-    # Shared loan context: payments, rate changes, seam balance + figures.
+    # Shared loan context: rate changes, seam balance + figures.
     # Identical to the dashboard's data loading so calculations are
     # consistent.  ``ctx.current_owed`` is the same dollar figure
     # rendered on the loan card (the seam's fold, plan C4).
-    ctx = _load_route_context(account, params)
+    ctx = _load_route_context(account)
 
     # A retired loan has no plan to accelerate: the seam's plan is empty for
     # it and its payoff ``None``, and a "Never" beside a "Paid off" chip
@@ -324,14 +320,13 @@ def payoff_calculate(account_id):
             error="This loan is paid off. No payoff scenario available.",
         )
 
-    # Whether the loan has a plan of ITS OWN to compare with the contract: a
-    # recurring definition into it (the plan prices every occurrence, rows
-    # or not -- ruling R-R64) or a payment row.  A loan with neither folds
-    # the contract's own installments, and a comparison would read "on
-    # track, $0.00 saved" of a plan that is the contract.
-    has_plan = bool(ctx.loan.payments) or bool(
-        active_recurring_transfer_templates(account.id, current_user.id),
-    )
+    # Whether the loan has a plan of ITS OWN to compare with the contract --
+    # a payment in its record, a recurring definition into it, or a projected
+    # row its forward plan folds -- is the seam's answer, read off the loan's
+    # one record (``LoanFigures.has_own_plan``).  A loan with none folds the
+    # contract's own installments, and a comparison would read "on track,
+    # $0.00 saved" of a plan that is the contract.
+    has_plan = ctx.figures.has_own_plan
     if mode == "extra_payment":
         return _payoff_extra_payment_result(
             account, params, ctx, data, has_plan,
@@ -564,7 +559,7 @@ def refinance_calculate(account_id):
 
     # Shared loan context: seam balance + figures.  Identical to the dashboard's
     # data loading so the "current" refinance baseline matches the card.
-    ctx = _load_route_context(account, params)
+    ctx = _load_route_context(account)
 
     # Paid-off loan: no refinance comparison is meaningful.  Read the seam's
     # balance (the fold, plan C4) ONCE, and gate on it: a loan that owes nothing

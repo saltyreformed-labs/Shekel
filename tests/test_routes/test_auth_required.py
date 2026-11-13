@@ -39,20 +39,28 @@ What is graded, and how each arm is kept honest:
   ``LOGIN_DISABLED`` -- each with the arm that proves the switch is a switch.
 * **the hook's place in the request** is pinned: after CSRF and the rate
   limiter, before the session-activity stamp.
+* **a signed-in companion without two-factor is held at its setup** (ruling
+  plan#3434): the hold's own set is pinned and resolves, every served pair
+  outside it and the front door sends her to setup by the hold's decision,
+  and none inside them is decided by the hold.  Its behaviour on a page, an
+  htmx request and a POST is ``tests/test_routes/test_two_factor_required.py``.
 """
 
 import re
 from urllib.parse import parse_qs, urlsplit
 
 import pytest
+from flask import request
 
 from app import create_app
 from app.config import TestConfig
 from app.extensions import db as _db, login_manager
 from app.rate_limits import limiter
-from app.login_gate import PUBLIC_ENDPOINTS
+from app import login_gate
+from app.login_gate import PUBLIC_ENDPOINTS, TWO_FACTOR_SETUP_ENDPOINTS
+from tests._two_factor_sign_in import sign_in_seed_companion_by_password
 from tests.test_integration.test_rate_limiter import _disable_limiter
-from tests.test_routes.test_no_baseline_policy import _route_table_app
+from tests.test_routes.test_no_baseline_policy._helpers import _route_table_app
 
 #: The seven views an anonymous visitor may reach, plus Flask's own static
 #: route -- the front door and what it needs.  **A second spelling on
@@ -69,6 +77,16 @@ _THE_FRONT_DOOR = frozenset({
     "static",
     "static_pass.web_manifest",
     "static_pass.service_worker",
+})
+
+#: What a signed-in user who owes two-factor reaches beside the front door
+#: (ruling plan#3434): setup, its confirmation and signing out.  A second
+#: spelling of ``TWO_FACTOR_SETUP_ENDPOINTS`` on purpose, as
+#: :data:`_THE_FRONT_DOOR` is of the public set.
+_THE_SETUP_DOOR = frozenset({
+    "auth.mfa_setup",
+    "auth.mfa_confirm",
+    "auth.logout",
 })
 
 #: What each converter kind is filled with to make a concrete URL.  The gate
@@ -189,14 +207,42 @@ def gate_decisions(monkeypatch):
 
     def counting(manager):
         """Record the refusal, then answer exactly as the original does."""
-        # Pylint: ``import-outside-toplevel`` -- ``request`` is read inside
-        # the wrapper because the path is only known during a request.
-        from flask import request  # pylint: disable=import-outside-toplevel
         refused.append((request.path, request.endpoint))
         return original(manager)
 
     monkeypatch.setattr(type(login_manager), "unauthorized", counting)
     yield refused
+
+
+def spy_on_the_hold(monkeypatch):
+    """Record each request the two-factor hold ends, without changing its answer.
+
+    :func:`app.login_gate._hold_at_two_factor_setup` is the one answer the
+    hold ends a request with, so wrapping it observes the hold's DECISION, as
+    :func:`gate_decisions` observes the anonymous gate's: a view that
+    redirects to setup on its own (``/mfa/confirm`` does) is never read as
+    the hold's.
+
+    Args:
+        monkeypatch: The test's monkeypatch, which restores the gate.
+
+    Returns:
+        A list the wrapper appends ``(method, path, endpoint)`` to on every
+        hold.
+    """
+    # Pylint: ``protected-access`` -- the hold's one answer is private to the
+    # gate, and spying on it is how a test observes the gate's decision.
+    # pylint: disable=protected-access
+    original = login_gate._hold_at_two_factor_setup
+    held = []
+
+    def counting():
+        """Record the hold, then answer exactly as the original does."""
+        held.append((request.method, request.path, request.endpoint))
+        return original()
+
+    monkeypatch.setattr(login_gate, "_hold_at_two_factor_setup", counting)
+    return held
 
 
 def _assert_bounced_to_login(response, path):
@@ -480,3 +526,70 @@ class TestWhereTheGateSitsInTheRequest:
             ], names
         finally:
             _disable_limiter(limiter, ordered_app)
+
+
+class TestTheTwoFactorHold:
+    """A signed-in companion without two-factor reaches setup and sign-out only."""
+
+    def test_the_setup_set_is_pinned(self):
+        """Adding a name to ``TWO_FACTOR_SETUP_ENDPOINTS`` is a two-file diff."""
+        assert TWO_FACTOR_SETUP_ENDPOINTS == _THE_SETUP_DOOR
+
+    def test_every_setup_name_resolves_in_the_route_table(self, app):
+        """A stale name lets nothing through, and is refused rather than ignored."""
+        served = {rule.endpoint for rule in app.url_map.iter_rules()}
+        assert TWO_FACTOR_SETUP_ENDPOINTS <= served, (
+            f"named for the hold but served by no route: "
+            f"{sorted(TWO_FACTOR_SETUP_ENDPOINTS - served)}"
+        )
+
+    @pytest.mark.usefixtures("seed_companion")
+    def test_every_other_pair_sends_her_to_setup(
+        self, app, monkeypatch,
+    ):
+        """Every served pair outside both sets is held, by the hold's decision.
+
+        One case over the whole table, rather than one per pair, because each
+        case would need a companion signed in, and the anonymous sweep above
+        already names each route.  The pairs the hold missed are listed whole.
+        """
+        held = spy_on_the_hold(monkeypatch)
+        with app.app_context():
+            browser = sign_in_seed_companion_by_password(app)
+            swept, missed = 0, []
+            for method, path, endpoint in _PROTECTED:
+                if endpoint in TWO_FACTOR_SETUP_ENDPOINTS:
+                    continue
+                held.clear()
+                response = _request(browser, method, path)
+                swept += 1
+                location = urlsplit(response.headers.get("Location", "")).path
+                if held != [(method, path, endpoint)] or location != "/mfa/setup":
+                    missed.append((method, path, response.status_code, location))
+
+        assert not missed, missed
+        assert swept > 200, swept
+
+    @pytest.mark.usefixtures("seed_companion")
+    def test_the_setup_door_and_the_front_door_are_not_held(
+        self, app, monkeypatch,
+    ):
+        """No pair of either set is decided by the hold, sign-out last.
+
+        Sign-out ends her session, so it runs after every other; what each
+        view then answers is its own business, above a crash.
+        """
+        held = spy_on_the_hold(monkeypatch)
+        let_through = sorted(
+            (pair for pair in _PAIRS
+             if pair[2] in TWO_FACTOR_SETUP_ENDPOINTS | PUBLIC_ENDPOINTS),
+            key=lambda pair: pair[2] == "auth.logout",
+        )
+        assert let_through[-1][2] == "auth.logout", let_through
+        with app.app_context():
+            browser = sign_in_seed_companion_by_password(app)
+            for method, path, endpoint in let_through:
+                response = _request(browser, method, path)
+                assert response.status_code < 500, (endpoint, response.status_code)
+
+        assert not held, held

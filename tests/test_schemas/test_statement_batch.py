@@ -590,7 +590,8 @@ class TestAMatchMayNameAsManyRowsAsThePassOFFERS:
       ``app/config.py``), the ONE bound on a request body (ruling
       **R-BAL218**), refuses the body before this schema sees it, and
       :data:`MAX_BATCH_ITEMS` bounds the ACTS.  Graded on a form body by
-      ``tests/test_config.py``'s ``TestTheUploadCeiling``.  Measured
+      ``TestTheUploadCeiling`` in
+      ``tests/test_config/test_settings_every_config_shares.py``.  Measured
       2026-10-06 on Werkzeug 3.1.9 at the CRAFTED 22-byte tick: that budget
       carries 23,830 ticks, costing 51-63 ms in one item and 49-139 ms spread
       across the 500-item ceiling (two sessions on a shared host), all of

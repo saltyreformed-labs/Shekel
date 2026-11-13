@@ -70,7 +70,7 @@ def _freeze_today_inside_seed_range(monkeypatch):
     2026-05-08.  Freezing today inside that window keeps the
     analytics defaults (current period lookup, year selector) on a
     real period regardless of the wall-clock date when the test
-    runs.  Mirrors the autouse freeze in ``test_analytics.py`` so
+    runs.  Mirrors the autouse freeze in ``test_analytics/conftest.py`` so
     fixture behavior is consistent.
     """
     freeze_today(monkeypatch, date(2026, 3, 20))

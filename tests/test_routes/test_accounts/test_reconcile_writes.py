@@ -27,9 +27,10 @@ class TestTheReconcileRoute(_TestTheReconcileRouteMembers):
         The COMPANION is the case that matters, not an unrelated stranger: a
         companion is authenticated AND holds granted access to this owner's
         transactions and their entries (``TestCompanionAccess`` in
-        ``test_routes/test_entries.py``), so ``@require_owner`` refusing them is
-        a real decision rather than a trivial one.  Reconciling is an owner
-        judgement about the owner's own bank statement.
+        ``test_routes/test_entries/test_access_and_popover.py``), so
+        ``@require_owner`` refusing them is a real decision rather than a
+        trivial one.  Reconciling is an owner judgement about the owner's own
+        bank statement.
 
         The project's security response rule: 404 for both "not found" and
         "not yours", so a probe cannot use the status code as an existence

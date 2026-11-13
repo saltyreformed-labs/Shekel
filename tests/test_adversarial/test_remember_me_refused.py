@@ -37,7 +37,7 @@ from app.utils.session_helpers import (
     SESSION_LAST_ACTIVITY_KEY,
     SESSION_USER_ID_KEY,
 )
-from tests.conftest import SEED_USER_EMAIL, SEED_USER_PASSWORD
+from tests._seed_owner_fixtures import SEED_USER_EMAIL, SEED_USER_PASSWORD
 
 _SECOND_EMAIL = "second@shekel.local"
 _SECOND_PASSWORD = "secondpass12"

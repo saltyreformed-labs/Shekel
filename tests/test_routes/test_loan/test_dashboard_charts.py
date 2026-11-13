@@ -12,7 +12,7 @@ import sqlalchemy as sa
 from app.enums import AcctTypeEnum, StatusEnum
 
 from tests._test_helpers import freeze_today
-from tests.conftest import log_in_seed_user
+from tests._seed_owner_fixtures import log_in_seed_user
 
 from ._helpers import (
     _create_loan_account,

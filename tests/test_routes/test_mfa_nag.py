@@ -23,6 +23,8 @@ copy can be tweaked without breaking the test, while still proving the
 banner element rendered.
 """
 
+from flask_login import login_user
+
 from app.extensions import db
 from app.models.user import MfaConfig
 from app.services import mfa_service
@@ -113,16 +115,31 @@ class TestMfaNagOwnerVisibility:
 class TestMfaNagOtherRolesAndAnonymous:
     """Banner is scoped to authenticated owner-role users only."""
 
-    def test_banner_hidden_for_companion(self, companion_client):
+    def test_banner_hidden_for_companion(self, app, seed_user, seed_companion):
         """Companion-role users do not see the owner-targeted nag.
 
         The audit scopes F-095 to the owner role (de facto admin).
         Companions should never see the banner regardless of whether
         they have personally enrolled in MFA.
+
+        **Asked of the processor, not a page** (ruling plan#3434).  A companion
+        without two-factor is now held at its setup, whose endpoint hides the
+        nag on its own, and ``companion_client`` signs in one who has it, whom
+        the two-factor clause hides it from.  Neither page can tell the owner
+        clause from the others, so this asks the processor for a request to
+        her page, as her and as the owner, both without two-factor: the two
+        answers differ in the role alone.
         """
-        resp = companion_client.get("/companion/")
-        assert resp.status_code == 200
-        assert _NAG_MARKER not in resp.data
+        nag = next(
+            processor for processor in app.template_context_processors[None]
+            if processor.__name__ == "inject_mfa_nag_visible"
+        )
+        for user, visible in (
+            (seed_companion["user"], False), (seed_user["user"], True),
+        ):
+            with app.test_request_context("/companion/"):
+                login_user(user)
+                assert nag() == {"mfa_nag_visible": visible}, user
 
     def test_banner_hidden_for_anonymous_user_on_login(self, client):
         """The login page must not render the nag.

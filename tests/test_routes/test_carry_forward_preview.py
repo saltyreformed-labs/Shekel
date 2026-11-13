@@ -58,6 +58,7 @@ from tests._test_helpers import (
     moved_by_the_owner,
     resolved_amount,
 )
+from tests._two_factor_sign_in import sign_in_seed_companion
 
 
 # ── Helpers ──────────────────────────────────────────────────────────
@@ -137,17 +138,6 @@ def _make_transfer(seed_user, period):
             name="CFP Transfer",
         ),
     )
-
-
-def _login_companion(app):
-    """Authenticate a companion test client."""
-    comp = app.test_client()
-    resp = comp.post("/login", data={
-        "email": "companion@shekel.local",
-        "password": "companionpass",
-    })
-    assert resp.status_code == 302
-    return comp
 
 
 # ── Status code + content tests ──────────────────────────────────────
@@ -423,7 +413,7 @@ class TestCarryForwardPreviewSecurity:
         share.  The decorator returns the same 404 the POST route
         does so the two are consistent.
         """
-        comp = _login_companion(app)
+        comp = sign_in_seed_companion(app)
         resp = comp.get(
             f"/pay-periods/{seed_periods_today[0].id}/carry-forward-preview"
         )

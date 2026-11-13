@@ -480,7 +480,7 @@ class TestPaydayWorkflowRegression:
         **Finding cash D1 is NARROWED, not reopened.**  A settle dated a LATER
         DAY than the assertion still rides on top of it -- that is the real
         shape of "money the app loses", and
-        ``test_cash_walk.TestEveryAssertionIsReplayed
+        ``test_cash_walk.test_the_assertions.TestEveryAssertionIsReplayed
         .test_three_assertions_each_reset_the_running_balance`` pins it (a
         -$300.00 settle on 04-01 reduces a $900.00 assertion made 03-01).  What
         R-DH removed is the SAME-DAY claim, which was never a fact about money.

@@ -25,6 +25,7 @@ from app.tax_law import (
     LAW,
     Bracket,
     ChildDeductionTier,
+    FederalCredits,
     FederalRules,
     FicaRules,
     StateYearLaw,
@@ -46,13 +47,21 @@ def _federal(**overrides):
     """Return one filing status's made-up federal rules, with *overrides* applied."""
     fields = {
         "standard_deduction": Decimal("15000.00"),
-        "child_credit_amount": Decimal("2000.00"),
-        "other_dependent_credit_amount": Decimal("500.00"),
-        "child_credit_refundable_cap": Decimal("1500.00"),
         "brackets": ladder(*_RUNGS),
     }
     fields.update(overrides)
     return FederalRules(**fields)
+
+
+def _credits(**overrides):
+    """Return a made-up year's per-child credits, with *overrides* applied."""
+    fields = {
+        "child_credit_amount": Decimal("2000.00"),
+        "other_dependent_credit_amount": Decimal("500.00"),
+        "child_credit_refundable_cap": Decimal("1500.00"),
+    }
+    fields.update(overrides)
+    return FederalCredits(**fields)
 
 
 def _fica(**overrides):
@@ -94,6 +103,7 @@ def _year(tax_year=2030, **overrides):
         "tax_year": tax_year,
         "sources": ("A made-up source",),
         "federal": {status: _federal() for status in FilingStatusEnum},
+        "federal_credits": _credits(),
         "fica": _fica(),
         "states": {"ZZ": _state()},
     }
@@ -129,7 +139,12 @@ class TestTheControlsLoad:
     def test_the_bounds_of_every_range_load(self):
         """A rate of 0 or 1, a zero amount and years 2000 and 2100 are all allowed."""
         assert _fica(ss_rate=Decimal("1"), medicare_rate=Decimal("0")).ss_rate == 1
-        assert _federal(child_credit_amount=Decimal("0.00")).child_credit_amount == 0
+        nothing = _credits(
+            child_credit_amount=Decimal("0.00"),
+            child_credit_refundable_cap=Decimal("0.00"),
+        )
+        assert nothing.child_credit_amount == 0
+        assert nothing.child_credit_refundable_cap == 0
         assert _year(2000).tax_year == 2000
         assert _year(2100).tax_year == 2100
 
@@ -250,25 +265,75 @@ class TestARungChecksItself:
             Bracket(0.0, None, Decimal("0.1000"), 0)
 
 
+class TestALaddersRatesClimb:
+    """FederalRules refuses a rung taxing at or below the rung beneath it (finding plan#3208).
+
+    Each rung's bounds still meet end to start, so every refusal here is the
+    rate's: :func:`_federal`'s own climbing ladder loads (the controls above).
+    """
+
+    def test_a_rate_below_the_rung_beneath_is_refused(self):
+        """A slipped digit: the 22% rung written at 11% would tax its income at half the rate."""
+        with pytest.raises(
+            ValueError,
+            match=r"rates climb: rung 2 taxes at 0\.1100, not above rung 1's 0\.1200",
+        ):
+            _federal(brackets=ladder(
+                ("0.00", "10000.00", "0.1000"),
+                ("10000.00", "40000.00", "0.1200"),
+                ("40000.00", None, "0.1100"),
+            ))
+
+    def test_a_rate_equal_to_the_rung_beneath_is_refused(self):
+        """A row copied from the one below with its rate left unchanged."""
+        with pytest.raises(
+            ValueError,
+            match=r"rates climb: rung 1 taxes at 0\.1000, not above rung 0's 0\.1000",
+        ):
+            _federal(brackets=ladder(
+                ("0.00", "10000.00", "0.1000"),
+                ("10000.00", "40000.00", "0.1000"),
+                ("40000.00", None, "0.2200"),
+            ))
+
+    def test_a_top_rung_at_zero_is_refused(self):
+        """The shape the made-up test rules had until this check: a 0% rung atop 12%."""
+        with pytest.raises(ValueError, match="rung 1 taxes at 0.0000, not above"):
+            _federal(brackets=ladder(
+                ("0.00", "10000.00", "0.1200"), ("10000.00", None, "0.0000"),
+            ))
+
+    def test_a_ladder_of_one_rung_loads(self):
+        """A one-rung ladder has no rung beneath it, so any rate loads, 0% too."""
+        rules = _federal(brackets=ladder(("0.00", None, "0.0000")))
+        assert rules.brackets[0].rate == Decimal("0.0000")
+
+
+#: Which builder states each federal amount: a filing status's rules state the
+#: standard deduction, and the year's credits the three per-child figures
+#: (ruling plan#3340).
+_STATED_BY = {
+    "standard_deduction": _federal,
+    "child_credit_amount": _credits,
+    "other_dependent_credit_amount": _credits,
+    "child_credit_refundable_cap": _credits,
+}
+
+
 class TestFederalAmounts:
     """The four amounts refuse what ``salary.tax_bracket_sets``' CHECKs refused."""
 
-    @pytest.mark.parametrize("field", [
-        "standard_deduction",
-        "child_credit_amount",
-        "other_dependent_credit_amount",
-        "child_credit_refundable_cap",
-    ])
+    @pytest.mark.parametrize("field", sorted(_STATED_BY))
     def test_a_negative_amount_is_refused(self, field):
         """ck_tax_bracket_sets_nonneg_*: each amount is at least zero."""
         with pytest.raises(ValueError, match=f"federal {field} -1.00 must be at least zero"):
-            _federal(**{field: Decimal("-1.00")})
+            _STATED_BY[field](**{field: Decimal("-1.00")})
 
-    @pytest.mark.parametrize("field", ["standard_deduction", "child_credit_amount"])
+    @pytest.mark.parametrize("field", sorted(_STATED_BY))
     def test_a_missing_amount_is_refused(self, field):
         """The columns were NOT NULL."""
         with pytest.raises(ValueError, match="must be a Decimal figure, not None"):
-            _federal(**{field: None})
+            _STATED_BY[field](**{field: None})
 
     def test_an_amount_finer_than_a_cent_is_refused(self):
         """The column is Numeric(12, 2)."""
@@ -295,75 +360,86 @@ class TestFederalAmounts:
 class TestWithholdingFigures:
     """A year states a withholding figure only where it differs (ruling plan#3213).
 
-    The made-up rules' return figures are a 15,000.00 standard deduction and a
-    2,000.00 child credit (:func:`_federal`).
+    The made-up return figures are a 15,000.00 standard deduction, a filing
+    status's (:func:`_federal`), and a 2,000.00 child credit, the year's
+    (:func:`_credits`; ruling plan#3342).  Which rules withholding prices on
+    is the resolver's slice's
+    (:attr:`app.services.tax_config_service.FederalTaxRules.withholding_rules`),
+    graded in ``tests/test_services/test_tax_config_service.py``.
     """
 
     _RETURNS = {
-        "withholding_standard_deduction": Decimal("15000.00"),
-        "withholding_child_credit_amount": Decimal("2000.00"),
+        "withholding_standard_deduction": (_federal, Decimal("15000.00")),
+        "withholding_child_credit_amount": (_credits, Decimal("2000.00")),
     }
 
     @pytest.mark.parametrize("field", sorted(_RETURNS))
     def test_a_figure_equal_to_the_returns_is_refused(self, field):
         """Stating the return's figure again would be a second spelling of it."""
+        builder, returns = self._RETURNS[field]
         with pytest.raises(ValueError, match=f"federal {field} .* is the return's figure"):
-            _federal(**{field: self._RETURNS[field]})
+            builder(**{field: returns})
 
     @pytest.mark.parametrize("field", sorted(_RETURNS))
     def test_a_negative_figure_is_refused(self, field):
         """A withholding figure is an amount like the return's."""
+        builder, _returns = self._RETURNS[field]
         with pytest.raises(ValueError, match=f"federal {field} -1.00 must be at least zero"):
-            _federal(**{field: Decimal("-1.00")})
+            builder(**{field: Decimal("-1.00")})
 
     @pytest.mark.parametrize("field", sorted(_RETURNS))
     def test_a_figure_finer_than_a_cent_is_refused(self, field):
         """To the cent, as every amount in the law."""
+        builder, _returns = self._RETURNS[field]
         with pytest.raises(ValueError, match="more than 2 decimal places"):
-            _federal(**{field: Decimal("1400.005")})
+            builder(**{field: Decimal("1400.005")})
 
     @pytest.mark.parametrize("field", sorted(_RETURNS))
     def test_a_float_figure_is_refused(self, field):
         """A float cannot carry an exact figure."""
+        builder, _returns = self._RETURNS[field]
         with pytest.raises(ValueError, match="must be a Decimal figure"):
-            _federal(**{field: 1400.0})
+            builder(**{field: 1400.0})
 
-    def test_rules_stating_none_withhold_on_themselves(self):
-        """The default: withholding prices on the return's rules, the same object."""
-        rules = _federal()
-        assert rules.withholding_standard_deduction is None
-        assert rules.withholding_child_credit_amount is None
-        assert rules.withholding_rules is rules
+    @pytest.mark.parametrize("field", sorted(_RETURNS))
+    def test_a_figure_states_none_by_default(self, field):
+        """Unstated is ``None``: withholding prices on the return's figure."""
+        builder, _returns = self._RETURNS[field]
+        assert getattr(builder(), field) is None
 
-    def test_each_stated_figure_takes_the_returns_place(self):
-        """Both stated: the withholding rules carry them and the rest of the return's."""
-        rules = _federal(
-            withholding_standard_deduction=Decimal("14000.00"),
-            withholding_child_credit_amount=Decimal("1800.00"),
-        )
-        withheld = rules.withholding_rules
-        assert withheld.standard_deduction == Decimal("14000.00")
-        assert withheld.child_credit_amount == Decimal("1800.00")
-        assert withheld.other_dependent_credit_amount == Decimal("500.00")
-        assert withheld.child_credit_refundable_cap == Decimal("1500.00")
-        assert withheld.brackets == rules.brackets
-        # It states none itself: it already is what withholding prices on.
-        assert withheld.withholding_standard_deduction is None
-        assert withheld.withholding_child_credit_amount is None
-        assert withheld.withholding_rules is withheld
-        # The return's rules are unmoved.
-        assert rules.standard_deduction == Decimal("15000.00")
-        assert rules.child_credit_amount == Decimal("2000.00")
+    @pytest.mark.parametrize("field", sorted(_RETURNS))
+    def test_a_figure_other_than_the_returns_loads(self, field):
+        """The control for the refusals above: a differing figure is stated."""
+        builder, _returns = self._RETURNS[field]
+        assert getattr(builder(**{field: Decimal("1400.00")}), field) == Decimal("1400.00")
 
-    def test_a_figure_not_stated_stays_the_returns(self):
-        """One stated: the other withholding figure is the return's."""
-        deduction_only = _federal(withholding_standard_deduction=Decimal("14000.00"))
-        assert deduction_only.withholding_rules.standard_deduction == Decimal("14000.00")
-        assert deduction_only.withholding_rules.child_credit_amount == Decimal("2000.00")
 
-        credit_only = _federal(withholding_child_credit_amount=Decimal("1800.00"))
-        assert credit_only.withholding_rules.standard_deduction == Decimal("15000.00")
-        assert credit_only.withholding_rules.child_credit_amount == Decimal("1800.00")
+class TestTheRefundableCapIsPartOfTheCredit:
+    """FederalCredits refuses a refundable cap above the child credit (finding plan#3208).
+
+    :func:`_credits` states a 2,000.00 child credit and a 1,500.00 cap.
+    """
+
+    def test_a_cap_a_cent_above_the_credit_is_refused(self):
+        """The refundable part of a credit cannot exceed the credit."""
+        with pytest.raises(
+            ValueError,
+            match=(
+                r"federal child_credit_refundable_cap 2000\.01 is above the "
+                r"child credit 2000\.00"
+            ),
+        ):
+            _credits(child_credit_refundable_cap=Decimal("2000.01"))
+
+    def test_a_credit_lowered_below_its_cap_is_refused(self):
+        """The slip from the other side: a credit transcribed below the cap beside it."""
+        with pytest.raises(ValueError, match="is above the child credit 1400.00"):
+            _credits(child_credit_amount=Decimal("1400.00"))
+
+    def test_a_cap_equal_to_the_credit_loads(self):
+        """A credit wholly refundable is lawful, so equal is not refused."""
+        whole = _credits(child_credit_refundable_cap=Decimal("2000.00"))
+        assert whole.child_credit_refundable_cap == whole.child_credit_amount
 
 
 class TestFicaRules:
@@ -523,7 +599,7 @@ class TestStateYearLaw:
 
 
 class TestAYearIsCompleteOrDoesNotLoad:
-    """A tax year covers every filing status, carries FICA, cites its sources and fits the range."""
+    """A tax year covers every filing status, states its credits and FICA, cites a source, fits."""
 
     def test_a_year_missing_a_filing_status_is_refused(self):
         """A missing status would price that filer's federal tax at zero."""
@@ -531,6 +607,13 @@ class TestAYearIsCompleteOrDoesNotLoad:
         del federal[FilingStatusEnum.HEAD_OF_HOUSEHOLD]
         with pytest.raises(ValueError, match="head_of_household"):
             _year(federal=federal)
+
+    def test_a_year_without_its_credits_is_refused(self):
+        """A year states its per-child credits once, for every filer (ruling plan#3340)."""
+        with pytest.raises(
+            ValueError, match="2030 federal credits are FederalCredits, not None",
+        ):
+            _year(federal_credits=None)
 
     def test_a_year_without_fica_is_refused(self):
         """A None FICA would price Social Security and Medicare at $0.00 from that year on."""
@@ -718,10 +801,11 @@ class TestTheShippedLaw:
     """What the app carries holds the shape the resolver relies on."""
 
     def test_every_year_carries_every_filing_status_fica_and_a_source(self):
-        """The resolver slices federal rules by status and FICA by year alone."""
+        """The resolver slices federal rules by status, and credits and FICA by year alone."""
         assert LAW.years
         for year in LAW.years:
             assert set(year.federal) == set(FilingStatusEnum)
+            assert isinstance(year.federal_credits, FederalCredits)
             assert isinstance(year.fica, FicaRules)
             assert year.sources
 

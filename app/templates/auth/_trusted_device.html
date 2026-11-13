@@ -1,0 +1,19 @@
+{# One trusted device as a page shows it: the browser's name, a mark when it
+   is the browser the page is on, and its two days.  The row is built once
+   (app/routes/_trusted_devices.py, trusted_device_rows) and drawn once, here:
+   on each user's own Security page (auth/_security.html) and, for each
+   companion, on the owner's Settings > Companions (settings/_companion.html;
+   ruling plan#3439).  The dates are stored UTC and shown as display-timezone
+   days by local_datetime. #}
+{% macro device_summary(device) %}
+<div class="fw-semibold">
+  {{ device.browser }}
+  {% if device.is_this_browser %}
+  <span class="flag-chip flag-chip--neutral ms-1">This browser</span>
+  {% endif %}
+</div>
+<div class="text-muted small">
+  Trusted {{ device.trusted_at | local_datetime }}; expires
+  {{ device.expires_at | local_datetime }}
+</div>
+{% endmacro %}

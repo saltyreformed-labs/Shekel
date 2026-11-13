@@ -14,7 +14,7 @@ end-to-end against the actual ``app/extensions.py:login_manager``
 configuration -- a regression that re-introduces ``"basic"`` (or
 disables session protection entirely with ``None``) must fail one of
 the behavior tests below, not just the static config inspection in
-``tests/test_config.py``.
+``tests/test_config/test_settings_every_config_shares.py``.
 
 Flask-Login derives the per-request identifier from
 ``sha512(remote_addr || "|" || user_agent)`` (see
@@ -293,10 +293,10 @@ class TestSessionProtectionAttributeIsConfigured:
     assignment is exercised here as well so a refactor that moves
     the assignment elsewhere (or accidentally drops it) is caught
     even if the static inspection in
-    ``tests/test_config.py::TestLoginManagerConfig`` is skipped or
-    deselected.
+    ``tests/test_config/test_settings_every_config_shares.py::TestLoginManagerConfig``
+    is skipped or deselected.
 
-    ``test_config.py`` covers the *intent* (the literal value);
+    That class covers the *intent* (the literal value);
     this class covers the *binding* (the attribute is actually set
     on the module-level ``login_manager`` instance the rest of the
     app imports).

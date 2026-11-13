@@ -1456,8 +1456,9 @@ class TestWhatTheScreenMayOFFER:
         candidate -- its purchase is -- so no match can name it while it holds
         one; the row stays the destination the case above says it is.  The
         already-matched clause keeps its live subject, an envelope matched
-        EMPTY (``test_batch.py::test_a_creation_cannot_target_an_envelope_a_
-        match_claimed``).
+        EMPTY (``test_batch.test_one_derivation_per_pass
+        .TestOneDerivationStAYSCorrectAcrossThePass
+        .test_a_creation_cannot_target_an_envelope_a_match_claimed``).
         """
         with app.app_context():
             envelope = _closed_from_purchases(seed_user)

@@ -15,13 +15,18 @@ If any of these tests starts failing, the F-031 fix has regressed.
 Related: ``shekel-audits/security-2026-04-15/remediation-plan.md`` C-05.
 """
 
+import hashlib
+import time
 from datetime import datetime, timedelta, timezone
+from os import getenv
 
+import pyotp
 from cryptography.fernet import Fernet, MultiFernet
 
 from app.extensions import db
 from app.models.user import MfaConfig
 from app.services import mfa_service
+from app.utils.session_helpers import SESSION_LAST_ACTIVITY_KEY
 
 
 def _decode_session_cookie(app, cookie_value: str) -> dict:
@@ -121,49 +126,98 @@ class TestMfaSetupSecretIsServerSide:
                     f"value: {value!r}"
                 )
 
-    def test_second_setup_overwrites_first_pending(
+    def test_one_pending_secret_at_a_time(
         self, app, auth_client, seed_user
     ):
-        """A second ``/mfa/setup`` GET replaces the first pending secret.
+        """A second ``/mfa/setup`` keeps the one pending secret; a new one replaces it.
 
-        Verifies the C-05 design that each setup attempt fully owns
-        the pending columns: the first ciphertext and expiry are gone
-        after the second visit (no accumulation, no race window in
-        which two pending secrets are simultaneously valid).
+        The C-05 design: each user's setup owns the pending columns, so no
+        two pending secrets are ever valid together.  Since ruling plan#3470 a
+        second visit inside the window shows the SAME pending secret (it was
+        a new one per visit until then), and since ruling plan#3523 only in
+        the sign-in that made it; once the window closes the next visit
+        replaces it, and the replaced secret no longer confirms.
         """
         with app.app_context():
+            user_id = seed_user["user"].id
             auth_client.get("/mfa/setup")
-            config = (
-                db.session.query(MfaConfig)
-                .filter_by(user_id=seed_user["user"].id)
-                .first()
-            )
+            config = db.session.query(MfaConfig).filter_by(user_id=user_id).one()
             first_ciphertext = config.pending_secret_encrypted
             first_secret = mfa_service.decrypt_secret(first_ciphertext)
 
             auth_client.get("/mfa/setup")
             db.session.refresh(config)
-            second_ciphertext = config.pending_secret_encrypted
-            second_secret = mfa_service.decrypt_secret(second_ciphertext)
+            # The same pending secret, untouched: one row, one ciphertext.
+            assert config.pending_secret_encrypted == first_ciphertext
+            assert db.session.query(MfaConfig).filter_by(user_id=user_id).count() == 1
 
-            # Exactly one pending row exists post-overwrite.
-            row_count = (
+            config.pending_secret_expires_at = (
+                datetime.now(timezone.utc) - timedelta(seconds=1)
+            )
+            db.session.commit()
+            auth_client.get("/mfa/setup")
+            db.session.refresh(config)
+            second_secret = mfa_service.decrypt_secret(config.pending_secret_encrypted)
+            assert second_secret != first_secret
+            assert db.session.query(MfaConfig).filter_by(user_id=user_id).count() == 1
+
+            # The replaced secret's code confirms nothing.  The code is one the
+            # replaced secret accepts this instant (a step of its drift window)
+            # and the new one does not, so a refusal is the replacement's.
+            now = int(time.time())
+            steps = (now - 30, now, now + 30)
+            accepted_now = {pyotp.TOTP(second_secret).at(t) for t in steps}
+            stale = next(
+                code for code in (pyotp.TOTP(first_secret).at(t) for t in steps)
+                if code not in accepted_now
+            )
+            replaced = auth_client.post("/mfa/confirm", data={"totp_code": stale})
+            assert replaced.status_code == 302
+            db.session.refresh(config)
+            assert config.is_enabled is False
+
+    def test_setup_adds_only_the_keys_fingerprint_to_the_session(
+        self, app, auth_client, seed_user
+    ):
+        """The session gains one value at setup: a SHA-256 digest of the ciphertext.
+
+        Ruling plan#3523: ``/mfa/setup`` shows the pending key again only in
+        the sign-in that made it, which it tells by a fingerprint it stores in
+        that browser's session.  The cookie is signed but not encrypted, so
+        the C-05 rule holds for the fingerprint too.  The payload after setup
+        is the payload before it, with the activity stamp every request moves
+        and with the digest added, and nothing else: no value holds the key or
+        its ciphertext in any encoding, under any name.  The digest is spelled
+        here with ``hashlib``, never read from the route's helper.
+        """
+        with app.app_context():
+            assert auth_client.get("/security").status_code == 200
+            before = _decode_session_cookie(
+                app, _get_session_cookie_value(auth_client),
+            )
+
+            assert auth_client.get("/mfa/setup").status_code == 200
+            after = _decode_session_cookie(
+                app, _get_session_cookie_value(auth_client),
+            )
+
+            config = (
                 db.session.query(MfaConfig)
                 .filter_by(user_id=seed_user["user"].id)
-                .count()
+                .one()
             )
-            assert row_count == 1
-
-            # Plaintext secrets differ -- the secret was regenerated.
-            assert first_secret != second_secret
-
-            # The first ciphertext is no longer the value stored on
-            # the row; verifying ``second_ciphertext != first_ciphertext``
-            # is necessary but not sufficient (Fernet uses a random IV,
-            # so even encrypting the same plaintext produces different
-            # bytes).  The plaintext comparison above is the load-bearing
-            # check; this assertion locks down the row identity.
-            assert config.pending_secret_encrypted != first_ciphertext
+            added = after.keys() - before.keys()
+            assert len(added) == 1, f"Setup added {sorted(added)} to the session."
+            (fingerprint_name,) = added
+            assert after == {
+                **before,
+                SESSION_LAST_ACTIVITY_KEY: after[SESSION_LAST_ACTIVITY_KEY],
+                fingerprint_name: hashlib.sha256(
+                    config.pending_secret_encrypted,
+                ).hexdigest(),
+            }
+            # The one value let change is a timestamp, nothing else.
+            assert datetime.fromisoformat(after[SESSION_LAST_ACTIVITY_KEY]).tzinfo
 
     def test_cross_user_cannot_consume_pending(
         self, app, auth_client, seed_user, second_auth_client, seed_second_user
@@ -260,7 +314,6 @@ class TestMfaSetupSecretIsServerSide:
             # Rotate: promote a new primary, demote the original to
             # TOTP_ENCRYPTION_KEY_OLD.  This mirrors steps 1-2 of
             # ``docs/runbook_secrets.md``.
-            from os import getenv  # pylint: disable=import-outside-toplevel
             old_primary_key_str = getenv("TOTP_ENCRYPTION_KEY")
             assert old_primary_key_str, (
                 "Test setup error: TOTP_ENCRYPTION_KEY must be set."
@@ -289,10 +342,9 @@ class TestMfaSetupSecretIsServerSide:
             assert config.is_enabled is True
             assert config.totp_secret_encrypted is not None
             new_primary_only = Fernet(new_primary_key_str)
-            decrypted_active = new_primary_only.decrypt(
+            assert new_primary_only.decrypt(
                 config.totp_secret_encrypted
-            ).decode("utf-8")
-            assert decrypted_active == captured_secret, (
+            ).decode("utf-8") == captured_secret, (
                 "Active credential must decrypt back to the originally "
                 "captured pending secret -- promotion lost or mutated "
                 "the value."

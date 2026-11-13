@@ -22,7 +22,7 @@ from tests._test_helpers import (
     open_books_before_the_first_assertion,
     transfer_amount,
 )
-from tests.test_integration.test_transfer_settle_freeze import _derived_loan_transfer
+from tests.test_integration.test_transfer_settle_freeze._helpers import _derived_loan_transfer
 from app.models.amount_ownership import AmountOwnership
 from app.services.amount_ownership import declare_derived, derived_ownership
 from tests._test_helpers import rendered_transfer_amount

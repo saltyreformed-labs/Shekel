@@ -6,10 +6,41 @@
 <div class="row justify-content-center mt-4">
   <div class="col-md-6">
     {% call form_card("Set Up Two-Factor Authentication", "bi-shield-plus") %}
-    <p class="text-muted">
-      Scan the QR code below with your authenticator app (e.g. Google Authenticator,
-      Authy, or 1Password), then enter the 6-digit code to verify.
+    {# Why the user is here (ruling plan#3434): a user who must have
+       two-factor is held at this page until it is set up, every other page
+       sending them back to it. #}
+    {% if current_user.must_have_two_factor %}
+    <p>
+      Your account requires two-factor authentication. Set it up here to
+      continue to Shekel.
     </p>
+    {% endif %}
+    {# No TOTP_ENCRYPTION_KEY, so no key can be made (plan#3514): the page
+       says so here, with no key, QR code or form, rather than redirecting to
+       a page the login gate refuses a companion held at setup. #}
+    {% if key_missing %}
+    <div class="alert alert-danger" role="alert">
+      MFA is not available. The server administrator must set
+      TOTP_ENCRYPTION_KEY before MFA can be enabled.
+    </div>
+    {% else %}
+    <p class="text-muted">
+      Setting up on this phone? Open your authenticator app (e.g. Google
+      Authenticator, Authy, or 1Password) from the button below, with the key
+      already filled in. On a computer, scan the QR code with your phone
+      instead. Then enter the 6-digit code it shows to verify.
+    </p>
+
+    {# The otpauth:// URI the QR code encodes, which a phone hands to its
+       authenticator app (ruling plan#3442).  Coming back from the app may
+       reload this page; in the sign-in that made the key it shows the same
+       key while the setup is pending, with fifteen fresh minutes each load
+       (ruling plan#3523), so the entry just added keeps working. #}
+    <div class="d-grid my-3">
+      <a class="btn btn-outline-primary" href="{{ totp_uri }}">
+        <i class="bi bi-box-arrow-up-right"></i> Open in my authenticator app
+      </a>
+    </div>
 
     <div class="text-center my-3">
       <img src="{{ qr_data_uri }}" alt="TOTP QR Code" class="mw-px-200">
@@ -35,6 +66,7 @@
         <i class="bi bi-shield-check"></i> Verify and Enable
       </button>
     </form>
+    {% endif %}
     {% endcall %}
   </div>
 </div>

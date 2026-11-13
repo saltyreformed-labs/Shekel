@@ -15,7 +15,7 @@ from tests._test_helpers import (
     capture_sql_statements,
     transfer_amount,
 )
-from tests.test_integration.test_transfer_settle_freeze import _derived_loan_transfer
+from tests.test_integration.test_transfer_settle_freeze._helpers import _derived_loan_transfer
 
 from ._helpers import _CONTRACT, _plain_transfer
 

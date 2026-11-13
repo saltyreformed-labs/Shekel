@@ -336,11 +336,11 @@ under a heading of their own:
 Exit 0 ends with its `verdict:` line. Exit 2 listed nothing (the file says why), and an exit with
 no `verdict:` line is a crash: either is a STOP.
 
-**Steps before the merge.** A subsection of `docs/runbook.md` 2.6 for a card the release carries may
-mark steps as the developer's and as coming before the merge into `main`. Ask Josh to do them, in
-plain words with its links, then run its read-back, the block opening with the source line, its
-output into `$R/before_merge_<card>.txt`. A read-back that does not hold is a STOP: the question
-below is not asked, and nothing merges.
+**Steps before the merge.** A subsection of `docs/runbook/2_deployment.md` 2.6 for a card the
+release carries may mark steps as the developer's and as coming before the merge into `main`. Ask
+Josh to do them, in plain words with its links, then run its read-back, the block opening with the
+source line, its output into `$R/before_merge_<card>.txt`. A read-back that does not hold is a
+STOP: the question below is not asked, and nothing merges.
 
 Header "Release ok". The question lists, in plain words with each id after its words:
 
@@ -379,10 +379,10 @@ Header "Release ok". The question lists, in plain words with each id after its w
   names `main`'s commit. Say too that the new image is not the old one byte for byte: each build
   installs Debian's newest system packages (the `Dockerfile`'s `apt-get` lines: OpenSSL, the
   database client and its library) and compiles the database driver against them;
-- each card the release carries that `docs/runbook.md` 2.6 holds host steps for, in plain words:
-  what they change on the host, and that `shekel-deploy`'s own rollback cannot undo them; and each
-  host copy in 2.5's table that `production.txt` lists and no such step copies, which the deploy
-  leaves as it is on the host (finding plan#2567);
+- each card the release carries that `docs/runbook/2_deployment.md` 2.6 holds host steps for, in
+  plain words: what they change on the host, and that `shekel-deploy`'s own rollback cannot undo
+  them; and each host copy in 2.5's table that `production.txt` lists and no such step copies,
+  which the deploy leaves as it is on the host (finding plan#2567);
 - the row comparison's verdict, whatever the release carries: how many stored rows change, in
   which tables and columns, each with the change step 4 traced it to, or that no row changes;
   each `ADDED` migration that moved no row, in plain words, with what it changes that the
@@ -560,9 +560,9 @@ the tracker's sync service run it, and each lane has its own for the rest (rulin
 uv sync --locked --directory ~/projects/Shekel; echo "exit=$?"
 ```
 
-Where a card this release carries names another sync in `docs/runbook.md` 2.6, that one runs in its
-place. Production reads nothing in this venv, so a failure holds nothing of the deploy: name it in
-the record (step 13) with uv's own words.
+Where a card this release carries names another sync in `docs/runbook/2_deployment.md` 2.6, that
+one runs in its place. Production reads nothing in this venv, so a failure holds nothing of the
+deploy: name it in the record (step 13) with uv's own words.
 
 Then `dev`. No one can push to `dev` (ruleset `dev-queue`, whose bypass list is empty, R-BAL322),
 so `main` reaches it as a pull request from `main` through `dev`'s merge queue, as CLAUDE.md's Git
@@ -613,13 +613,13 @@ record says so, and the next `/release` stops at step 1 until this one resumes h
 ## 11. Deploy, verify, read main's CI
 
 **Host steps first.** `shekel-deploy` re-pins the image and nothing else, and its rollback restores
-the image alone. For each card the release carries that `docs/runbook.md` 2.6 holds host steps for,
-run them as 2.6 orders them around the block below, each block a call of its own opening with the
-source line, its output into `$R/host_<card>_<step>.txt`, and append the snapshot path a step prints
-for its rollback to `current.sh` as `HS`. A step, deploy or verify that fails after them is never
-answered by running `shekel-deploy` again: run their rollback only where 2.6 says it applies, then
-STOP and tell Josh, as for any rolled-back release; where 2.6 says it does not apply, STOP and ask
-Josh, with the ways out 2.6 names, before anything else.
+the image alone. For each card the release carries that `docs/runbook/2_deployment.md` 2.6 holds
+host steps for, run them as 2.6 orders them around the block below, each block a call of its own
+opening with the source line, its output into `$R/host_<card>_<step>.txt`, and append the snapshot
+path a step prints for its rollback to `current.sh` as `HS`. A step, deploy or verify that fails
+after them is never answered by running `shekel-deploy` again: run their rollback only where 2.6
+says it applies, then STOP and tell Josh, as for any rolled-back release; where 2.6 says it does
+not apply, STOP and ask Josh, with the ways out 2.6 names, before anything else.
 
 ```bash
 . ~/projects/shekel-handoffs/releases/current.sh && cd "${W:?}" || exit 1

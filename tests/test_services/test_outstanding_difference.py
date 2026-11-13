@@ -62,8 +62,8 @@ from tests.test_services.test_statement_import.test_anchor import _seed_import
 _FILE_CHAIN = StatementBalanceEvidenceEnum.FILE_CHAIN
 
 #: The seeded owner's Checking books open the day BEFORE its origination
-#: assertion (``tests/conftest.py``: ``open_books_before_the_first_assertion``),
-#: and that assertion is dated :data:`~tests.conftest.SEED_USER_BOOTSTRAP_START`
+#: assertion (``tests/_seed_owner_fixtures.py``: ``open_books_before_the_first_assertion``),
+#: and that assertion is dated :data:`~tests._seed_owner_fixtures.SEED_USER_BOOTSTRAP_START`
 #: at ``$1,000.00``.  Named here because every figure below is that opening plus
 #: what the test itself records.
 _SEED_OPENING = Decimal("1000.00")

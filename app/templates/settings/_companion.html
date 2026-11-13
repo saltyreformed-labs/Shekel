@@ -1,4 +1,5 @@
 {% from "_form_macros.html" import render_field, render_errors %}
+{% from "auth/_trusted_device.html" import device_summary %}
 
 <h5 class="mb-3"><i class="bi bi-people"></i> Companion Accounts</h5>
 
@@ -7,7 +8,8 @@
   transactions for the current pay period.  They cannot see the budget
   grid, dashboards, account balances, or any other configuration.
   Mark a template as <em>Companion Visible</em> on its edit page to
-  expose its transactions to companions.
+  expose its transactions to companions.  Each companion sets up
+  two-factor authentication at their first sign-in.
 </p>
 
 {{ render_errors(errors) }}
@@ -105,6 +107,16 @@
             {{ comp.display_name or comp.email }}
           </div>
           <div class="text-muted small">{{ comp.email }}</div>
+          {# Her two-factor, which every companion must have (ruling
+             plan#3434): until she has it, Shekel holds her at its setup. #}
+          {% if comp.has_two_factor %}
+          <span class="flag-chip flag-chip--neutral mt-1">Two-factor on</span>
+          {% else %}
+          <span class="flag-chip flag-chip--warning mt-1">Two-factor not set up</span>
+          <div class="text-muted small mt-1">
+            They will be asked to set it up the next time they use Shekel.
+          </div>
+          {% endif %}
         </div>
         <div class="d-flex gap-1">
           <a class="btn btn-sm btn-outline-secondary"
@@ -112,6 +124,21 @@
              title="Edit">
             <i class="bi bi-pencil"></i> Edit
           </a>
+          {% if comp.has_two_factor %}
+          {# For a lost or replaced phone (ruling plan#3441): she sets
+             two-factor up again at her next sign-in.  Amber outline per the
+             D5 convention: a reset is a deactivate-genus control. #}
+          <form method="POST"
+                action="{{ url_for('settings.companion_reset_two_factor', companion_id=comp.id) }}"
+                class="d-inline"
+                data-confirm="Reset two-factor authentication for {{ comp.display_name or comp.email }}? They are signed out everywhere, their trusted devices are forgotten, and they set it up again with their authenticator app the next time they use Shekel.">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button type="submit" class="btn btn-sm btn-outline-warning"
+                    title="Reset two-factor">
+              <i class="bi bi-shield-x"></i> Reset two-factor
+            </button>
+          </form>
+          {% endif %}
           <form method="POST"
                 action="{{ url_for('settings.companion_deactivate', companion_id=comp.id) }}"
                 class="d-inline"
@@ -124,6 +151,30 @@
           </form>
         </div>
       </div>
+      {# Her trusted devices, each forgettable by the owner (ruling
+         plan#3439): the rows the Security page lists one's own as. #}
+      {% set devices = companion_devices[comp.id] %}
+      {% if devices %}
+      <div class="small fw-semibold mt-3">Trusted devices</div>
+      {% for device in devices %}
+      <div class="d-flex justify-content-between align-items-start flex-wrap gap-2 mt-2">
+        <div>{{ device_summary(device) }}</div>
+        <form method="POST"
+              action="{{ url_for('settings.companion_forget_device', companion_id=comp.id, device_id=device.id) }}"
+              class="d-inline"
+              data-confirm="Forget this device? Signing in on it as {{ comp.display_name or comp.email }} will ask for the two-factor code again.">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          {# Amber outline per the D5 convention: forgetting a device is a
+             deactivate-genus control. #}
+          <button type="submit" class="btn btn-sm btn-outline-warning">
+            <i class="bi bi-x-circle"></i> Forget
+          </button>
+        </form>
+      </div>
+      {% endfor %}
+      {% elif comp.has_two_factor %}
+      <div class="text-muted small mt-2">No trusted devices.</div>
+      {% endif %}
       {% endif %}
     </div>
     {% endfor %}

@@ -549,7 +549,7 @@ class TestPreviewRecurrence:
             ).one()
             category = seed_user["categories"]["Rent"]
             # DERIVED, never a literal.  A seeded world "holds rows dated from
-            # ``display_today()``" (tests/conftest.py), and this module is not
+            # ``display_today()``" (tests/_seeded_start_states.py), and this module is not
             # under the conftest that freezes the clock -- that one covers
             # tests/test_services/ only.  A hardcoded day therefore sits inside
             # the calendar when it is written and DECAYS INTO THE PAST as the

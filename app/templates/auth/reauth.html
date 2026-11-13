@@ -56,8 +56,10 @@
         </form>
 
         <div class="text-center mt-3">
-          <a href="{{ url_for('dashboard.page') }}" class="small text-muted">
-            Cancel and return to dashboard
+          {# ``home`` is where a sign-in lands this user: the dashboard
+             for an owner, her own page for a companion (plan#2407). #}
+          <a href="{{ home }}" class="small text-muted">
+            Cancel
           </a>
         </div>
       </div>

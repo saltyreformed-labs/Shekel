@@ -47,9 +47,10 @@
         Companions
       </a>
     </li>
+    {# Security is a page of its own for every user (ruling plan#3435);
+       Settings keeps its link, never active here. #}
     <li class="nav-item">
-      <a class="nav-link{{ ' active' if active_section == 'security' }}"
-         href="{{ url_for('settings.show', section='security') }}">
+      <a class="nav-link" href="{{ url_for('auth.security') }}">
         Security
       </a>
     </li>
@@ -84,8 +85,9 @@
          class="list-group-item list-group-item-action{{ ' active' if active_section == 'companions' }}">
         <i class="bi bi-people"></i> Companions
       </a>
-      <a href="{{ url_for('settings.show', section='security') }}"
-         class="list-group-item list-group-item-action{{ ' active' if active_section == 'security' }}">
+      {# Security is a page of its own for every user (ruling plan#3435). #}
+      <a href="{{ url_for('auth.security') }}"
+         class="list-group-item list-group-item-action">
         <i class="bi bi-shield-lock"></i> Security
       </a>
     </div>
@@ -109,8 +111,6 @@
       {% include "settings/_account_types.html" %}
     {% elif active_section == 'companions' %}
       {% include "settings/_companion.html" %}
-    {% elif active_section == 'security' %}
-      {% include "settings/_security.html" %}
     {% endif %}
   </div>
 </div>
@@ -119,14 +119,5 @@
 {% block scripts %}
 {% if active_section == 'account-types' %}
 <script src="{{ url_for('static', filename='js/account_types.js') }}"></script>
-{% endif %}
-{% if active_section == 'security' %}
-{# Strength meter (audit F-089) and show/hide toggle (audit F-090) on
-   the change-password form.  Loaded only when the security section is
-   active so the ~400 KB zxcvbn asset does not download on every
-   settings page view. #}
-<script src="{{ url_for('static', filename='vendor/zxcvbn/zxcvbn.js') }}"></script>
-<script src="{{ url_for('static', filename='js/password_strength.js') }}"></script>
-<script src="{{ url_for('static', filename='js/password_toggle.js') }}"></script>
 {% endif %}
 {% endblock scripts %}

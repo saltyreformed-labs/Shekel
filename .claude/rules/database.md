@@ -7,9 +7,7 @@ paths:
 # Database, schema, and migration rules
 
 Must-knows for models and migrations. Full standards: `docs/coding-standards.md`
-(SQL / Database, Migrations, Audit Triggers). The `code-reviewer` agent restates
-these rules deliberately, so a review carries them even where this file has not
-loaded; a change to a rule here updates that mirror in the same commit.
+(SQL / Database, Migrations, Audit Triggers).
 
 ## Query safety
 
@@ -26,9 +24,11 @@ loaded; a change to a rule here updates that mirror in the same commit.
 - **NOT NULL by default;** nullable columns justify nullability in a comment.
 - **`Numeric(12,2)` for all money** -- never Float, Integer, or bare Numeric.
 - **CHECK constraints on every financial column** (amounts, rates, counts,
-  durations). If Marshmallow says `min=0`, the column has `CHECK(col >= 0)`.
+  durations), not only where a schema states a range. If Marshmallow says
+  `min=0`, the column has `CHECK(col >= 0)`.
 - **Explicit `ondelete` on every FK** (`CASCADE` for user_id, `RESTRICT` for ref
-  tables, `CASCADE`/`SET NULL` inter-domain). **Name all constraints**:
+  tables, since a `CASCADE` there deletes user rows with a ref row,
+  `CASCADE`/`SET NULL` inter-domain). **Name all constraints**:
   `ck_<table>_<desc>`, `uq_<table>_<cols>`, `ix_<table>_<cols>`. Index frequent
   WHERE/JOIN/ORDER BY columns.
   **EXEMPT: single-column `PRIMARY KEY (id)` / `UNIQUE (name)` on a `ref` lookup

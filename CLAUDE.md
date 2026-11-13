@@ -316,9 +316,8 @@ the full doc.
 
 **The tier rule: a fact lives in ONE tier.** This file states a rule in one line and points;
 `.claude/rules/*` carry the path-scoped must-knows; `docs/*-standards.md` hold the rationale and
-every dated measurement. The `code-reviewer` agent deliberately mirrors the coding, database and
-testing rules plus the transfer rules at the end of Architecture (a subagent loads no path-scoped
-rules); a change to one updates the mirror in the same commit -- a discipline no gate enforces yet.
+every dated measurement. The `code-reviewer` agent holds no copy of them: it loads this file at its
+start and each rules file as it reads a file the rule covers (measured 2026-11-12).
 
 ## Tests
 

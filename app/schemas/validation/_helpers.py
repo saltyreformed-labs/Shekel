@@ -100,10 +100,15 @@ _DAY_OF_MONTH_RANGE = validate.Range(min=1, max=31)
 # **R-EY**).
 #
 # The ceiling is named once (plan step salary:X-av-3b, finding SAL-586) because
-# more than one bound takes it: the one-paycheck bound below, and the raise
-# form's flat raise (``salary.RaiseCreateSchema.flat_amount``, task plan#3577),
-# each read this name.  A comment saying two bounds share a ceiling is an
-# agreement, and a name is one value.
+# more than one bound takes it: ``_NON_NEGATIVE_MONETARY`` just below, and so
+# every field it validates and ``cards._POSITIVE_MONETARY``, built from its
+# ``max``; the one-paycheck bound below; and the raise form's flat raise
+# (``salary.RaiseCreateSchema.flat_amount``, task plan#3577).  The last two
+# read this name.  A comment saying two bounds share a ceiling is an
+# agreement, and a name is one value.  It is not every monetary input's
+# ceiling: some fields state their own, from $100K to $100M (in
+# ``investments``, ``retirement``, ``debt_strategy`` and ``salary``'s payroll
+# lines), and the 50 above state none.
 _MONETARY_INPUT_CEILING = Decimal("10000000")
 _NON_NEGATIVE_MONETARY = validate.Range(
     min=Decimal("0"), max=_MONETARY_INPUT_CEILING,
@@ -113,7 +118,7 @@ _NON_NEGATIVE_MONETARY = validate.Range(
 # salary's pay list (plan step salary:X-av-3a) and the base a pay stub prints
 # (plan step salary:S11-b).  Above zero like both columns
 # (``ck_pay_entries_positive_amount``, ``ck_pay_stubs_positive_base_pay``),
-# under the ceiling every monetary input takes.  One home since plan step
+# under the named ceiling above.  One home since plan step
 # salary:X-av-3b (finding **SAL-586**): the salary and pay-stub schemas each
 # spelled it, so the pay list and the stub door could come to accept different
 # pay for one fact.

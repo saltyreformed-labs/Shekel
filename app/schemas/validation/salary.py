@@ -275,10 +275,11 @@ class RaiseCreateSchema(BaseSchema):
     # column-fitting bound on a flat-dollar raise, dollars a year (R-SAL65).
     # ``salary.salary_raises.flat_amount`` is ``Numeric(12, 2)``; the
     # DB CHECK ``flat_amount > 0`` rejects zero/negative.  The ceiling is
-    # the one every monetary input takes, ``_MONETARY_INPUT_CEILING``
-    # ($10M, read by name since task plan#3577) -- well above any
-    # realistic raise but below the column limit, so an order-of-magnitude
-    # typo is rejected with a clean 400 rather than being committed.
+    # the named one the one-paycheck bound and ``_NON_NEGATIVE_MONETARY``
+    # take too, ``_MONETARY_INPUT_CEILING`` ($10M, read by name since task
+    # plan#3577) -- well above any realistic raise but below the column
+    # limit, so an order-of-magnitude typo is rejected with a clean 400
+    # rather than being committed.
     flat_amount = fields.Decimal(
         places=2, as_string=True,
         validate=validate.Range(

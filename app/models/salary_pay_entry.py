@@ -42,7 +42,7 @@ class SalaryPayEntry(OptimisticLockMixin, TimestampMixin, db.Model):
     it does not stop: two at ``REPEATABLE READ`` each removing one of a
     profile's last two entries, a ``TRUNCATE``, and a session firing no
     trigger (``session_replication_role = replica``) or the tables' owner or
-    a superuser dropping them.
+    a superuser dropping the triggers.
 
     Optimistic locking: see :class:`Transaction` for the ``version_id_col``
     contract.  Two tabs fixing one entry race for the bump; the loser raises

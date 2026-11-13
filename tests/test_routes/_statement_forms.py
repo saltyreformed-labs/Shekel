@@ -111,13 +111,13 @@ class ReconcileFormReader(HTMLParser):
     checkbox and an unchecked radio included -- as the ``(name, value)`` pair
     that control would send if the owner pressed it, or as ``(name, None)``
     for a field whose value the owner supplies.  That set is what
-    :func:`~tests.test_routes.test_statement_reconcile._post` refuses a
-    payload against, and it exists because of a defect a green suite hid:
+    :func:`~tests.test_routes.test_statement_reconcile._helpers._post` refuses
+    a payload against, and it exists because of a defect a green suite hid:
     every acting case appended ``("ok", str(line.id))`` by hand, and the
     ``ok-<line>`` checkbox is rendered only for a card that suggests a working
     verb -- so 31 of the developer's 248 cards had a panel button pointing at
-    an element not in the document, and no test could see it because the
-    tests posted a value no browser could produce.
+    an element not in the document, and no test could see it because the tests
+    posted a value no browser could produce.
 
     **The pair and not the name**: ``ok`` is ONE name shared by every card,
     keyed by its VALUE, so a check that only asked whether the page renders

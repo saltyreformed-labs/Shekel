@@ -38,7 +38,8 @@ class TestWhichKindOfCARDAPageHoldsIsSTATEDByWhatBuiltThem:
     keep two in step).
 
     **What replaced them is stronger and lives at the ROUTE**:
-    ``test_statement_reconcile.TestEveryTabTheServiceBuildsIsServed
+    ``test_statement_reconcile.test_the_doors
+    .TestEveryTabTheServiceBuildsIsServed
     ::test_every_tab_RENDERS_THE_CONTROL_ITS_KIND_CARRIES`` drives every
     :class:`~app.services.statement_match.Tab` through a real render and
     asserts each tab emits its own kind's control and NEITHER of the other

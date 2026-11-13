@@ -194,7 +194,7 @@ class TestWhichRowsTheBankNeverShowsByThemselves:
     bank showed the purchases of.
 
     **The rows stay in the panel and only the CLAIM is withdrawn**, which
-    ``test_statement_reconcile
+    ``test_statement_reconcile.test_the_match_pane
     .TestThePaneTagsARowTheBankNeverShowsAloneOnItsOwn`` pins on the render:
     the MATCH pane's candidate list is what the owner assembles a group from,
     and ruling **R-GJ** leaves the group match as a parked card payment's only

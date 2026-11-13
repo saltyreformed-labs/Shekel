@@ -102,9 +102,12 @@ updates:
       # ``1.31-alpine``, are pushed again in place.  From 2026-10-16 to
       # 2026-11-09 the cooldown skipped nginx's at 8 of the 10 runs that
       # read it and postgres's at 3 of 9, and on 2026-11-13 neither pin was
-      # the digest its tag named.  valkey keeps the week: its tag names one
-      # exact release, and the digest it named on 2026-11-13 is the one
-      # pinned.
+      # the digest its tag named.  The exclusion covers their version moves
+      # too (a new nginx minor, which the daily queue lands; postgres's next
+      # major, which waits for a card): Dependabot sets a wait per kind of
+      # update only for a whole entry, and valkey's digests keep their week
+      # here.  valkey is not excluded because nothing measured holds it
+      # back: the digest its tag named on 2026-11-13 is the one pinned.
       exclude: ["postgres", "nginx"]
     commit-message:
       prefix: "chore(deps)"

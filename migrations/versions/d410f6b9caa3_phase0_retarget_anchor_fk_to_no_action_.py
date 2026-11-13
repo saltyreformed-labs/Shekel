@@ -44,7 +44,7 @@ both statements run inside the migration's single transaction, so the
 window during which the FK is absent is invisible to concurrent
 statements.  A post-recreate assertion reads ``pg_constraint`` back and
 fails loudly if the new action/deferrability did not take -- the same
-verification value the C-43 ``_assert_fk_ondelete`` helper provides,
+verification value the C-43 ``assert_fk_ondelete`` helper provides,
 inlined here for a single constraint (the C-43 idempotent drop/recreate
 machinery is not reused: this FK is always present in the exact state the
 chain leaves it, so there is no partial-apply/replay case to guard, and

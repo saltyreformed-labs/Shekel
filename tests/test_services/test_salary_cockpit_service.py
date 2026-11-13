@@ -27,6 +27,7 @@ from decimal import Decimal
 from app import ref_cache
 from app.enums import PaycheckLineKindEnum
 from app.services import salary_cockpit_service as svc
+from app.services.pay_banner import ForecastRaise, PayBanner, RecordedChange
 from app.services.pay_calendar import DerivedPeriod, PayCadence
 from app.services.pay_rhythm import FixedDays
 from app.services.paycheck_calculator import (
@@ -37,6 +38,7 @@ from app.services.paycheck_calculator import (
     PeriodInfo,
     TaxLines,
 )
+from app.services.salary_raises import RaiseTerms
 from app.services.tax_config_service import TaxLawBasis
 from tests._tax_configs import own_year_rules
 
@@ -60,6 +62,25 @@ def _fake_period(period_id, start_date, end_date):
     )
 
 
+def _raise_banner(type_name, percentage):
+    """A banner naming one percentage raise of *type_name*, as the engine builds one.
+
+    The producers here read a banner's words and directions, never a raise's
+    date, so every fake raise is dated 2026-07-01.
+    """
+    return PayBanner((ForecastRaise(RaiseTerms(
+        effective_date=date(2026, 7, 1), is_recurring=False,
+        percentage=Decimal(percentage), flat_amount=None, terminal_year=None,
+        raise_type_name=type_name,
+    )),))
+
+
+#: A 2.5% merit raise's banner: "Merit +2.5%".
+_MERIT = _raise_banner("merit", "0.0250")
+#: A 3% cost-of-living raise's banner: "Cola +3%".
+_COLA = _raise_banner("cola", "0.0300")
+
+
 #: The rhythm a paycheck here is priced at unless a case says otherwise.
 _BIWEEKLY = PayCadence(FixedDays(14))
 _WEEKLY = PayCadence(FixedDays(7))
@@ -81,7 +102,7 @@ def _priced(lines, kind):
 
 def _pair(
     pid, start, end, annual, gross, net, *,
-    taxable="0", is_third=False, raise_event="",
+    taxable="0", is_third=False, banner=PayBanner(),
     federal="0", state="0", ss="0", medicare="0",
     pre=(), post=(), taxable_lines=(), after_tax=(), cadence=_BIWEEKLY,
     stub_payday=None, rules=None,
@@ -105,7 +126,7 @@ def _pair(
     breakdown = PaycheckBreakdown(
         period=PeriodInfo(
             period.start_date, pid,
-            is_third_paycheck=is_third, raise_event=raise_event,
+            is_third_paycheck=is_third, banner=banner,
             cadence=cadence,
         ),
         earnings=Earnings(
@@ -144,55 +165,11 @@ def _scenario():
               pre=[("401k", "200")], post=[("Roth", "100")]),
         _pair(13, date(2026, 6, 15), date(2026, 6, 28), "52000", "2000", "1400"),
         _pair(14, date(2026, 7, 1), date(2026, 7, 14), "54000", "2076.92", "1450",
-              raise_event="MERIT +2.5000%"),
+              banner=_MERIT),
         _pair(15, date(2026, 7, 15), date(2026, 7, 28), "54000", "2076.92", "1450"),
         _pair(16, date(2026, 11, 1), date(2026, 11, 14), "54000", "2076.92", "1650",
               is_third=True),
     ]
-
-
-class TestCleanRaiseLabel:
-    """clean_raise_label: display cleaning of calculator raise_event strings.
-
-    Input shapes are exactly what raise_banner emits (verified against
-    app/services/salary_raises.py, which the basis's ``pay_event_on``
-    calls): "{TYPE} +{pct}%" for percentage
-    raises (pct = stored Numeric(5,4) percentage * 100, e.g. "2.5000"),
-    "{TYPE} +${amount:,.2f}" for flat raises, multiple events joined with
-    ", ", and "RAISE" as the null-relationship type fallback.
-    """
-
-    def test_percentage_trailing_zeros_trimmed(self):
-        """Fractional percentage: "MERIT +2.5000%" -> "Merit +2.5%"."""
-        assert svc.clean_raise_label("MERIT +2.5000%") == "Merit +2.5%"
-
-    def test_percentage_whole_number(self):
-        """Whole percentage drops the dot: "COLA +3.0000%" -> "Cola +3%"."""
-        assert svc.clean_raise_label("COLA +3.0000%") == "Cola +3%"
-
-    def test_percentage_shorter_precision(self):
-        """A 2dp source Decimal ("+3.00%") trims identically to "+3%"."""
-        # A hand-built Decimal("0.03") * 100 = Decimal("3.00") emits
-        # "COLA +3.00%"; the trim is precision-agnostic.
-        assert svc.clean_raise_label("COLA +3.00%") == "Cola +3%"
-
-    def test_flat_amount_kept_to_the_cent(self):
-        """Flat raises keep money formatting: "+$2,000.00" is untouched."""
-        assert svc.clean_raise_label("MERIT +$2,000.00") == "Merit +$2,000.00"
-
-    def test_multiple_events_each_cleaned(self):
-        """Comma-joined events clean independently; the flat-amount
-        thousands comma (",0", no space) does not split the label."""
-        raw = "COLA +$2,000.00, MERIT +3.0000%"
-        assert svc.clean_raise_label(raw) == "Cola +$2,000.00, Merit +3%"
-
-    def test_fallback_type_title_cased(self):
-        """The null-raise_type fallback "RAISE" title-cases like any type."""
-        assert svc.clean_raise_label("RAISE +10.0000%") == "Raise +10%"
-
-    def test_empty_string_passthrough(self):
-        """No raise event (empty string) stays empty."""
-        assert svc.clean_raise_label("") == ""
 
 
 class TestBaseRegularNet:
@@ -279,17 +256,34 @@ class TestNextEvents:
     """next_raise_after / next_third_after strictly after today."""
 
     def test_next_raise_after_today(self):
-        """First raise event after 2026-06-05 is the 2026-07-01 merit step.
+        """First raise event after 2026-06-05 is the 2026-07-01 merit step, its banner whole.
 
-        The raw calculator label "MERIT +2.5000%" is display-cleaned:
-        "MERIT" title-cases to "Merit"; "2.5000" trims trailing zeros to
-        "2.5" -> "Merit +2.5%".
+        The chip reads the banner's words and direction off the value: "Merit
+        +2.5%", a raise.
         """
         result = svc.next_raise_after(_scenario(), TODAY)
         assert result == {
-            "label": "Merit +2.5%",
+            "banner": _MERIT,
             "period_start": date(2026, 7, 1),
         }
+        assert result["banner"].text == "Merit +2.5%"
+        assert result["banner"].cuts == PayBanner()
+
+    def test_a_recorded_cut_after_today_is_the_next_and_says_so(self):
+        """A recorded cut on 07-01 is the next banner, and the value says it is a cut (R-SAL85).
+
+        The chip read its words before task plan#3168 and named every banner
+        a raise in green.  Made-up: $2,000.00 to $1,930.00.
+        """
+        cut = PayBanner((RecordedChange(Decimal("-70.00"), yearly=False),))
+        pairs = [
+            _pair(1, date(2026, 6, 1), date(2026, 6, 14), "52000", "2000", "1400"),
+            _pair(2, date(2026, 7, 1), date(2026, 7, 14), "50180", "1930", "1350",
+                  banner=cut),
+        ]
+        result = svc.next_raise_after(pairs, TODAY)
+        assert result == {"banner": cut, "period_start": date(2026, 7, 1)}
+        assert result["banner"].cuts == cut
 
     def test_next_third_after_today_delta(self):
         """Next third paycheck (2026-11-01) delta = 1650 - base 1450 = 200."""
@@ -317,13 +311,13 @@ class TestNextEvents:
         pairs = [
             _pair(1, date(2026, 7, 2), date(2026, 7, 15), "52000", "2000", "1400"),
             _pair(2, date(2026, 7, 16), date(2026, 7, 29), "53560", "2048", "1430",
-                  raise_event="COLA +3.0000%"),
+                  banner=_COLA),
             _pair(3, date(2026, 7, 30), date(2026, 8, 12), "53560", "2060", "1440"),
             _pair(4, date(2027, 1, 7), date(2027, 1, 20), "54899", "2111.50", "1475",
-                  raise_event="MERIT +2.5000%"),
+                  banner=_MERIT),
         ]
         assert svc.next_raise_after(pairs, date(2026, 7, 3)) == {
-            "label": "Cola +3%",
+            "banner": _COLA,
             "period_start": date(2026, 7, 16),
         }
 
@@ -336,12 +330,12 @@ class TestNextEvents:
         """
         pairs = [
             _pair(1, date(2026, 8, 1), date(2026, 8, 14), "53560", "2060", "1440",
-                  raise_event="COLA +3.0000%"),
+                  banner=_COLA),
             _pair(2, date(2026, 8, 15), date(2026, 8, 28), "55167", "2121.80", "1480",
-                  raise_event="COLA +3.0000%"),
+                  banner=_COLA),
         ]
         assert svc.next_raise_after(pairs, date(2026, 8, 5)) == {
-            "label": "Cola +3%",
+            "banner": _COLA,
             "period_start": date(2026, 8, 15),
         }
 
@@ -432,9 +426,9 @@ class TestBuildChips:
         assert chips["annual_salary"] == Decimal("52000")
         # take-home = net/gross*100 = 1400/2000*100 = 70.
         assert chips["take_home_rate_pct"] == Decimal("70")
-        # Label display-cleaned: "MERIT +2.5000%" -> "Merit +2.5%".
+        # The next banner, the merit raise's: "Merit +2.5%".
         assert chips["next_raise"] == {
-            "label": "Merit +2.5%",
+            "banner": _MERIT,
             "period_start": date(2026, 7, 1),
         }
         # third-paycheck chip carries only period_start + delta (200.00).
@@ -677,8 +671,7 @@ class TestBuildChartSeries:
             {"start": date(2026, 5, 15), "net": Decimal("1600")},
             {"start": date(2026, 11, 1), "net": Decimal("1650")},
         ]
-        # The one raise event, display-cleaned ("MERIT +2.5000%" ->
-        # "Merit +2.5%").
+        # The one raise event, its banner's words.
         assert series["raises"] == [
             {"start": date(2026, 7, 1), "label": "Merit +2.5%"},
         ]
@@ -703,11 +696,11 @@ class TestBuildChartSeries:
         """
         pairs = [
             _pair(1, date(2026, 8, 1), date(2026, 8, 14), "53560", "2060", "1440",
-                  raise_event="COLA +3.0000%"),
+                  banner=_COLA),
             _pair(2, date(2026, 8, 15), date(2026, 8, 28), "55167", "2121.80", "1480",
-                  raise_event="COLA +3.0000%"),
+                  banner=_COLA),
             _pair(3, date(2026, 8, 29), date(2026, 9, 11), "56546", "2174.85", "1515",
-                  raise_event="MERIT +2.5000%"),
+                  banner=_MERIT),
             _pair(4, date(2026, 9, 12), date(2026, 9, 25), "56546", "2174.85", "1515"),
         ]
         series = svc.build_chart_series(pairs, date(2026, 8, 5))

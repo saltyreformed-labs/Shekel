@@ -106,7 +106,7 @@ operations plus one documentation deliverable:
      model carries an explicit ``name=`` shaped by the convention.
      The contract is enforced by code review and by the regression
      test
-     ``tests/test_models/test_c43_ondelete_and_naming_convention.py``
+     ``tests/test_models/test_c43_ondelete_and_naming_convention/test_the_contracts.py``
      which asserts the explicit-name rule for every ref-FK and the
      transfers.pay_period_id FK touched by this commit.
 
@@ -336,7 +336,7 @@ def _fk_ondelete(bind, schema: str, name: str) -> str | None:
     return _CONFDELTYPE_TO_LABEL[code]
 
 
-def _drop_and_recreate_fk(
+def drop_and_recreate_fk(
     bind,
     source_schema: str,
     source_table: str,
@@ -420,7 +420,7 @@ def _drop_and_recreate_fk(
     return True
 
 
-def _assert_fk_ondelete(
+def assert_fk_ondelete(
     bind, schema: str, name: str, expected_ondelete: str,
 ) -> None:
     """Verify the FK has the expected ondelete clause after DDL.
@@ -481,13 +481,13 @@ def upgrade():
         target_schema, target_table, target_column,
         legacy_name, new_name, new_ondelete,
     ) in REF_FK_SPECS:
-        _drop_and_recreate_fk(
+        drop_and_recreate_fk(
             bind,
             source_schema, source_table, source_column,
             target_schema, target_table, target_column,
             legacy_name, new_name, new_ondelete,
         )
-        _assert_fk_ondelete(bind, source_schema, new_name, new_ondelete)
+        assert_fk_ondelete(bind, source_schema, new_name, new_ondelete)
 
     # Group 2: transfers.pay_period_id realignment.
     (
@@ -495,13 +495,13 @@ def upgrade():
         tgt_schema, tgt_table, tgt_col,
         legacy, new, new_action,
     ) = TRANSFERS_PAY_PERIOD_SPEC
-    _drop_and_recreate_fk(
+    drop_and_recreate_fk(
         bind,
         src_schema, src_table, src_col,
         tgt_schema, tgt_table, tgt_col,
         legacy, new, new_action,
     )
-    _assert_fk_ondelete(bind, src_schema, new, new_action)
+    assert_fk_ondelete(bind, src_schema, new, new_action)
 
 
 def downgrade():
@@ -533,7 +533,7 @@ def downgrade():
         legacy, new, _new_action,
     ) = TRANSFERS_PAY_PERIOD_SPEC
     # Swap legacy <-> new and use the pre-C-43 ondelete (RESTRICT).
-    _drop_and_recreate_fk(
+    drop_and_recreate_fk(
         bind,
         src_schema, src_table, src_col,
         tgt_schema, tgt_table, tgt_col,
@@ -550,7 +550,7 @@ def downgrade():
         target_schema, target_table, target_column,
         legacy_name, new_name, _new_ondelete,
     ) in REF_FK_SPECS:
-        _drop_and_recreate_fk(
+        drop_and_recreate_fk(
             bind,
             source_schema, source_table, source_column,
             target_schema, target_table, target_column,

@@ -599,10 +599,10 @@ class TestTheBasisNamesItsRaiseSet:
 
         assert calculate_paycheck(
             stored, march, simple_tax_configs,
-        ).period.raise_event == "MERIT +5.00%"
+        ).period.banner.text == "Merit +5%"
         assert calculate_paycheck(
             believed, march, simple_tax_configs,
-        ).period.raise_event == "", (
+        ).period.banner.text == "", (
             "the raise event was badged off the profile's rows while the "
             "paycheck was priced off the basis's terms"
         )

@@ -1974,79 +1974,6 @@ class TestShekelLedgerModelFenceChecker(CheckerTestCase):
                 self.checker.visit_importfrom(node)
 
 
-# ── shekel-private-module-import (W9910) fixtures ──
-
-
-@pytest.fixture(scope="module", name="privacy_fixture_root")
-def _privacy_fixture_root(tmp_path_factory: pytest.TempPathFactory):
-    """On-disk fixture packages for the resolution-dependent privacy tests.
-
-    The W9910 rule is mostly pure string analysis, but two behaviors depend on
-    astroid RESOLVING real modules: the ``from P import _x`` module-vs-name
-    split, and the physical-membership second chance for namespace packages.
-    Testing those against the live ``app`` tree would couple the checker tests
-    to the application's import graph (and to ``app`` being importable at all),
-    so a hermetic fixture tree is built once per module and put on ``sys.path``:
-
-    * ``dgate_res_pkg`` -- a REGULAR package: ``__init__`` defines a private
-      NAME, ``_engine`` is a private MODULE (which itself defines a private
-      NAME, so the intra-package "private name out of a private sibling
-      module" form has a real target to resolve), ``public_mod`` is a public
-      module defining a private NAME.
-    * ``dgate_res_ns`` -- a NAMESPACE package (no ``__init__.py``) holding a
-      private module, mirroring ``scripts/_script_lib.py``, plus a private
-      subPACKAGE (``_libpkg``) whose boundary a namespace sibling must NOT
-      inherit membership of (the per-boundary rule).
-
-    The fixture names are used ONLY as resolution targets, never as a parsed
-    module's ``module_name`` -- :func:`astroid.parse` registers string-built
-    modules in the manager cache under their given name (with the ``"<?>"``
-    placeholder file), so reusing a name in both roles would let one test's
-    fake module shadow another test's on-disk resolution, making outcomes
-    order-dependent. The pure string-rule tests use the disjoint
-    ``dgate_probe_*`` names, which never exist on disk and are never resolved.
-
-    Yields:
-        The root directory holding both fixture packages.
-    """
-    root = tmp_path_factory.mktemp("dgate_fixture")
-    pkg = root / "dgate_res_pkg"
-    pkg.mkdir()
-    (pkg / "__init__.py").write_text(
-        "_package_private_name = object()\n", encoding="utf-8",
-    )
-    (pkg / "_engine.py").write_text(
-        "def build_balance_map():\n    return {}\n\n\n"
-        "def _engine_private_helper():\n    return None\n",
-        encoding="utf-8",
-    )
-    (pkg / "public_mod.py").write_text(
-        "_module_private_name = object()\n", encoding="utf-8",
-    )
-    namespace = root / "dgate_res_ns"
-    (namespace / "_libpkg").mkdir(parents=True)
-    (namespace / "_ns_lib.py").write_text(
-        "def helper():\n    return 1\n", encoding="utf-8",
-    )
-    (namespace / "_libpkg" / "__init__.py").write_text("", encoding="utf-8")
-    (namespace / "_libpkg" / "_deep.py").write_text(
-        "def deep_helper():\n    return 2\n", encoding="utf-8",
-    )
-    # Both probe files exist on disk: the physical-membership test only honors
-    # REAL files (astroid's "<?>" placeholder must never suppress a finding),
-    # so the outsider control must fail on DIRECTORY containment, not on a
-    # missing file.
-    (namespace / "sibling_tool.py").write_text(
-        "from dgate_res_ns._ns_lib import helper\n", encoding="utf-8",
-    )
-    (root / "outsider.py").write_text(
-        "from dgate_res_ns._ns_lib import helper\n", encoding="utf-8",
-    )
-    sys.path.insert(0, str(root))
-    yield root
-    sys.path.remove(str(root))
-
-
 class TestShekelPackagePrivacyChecker(CheckerTestCase):
     """``shekel-private-module-import``: a package's private modules are private.
 
@@ -2062,6 +1989,77 @@ class TestShekelPackagePrivacyChecker(CheckerTestCase):
     """
 
     CHECKER_CLASS = ShekelPackagePrivacyChecker
+
+    @pytest.fixture(scope="class", name="privacy_fixture_root")
+    @classmethod
+    def _privacy_fixture_root(cls, tmp_path_factory: pytest.TempPathFactory):
+        """On-disk fixture packages for the resolution-dependent privacy tests.
+
+        The W9910 rule is mostly pure string analysis, but two behaviors depend on
+        astroid RESOLVING real modules: the ``from P import _x`` module-vs-name
+        split, and the physical-membership second chance for namespace packages.
+        Testing those against the live ``app`` tree would couple the checker tests
+        to the application's import graph (and to ``app`` being importable at all),
+        so a hermetic fixture tree is built once for this class and put on
+        ``sys.path``:
+
+        * ``dgate_res_pkg`` -- a REGULAR package: ``__init__`` defines a private
+          NAME, ``_engine`` is a private MODULE (which itself defines a private
+          NAME, so the intra-package "private name out of a private sibling
+          module" form has a real target to resolve), ``public_mod`` is a public
+          module defining a private NAME.
+        * ``dgate_res_ns`` -- a NAMESPACE package (no ``__init__.py``) holding a
+          private module, mirroring ``scripts/_script_lib.py``, plus a private
+          subPACKAGE (``_libpkg``) whose boundary a namespace sibling must NOT
+          inherit membership of (the per-boundary rule).
+
+        The fixture names are used ONLY as resolution targets, never as a parsed
+        module's ``module_name`` -- :func:`astroid.parse` registers string-built
+        modules in the manager cache under their given name (with the ``"<?>"``
+        placeholder file), so reusing a name in both roles would let one test's
+        fake module shadow another test's on-disk resolution, making outcomes
+        order-dependent. The pure string-rule tests use the disjoint
+        ``dgate_probe_*`` names, which never exist on disk and are never resolved.
+
+        Yields:
+            The root directory holding both fixture packages.
+        """
+        root = tmp_path_factory.mktemp("dgate_fixture")
+        pkg = root / "dgate_res_pkg"
+        pkg.mkdir()
+        (pkg / "__init__.py").write_text(
+            "_package_private_name = object()\n", encoding="utf-8",
+        )
+        (pkg / "_engine.py").write_text(
+            "def build_balance_map():\n    return {}\n\n\n"
+            "def _engine_private_helper():\n    return None\n",
+            encoding="utf-8",
+        )
+        (pkg / "public_mod.py").write_text(
+            "_module_private_name = object()\n", encoding="utf-8",
+        )
+        namespace = root / "dgate_res_ns"
+        (namespace / "_libpkg").mkdir(parents=True)
+        (namespace / "_ns_lib.py").write_text(
+            "def helper():\n    return 1\n", encoding="utf-8",
+        )
+        (namespace / "_libpkg" / "__init__.py").write_text("", encoding="utf-8")
+        (namespace / "_libpkg" / "_deep.py").write_text(
+            "def deep_helper():\n    return 2\n", encoding="utf-8",
+        )
+        # Both probe files exist on disk: the physical-membership test only honors
+        # REAL files (astroid's "<?>" placeholder must never suppress a finding),
+        # so the outsider control must fail on DIRECTORY containment, not on a
+        # missing file.
+        (namespace / "sibling_tool.py").write_text(
+            "from dgate_res_ns._ns_lib import helper\n", encoding="utf-8",
+        )
+        (root / "outsider.py").write_text(
+            "from dgate_res_ns._ns_lib import helper\n", encoding="utf-8",
+        )
+        sys.path.insert(0, str(root))
+        yield root
+        sys.path.remove(str(root))
 
     @staticmethod
     def _import_statement(

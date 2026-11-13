@@ -76,7 +76,7 @@ DOCKER_SUBPROCESS_TIMEOUT_S = 60
 
 def _docker_available() -> bool:
     """Return True when the ``docker`` CLI is on PATH and the daemon
-    answers ``docker info``.  Mirrors the helper in the sibling
+    answers ``docker info``.  Mirrors the helper in tests/test_deploy's
     test_deploy_configs.py / test_container_hardening.py modules.
     """
     if shutil.which("docker") is None:

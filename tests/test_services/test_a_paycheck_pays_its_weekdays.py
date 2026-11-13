@@ -160,8 +160,8 @@ def _pay(basis, payday):
 
 
 def _badge(basis, payday):
-    """The banner of *payday*'s paycheck."""
-    return basis.pay_event_on(_paycheck(basis, payday))
+    """The words of *payday*'s banner, as the screens show them; ``""`` for none."""
+    return basis.banner_on(_paycheck(basis, payday)).text
 
 
 #: 5% from Wednesday 2027-03-03, inside the 03-11 paycheck's 02-20..03-05.
@@ -300,7 +300,7 @@ class TestTheBannerComparesPayWithPay:
         """$2,100.00 from 03-25 against the $2,100.00 in force on 03-05: no change.
 
         Against the paycheck before it, 03-11's $2,030.00, it read
-        'PAY +$70.00', a change of nothing.
+        'Pay +$70.00', a change of nothing.
         """
         basis = _basis(
             _biweekly(), [(_OPENS, "2000.00"), (date(2027, 3, 25), "2100.00")],
@@ -309,12 +309,12 @@ class TestTheBannerComparesPayWithPay:
         assert _badge(basis, date(2027, 3, 25)) == ""
 
     def test_a_change_badges_against_the_pay_in_force(self):
-        """$2,110.00 from 03-25: 'PAY +$10.00' against the $2,100.00, not +$80.00."""
+        """$2,110.00 from 03-25: 'Pay +$10.00' against the $2,100.00, not +$80.00."""
         basis = _basis(
             _biweekly(), [(_OPENS, "2000.00"), (date(2027, 3, 25), "2110.00")],
             _WEDNESDAY_RAISE,
         )
-        assert _badge(basis, date(2027, 3, 25)) == "PAY +$10.00"
+        assert _badge(basis, date(2027, 3, 25)) == "Pay +$10.00"
 
 
 def _badges(basis, *paydays):
@@ -340,21 +340,21 @@ class TestARaiseBadgesTheFirstPaycheckItReaches:
         basis = _basis(_biweekly(), [(_OPENS, "2000.00")], _WEDNESDAY_RAISE)
         assert _badges(
             basis, date(2027, 2, 25), date(2027, 3, 11), date(2027, 3, 25),
-        ) == ["", "MERIT +5.00%", ""]
+        ) == ["", "Merit +5%", ""]
 
     def test_on_a_pay_periods_first_day_it_badges_that_paycheck(self):
         """From Saturday 03-06, 03-25's first day: 03-25, not 03-11, which ends 03-05."""
         basis = _basis(
             _biweekly(), [(_OPENS, "2000.00")], (_percent(date(2027, 3, 6), "0.05"),),
         )
-        assert _badges(basis, date(2027, 3, 11), date(2027, 3, 25)) == ["", "MERIT +5.00%"]
+        assert _badges(basis, date(2027, 3, 11), date(2027, 3, 25)) == ["", "Merit +5%"]
 
     def test_on_a_pay_periods_last_day_it_badges_that_paycheck(self):
         """From Friday 03-05, 03-11's last day: 03-11, one weekday at the raise, and not 03-25."""
         basis = _basis(
             _biweekly(), [(_OPENS, "2000.00")], (_percent(date(2027, 3, 5), "0.05"),),
         )
-        assert _badges(basis, date(2027, 3, 11), date(2027, 3, 25)) == ["MERIT +5.00%", ""]
+        assert _badges(basis, date(2027, 3, 11), date(2027, 3, 25)) == ["Merit +5%", ""]
 
     def test_late_in_a_month_it_badges_a_paycheck_dated_the_next(self):
         """From Monday 03-29, inside 04-08's 03-20..04-02: April's paycheck, neither of March's."""
@@ -363,7 +363,7 @@ class TestARaiseBadgesTheFirstPaycheckItReaches:
         )
         assert _badges(
             basis, date(2027, 3, 11), date(2027, 3, 25), date(2027, 4, 8),
-        ) == ["", "", "MERIT +5.00%"]
+        ) == ["", "", "Merit +5%"]
 
     def test_a_recurring_raise_badges_its_first_paycheck_each_year(self):
         """3% every July 1 from 2027: 2027-07-15 and 2028-07-13, never a July 1 payday.
@@ -379,10 +379,10 @@ class TestARaiseBadgesTheFirstPaycheckItReaches:
         )
         assert _badges(
             basis, date(2027, 7, 1), date(2027, 7, 15), date(2027, 7, 29),
-        ) == ["", "MERIT +3.00%", ""]
+        ) == ["", "Merit +3%", ""]
         assert _badges(
             basis, date(2028, 6, 29), date(2028, 7, 13), date(2028, 7, 27),
-        ) == ["", "MERIT +3.00%", ""]
+        ) == ["", "Merit +3%", ""]
 
     def test_a_recurring_raise_badges_nothing_after_its_end_year(self):
         """Believed through 2027: 2027-07-15 badges it, 2028-07-13 does not.
@@ -394,14 +394,14 @@ class TestARaiseBadgesTheFirstPaycheckItReaches:
             _biweekly(_TWO_YEARS), [(_OPENS, "2000.00")],
             (_recurring(date(2027, 7, 1), "0.03", terminal_year=2027),),
         )
-        assert _badges(basis, date(2027, 7, 15), date(2028, 7, 13)) == ["MERIT +3.00%", ""]
+        assert _badges(basis, date(2027, 7, 15), date(2028, 7, 13)) == ["Merit +3%", ""]
 
     def test_a_one_time_raise_badges_once(self):
         """3% once from 2027-07-01: 2027-07-15, and nothing a year on."""
         basis = _basis(
             _biweekly(_TWO_YEARS), [(_OPENS, "2000.00")], (_percent(date(2027, 7, 1), "0.03"),),
         )
-        assert _badges(basis, date(2027, 7, 15), date(2028, 7, 13)) == ["MERIT +3.00%", ""]
+        assert _badges(basis, date(2027, 7, 15), date(2028, 7, 13)) == ["Merit +3%", ""]
 
     def test_a_raise_its_entry_holds_badges_nowhere(self):
         """The only entry, $2,100.00 from 03-25 (opens 03-06), holds the 03-03 raise.
@@ -424,7 +424,7 @@ class TestARaiseBadgesTheFirstPaycheckItReaches:
             _biweekly(), [(_OPENS, "2000.00")],
             (_flat(date(2027, 3, 4), "2600"), _percent(date(2027, 3, 3), "0.05")),
         )
-        assert _badge(basis, date(2027, 3, 11)) == "MERIT +5.00%, COLA +$2,600.00"
+        assert _badge(basis, date(2027, 3, 11)) == "Merit +5%, Cola +$2,600.00"
 
     def test_a_paycheck_badges_exactly_where_its_base_first_leaves_the_old_pay(self):
         """Two years of the July raise: the badged paydays are where the BASE first moves.
@@ -487,7 +487,7 @@ class TestARaiseOnAWeekendBadgesThePaycheckThatPaysIt:
         basis = _basis(
             _friday_paydays(), [(_FRIDAYS, "2000.00")], (_percent(date(2028, 7, 1), "0.03"),),
         )
-        assert _badges(basis, date(2028, 7, 7), date(2028, 7, 21)) == ["", "MERIT +3.00%"]
+        assert _badges(basis, date(2028, 7, 7), date(2028, 7, 21)) == ["", "Merit +3%"]
         assert _pay(basis, date(2028, 7, 7)) == Decimal("2000.00")
         assert basis.base_pay_on(date(2028, 7, 7)).rate.per_paycheck == Decimal("2060.00")
         assert _pay(basis, date(2028, 7, 21)) == Decimal("2060.00")
@@ -497,7 +497,7 @@ class TestARaiseOnAWeekendBadgesThePaycheckThatPaysIt:
         basis = _basis(
             _friday_paydays(), [(_FRIDAYS, "2000.00")], (_percent(date(2028, 7, 2), "0.03"),),
         )
-        assert _badges(basis, date(2028, 7, 7), date(2028, 7, 21)) == ["", "MERIT +3.00%"]
+        assert _badges(basis, date(2028, 7, 7), date(2028, 7, 21)) == ["", "Merit +3%"]
 
 
 class TestARhythmSeam:
@@ -547,14 +547,14 @@ class TestARhythmSeam:
         """$1,100.00 weekly from 04-08 (opens 03-20) against 03-19's $2,000.00 biweekly.
 
         1,100.00 x 52 = 57,200.00 against 2,000.00 x 26 = 52,000.00:
-        'PAY +$5,200.00 a year', and nothing named, since pay is recorded
+        'Pay +$5,200.00 a year', and nothing named, since pay is recorded
         from the change.
         """
         basis = _basis(
             _biweekly_then_weekly(),
             [(_OPENS, "2000.00"), (date(2027, 4, 8), "1100.00")],
         )
-        assert _badge(basis, date(2027, 4, 8)) == "PAY +$5,200.00 a year"
+        assert _badge(basis, date(2027, 4, 8)) == "Pay +$5,200.00 a year"
         assert basis.rhythm_changes_without_pay() == []
 
 
@@ -590,7 +590,7 @@ class TestAPeriodHoldingNoWeekday:
         )
         assert _badges(
             basis, date(2027, 3, 5), date(2027, 3, 6), date(2027, 3, 7), date(2027, 3, 8),
-        ) == ["", "MERIT +5.00%", "", ""]
+        ) == ["", "Merit +5%", "", ""]
 
 
 class TestThePayListReadsTheRate:
@@ -735,7 +735,7 @@ class TestARaiseOnNewYearsDay:
         assert [_pay(basis, payday) for payday in paydays] == [
             Decimal("2060.00"), Decimal("2090.90"), Decimal("2121.80"),
         ]
-        assert _badges(basis, *paydays) == ["", "MERIT +3.00%", ""]
+        assert _badges(basis, *paydays) == ["", "Merit +3%", ""]
 
     def test_its_paycheck_is_in_its_payday_s_year_to_date(self):
         """The straddle is 2028's first paycheck, whatever year its weekdays fall in.

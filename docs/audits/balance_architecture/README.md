@@ -2,8 +2,8 @@
 
 **This is the balance arc's ARGUMENT: the reasoning behind its steps, not the steps.** Each step,
 finding and ruling is a card in the tracker, `saltyreformed-labs/shekel-plan`, read and written
-through quill (`CLAUDE.md`, Development Status): an open step's specification is its card's body,
-the order is the board's, and a shipped step's record is its commit. Sections 4, 5, 6 and 9 held
+through quill (`CLAUDE.md`, Multi-session operation): an open step's specification is its card's
+body, the order is the board's, and a shipped step's record is its commit. Sections 4, 5, 6 and 9 held
 the rulings' pointer, the steps, the findings' pointer and this document's rules until the tracker
 took them; the rest keep their numbers because the code cites them.
 

@@ -1,0 +1,37 @@
+{# The "Next raise" chip, which the salary cockpit and the projection ledger
+   both show.
+
+   Usage:
+     {% from "salary/_chip_macros.html" import next_raise_chip %}
+     {{ next_raise_chip(chips.next_raise) }}
+
+   *next_raise* is ``salary_cockpit_service.next_raise_after``'s answer: the
+   next paycheck's ``PayBanner`` and its payday, or ``none``.  One macro
+   because the two pages stated the chip twice, and the direction each change
+   carries (task plan#3168) would have been read twice.
+
+   R-SAL85 for the chip: a banner holding a cut reads "Next pay cut", the cut
+   amber with a down arrow; a raise or a pay increase keeps the green.  A
+   paycheck showing a recorded cut and a raise it is the first to pay names
+   both, each in its own colour, as the paycheck's own banners do. #}
+
+{% macro next_raise_chip(next_raise) %}
+{% if next_raise is none %}
+<div class="pulse-chip">
+  <div class="pulse-chip__label">Next raise</div>
+  <div class="pulse-chip__value">--</div>
+  <div class="sal-chip__sub">none scheduled</div>
+</div>
+{% else %}
+{% set banner = next_raise.banner %}
+<div class="pulse-chip{{ ' sal-chip-up' if banner.increases.events }}">
+  <div class="pulse-chip__label">{{ 'Next pay cut' if banner.cuts.events else 'Next raise' }}</div>
+  <div class="pulse-chip__value">
+    {%- if banner.cuts.events %}<span class="sal-chip-cut"><i class="bi bi-arrow-down" aria-hidden="true"></i> {{ banner.cuts.text }}</span>{% endif %}
+    {%- if banner.cuts.events and banner.increases.events %} {% endif %}
+    {%- if banner.increases.events %}{{ banner.increases.text }}{% endif -%}
+  </div>
+  <div class="sal-chip__sub">{{ next_raise.period_start.strftime('%b %Y') }}</div>
+</div>
+{% endif %}
+{% endmacro %}

@@ -1,7 +1,7 @@
 """The daily update queue (ruling plan#2449): each open pull request of Dependabot or the update
 App put in ``dev``'s merge queue when it moves pinned versions alone, none across a major, at the
-head it was judged at; and the developer mentioned once on each that cannot be (rulings
-plan#2450, plan#2467, plan#2468).
+head it was judged at; and a comment of the App's, mentioning no one, written once on each
+that cannot be for each thing it tells (rulings plan#2450, plan#2467, plan#2468, plan#3622).
 
 **It runs main's own code** (``.github/workflows/updates.yml``'s ``queue`` job), holding the
 update App's token (ruling plan#2448) and only the ``landing`` group's packages; GitHub hands
@@ -10,8 +10,8 @@ it is used by code already released and never by a pull request's.
 
 **Which pull requests**: each open one of this repository (none from a fork) opened by
 Dependabot or by the App, as GraphQL names a bot: by its slug, ``dependabot``, where REST says
-``dependabot[bot]`` (measured on #626, 2026-10-31); the App's is its token's mint's
-``app-slug``.
+``dependabot[bot]`` (measured on #626, 2026-10-31); the App's is
+:data:`tools.update.app.APP`.
 
 - **Into ``main``**: a Dependabot security update, which ignores the config's
   ``target-branch``, is retargeted to ``dev`` (:func:`_retarget`) and judged on a later run,
@@ -26,9 +26,11 @@ Dependabot or by the App, as GraphQL names a bot: by its slug, ``dependabot``, w
   whose checks have not all passed are left, each said with its reason, and read again on the
   next day's run.
 
-**What reaches the developer** is a comment from the App on the pull request, mentioning him,
-since only a mention reaches him (measured 2026-10-27, on the tracker, whose App's mentions
-did), written once for each thing it tells (:func:`_told`):
+**What is told** is a comment from the App on the pull request, written once for each thing
+it tells (:func:`_told`), which mentions no one (ruling plan#3622): what reaches the developer
+is the card ``quill sync`` files for the pull request, or puts it on while one is open for it
+(rulings plan#3619, plan#3722, below).  The comments written before plan#3627 open mentioning
+him; their markers are read as any other's.
 
 - **removed from the merge queue at its head**: GitHub took it out of the queue (a check
   failed on top of ``dev``, say) after testing the head it has now, which the removal says:
@@ -53,9 +55,12 @@ did), written once for each thing it tells (:func:`_told`):
   passes (a re-run), or judged afresh at its next head.
 
 Each comment holds a marker for each thing it tells, a digest of it, so nothing a pull
-request carries is spelled inside an HTML comment.  The App's own comments are the one record
-of what was told, read only when there is something to tell (:func:`_markers`); a marker in
-anyone else's comment counts for nothing.
+request carries is spelled inside an HTML comment (:func:`tools.update.app.marker`, its one
+form).  The App's own comments are the one record of what was told, read here only when there
+is something to tell (:func:`_markers`), and read by ``quill sync`` too, which files a card for
+each thing told that no card for its pull request holds, or puts it on the card open for that
+pull request (rulings plan#3619, plan#3722); a marker in anyone else's comment counts for
+nothing.
 
 **Why the queue and not auto-merge** (measured 2026-10-31): GitHub's ``AutoMergeRequest`` holds
 no head commit, and its documentation turns auto-merge off on a push only when the pusher has
@@ -73,8 +78,7 @@ judged once the rounds end, after the others.
 Usage, at the root of a checkout whose ``origin`` is this repository, which serves each trial
 merge with no credential, being public::
 
-    UPDATE_TOKEN=<token> UPDATE_APP_SLUG=<slug> GITHUB_REPOSITORY=<owner>/<name> \\
-        python -m tools.update.queue
+    UPDATE_TOKEN=<token> GITHUB_REPOSITORY=<owner>/<name> python -m tools.update.queue
 
 It prints a line for each pull request it reads, what it did and why.  Exit status: 0 each one
 read and done; 1 a read or a write failed, each other pull request still tried, or a variable
@@ -83,9 +87,7 @@ is unset, saying which.
 from __future__ import annotations
 
 import argparse
-import hashlib
 import os
-import re
 import sys
 import time
 from collections.abc import Callable, Sequence
@@ -106,10 +108,17 @@ from tools.quill.door import (
     reading,
     unversioned_between,
 )
-from tools.update.app import DEVELOPER, INTO, REPOSITORY_VARIABLE, TOKEN_VARIABLE, unset
+from tools.update.app import (
+    APP,
+    INTO,
+    REPOSITORY_VARIABLE,
+    TOKEN_VARIABLE,
+    bot_of,
+    marker,
+    markers,
+    unset,
+)
 
-#: The variable holding the App's slug, as GraphQL names the bot it acts as.
-APP_VARIABLE = "UPDATE_APP_SLUG"
 #: Dependabot, as GraphQL names its bot (measured on #626, 2026-10-31).
 DEPENDABOT = "dependabot"
 #: The branch a security update is moved off.
@@ -130,10 +139,6 @@ _FAILED = frozenset({"FAILURE", "ERROR"})
 #: own trial merge, its second parent the head it tested (measured 2026-11-01 on #589 and #592,
 #: each removed for ``failed_checks``).
 _REMOVED = "RemovedFromMergeQueueEvent"
-#: A marker in a comment of the App's, naming by its digest one thing it told the developer,
-#: and the expression finding each in a comment's text, made from it.
-_MARKER = "<!-- update: mention {} -->"
-_MARKED = re.compile(re.escape(_MARKER).replace(r"\{\}", "([0-9a-f]{64})"))
 
 #: What the run reads of each pull request.
 _FIELDS = """number id headRefName isDraft isCrossRepository isInMergeQueue baseRefName
@@ -160,7 +165,7 @@ _COMMENTS = """query($owner: String!, $name: String!, $number: Int!, $after: Str
   repository(owner: $owner, name: $name) {
     pullRequest(number: $number) {
       comments(first: 100, after: $after) {
-        nodes { author { login } body }
+        nodes { author { __typename login } body }
         pageInfo { hasNextPage endCursor }
       }
     }
@@ -214,7 +219,6 @@ def _tested(removal: dict) -> str | None:
 
 def _pull(node: dict) -> Pull:
     """A pull request as GraphQL's answer to :data:`_FIELDS` describes it."""
-    author = node["author"]
     last = node["commits"]["nodes"]
     rollup = (last[0]["commit"]["statusCheckRollup"]
               if last and last[0]["commit"]["oid"] == node["headRefOid"] else None)
@@ -222,7 +226,7 @@ def _pull(node: dict) -> Pull:
     removal = latest[0] if latest and latest[0]["__typename"] == _REMOVED else None
     return Pull(
         number=node["number"], node=node["id"], branch=node["headRefName"],
-        bot=author["login"] if author and author["__typename"] == "Bot" else None,
+        bot=bot_of(node),
         fork=node["isCrossRepository"], draft=node["isDraft"], queued=node["isInMergeQueue"],
         base=node["baseRefName"], head=node["headRefOid"], mergeable=node["mergeable"],
         merge=(node["potentialMergeCommit"] or {}).get("oid"),
@@ -253,7 +257,7 @@ def _read(github: GitHub, repository: str, number: int) -> Pull:
 class Queue:
     """One run of the queue: ``github``, under the App's token; the ``repository`` it reads;
     ``app``, the App's slug, as GraphQL names the bot that opens its pull requests and writes
-    its mentions; ``root``, the checkout it judges each trial merge in; and ``sleep``, its wait
+    its comments; ``root``, the checkout it judges each trial merge in; and ``sleep``, its wait
     between reads of a trial merge GitHub has not made."""
 
     github: GitHub
@@ -315,39 +319,34 @@ def _onto(root: Path, pull: Pull) -> str | None:
     return parents[0] if len(parents) == 2 and parents[1] == pull.head else None
 
 
-def _marker(told: str) -> str:
-    """The marker naming ``told``, one thing the App tells the developer, by its digest."""
-    return _MARKER.format(hashlib.sha256(told.encode()).hexdigest())
-
-
 def _markers(queue: Queue, pull: Pull) -> frozenset[str]:
-    """Each marker (:func:`_marker`) in a comment the App wrote on ``pull``, read page by
-    page."""
+    """Each marker (:func:`tools.update.app.marker`) in a comment the App wrote on ``pull``
+    (:func:`tools.update.app.bot_of`), read page by page."""
     owner, name = queue.repository.split("/", 1)
     nodes, _ = paged(partial(queue.github.graphql, _COMMENTS, owner=owner, name=name,
                              number=pull.number),
                      lambda answer: answer["repository"]["pullRequest"]["comments"],
                      f"the comments of pull request #{pull.number} of {queue.repository}")
-    return frozenset(_MARKER.format(digest) for node in nodes
-                     if (node["author"] or {}).get("login") == queue.app
-                     for digest in _MARKED.findall(node["body"]))
+    return frozenset(found for node in nodes
+                     if bot_of(node) == queue.app
+                     for found in markers(node["body"]))
 
 
 def _told(queue: Queue, pull: Pull, told: Sequence[str], text: str) -> str:
-    """Mention the developer on ``pull`` in a comment saying ``text``, marked with each of
-    ``told`` (:func:`_marker`), unless the App's comments hold every one of those marks
-    already: what was done, for the pull request's line."""
-    marks = [_marker(thing) for thing in told]
+    """Comment on ``pull`` saying ``text``, which mentions no one (ruling plan#3622), marked
+    with each of ``told`` (:func:`tools.update.app.marker`), unless the App's comments hold
+    every one of those marks already: what was done, for the pull request's line."""
+    marks = [marker(thing) for thing in told]
     if set(marks) <= _markers(queue, pull):
-        return "the developer was mentioned already"
+        return "told in a comment already"
     queue.github.rest("POST", f"/repos/{queue.repository}/issues/{pull.number}/comments",
-                      {"body": "\n".join([f"@{DEVELOPER} {text}", "", *marks]) + "\n"})
-    return "the developer mentioned"
+                      {"body": "\n".join([text, "", *marks]) + "\n"})
+    return "told in a comment"
 
 
 def _removed(queue: Queue, pull: Pull) -> str:
-    """Tell the developer once for its head that GitHub removed ``pull`` from the merge queue
-    there, where it waits for a new head (ruling plan#2468): its line's text."""
+    """Tell once for its head that GitHub removed ``pull`` from the merge queue there, where
+    it waits for a new head (ruling plan#2468): its line's text."""
     said = _told(queue, pull, [f"removed {pull.head}"],
                  f"GitHub removed this pull request from the merge queue at "
                  f"{pull.head[:12]} ({pull.removed}). The daily update queue leaves it until "
@@ -358,8 +357,8 @@ def _removed(queue: Queue, pull: Pull) -> str:
 
 
 def _waiting(queue: Queue, pull: Pull, reasons: Sequence[Reason]) -> str:
-    """Tell the developer once for each thing it waits on that ``pull`` waits for a card for
-    ``reasons`` (ruling plan#2450): its line's text."""
+    """Tell once for each thing it waits on that ``pull`` waits for a card for ``reasons``
+    (ruling plan#2450): its line's text."""
     clauses = "; ".join(reason.clause for reason in reasons)
     said = _told(queue, pull, sorted({f"card {reason.waits_on}" for reason in reasons}),
                  f"This pull request waits for a card: {clauses}. A session reads the "
@@ -369,8 +368,8 @@ def _waiting(queue: Queue, pull: Pull, reasons: Sequence[Reason]) -> str:
 
 
 def _red(queue: Queue, pull: Pull) -> str:
-    """Tell the developer once for its head that ``pull`` moves pinned versions alone but a
-    check failed there: its line's text."""
+    """Tell once for its head that ``pull`` moves pinned versions alone but a check failed
+    there: its line's text."""
     said = _told(queue, pull, [f"red {pull.head}"],
                  f"This pull request moves pinned versions alone, but its checks at "
                  f"{pull.head[:12]} are {pull.checks}. The daily update queue puts it in the "
@@ -514,7 +513,7 @@ def _each(queue: Queue, pulls: Sequence[Pull]) -> int:
 def run(github: GitHub, repository: str, app: str, root: Path,
         sleep: Callable[[float], None] = time.sleep) -> int:
     """Put each pull request of ``repository`` by Dependabot or the App ``app`` that moves
-    pinned versions alone in the merge queue, or mention the developer on it (:func:`queued`),
+    pinned versions alone in the merge queue, or tell on it why not (:func:`queued`),
     judged in the checkout at ``root``, printing a line for each; exit as the module says."""
     try:
         pulls = _open(github, repository)
@@ -531,16 +530,17 @@ def run(github: GitHub, repository: str, app: str, root: Path,
 
 def main(argv: Sequence[str] | None = None, root: Path = REPO,
          sleep: Callable[[float], None] = time.sleep) -> int:
-    """Run the queue over the repository and with the token the environment names."""
+    """Run the queue over the repository and with the token the environment names, as the App
+    :data:`tools.update.app.APP`."""
     argparse.ArgumentParser(prog="python -m tools.update.queue",
                             description="The daily update queue (ruling plan#2449).",
                             ).parse_args(argv)
-    if missing := unset(TOKEN_VARIABLE, APP_VARIABLE, REPOSITORY_VARIABLE):
+    if missing := unset(TOKEN_VARIABLE, REPOSITORY_VARIABLE):
         print(f"update queue: {', '.join(missing)} unset, so nothing was read",
               file=sys.stderr)
         return 1
-    return run(GitHub(os.environ[TOKEN_VARIABLE]), os.environ[REPOSITORY_VARIABLE],
-               os.environ[APP_VARIABLE], root, sleep)
+    return run(GitHub(os.environ[TOKEN_VARIABLE]), os.environ[REPOSITORY_VARIABLE], APP, root,
+               sleep)
 
 
 if __name__ == "__main__":

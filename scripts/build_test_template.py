@@ -178,6 +178,7 @@ from app.level_infrastructure import apply_level_infrastructure
 from app.migration_runner import upgrade_to_head
 from app.sighting_infrastructure import apply_sighting_infrastructure
 from app.pay_stub_infrastructure import apply_pay_stub_infrastructure
+from app.pay_entry_infrastructure import apply_pay_entry_infrastructure
 from app.deleted_row_infrastructure import (
     ALL_ARMS as DELETED_ROW_ARMS,
     apply_deleted_row_infrastructure,
@@ -363,8 +364,9 @@ def _populate_template(app) -> None:
     8. ``apply_sighting_infrastructure``: a bank line goes with its last
        sighting (plan step bank_import:X-f6b-1), the same contract.
     9. ``apply_pay_stub_infrastructure``: a transcribed pay stub is never
-       deleted and never moved (plan step salary:S11-a), the same
-       contract.
+       deleted and never moved (plan step salary:S11-a), and
+       ``apply_pay_entry_infrastructure``: a salary profile holds at least
+       one pay entry (task plan#3167), the same contract.
     10. ``apply_deleted_row_infrastructure``: a deleted row takes no money
         (plan step credit_card:CC-5-4a-4), and
         ``apply_side_band_infrastructure``: a transfer side's record is dated
@@ -391,8 +393,9 @@ def _populate_template(app) -> None:
         table's ids start in a range of their own, so no two kinds of id
         coincide in a clone (ruling ``balance:R-BAL356``).
 
-    The audit, append-only, level, sighting, pay-stub and deleted-row
-    trigger families are counted by one list,
+    The audit, append-only, level, sighting, pay-stub, pay-entry,
+    deleted-row and side-record band trigger families are counted by one
+    list,
     :func:`scripts.build_test_db_image.template_checks`: in the baked image,
     and on a first boot by
     ``tests/test_scripts/test_init_database_one_transaction.py``.  The
@@ -477,6 +480,15 @@ def _populate_template(app) -> None:
         # salary:S11-a, ruling R-SAL44): idempotent re-application, same
         # contract, and a refusal a FIXTURE can trip.
         apply_pay_stub_infrastructure(
+            lambda statement: db.session.execute(db.text(statement))
+        )
+        db.session.commit()
+
+        # A salary profile holds at least one pay entry (task plan#3167,
+        # ruling R-SAL68): idempotent re-application, same contract, and a
+        # refusal a FIXTURE can trip -- one that commits a profile with no
+        # entry is building a state production cannot hold.
+        apply_pay_entry_infrastructure(
             lambda statement: db.session.execute(db.text(statement))
         )
         db.session.commit()

@@ -168,15 +168,18 @@ _CADENCES = [
     (365, 1),    # annual (a contractor)
 ]
 
-#: The $91,675.00 salary's pay entry at each count above: what ONE paycheck
-#: pays at that rhythm, rounded to the cent ROUND_HALF_UP (plan step
-#: salary:X-av-3a stores the paycheck, not the year).
-_PAY_OF_91675_AT = {
-    52: Decimal("1762.98"),   # $91,675.00 a year / 52
-    26: Decimal("3525.96"),   # $91,675.00 a year / 26
-    24: Decimal("3819.79"),   # $91,675.00 a year / 24
-    12: Decimal("7639.58"),   # $91,675.00 a year / 12
-    1: Decimal("91675.00"),   # $91,675.00 a year / 1
+#: A made-up yearly salary (ruling salary:R-SAL98: test figures are made up).
+_YEARLY = Decimal("78500.00")
+
+#: Its pay entry at each count above: what ONE paycheck pays at that rhythm,
+#: rounded to the cent ROUND_HALF_UP (plan step salary:X-av-3a stores the
+#: paycheck, not the year).
+_PAY_OF_A_YEAR_AT = {
+    52: Decimal("1509.62"),   # $78,500.00 a year / 52 = 1,509.6153...
+    26: Decimal("3019.23"),   # $78,500.00 a year / 26 = 3,019.2307...
+    24: Decimal("3270.83"),   # $78,500.00 a year / 24 = 3,270.8333...
+    12: Decimal("6541.67"),   # $78,500.00 a year / 12 = 6,541.6666...
+    1: Decimal("78500.00"),   # $78,500.00 a year / 1
 }
 
 
@@ -217,20 +220,21 @@ class TestTheCountIsTheSchedule:
     ):
         """A year's grosses total the yearly figure the engine reports, at every rhythm.
 
-        Input: a raise-free profile whose one pay entry is $91,675.00 a year's
-        worth at the rhythm tested (91,675.00 / count, half-up), projected
+        Input: a raise-free profile whose one pay entry is $78,500.00 a year's
+        worth at the rhythm tested (78,500.00 / count, half-up), projected
         over one full year at each authorable cadence.
         Expected: exactly ``count`` paychecks, every one the same figure,
         summing EXACTLY to the yearly figure the engine reports
         (``Earnings.annual_salary``: the pay times the count it annualises
-        by); and within half a cent per paycheck of $91,675.00.
+        by); and within half a cent per paycheck of $78,500.00.
         Why: **this is the money property finding F-16 destroyed**, and it is
         an identity rather than a figure, so it holds at every cadence without
         a per-cadence expected value to get wrong.  Before R-F16 the engine
         divided by a stored 26 while the schedule paid out ``count`` times, so
         the year totalled ``count / 26`` of the salary: 200% at a 7-day
-        cadence, 46% at 30 days.  Measured on this exact salary at plan step
-        R-F16.
+        cadence, 46% at 30 days.  Measured at plan step R-F16 on the owner's
+        own salary, which this test priced until plan step salary:X-av-3b swapped
+        it for a made-up one (ruling **R-SAL98**).
 
         **Since plan step salary:X-av-3a the stored fact is the paycheck**
         (ruling **R-SAL59**) and nothing divides it, so the property F-16
@@ -238,7 +242,7 @@ class TestTheCountIsTheSchedule:
         number of paydays the calendar pays in a year: the exact equality
         grades that, and a count read anywhere but the calendar (hardcoded to
         26, say) fails it at every other rhythm.  The half-cent bound against
-        $91,675.00 is the property as ruling **balance:R-HW** stated it for a
+        $78,500.00 is the property as ruling **balance:R-HW** stated it for a
         divided salary; each fixture's pay is already that salary over its
         own count, so the bound now holds by construction and cannot fail on
         its own (an adversarial review of this step hardcoded the count to 26
@@ -255,7 +259,7 @@ class TestTheCountIsTheSchedule:
                 state_code="NC",
             )
             db.session.add(profile)
-            start_test_pay_list(profile, _PAY_OF_91675_AT[count])
+            start_test_pay_list(profile, _PAY_OF_A_YEAR_AT[count])
             db.session.flush()
 
             calendar = _calendar(cadence_days, count, user_id=user_id)
@@ -268,9 +272,9 @@ class TestTheCountIsTheSchedule:
 
             total = sum(b.earnings.gross_biweekly for b in breakdowns)
             bound = Decimal(count) * Decimal("0.005")
-            assert abs(total - Decimal("91675.00")) <= bound, (
+            assert abs(total - _YEARLY) <= bound, (
                 f"a {cadence_days}-day cadence paid {total} of a "
-                f"$91,675.00 salary over {len(breakdowns)} paychecks, "
+                f"${_YEARLY:,} salary over {len(breakdowns)} paychecks, "
                 f"outside the {bound} rounding bound"
             )
             # And every paycheck is the SAME figure -- the rate contract
@@ -289,10 +293,10 @@ class TestTheCountIsTheSchedule:
     ):
         """THE FIRING CONTROL: the cadence actually moves the answer.
 
-        Input: ONE profile -- one pay entry of $3,525.96 a paycheck
-        ($91,675.00 a year / 26, the owner's own 14-day rhythm) -- walked on a
+        Input: ONE profile -- one pay entry of $3,019.23 a paycheck
+        ($78,500.00 a year / 26, made up, at a 14-day rhythm) -- walked on a
         7-day calendar and on a 14-day one.
-        Expected: the same $3,525.96 paycheck on both, counted 52 and 26 times
+        Expected: the same $3,019.23 paycheck on both, counted 52 and 26 times
         a year, so the weekly calendar's yearly figure is twice the biweekly
         one's, exactly.
         Why: every assertion above would still pass if the engine ignored the
@@ -304,14 +308,15 @@ class TestTheCountIsTheSchedule:
 
         **Re-stated on the pay list's walk at plan step salary:X-av-3a.**  It
         priced one YEARLY salary on each calendar and asserted the paycheck
-        was that salary over the calendar's count ($1,762.98 weekly against
-        $3,525.96 biweekly).  The stored fact is one PAYCHECK now (ruling
-        **R-SAL59**), so no calendar divides anything: what survives is that
-        the count comes from the calendar the basis carries and the yearly
-        figure is the paycheck times it.  Each calendar holds one era and the
-        entry's payday (the owner's first saved payday, 2024-01-05) sits
-        below both, where the earliest era runs backward, so the walk crosses
-        no change of rhythm and carries nothing (R-SAL82).
+        was that salary over the calendar's count ($1,509.62 weekly against
+        $3,019.23 biweekly, in this test's made-up figures).  The stored fact
+        is one PAYCHECK now (ruling **R-SAL59**), so no calendar divides
+        anything: what survives is that the count comes from the calendar the
+        basis carries and the yearly figure is the paycheck times it.  Each
+        calendar holds one era and the entry's payday (the owner's first saved
+        payday, 2024-01-05) sits below both, where the earliest era runs
+        backward, so the walk crosses no change of rhythm and carries nothing
+        (R-SAL82).
         """
         with app.app_context():
             user_id = seed_user["user"].id
@@ -324,8 +329,8 @@ class TestTheCountIsTheSchedule:
                 state_code="NC",
             )
             db.session.add(profile)
-            # The owner's own rhythm on the entry's payday is 14 days.
-            start_test_pay_list(profile, _PAY_OF_91675_AT[26])
+            # A 14-day rhythm's pay on the entry's payday.
+            start_test_pay_list(profile, _PAY_OF_A_YEAR_AT[26])
             db.session.flush()
 
             weekly = _calendar(7, 52, user_id=user_id)
@@ -339,15 +344,15 @@ class TestTheCountIsTheSchedule:
             )
 
             # The paycheck is the entry on both calendars: nothing divides it.
-            assert weekly_pay.per_paycheck == Decimal("3525.96")
-            assert biweekly_pay.per_paycheck == Decimal("3525.96")
+            assert weekly_pay.per_paycheck == Decimal("3019.23")
+            assert biweekly_pay.per_paycheck == Decimal("3019.23")
             # The count is each calendar's own.
             assert weekly_pay.periods_per_year == Decimal("52")
             assert biweekly_pay.periods_per_year == Decimal("26")
             # Hand-computed, exact (a product rounds nothing):
-            # $3,525.96 x 52 = $183,349.92 and $3,525.96 x 26 = $91,674.96.
-            assert weekly_pay.annual == Decimal("183349.92")
-            assert biweekly_pay.annual == Decimal("91674.96")
+            # $3,019.23 x 52 = $156,999.96 and $3,019.23 x 26 = $78,499.98.
+            assert weekly_pay.annual == Decimal("156999.96")
+            assert biweekly_pay.annual == Decimal("78499.98")
             # Twice the paychecks, twice the year, to the cent.
             assert weekly_pay.annual == biweekly_pay.annual * 2
 

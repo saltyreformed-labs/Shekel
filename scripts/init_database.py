@@ -114,6 +114,7 @@ from app.level_infrastructure import apply_level_infrastructure
 from app.migration_runner import stamp_head, upgrade_to_head
 from app.sighting_infrastructure import apply_sighting_infrastructure
 from app.pay_stub_infrastructure import apply_pay_stub_infrastructure
+from app.pay_entry_infrastructure import apply_pay_entry_infrastructure
 from app.opening_infrastructure import ALL_ARMS, apply_opening_infrastructure
 from app.append_only_infrastructure import (
     apply_append_only_infrastructure,
@@ -153,7 +154,8 @@ def init_fresh_database(connection):
     """Create the schema, the integrity infrastructure, and stamp Alembic.
 
     The steps below run in order -- with the append-only, level-within-file,
-    last-sighting, pay-stub and deleted-row blocks between 4 and 5, each
+    last-sighting, pay-stub, pay-entry, deleted-row and side-record band
+    blocks between 4 and 5, each
     documented where it runs -- every one on the deploy's ONE connection
     and none of them committing (plan step balance:X-cv):
     :func:`initialise_database` commits them together.  A failure part-way
@@ -273,6 +275,16 @@ def init_fresh_database(connection):
         lambda sql: db.session.execute(db.text(sql))
     )
     print("Pay-stub refusal ready.")
+
+    # A salary profile holds at least one pay entry (task plan#3167, ruling
+    # R-SAL68).  Same fresh-DB reason, same three-caller contract: the stamp
+    # below marks c3a7e5d91f42 applied without running it.  Nothing to check
+    # first on this path: the database holds no profile.
+    print("Applying pay-entry rule (a profile holds a pay entry)...")
+    apply_pay_entry_infrastructure(
+        lambda sql: db.session.execute(db.text(sql))
+    )
+    print("Pay-entry rule ready.")
 
     # A deleted row takes no money (plan step credit_card:CC-5-4a-4, ruling
     # R-CC89): a payment or purchase arriving under a deleted row is refused.

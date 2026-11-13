@@ -24,8 +24,9 @@ class TestAccountVersionIdColumn:
         """``budget.accounts`` carries NO anchor cache columns (ruling R-EH).
 
         **Asserted rather than merely deleted**, for the reason the sibling
-        lock one table over gives (``test_c43_ondelete_and_naming_convention
-        .test_account_anchor_history_has_no_pay_period_fk``): a future
+        lock one table over gives (``test_c43_ondelete_and_naming_convention/
+        test_the_migrated_shape.py``'s
+        ``test_account_anchor_history_has_no_pay_period_fk``): a future
         migration re-adding ``current_anchor_balance`` /
         ``current_anchor_period_id`` would re-open a denormalized second
         balance -- the state whose divergence this arc spent a step deleting --

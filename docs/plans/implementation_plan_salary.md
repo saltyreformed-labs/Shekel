@@ -4,9 +4,9 @@
 `calibration_service`, `payroll_basis`, the `routes/salary/` package and the tax services -- minted
 2026-09-03 by the developer (**R-SAL1**) because four arcs edited the engine and none named it. Each
 step, finding and ruling is a card in the tracker, `saltyreformed-labs/shekel-plan` (`CLAUDE.md`,
-Development Status), whose board holds the order; "done" is `verification.md`, and what shipped is
-archived under `historical/salary_*`. Sections 4, 5 and 7 held the steps, the findings' pointer and
-this document's rules until the tracker took them.
+Multi-session operation), whose board holds the order; "done" is `verification.md`, and what shipped
+is archived under `historical/salary_*`. Sections 4, 5 and 7 held the steps, the findings' pointer
+and this document's rules until the tracker took them.
 
 ## 0. Why this arc exists, and its own sequencing
 

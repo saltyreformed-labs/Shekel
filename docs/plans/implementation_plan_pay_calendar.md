@@ -1,9 +1,9 @@
 # Implementation Plan: The Pay Calendar
 
 **The argument for deriving the pay calendar from the paydays.** Each step, finding and ruling is a
-card in the tracker, `saltyreformed-labs/shekel-plan` (`CLAUDE.md`, Development Status): an open
-step's specification is its card's body and the order is the board's. Sections 4, 5 and 7 held the
-steps, the findings' pointer and this document's rules until the tracker took them.
+card in the tracker, `saltyreformed-labs/shekel-plan` (`CLAUDE.md`, Multi-session operation): an
+open step's specification is its card's body and the order is the board's. Sections 4, 5 and 7 held
+the steps, the findings' pointer and this document's rules until the tracker took them.
 **`R-PC2` also answers the `recurrence` arc's `F-10` fork**, a pay-period HOLE.
 
 ---

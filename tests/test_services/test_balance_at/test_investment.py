@@ -352,7 +352,7 @@ class TestTheSeamOwnsTheIncomeBasis:
         """
         # pylint: disable=import-outside-toplevel
         tax_law(NO_TAX_LAW)
-        from tests.test_services.test_income_service import (
+        from tests.test_services.test_income_service._helpers import (
             _create_profile,
             _make_salary_template,
             _make_txn,
@@ -390,7 +390,7 @@ class TestTheSeamOwnsTheIncomeBasis:
         """
         # pylint: disable=import-outside-toplevel
         tax_law(NO_TAX_LAW)
-        from tests.test_services.test_income_service import (
+        from tests.test_services.test_income_service._helpers import (
             _create_profile,
             _make_salary_template,
             _make_txn,

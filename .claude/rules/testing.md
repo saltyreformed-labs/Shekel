@@ -6,9 +6,7 @@ paths:
 # Testing rules
 
 Must-knows for the test suite. Full standards: `docs/testing-standards.md`
-(infrastructure, run guidelines, problem reporting). The `code-reviewer` agent
-restates the test-quality bar deliberately, so a review carries it even where
-this file has not loaded; a change here updates that mirror in the same commit.
+(infrastructure, run guidelines, problem reporting).
 
 ## Running
 
@@ -87,7 +85,10 @@ this file has not loaded; a change here updates that mirror in the same commit.
   the fixture needs and construct it so it holds on every day -- pin the read
   (`BalanceContext.build(user_id, as_of=...)`) to a date the fixture controls and
   derive the rest from that. Findings N-131, N-132, R8 and the 2026-08-01 loan
-  failures are all this shape.
+  failures are all this shape. Never `date.replace(year=...)` (29 February raises;
+  `app.utils.dates.add_months` clamps), and never a hard-coded "future" date
+  (derive it from `display_today()`). `@pytest.mark.server_clock` states that
+  Postgres's clock cannot be faked, and is never a way to quiet a failure.
 - **Check both:** `TZ=Pacific/Kiritimati ./scripts/test.sh` must pass unchanged.
   Full rationale and worked cases: `docs/testing-standards.md`; the gates, the
   `server_clock` marker and the debugging pitfalls: `docs/test-suite-clocks.md`.
@@ -99,6 +100,8 @@ this file has not loaded; a change here updates that mirror in the same commit.
 - **Service tests assert exact computed values** -- include a comment showing the
   arithmetic that produces the expected number, not `result > 0`.
 - **Edge-case tests assert the specific edge behavior**, not just "did not crash."
+  A test that does not verify behavior is worse than no test, and one that
+  duplicates existing coverage is a finding.
 - **A pay-calendar fixture that tests a derived period END is OFF cadence.** On cadence, a saved
   period's end (`lead(start) - 1`, the day before the next payday) and a projected one's
   (`start + cadence - 1`) are the same day, so a defect in either cannot show: it made

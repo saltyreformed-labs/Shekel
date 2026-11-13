@@ -357,7 +357,7 @@ class TestALegsDisplayProjections:
         transfer's own name only in either state passed every file named
         here (measured by that fix's review).  ``test_calendar_service/test_month_detail.py``'s
         ``TestDayAssignment::test_due_date_none_fallback``,
-        ``test_spending_report_service.py``'s
+        ``test_spending_report_service/test_the_scope_and_the_cash_flow_set.py``'s
         ``TestATransferIsALegOfItsParent`` and
         ``test_the_entry_doors_ask_the_movement.py``'s
         ``TestATransfersPaymentIsNamedByItsLeg`` read the expense side's

@@ -8,10 +8,13 @@
 # --bounds major``'s form, so a 0.x package is held to its minor), the exact
 # version has ONE home, the lock (CLAUDE.md rule 14), and a major version
 # moves only by an edit to this file -- which needs a card (ruling plan#2351).
-# Minor and patch moves are the lock's alone, refreshed each Monday.  The one
-# exception is the build tools a source build may run (``[tool.uv]``'s
-# ``build-constraint-dependencies``): uv locks no build tool, so each one's
-# version and hash live here, and uv copies them into the lock's manifest.
+# Minor and patch moves are the lock's alone, refreshed each Monday, but where
+# a requirement caps its package short of its major, the comment beside it
+# says why and which card lifts it (pytest's, below).  The one exception to
+# the lock holding every version is the build tools a source build may run
+# (``[tool.uv]``'s ``build-constraint-dependencies``): uv locks no build
+# tool, so each one's version and hash live here, and uv copies them into
+# the lock's manifest.
 #
 # The Python version is ``.python-version``'s: uv picks the interpreter from
 # it and CI's jobs read it.  ``requires-python`` below names its minor too,
@@ -99,7 +102,17 @@ dependencies = [
 # installs this group by default; the image never does.
 dev = [
     # Testing
-    "pytest>=9.1.1,<10.0.0",
+    # pytest is capped below 9.2, short of its major (ruling plan#3624):
+    # pytest 9.2.0 with pytest-xdist 3.8.0 splits every ``xdist_group``
+    # across workers, so ``--dist=loadgroup`` keeps no group together and
+    # the suite goes red only when a split happens to collide (plan#2954).
+    # xdist's fix (pytest-dev/pytest-xdist#1388) was on its master and in no
+    # release on 2026-11-12.  The Monday refresh holds this cap silently, as
+    # it prepares a change alone only across a major or past an exact pin,
+    # so plan#3632 lifts it once xdist releases the fix;
+    # tests/test_arch/test_an_xdist_group_runs_on_one_worker.py fails every
+    # run while a group is split.
+    "pytest>=9.1.1,<9.2",
     "pytest-flask>=1.3.0,<2.0.0",
     "pytest-cov>=7.1.0,<8.0.0",
     "pytest-timeout>=2.4.0,<3.0.0",

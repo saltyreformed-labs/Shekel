@@ -15,13 +15,6 @@ from decimal import Decimal
 
 import pytest
 
-# Pylint: ``shekel-private-module-import`` -- a test of a service's
-# INTERNALS reaches for them by name, which is the convention this
-# package's own test modules already keep (``test_bars``,
-# ``test_candidates``, ``test_residual``).  The alternative is widening
-# the package's public surface for the tests alone, which is the
-# "surface nobody asked for" its ``__init__`` refuses in as many words.
-# pylint: disable=shekel-private-module-import
 from app.enums import StatementBalanceEvidenceEnum, StatusEnum
 from app.models.statement_line_skip import StatementLineSkip
 from app.services import bank_agreement, statement_match

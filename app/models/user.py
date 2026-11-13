@@ -143,11 +143,15 @@ class User(UserMixin, TimestampMixin, db.Model):
     )
     role = db.relationship("UserRole", lazy="joined")
     # The user's one two-factor row, read through :attr:`has_two_factor`.
-    # View-only: every write of the row goes through its own query, and a
-    # deleted user's row goes with them by the foreign key's ``ON DELETE
-    # CASCADE``.  Loaded on first read and kept for the rest of the request,
-    # whose closing rollback expires it, so the login gate asks the database
-    # once a request and anything later in it reads the gate's answer.
+    # View-only: assigning it links or makes no row, and a deleted user's row
+    # goes with them by the foreign key's ``ON DELETE CASCADE``.  Loaded on
+    # first read
+    # and kept for the rest of the request, whose closing rollback expires
+    # it, so the login gate asks the database once a request and anything
+    # later in it reads the gate's answer: the doors behind the gate write
+    # the row it loaded (Regenerate backup codes, the re-confirm page's code
+    # check; ruling plan#3826), and the doors the gate lets through without
+    # two-factor read their own.
     mfa_config = db.relationship("MfaConfig", uselist=False, viewonly=True)
 
     @property

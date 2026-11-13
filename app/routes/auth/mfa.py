@@ -761,16 +761,15 @@ def regenerate_backup_codes():
 
     Takes a step-up (ruling plan#3010): new codes void the old ones, so a
     stolen session must not be able to mint them.
-    """
-    mfa_config = (
-        db.session.query(MfaConfig)
-        .filter_by(user_id=current_user.id)
-        .first()
-    )
-    if not mfa_config or not mfa_config.is_enabled:
-        flash("Two-factor authentication is not enabled.", "danger")
-        return redirect(url_for("auth.security"))
 
+    The codes are written onto the two-factor row the login gate read, which
+    is on: the gate holds an account without two-factor at setup, so this
+    door asks nothing again (plan#3775, ruling plan#3826).  It once had a
+    refusal of its own, "Two-factor authentication is not enabled.", which
+    no request could reach: its query returned the row the gate had loaded,
+    unrefreshed (measured 2026-11-13).
+    """
+    mfa_config = current_user.mfa_config
     codes = mfa_service.generate_backup_codes()
     mfa_config.backup_codes = mfa_service.hash_backup_codes(codes)
     # Stamp the security-event columns in the same transaction as

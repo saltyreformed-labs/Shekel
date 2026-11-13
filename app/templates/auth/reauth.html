@@ -35,19 +35,17 @@
             </div>
           </div>
 
-          {# TOTP field is always rendered so a user with a hardware
-             authenticator app can paste a code without an extra
-             round-trip; the server ignores it for accounts without
-             MFA enabled. #}
+          {# The code is always asked (ruling plan#3826): the login gate
+             holds an account without two-factor at setup, so everyone
+             here has it on. #}
           <div class="mb-3">
             <label for="totp_code" class="form-label">
               Authentication Code
-              <span class="text-muted small">(if MFA is enabled)</span>
             </label>
             <input type="text" class="form-control" id="totp_code"
                    name="totp_code" maxlength="6" pattern="[0-9]{6}"
                    inputmode="numeric" autocomplete="one-time-code"
-                   placeholder="000000">
+                   placeholder="000000" required>
           </div>
 
           <button type="submit" class="btn btn-primary w-100">

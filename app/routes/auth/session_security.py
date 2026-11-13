@@ -23,7 +23,6 @@ from marshmallow import ValidationError as MarshmallowValidationError
 
 from app.extensions import db
 from app.models.known_device import TRUST_LIFETIME
-from app.models.user import MfaConfig
 from app.schemas.validation import ChangePasswordSchema, ReauthSchema
 from app.services import auth_service, known_device_service
 from app.exceptions import AuthError, ValidationError
@@ -239,8 +238,11 @@ def reauth():
         sign-in's one rule (plan#2772, ruling plan#3034): a known browser
         passes the account's lock and counts on its own record, a stranger
         meets it and counts on the account.
-      * If the user has MFA enabled, a TOTP code is required.  A wrong or
-        replayed one counts toward the lock.  The
+      * A TOTP code is always required, checked against the two-factor row
+        the login gate read (ruling plan#3826): the gate holds an account
+        without two-factor at setup, so every account here has it, and this
+        view asks nothing again.  A wrong, replayed or empty code counts
+        toward the lock.  The
         same ``_verify_totp_with_replay_logging`` helper used by
         /mfa/verify enforces replay prevention --
         a code captured at primary login cannot be reused here, and
@@ -338,27 +340,23 @@ def reauth():
         flash(str(exc), "danger")
         return _render_reauth_form(safe_next)
 
-    mfa_config = (
-        db.session.query(MfaConfig)
-        .filter_by(user_id=current_user.id, is_enabled=True)
-        .first()
+    # The code is always asked, and checked against the two-factor row the
+    # login gate read (ruling plan#3826): the gate holds an account without
+    # two-factor at setup, so every account here has it on.
+    accepted, key_failure = _totp_accepted_or_key_failure(
+        current_user.mfa_config, reauth_data["totp_code"], current_user.id,
     )
-    if mfa_config:
-        totp_code = reauth_data["totp_code"]
-        accepted, key_failure = _totp_accepted_or_key_failure(
-            mfa_config, totp_code, current_user.id,
+    if key_failure:
+        return _render_reauth_form(safe_next)
+    if not accepted:
+        auth_service.record_failed_attempt(current_user, device=device)
+        log_event(
+            logger, logging.WARNING, EVT_REAUTH_FAILED, AUTH,
+            "Step-up re-auth failed: bad TOTP",
+            user_id=current_user.id, ip=request.remote_addr,
         )
-        if key_failure:
-            return _render_reauth_form(safe_next)
-        if not accepted:
-            auth_service.record_failed_attempt(current_user, device=device)
-            log_event(
-                logger, logging.WARNING, EVT_REAUTH_FAILED, AUTH,
-                "Step-up re-auth failed: bad TOTP",
-                user_id=current_user.id, ip=request.remote_addr,
-            )
-            flash("Invalid authentication code.", "danger")
-            return _render_reauth_form(safe_next)
+        flash("Invalid authentication code.", "danger")
+        return _render_reauth_form(safe_next)
 
     # Every check has passed.  ``device`` is asked only whether it was None:
     # with two-factor, the code's commit has expired it, and a copy of this

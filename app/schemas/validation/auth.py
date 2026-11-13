@@ -436,8 +436,11 @@ class ReauthSchema(BaseSchema):
 
     Used when a high-value action (e.g. password change, backup-code
     regeneration, salary edit) requires fresh proof of identity.  Mirrors the /login
-    flow: password is required and totp_code is optional (only verified
-    if the user has MFA enabled).  Backup codes are intentionally NOT
+    flow: password is required, and totp_code is always verified, since
+    every account the login gate lets reach /reauth has two-factor on
+    (ruling plan#3826).  It loads as "" when absent, so a missing code is
+    refused as a wrong one, counted toward the lock, rather than as a
+    malformed form.  Backup codes are intentionally NOT
     accepted here -- they are single-use recovery credentials for the
     "I lost my authenticator" scenario at primary login.
 

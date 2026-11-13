@@ -310,9 +310,9 @@ docker exec shekel-prod-app python scripts/integrity_check.py --verbose
 # Run only referential integrity checks.
 docker exec shekel-prod-app python scripts/integrity_check.py --category referential
 
-# Run locally in development.
-DATABASE_URL=postgresql://shekel_user:shekel_pass@localhost:5432/shekel \
-    python scripts/integrity_check.py --verbose
+# Run locally in development, as the login .env's DATABASE_URL names:
+# the database owner, shekel_owner (ruling plan#3608).
+python scripts/integrity_check.py --verbose
 ```
 
 ### Check Categories

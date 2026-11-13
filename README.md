@@ -406,9 +406,13 @@ Edit `.env` and set at minimum:
 SECRET_KEY=<any random string for dev>
 ```
 
-The default `DATABASE_URL` in `.env.example` points to `localhost:5432`, which matches the dev
-Docker database started in the next step. There is no `TEST_DATABASE_URL` to set:
-`./scripts/test.sh` exports the test DSNs at the throwaway cluster it starts for each run.
+Then replace `REPLACE-ME-WITH-THE-OWNER-ROLE-PASSWORD` in `DATABASE_URL` with the dev database
+owner's password, `OWNER_ROLE_PASSWORD` in `docker-compose.dev.yml`. That URL logs in as
+`shekel_owner`, the database owner, at `localhost:5432`, the dev Docker database started in the next
+step. Every host run uses it (`flask db upgrade`, `flask run`, the scripts), so a host migration
+runs as the deploy does and every table it makes is the owner's: a migration run as any other login
+makes tables the next deploy cannot alter (ruling plan#3608). There is no `TEST_DATABASE_URL` to
+set: `./scripts/test.sh` exports the test DSNs at the throwaway cluster it starts for each run.
 
 ### 4. Start the Dev Database
 
@@ -419,6 +423,19 @@ docker compose -f docker-compose.dev.yml up -d db
 This starts one PostgreSQL container:
 
 - `shekel-dev-db` on port 5432 (development database)
+
+On an empty volume its first boot runs the provisioning script,
+`deploy/postgres/provision_roles.sh`, which makes the owner's and the web server's logins. A dev
+database made before that script existed has no owner login, so the owner cannot log in until the
+script runs once. The `up -d db` above makes the container again with the two password variables it
+reads; then run:
+
+```bash
+docker exec shekel-dev-db /docker-entrypoint-initdb.d/10-provision-roles.sh
+```
+
+Run it again after a production copy is restored into the dev database. Run again with the same
+passwords, it changes nothing.
 
 **There is no test database to start.** `./scripts/test.sh` creates a throwaway postgres container
 of its own for every run and removes it afterwards, so the suite needs nothing running beforehand.
@@ -487,6 +504,9 @@ Do not wrap the wrapper in `timeout`: it forwards INT, TERM and HUP to pytest an
 container down, and an outer `timeout`'s SIGKILL escalation defeats both.
 
 ### Database Migrations
+
+Each command runs as the login `.env`'s `DATABASE_URL` names, the database owner (Developer Setup,
+step 3), so the tables a migration makes are the owner's, as the deploy's are.
 
 ```bash
 # After changing models, generate a new migration

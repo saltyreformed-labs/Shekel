@@ -32,6 +32,7 @@ import shutil
 import subprocess
 from importlib import reload
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import pytest
 import yaml
@@ -51,13 +52,12 @@ DOCKER_COMPOSE = REPO_ROOT / "docker-compose.yml"
 DOCKER_COMPOSE_PROD = REPO_ROOT / "deploy" / "docker-compose.prod.yml"
 RUNBOOK_SECRETS = REPO_ROOT / "docs" / "runbook_secrets.md"
 
-# The sentinel token shipped in .env.example's DATABASE_URL and
-# TEST_DATABASE_URL templates.  Mirrors ``_DATABASE_URL_SENTINEL`` in
-# app/config.py; cross-referenced here as a string literal so a
-# regression that renames the constant on one side without the other
-# surfaces as a test failure (rather than as a silent acceptance of
-# the leaked default at runtime).
-ENV_EXAMPLE_DB_URL_SENTINEL = "REPLACE-ME-WITH-YOUR-POSTGRES-PASSWORD"
+# The sentinel token shipped in .env.example's DATABASE_URL template.
+# Mirrors ``_DATABASE_URL_SENTINEL`` in app/config.py; cross-referenced
+# here as a string literal so a regression that renames the constant on
+# one side without the other surfaces as a test failure (rather than as
+# a silent acceptance of the leaked default at runtime).
+ENV_EXAMPLE_DB_URL_SENTINEL = "REPLACE-ME-WITH-THE-OWNER-ROLE-PASSWORD"
 
 # Subprocess timeout for ``docker compose config`` invocations.
 DOCKER_SUBPROCESS_TIMEOUT_S = 60
@@ -409,6 +409,25 @@ class TestEnvExampleUriTemplatesSanitized:
             "copy-paste-without-substitution failure mode the C-38 "
             "follow-up Issue 3 work introduces."
         )
+
+    def test_database_url_logs_in_as_the_owner(
+        self, env_example_text: str,
+    ) -> None:
+        """A host run logs in as ``shekel_owner``, the deploy's login (ruling plan#3608).
+
+        ``flask db upgrade`` and the host scripts connect by this URL.  A
+        migration run as any other login makes tables that login owns, and
+        the next deploy, as the owner, cannot alter them until the
+        provisioning script runs again.  The URL names the dev database the
+        dev stack publishes, ``localhost:5432/shekel``.
+        """
+        match = re.search(r"^DATABASE_URL=([^\n]*)$", env_example_text, re.MULTILINE)
+        assert match is not None
+        url = urlsplit(match.group(1))
+        assert (url.scheme, url.username, url.hostname, url.port, url.path) == (
+            "postgresql", "shekel_owner", "localhost", 5432, "/shekel",
+        ), match.group(1)
+        assert url.password == ENV_EXAMPLE_DB_URL_SENTINEL, match.group(1)
 
     def test_database_section_documents_substitution(
         self, env_example_text: str,

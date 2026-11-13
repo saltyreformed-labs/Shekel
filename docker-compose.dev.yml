@@ -28,7 +28,11 @@
 # parity: owner-role DB access, no entrypoint pipeline, and the rate
 # limiter in memory):
 #   1. docker compose -f docker-compose.dev.yml up -d --remove-orphans db
-#   2. flask run    (connects to containerized Postgres; the limiter
+#   2. flask run    (connects to containerized Postgres as the login
+#      .env's DATABASE_URL names: the database owner, shekel_owner,
+#      with the OWNER_ROLE_PASSWORD below, the login the migrate
+#      service runs the deploy as, so a host migration makes the
+#      owner's tables (ruling plan#3608); the limiter
 #      runs on DevConfig's in-memory store, always, since the valkey
 #      service listens only on a socket in a volume host flask run
 #      cannot reach (ruling plan#2619).  The containerized app runs

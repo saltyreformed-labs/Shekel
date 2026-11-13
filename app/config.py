@@ -48,23 +48,25 @@ _KNOWN_DEFAULT_SECRETS = frozenset({
 # (32 bytes / 256 bits) which is well above this floor.
 _MIN_SECRET_KEY_LENGTH = 32
 
-# Sentinel password embedded in the ``.env.example`` DATABASE_URL and
-# TEST_DATABASE_URL templates so a fresh checkout cannot accidentally
-# boot under the historically-leaked default ``shekel_pass``.  An
-# operator who copies ``.env.example`` to ``.env`` and forgets to
-# substitute their own password is met with a loud app-level
-# ``ValueError`` from ``_reject_sentinel`` below, rather than a
-# generic Postgres "password authentication failed" at connect time.
+# Sentinel password embedded in the ``.env.example`` DATABASE_URL
+# template, which logs in as the database owner (ruling plan#3608), so
+# a fresh checkout cannot accidentally boot under the historically-leaked
+# default ``shekel_pass``.  An operator who copies ``.env.example`` to
+# ``.env`` and forgets to substitute their own password is met with a
+# loud app-level ``ValueError`` from ``_reject_sentinel`` below, rather
+# than a generic Postgres "password authentication failed" at connect
+# time.
 # See audit finding F-109 and the C-38 follow-up Issue 3 in
 # ``shekel-audits/security-2026-04-15/c-38-followups.md``.
 #
 # The token is intentionally specific (uppercase, hyphen-delimited,
-# 37 chars) so that a real password is extremely unlikely to contain
-# it as a substring.  The substring check is correct here because the
-# token surfaces inside a postgres URI ``user:password@host`` form;
-# parsing the URI would be heavier and is unnecessary given the
-# specificity of the marker.
-_DATABASE_URL_SENTINEL = "REPLACE-ME-WITH-YOUR-POSTGRES-PASSWORD"
+# 39 chars) so that a real password is extremely unlikely to contain
+# it as a substring.  It names the password that replaces it, the
+# owner's (``OWNER_ROLE_PASSWORD``), not the superuser's.  The
+# substring check is correct here because the token surfaces inside a
+# postgres URI ``user:password@host`` form; parsing the URI would be
+# heavier and is unnecessary given the specificity of the marker.
+_DATABASE_URL_SENTINEL = "REPLACE-ME-WITH-THE-OWNER-ROLE-PASSWORD"
 
 
 def _reject_sentinel(uri: str | None, *, var_name: str) -> str | None:
@@ -100,8 +102,8 @@ def _reject_sentinel(uri: str | None, *, var_name: str) -> str | None:
         raise ValueError(
             f"{var_name} still embeds the .env.example sentinel "
             f"password '{_DATABASE_URL_SENTINEL}'.  Copy "
-            ".env.example to .env and replace the sentinel with a "
-            "real PostgreSQL password before starting the "
+            ".env.example to .env and replace the sentinel with the "
+            "password of the login the URL names before starting the "
             "application or the test suite.  See audit finding "
             "F-109 / Commit C-38 follow-up Issue 3."
         )

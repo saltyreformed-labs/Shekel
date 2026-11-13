@@ -48,6 +48,11 @@ The shared filter applied here, in one place, by every consumer:
      tracks its loan counted whatever the contract was when it last pressed
      Track.  **There is no ``None`` arm any more**: a definition states a
      price or the rule refuses it, exactly as its rows would be refused.
+     **A card's worked-out payment is skipped here too, whatever it asks**
+     (plan task plan#3700): each of its rows is what the card owes then, so no
+     one figure repeats to convert, and one $800 purchase read as $800 x 26 /
+     12 = $1,733.33 a month.  What it carries is the card's bills, each counted
+     as itself.
 
 **There is no fourth rule, and its removal is plan step R7a-2b's.**  The filter
 used to end "skip if the conversion returns ``None`` -- a pattern this
@@ -237,10 +242,13 @@ def todays_price(
       :func:`~app.services.cash_ledger.definition_cash` -- the contract for a
       payment that tracks its loan, the stated series otherwise, and the
       standing extra in both, because that is what leaves checking;
-    * a card's worked-out payment: what its next row asks of checking
-      (:func:`~app.services.balance_at.next_card_payment_price`), because the
-      rule prices a row off the card's balance and a row imagined on the day
-      would read ``$0.00`` from each due date until the next close;
+    * a card's worked-out payment: what its next row asks of checking, the row
+      dated on or after the pass's day that the Recurring page's Next column
+      names, worked out or typed over
+      (:func:`~app.services.balance_at.next_card_payment_price`, plan task
+      plan#3700), because the rule prices a row off the card's balance and a row
+      imagined on the day would read ``$0.00`` from each due date until the next
+      close.  It is a figure and never a monthly one (:func:`monthly_or_none`);
     * any other definition: rule 3, its price series as of the day.
 
     **Not the newest stated price**, which is what the stored
@@ -425,6 +433,25 @@ def _todays_paycheck(
     return basis.salary.paycheck_on(template.id, today)
 
 
+def _repeats_one_figure(template: RecurringTemplate) -> bool:
+    """Return whether one figure of *template*'s repeats, so it has a monthly one.
+
+    Filter step 3's second half (plan task plan#3700): every definition but a
+    card's worked-out payment, whose rows are each what the card owes then.  Its
+    figure is its next row's (:func:`todays_price`) and says nothing of the row
+    after: one $800 purchase on the card read $800 x 26 / 12 = $1,733.33 a month.
+    A fixed amount sent to the card states its own figure and repeats it.
+
+    Args:
+        template: A definition of either kind, or a duck-typed one (the module
+            docstring's contract).
+
+    Returns:
+        ``False`` for a card's worked-out payment, ``True`` otherwise.
+    """
+    return not is_card_payment_definition(template)
+
+
 def monthly_or_none(
     template: RecurringTemplate,
     reading: RuleReading,
@@ -445,7 +472,8 @@ def monthly_or_none(
     too, and the price is now a derivation (:func:`todays_price`) rather than
     a column read, so the caller prices once and hands it here.
 
-    Applies filter steps 2 and 3 (expired, zero price).  Step 1 -- no rule,
+    Applies filter steps 2 and 3 (expired; a zero price or a card's worked-out
+    payment, :func:`_repeats_one_figure`).  Step 1 -- no rule,
     which is how a definition says it does not repeat -- is the caller's: a
     definition with no rule has no *reading* to hand in.  The returned
     Decimal is NOT quantized -- callers that aggregate first then round
@@ -495,7 +523,7 @@ def monthly_or_none(
             this module feeds while the Recurring surface 500'd on the same
             row.
     """
-    if price.commits_nothing:
+    if price.commits_nothing or not _repeats_one_figure(template):
         return None
 
     rule = template_rule(template)
@@ -529,12 +557,13 @@ def template_monthly_or_none(
     contribution floors take this entry; the Recurring surface, which has
     already read and priced every definition once, takes the one below it.
 
-    The two skips that need no walk are asked FIRST, so a definition that
-    cannot contribute costs no door read: no rule (filter step 1), then a
-    zero price (step 3).  **The zero skip comes after the PRICE since plan
-    step X-bp**, where it read the stored column before anything else: the
-    price is a derivation on the pass's day now, so it is read here once and
-    the same value is handed down.
+    The skips that need no walk are asked FIRST, so a definition that cannot
+    contribute costs no door read: no rule (filter step 1), a card's
+    worked-out payment (step 3, asked before its price so its card's balance is
+    not folded for a figure nothing adds), then a zero price (step 3).  **The
+    zero skip comes after the PRICE since plan step X-bp**, where it read the
+    stored column before anything else: the price is a derivation on the
+    pass's day now, so it is read here once and the same value is handed down.
 
     Args:
         template: A ``TransactionTemplate`` or ``TransferTemplate`` ORM
@@ -563,7 +592,7 @@ def template_monthly_or_none(
             a bound nothing derived.  A definition with no loan behind it
             still resolves for such an owner.
     """
-    if template_rule(template) is None:
+    if template_rule(template) is None or not _repeats_one_figure(template):
         return None
     price = todays_price(template, ctx)
     if price.commits_nothing:

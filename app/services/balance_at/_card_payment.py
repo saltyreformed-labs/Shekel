@@ -603,16 +603,40 @@ class CardPayments:
         dated_on = period.attribution_day(xfer.due_date)
         return self._price(xfer, dated_on, dated_on, list(self._priced.values()))
 
-    def next_price(self, template_id: int) -> Decimal:
-        """Return what the next payment of a definition is priced at.
+    def next_price(self, template_id: int, on: date) -> Decimal:
+        """Return what a definition's next row asks: its first dated on or after *on*.
+
+        The row the Recurring page's Next column names
+        (``recurring_view.next_placement``, the first occurrence due on or after
+        the pass's day), read as every reader reads it: a worked-out row at the
+        card's figure, a row typed over at its own (plan task plan#3700).  **A row
+        dated before *on* and still unmarked is not next**, whatever it reads: its
+        money is the grid's to show, and the earliest row still in the plan used to
+        answer here, so an unmarked $0.00 row nobody marks (none can be marked Paid)
+        held the figure at $0.00 while the next one asked $800, and a row typed
+        over was passed by for the worked-out row after it.
 
         Args:
             template_id: The definition.
+            on: The first day a row can be dated and be next: the pass's day.
 
         Returns:
-            The price of its earliest row still in the plan, ``0.00`` with none.
+            That row's figure, ``0.00`` with none.
         """
-        for row in self._ordered_rows:
-            if row.leg.transfer.transfer_template_id == template_id:
-                return self._priced[row.leg.transfer.id].amount
+        rows = sorted(
+            (
+                (_planned_day(item, self.calendar), item.transfer.id, item)
+                for item in self.plan.rows
+                if isinstance(item, TransferLeg)
+                and item.transfer.transfer_template_id == template_id
+            ),
+            key=lambda dated: dated[:2],
+        )
+        for dated_on, transfer_id, item in rows:
+            if dated_on < on:
+                continue
+            if transfer_id in self._priced:
+                return self._priced[transfer_id].amount
+            income, expense = sum_projected([item], self.plan.basis)
+            return income - expense
         return _ZERO_MONEY

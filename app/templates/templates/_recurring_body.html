@@ -18,7 +18,8 @@
    A transfer row with pays_a_card set (a payment into a card) keeps its
    Amount and monthly figure, has no share (share_pct is None) and says it is
    not in the totals: the card's bills it pays are, in Expenses (ruling
-   plan#3527).
+   plan#3527). A payment the card works out shows its next row's Amount and no
+   monthly figure, as no one figure of it repeats (plan task plan#3700).
 
    Self-contained imports so the standalone render has them too. #}
 {% from "_money_macros.html" import money %}

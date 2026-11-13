@@ -61,17 +61,20 @@ def next_card_payment_price(
 ) -> Decimal:
     """Return what a card's worked-out payment will next ask of checking.
 
-    The figure the Recurring and savings pages show for the definition.  **Its
-    next row, never a row imagined on the pass's day**: such a row reads
-    ``0.00`` in statement mode from each due date until the next close, which
-    says nothing about what the payment costs.
+    The Amount the Recurring page, the Archived drawer and the definition's edit
+    form show (plan task plan#3700).  **Its next row, never a row imagined on the
+    pass's day**: such a row reads ``0.00`` in statement mode from each due date
+    until the next close, which says nothing about what the payment costs.  The
+    next row is the one the page's Next column names, the first dated on or after
+    the pass's day (:meth:`~._card_payment.CardPayments.next_price`), so an
+    earlier row still unmarked does not hold the figure.
 
     Args:
         template: The definition, carrying card-payment settings.
-        ctx: The read pass.
+        ctx: The read pass, whose day the next row is dated on or after.
 
     Returns:
-        The price of its earliest row still in the plan, ``0.00`` with none.
+        That row's figure, worked out or typed over; ``0.00`` with none.
 
     Raises:
         ForeignAccountError: The card belongs to another owner.
@@ -82,4 +85,4 @@ def next_card_payment_price(
     """
     return assembled_fold(
         template.to_account, ctx,
-    ).card_payments.next_price(template.id)
+    ).card_payments.next_price(template.id, ctx.as_of)

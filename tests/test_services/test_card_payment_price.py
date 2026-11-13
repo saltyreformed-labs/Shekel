@@ -45,7 +45,7 @@ from app.services.cash_ledger import (
     transfer_amount_rule,
 )
 from app.services.generation_schedule import GenerationSchedule
-from app.services.obligations_aggregator import todays_price
+from app.services.obligations_aggregator import template_monthly_or_none, todays_price
 from app.services.pay_calendar import calendar_for
 from app.services.recurrence import author_rule
 from app.services.settle_day import SettleDay
@@ -293,7 +293,8 @@ class TestEverythingOnTheCard:
         assert _price(template, date(2026, 1, 16)) == Decimal("500.00")
         assert _price(template, date(2026, 1, 30)) == Decimal("50.00")
 
-    def test_a_card_owing_nothing_prices_zero(self, seed_user, seed_periods):
+    @pytest.mark.usefixtures("seed_periods")
+    def test_a_card_owing_nothing_prices_zero(self, seed_user):
         """No charge at all: every row is $0.00."""
         template = _works_out(
             seed_user, _card(seed_user), CardPaymentModeEnum.CARD_BALANCE,
@@ -409,7 +410,8 @@ class TestTheStatementBalance:
         assert _price(template, date(2026, 2, 5)) == Decimal("800.00")
         assert _price(template, date(2026, 3, 5)) == Decimal("200.00")
 
-    def test_a_dormant_card_refuses(self, seed_user, seed_periods):
+    @pytest.mark.usefixtures("seed_periods")
+    def test_a_dormant_card_refuses(self, seed_user):
         """A statement's rule on a card with no terms refuses rather than guess."""
         card = _dormant_card(seed_user)
         template = TransferTemplate(
@@ -567,7 +569,8 @@ class TestARowOutsideThePlanStillAnswers:
 class TestTheRefusals:
     """A basis that cannot answer says so; no figure stands in."""
 
-    def test_a_basis_with_no_read_pass_refuses(self, seed_user, seed_periods):
+    @pytest.mark.usefixtures("seed_periods")
+    def test_a_basis_with_no_read_pass_refuses(self, seed_user):
         """Nothing can work the price out without the card's fold."""
         template = _works_out(
             seed_user, _card(seed_user), CardPaymentModeEnum.CARD_BALANCE,
@@ -579,7 +582,8 @@ class TestTheRefusals:
                 row, derived_amount_basis(row.user_id, row.scenario_id),
             )
 
-    def test_a_basis_of_another_scenario_refuses(self, seed_user, seed_periods):
+    @pytest.mark.usefixtures("seed_periods")
+    def test_a_basis_of_another_scenario_refuses(self, seed_user):
         """The fold is one scenario's, so another's basis cannot price the row."""
         template = _works_out(
             seed_user, _card(seed_user), CardPaymentModeEnum.CARD_BALANCE,
@@ -595,7 +599,8 @@ class TestTheRefusals:
 class TestTheDefinitionStatesNoPrice:
     """A worked-out payment has no series, and its pages read its next row."""
 
-    def test_it_does_not_own_its_amount(self, seed_user, seed_periods):
+    @pytest.mark.usefixtures("seed_periods")
+    def test_it_does_not_own_its_amount(self, seed_user):
         """The one predicate says no, and the write door refuses a series."""
         template = _works_out(
             seed_user, _card(seed_user), CardPaymentModeEnum.CARD_BALANCE,
@@ -607,7 +612,8 @@ class TestTheDefinitionStatesNoPrice:
                 template, Decimal("100.00"), effective_on=_JAN_1,
             )
 
-    def test_a_plain_transfer_into_a_card_still_does(self, seed_user, seed_periods):
+    @pytest.mark.usefixtures("seed_periods")
+    def test_a_plain_transfer_into_a_card_still_does(self, seed_user):
         """The control: with no settings, the same definition keeps rule 3."""
         template = TransferTemplate(
             user_id=seed_user["user"].id,
@@ -630,7 +636,8 @@ class TestTheDefinitionStatesNoPrice:
 
         assert todays_price(template, ctx).amount == Decimal("700.00")
 
-    def test_todays_price_is_zero_with_no_row_left(self, seed_user, seed_periods):
+    @pytest.mark.usefixtures("seed_periods")
+    def test_todays_price_is_zero_with_no_row_left(self, seed_user):
         """Every row gone: $0.00."""
         template = _works_out(
             seed_user, _card(seed_user), CardPaymentModeEnum.CARD_BALANCE,
@@ -641,3 +648,82 @@ class TestTheDefinitionStatesNoPrice:
         ctx = BalanceContext.build(template.user_id, as_of=_JAN_1)
 
         assert todays_price(template, ctx).amount == _ZERO
+
+
+class TestTheNextRowIsTheOneItsNextDateNames:
+    """The definition's figure is its first row still planned on or after the day.
+
+    Plan task plan#3700: the row the Recurring page's Next column names, worked
+    out or typed over.  It was the earliest worked-out row still in the plan, so
+    an unmarked row dated before the day held the figure, and a typed row was
+    passed by.  $800 of groceries on the card Jan 3, counted from that date.
+    """
+
+    def test_an_unmarked_row_before_the_day_is_not_next(
+        self, seed_user, seed_periods,
+    ):
+        """Read Jan 5: Jan 16's $800, not Jan 2's $0.00, and no monthly figure.
+
+        Jan 2's row owes what the card held at the end of Jan 1: $0.00.  Jan 16's
+        owes the $800 on it at the end of Jan 15.  The Jan 2 row is unmarked and
+        dated before Jan 5, so it is not next.  No one figure of the payment
+        repeats, so it has no monthly one, where $800 x 26 / 12 = $1,733.33 would
+        have stood for one purchase.
+        """
+        card = _card(seed_user)
+        _spend(seed_user, card, seed_periods[0], "800.00", date(2026, 1, 3))
+        template = _works_out(seed_user, card, CardPaymentModeEnum.CARD_BALANCE)
+        jan_5 = date(2026, 1, 5)
+        ctx = BalanceContext.build(template.user_id, as_of=jan_5)
+
+        assert _price(template, date(2026, 1, 2), jan_5) == _ZERO
+        assert _price(template, date(2026, 1, 16), jan_5) == Decimal("800.00")
+        assert todays_price(template, ctx).amount == Decimal("800.00")
+        assert template_monthly_or_none(template, ctx) is None
+
+    def test_a_row_dated_on_the_day_is_next(self, seed_user, seed_periods):
+        """Read Jan 16 itself: Jan 16's $800, as the page's Next column names Jan 16.
+
+        Jan 30's row would read $0.00, the $800 being Jan 16's.
+        """
+        card = _card(seed_user)
+        _spend(seed_user, card, seed_periods[0], "800.00", date(2026, 1, 3))
+        template = _works_out(seed_user, card, CardPaymentModeEnum.CARD_BALANCE)
+        jan_16 = date(2026, 1, 16)
+        ctx = BalanceContext.build(template.user_id, as_of=jan_16)
+
+        assert _price(template, date(2026, 1, 30), jan_16) == _ZERO
+        assert todays_price(template, ctx).amount == Decimal("800.00")
+
+    def test_a_row_typed_over_is_next_at_its_own_figure(
+        self, seed_user, seed_periods,
+    ):
+        """Jan 16 typed to $300, read Jan 5: $300.00, not Jan 30's other $500.
+
+        800 - 300 = $500 waits for Jan 30, the worked-out row after it.
+        """
+        card = _card(seed_user)
+        _spend(seed_user, card, seed_periods[0], "800.00", date(2026, 1, 3))
+        template = _works_out(seed_user, card, CardPaymentModeEnum.CARD_BALANCE)
+        _type_over(_row(template, date(2026, 1, 16)), "300.00")
+        jan_5 = date(2026, 1, 5)
+        ctx = BalanceContext.build(template.user_id, as_of=jan_5)
+
+        assert _price(template, date(2026, 1, 30), jan_5) == Decimal("500.00")
+        assert todays_price(template, ctx).amount == Decimal("300.00")
+
+    def test_after_an_unmarked_row_it_is_the_row_after(self, seed_user, seed_periods):
+        """Read Jan 20, Jan 16's $800 unmarked and $50 more Jan 18: Jan 30's $50.00.
+
+        Jan 16's $800 is still to leave checking, from Jan 21, and the grid shows
+        it there; Jan 30's row owes the card's end of Jan 29: 800 + 50 - 800 = $50.
+        """
+        card = _card(seed_user)
+        _spend(seed_user, card, seed_periods[0], "800.00", date(2026, 1, 3))
+        _spend(seed_user, card, seed_periods[1], "50.00", date(2026, 1, 18))
+        template = _works_out(seed_user, card, CardPaymentModeEnum.CARD_BALANCE)
+        jan_20 = date(2026, 1, 20)
+        ctx = BalanceContext.build(template.user_id, as_of=jan_20)
+
+        assert _price(template, date(2026, 1, 16), jan_20) == Decimal("800.00")
+        assert todays_price(template, ctx).amount == Decimal("50.00")

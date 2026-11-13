@@ -124,7 +124,10 @@ twice: a ``$100`` phone bill every paycheck on the card read Expenses
 keeps its Amount and its monthly figure, takes no share, says why it is left
 out, and adds nothing to the Transfers subtotal or the band
 (:func:`~app.services.account_projection.pays_a_card`).  A fixed amount sent
-to the card is left out the same way, which is the ruling's stated cost.
+to the card is left out the same way, which is the ruling's stated cost.  A
+payment the card works out has no monthly figure at all, because no one figure
+of it repeats, and its Amount is its next row's (plan task plan#3700,
+``obligations_aggregator``).
 
 Boundary discipline (``CLAUDE.md`` Architecture): no Flask imports; inputs
 are already-loaded ORM template lists (or any duck-typed equivalent, as the
@@ -224,9 +227,10 @@ class RecurringRow:
             scheduled rise showed before it took effect.
         pays_a_card: True for a transfer definition whose money goes into a
             card (:func:`~app.services.account_projection.pays_a_card`): its
-            Amount and monthly figure stand, and it is in no subtotal, share
-            or band figure, because the card's bills it pays are (ruling
-            plan#3527).  False for every other row.
+            Amount and monthly figure stand (a payment the card works out has
+            none, plan task plan#3700), and it is in no subtotal, share or band
+            figure, because the card's bills it pays are (ruling plan#3527).
+            False for every other row.
     """
 
     template: RecurringTemplate

@@ -67,11 +67,12 @@ Must-knows for the test suite. Full standards: `docs/testing-standards.md`
 - **Use existing fixtures** from `conftest.py` (`seed_user`, `seed_second_user`,
   `auth_client`, `second_auth_client`, ...). No ad-hoc user setup in test methods.
 - **Check for existing coverage** before writing a new test.
-- Tests are **independent** -- each sets up its own preconditions, no ordering or
-  shared mutable state. Tests that mutate cluster state use `@pytest.mark.xdist_group`.
-- **Tests that must share ONE session share an `xdist_group`.** CI splits the suite across
-  six runners (`SHEKEL_TEST_SHARD`, `tests/_shard.py`) and only a group is kept whole: two
-  tests that read each other's session state without one can land on different machines.
+- Tests are **independent** -- each sets up its own preconditions, no ordering or shared mutable
+  state. **No test depends on running in the same worker, process or session as another**
+  (plan#2954): there is no `xdist_group`, any test can run on any worker and in any of CI's six
+  shards (`tests/_shard.py`), and no test changes cluster state (the `shekel_app` role is the baked
+  image's, for the whole run). A cost paid once per process is a session-scoped fixture.
+  `docs/testing-standards.md`, Cluster-state and process-wide state.
 
 ## The ambient clock and calendar (a test that fails on some days is BROKEN, not flaky)
 

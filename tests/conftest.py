@@ -144,8 +144,7 @@ def pytest_collection_modifyitems(config, items):
     CI splits the suite across parallel jobs (plan step ``bank_import:X-gy``);
     each exports ``SHEKEL_TEST_SHARD=<index>/<total>`` and runs only its share.
     Unset -- every local run -- this deselects nothing.  How the split is a
-    partition by construction, and why it keeps every ``xdist_group`` whole,
-    is :mod:`tests._shard`.
+    partition by construction is :mod:`tests._shard`.
     """
     apply_shard(config, items, os.environ.get(SHARD_ENV))
 

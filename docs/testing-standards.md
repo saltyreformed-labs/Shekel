@@ -120,26 +120,25 @@ must-knows; a fact lives in one tier and the other tiers point at it.
   needs them all, runs `if: always()` and fails closed through `tools/ci/ci_verdict.py` (GitHub
   counts a SKIPPED required check as passing). Each shard exports
   `SHEKEL_TEST_SHARD=<index>/<total>` and keeps the share `tests/_shard.py` assigns: a stable hash
-  of each test's `xdist_group` or node id, so the shards partition the collection by construction
-  and every group lands whole on one shard --
-  **a test that depends on another test's session must share an `xdist_group` with it.** The weekly
-  `calendar-sweep.yml` runs the wrapper too, so every CI run has the one cluster configuration a
-  local run has. **Why, measured on the runner in a matched A/B** (draft PR #447, runs 35803297014,
-  35806759874, 35808935180): the hosted runner is CPU-BOUND -- 4 vCPUs that are 2 physical cores
-  with SMT, a fixed CPU benchmark 1.2-2.1x slower per core than this host, the fleet a mix of EPYC
-  7763 / 9V74 / 9V45 and Xeon 6973P. On one 1,230-test slice, arms run in sequence on ONE runner:
-  two or four postgres clusters per runner gained 0-7% over one; PGDATA on tmpfs saved 2-11%, and
-  the wrapper's cluster (socket, baked image, its flags) 8-15% over the TCP service container; and
-  it ran it at `-n 12` / `-n 6` / `-n 4` / `-n 3` in 285.1 / 265.8 / 259.1 / 301.4 s on one runner
-  and 310.4 / 276.5 / 272.6 / 311.2 s on another. Per-test wall clock scaled with the worker
-  count -- setup plus body 0.79 s at `-n 4`, 2.46 s at `-n 12` -- so the single job's 41-61 min (the
-  suite 35-52 of them at `-n 12`) was CPU time stretched by oversubscription, not a database or disk
-  defect. Ledger **BI-496**'s 5-13x per-test ratio is CONSISTENT with that rather than fully
-  measured: 3.1x from the worker count (2.46 / 0.79) times 1.2-2.1x per core is 3.7-6.5x, and the
-  top of the range fits SMT and postgres sharing two physical cores, which no arm measured apart.
-  Six shards ran 6.4-9.7 min per job; their union was the runner's own collection of that tree
-  exactly (15,166 items, none in two shards, the container tests included). Quote none of these
-  without the date.
+  of each test's node id, so the shards partition the collection by construction --
+  **no test may depend on another test's session or process**, since any test can land on any shard
+  and any worker (see Cluster-state and process-wide state, below). The weekly `calendar-sweep.yml`
+  runs the wrapper too, so every CI run has the one cluster configuration a local run has.
+  **Why, measured on the runner in a matched A/B** (draft PR #447, runs 35803297014, 35806759874,
+  35808935180): the hosted runner is CPU-BOUND -- 4 vCPUs that are 2 physical cores with SMT, a
+  fixed CPU benchmark 1.2-2.1x slower per core than this host, the fleet a mix of EPYC 7763 / 9V74 /
+  9V45 and Xeon 6973P. On one 1,230-test slice, arms run in sequence on ONE runner: two or four
+  postgres clusters per runner gained 0-7% over one; PGDATA on tmpfs saved 2-11%, and the wrapper's
+  cluster (socket, baked image, its flags) 8-15% over the TCP service container; and it ran it at
+  `-n 12` / `-n 6` / `-n 4` / `-n 3` in 285.1 / 265.8 / 259.1 / 301.4 s on one runner and 310.4 /
+  276.5 / 272.6 / 311.2 s on another. Per-test wall clock scaled with the worker count -- setup plus
+  body 0.79 s at `-n 4`, 2.46 s at `-n 12` -- so the single job's 41-61 min (the suite 35-52 of them
+  at `-n 12`) was CPU time stretched by oversubscription, not a database or disk defect. Ledger
+  **BI-496**'s 5-13x per-test ratio is CONSISTENT with that rather than fully measured: 3.1x from
+  the worker count (2.46 / 0.79) times 1.2-2.1x per core is 3.7-6.5x, and the top of the range fits
+  SMT and postgres sharing two physical cores, which no arm measured apart. Six shards ran 6.4-9.7
+  min per job; their union was the runner's own collection of that tree exactly (15,166 items, none
+  in two shards, the container tests included). Quote none of these without the date.
 - **Test timeout:** 50 s per test, configured in `pytest.ini`; it covers setup + call + teardown,
   and anything past it raises a timeout error rather than hanging the suite. It is the one limit on
   a test's idle time: the test cluster sets no idle-in-transaction limit (ruling plan#3027), so a
@@ -279,44 +278,29 @@ row/trigger count, the error message names the offending count and the likely ro
 wrapper that should be unreachable -- the image is verified before pytest starts -- so reaching it
 means something else supplied the cluster.
 
-## Cluster-state tests and `xdist_group`
+## Cluster-state and process-wide state
 
 PostgreSQL has two kinds of state. Per-database state (rows, indexes, triggers, schemas) is isolated
-by the per-session DB clone: two xdist workers writing to `budget.transactions` cannot collide
-because each writes to its own database. Cluster-scoped state (`CREATE ROLE`, replication slots,
-`pg_advisory_lock`) is shared across all databases in the cluster; two workers racing on the same
-cluster-level operation will collide.
+by the per-test clone: two xdist workers writing to `budget.transactions` cannot collide because
+each writes to its own database. Cluster-scoped state (roles, tablespaces, replication slots,
+cluster-wide settings) is shared by every database on the cluster, so by every worker of the run.
 
-The only test file in the current suite that mutates cluster state is
-`tests/test_models/test_audit_migration.py`: the `shekel_app_role` fixture executes
-`CREATE ROLE shekel_app` and `DROP ROLE shekel_app`, and `apply_audit_infrastructure` (called from
-sibling test classes in the same file) conditionally `GRANT`s to the role when it exists. Both touch
-the cluster.
+**No test changes cluster state** (plan#2954). The one cluster-scoped thing tests read, the
+`shekel_app` role, is created by the baked test-db image before the template is built
+(`scripts/build_test_db_image.py`, plan#3636), as the entrypoint creates it before it migrates. It
+exists for the whole run, and a test grants to it only inside its own clone, which goes with that
+clone. A test that needs other cluster state gets it from the image the same way: changed mid-run,
+it races every other worker, and there is no way to keep it on one worker.
 
-**Pattern:** pin all tests that touch cluster state to one pytest-xdist worker via
-`@pytest.mark.xdist_group("name")`:
+**State a test keeps in its PROCESS is the same.** A module global, a cache or a counter is seen
+only by the tests that happen to run on that worker, in whatever order they run, and any test can
+run on any worker and in any CI shard. A cost paid once per process belongs in a session-scoped
+fixture, as the seeded worlds are (`_seeded_snapshots` in `tests/_app_fixtures.py`, which builds
+every world the run declares in one pass, ruling plan#3767).
 
-```python
-import pytest
-
-# Module-level marker pins every test in this file to a single
-# pytest-xdist worker.  pytest.ini's --dist=loadgroup is what
-# makes the marker actually serialise (under the default
-# --dist=load the marker is metadata only).
-pytestmark = pytest.mark.xdist_group("shekel_app_role")
-```
-
-Use a **module-level** marker when sibling classes share the cluster-state coupling (as in
-`test_audit_migration.py`). Use a **class-level** or **test-level** marker when only some tests in
-the file are affected.
-
-The marker **name** must be unique per cluster-state resource: tests sharing a name run on the same
-worker, so two unrelated cluster-state tests with the same name would unnecessarily serialise.
-Prefer distinct names per resource.
-
-If you add a new test that mutates cluster state, add the marker and a comment naming the resource.
-Without it the test will race across workers and produce intermittent failures like
-`role "X" already exists` or `DependentObjectsStillExist` on `DROP ROLE`.
+The suite once kept such tests on one worker with `@pytest.mark.xdist_group` and `--dist=loadgroup`.
+pytest 9.2.0 with pytest-xdist 3.8.0 silently stopped honouring them, and the suite failed whenever
+the scheduler split a group whose tests collided. The groups are gone.
 
 ## Zero Tolerance for Failing Tests
 

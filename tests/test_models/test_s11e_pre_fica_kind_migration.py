@@ -54,9 +54,6 @@ def _profile(seed_user):
     )
     db.session.flush()
     return profile
-
-
-@pytest.mark.xdist_group("recurrence_rules_ddl")
 class TestTheKindAndItsRoundTrip:
     """Head carries five kinds; down leaves four; up restores five; the enum matches."""
 
@@ -91,9 +88,6 @@ class TestTheKindAndItsRoundTrip:
             assert db.session.execute(text(
                 "SELECT count(*) FROM ref.paycheck_line_kinds"
             )).scalar() == 5
-
-
-@pytest.mark.xdist_group("recurrence_rules_ddl")
 class TestTheDowngradeRefusesWhileTheKindIsHeld:
     """Each of the three rows that names a kind stops the downgrade, named, untouched."""
 

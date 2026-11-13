@@ -157,9 +157,6 @@ def _up(db_session):
     """Step back up to head: this revision, then the later one."""
     _run(_MIGRATION.upgrade, db_session)
     _run(_LATER.upgrade, db_session)
-
-
-@pytest.mark.xdist_group("sighting_relation_ddl")
 class TestTheRoundTrip:
     """Head -> down -> up, over one line two imports sighted."""
 

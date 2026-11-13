@@ -482,10 +482,10 @@ jobs:
       # runner's own throwaway daemon.
       #
       # ``SHEKEL_TEST_SHARD`` is read by ``tests/conftest.py``: the job keeps
-      # the tests ``tests/_shard.py`` assigns it, a partition by construction
-      # that keeps every ``xdist_group`` whole.  ``-m ""`` overrides the
-      # wrapper's local ``not docker`` default, so the container-spawning
-      # ``tests/test_deploy`` tests run here as they always have.
+      # the tests ``tests/_shard.py`` assigns it, a partition by construction.
+      # ``-m ""`` overrides the wrapper's local ``not docker`` default, so the
+      # container-spawning ``tests/test_deploy`` tests run here as they always
+      # have.
       #
       # ``-n logical`` is the runner's logical CPU count, 4 today -- ``auto``
       # would drop to the PHYSICAL count (2) the day psutil is installed.

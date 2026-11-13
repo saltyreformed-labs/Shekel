@@ -170,9 +170,6 @@ def _seed_line(seed_user, name="Dental", amount="40.00"):
     db.session.add(line)
     db.session.commit()
     return line.id
-
-
-@pytest.mark.xdist_group("recurrence_rules_ddl")
 class TestHeadCarriesTheNewNamesOnly:
     """The template is at head: every artifact under its new name, none under the old."""
 
@@ -269,9 +266,6 @@ class TestHeadCarriesTheNewNamesOnly:
             assert db.session.execute(text(
                 "SELECT count(*) FROM pg_trigger WHERE tgname LIKE 'audit_%'"
             )).scalar() == EXPECTED_TRIGGER_COUNT
-
-
-@pytest.mark.xdist_group("recurrence_rules_ddl")
 class TestTheRoundTrip:
     """Down restores every old name; up restores the whole catalogue; the row rides through."""
 

@@ -243,9 +243,6 @@ def test_the_migration_declares_its_revision_and_a_working_downgrade():
 
 
 # -- the round trip ----------------------------------------------------------
-
-
-@pytest.mark.xdist_group("record_columns_ddl")
 class TestTheRoundTrip:
     """Head -> down -> up, over every shape the seam writes."""
 
@@ -386,9 +383,6 @@ class TestTheRoundTrip:
 
 
 # -- the refusals, driven -----------------------------------------------------
-
-
-@pytest.mark.xdist_group("record_columns_ddl")
 class TestTheUpgradeRefusesALossyRow:
     """The three fail-closed predicates, each staged by SQL on the downgraded schema.
 
@@ -525,9 +519,6 @@ class TestTheUpgradeRefusesALossyRow:
             "WHERE name = 'corrected') WHERE id = :id", id=row_id,
         )
         assert _M.refuse_lossy_rows(db.session.connection()) is None
-
-
-@pytest.mark.xdist_group("record_columns_ddl")
 class TestTheDowngradeRefusesADatedRowOutOfTheBand:
     """The downgrade's one refusal: a settle day on an unsettled row with no movement."""
 

@@ -33,15 +33,11 @@ Three locks land here:
   same surface check ``test_loan_anchor_backfill.py::TestDowngradeSmoke`` makes
   on ``d3d25212504b``, made here on ``22b23085394d``.
 """
-# pylint: disable=redefined-outer-name
-# Rationale: ``redefined-outer-name`` is the canonical pytest
-# fixture pattern; bodies bind fixtures by name.
 from __future__ import annotations
 
 from datetime import date, timedelta
 from decimal import Decimal
 
-import pytest
 from sqlalchemy import text
 
 from app import ref_cache
@@ -54,15 +50,6 @@ from tests._test_helpers import (
     load_migration_module,
     loan_params_for,
 )
-
-
-# pytest-xdist isolation: the round-trip test ALTERs the live
-# ``budget.loan_params`` table in-place and then restores the dropped
-# state.  Two xdist workers running the test concurrently against the
-# same per-worker DB clone would race on the ALTER -- pin to a single
-# worker via ``--dist=loadgroup`` (configured in ``pytest.ini``) so
-# the test runs serially with itself across the suite.
-pytestmark = pytest.mark.xdist_group("c15_loan_params_demotion")
 
 
 _M_R20 = load_migration_module(

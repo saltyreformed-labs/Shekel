@@ -50,14 +50,6 @@ from tests._test_helpers import (
 )
 
 
-# This group guards nothing now.  It pinned the module to one worker so a
-# test's grant to ``shekel_app`` in one worker's database could not block
-# another worker's ``DROP ROLE``; no test drops the role since it became the
-# cluster's for the whole run (plan#3636), and plan#3640 deletes this marker
-# with every other ``xdist_group``.
-pytestmark = pytest.mark.xdist_group("shekel_app_role")
-
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -166,10 +158,9 @@ class TestRoundTrip:
     Mirrors ``flask db upgrade`` -> ``flask db downgrade`` ->
     ``flask db upgrade`` for the rebuild migration.  The test wraps
     its work in a try/finally that re-applies the infrastructure on
-    failure so a partial run does not leave subsequent tests without
-    triggers.  conftest's ``db`` fixture does not re-create the
-    audit infrastructure between tests (it is session-scoped) so the
-    cleanup matters.
+    failure.  No later test needs that: conftest's ``db`` fixture
+    gives every test its own clone of the template, so a partial run
+    leaves only its own clone without triggers.
     """
 
     def test_remove_drops_table_function_and_triggers(

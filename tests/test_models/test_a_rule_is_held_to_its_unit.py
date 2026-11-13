@@ -453,9 +453,6 @@ def _plant(db, seed_user, unit, starts_on, **values):
         "max_per_month": values.get("max_per_month"),
         "nominal_day": values.get("nominal_day"),
     }).scalar_one()
-
-
-@pytest.mark.xdist_group("recurrence_rules_ddl")
 class TestTheMigration:
     """``9b3e6d1f4a27`` over this test's own clone, in both directions.
 

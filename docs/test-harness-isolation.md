@@ -56,8 +56,8 @@ Deferred or corrected:
 - Test entrypoint: `scripts/test.sh` → starts a throwaway postgres container for the run on the
   rootless daemon, exports the test DSNs at its unix socket, runs `pytest` as a child and removes
   the container afterwards (`balance:X-br-4`; before it, the wrapper restarted a long-lived shared
-  container on request instead). `pytest.ini` sets `addopts = ... --dist=loadgroup -n 12`, so
-  **every** local run fans out across 12 pytest-xdist workers.
+  container on request instead). `pytest.ini` sets `addopts = ... -n 12`, so **every** local run
+  fans out across 12 pytest-xdist workers.
 - Most tests are pure Python / static config assertions. **Eight classes across six files** touch
   the docker daemon (all gated by `_docker_available()`, all now `@pytest.mark.docker`). Of those:
   - **Three actually spawn containers.**

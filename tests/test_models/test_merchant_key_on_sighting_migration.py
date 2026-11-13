@@ -21,7 +21,6 @@ from __future__ import annotations
 from datetime import date, datetime, timezone
 from decimal import Decimal
 
-import pytest
 from sqlalchemy import text
 
 from app import ref_cache
@@ -125,9 +124,6 @@ def _sight(statement, line, *, description, merchant_id=None):
 def _merchants():
     """Every merchant row as ``(id, name)``, ascending."""
     return _sql("SELECT id, name FROM budget.merchants ORDER BY id")
-
-
-@pytest.mark.xdist_group("sighting_relation_ddl")
 class TestTheRoundTrip:
     """Head -> down -> up, over a line two imports named two ways."""
 
@@ -282,9 +278,6 @@ class TestTheRoundTrip:
         assert _sql(
             "SELECT merchant_id FROM budget.merchant_rules",
         ) == [(coffee_shop,)]
-
-
-@pytest.mark.xdist_group("sighting_relation_ddl")
 class TestTheUpgradeOverTheOldSchema:
     """The upgrade's own arms, run over the shape ``af07125d00f1`` left."""
 

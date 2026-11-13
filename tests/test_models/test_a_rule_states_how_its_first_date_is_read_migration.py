@@ -206,7 +206,6 @@ def _audit_trigger_count(session) -> int:
 
 
 @pytest.mark.usefixtures("seed_periods")
-@pytest.mark.xdist_group("recurrence_rules_ddl")
 class TestTheDDL:
     """The revision's own DDL, run: refuse, restore, refuse, drop."""
 

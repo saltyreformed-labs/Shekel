@@ -21,11 +21,11 @@ reviewer remembers it. A gate is a floor: rules 2, 3, 6, 8, 10 and 13 are judgme
    stop; never ship the workaround silently.
 2. **Read before you write.** Read the whole file before changing it; never rely on memory or on a
    planning document's line numbers.
-3. **No guessing.** If unsure what a function returns, what columns a table has or what state an
-   object is in, read the code or ask. Ask before proceeding on ambiguous financial logic.
+3. **No guessing.** If uncertain, read the code or ask; never assume what a function returns, what
+   columns a table has or what state an object is in. Ask first on ambiguous financial logic.
 4. **Never ignore a problem.** A failing test, bug, lint error or logic flaw you find, whether you
    caused it or not, is either fixed or stopped on and reported in full. Never dismiss one as
-   pre-existing or unrelated without investigating it.
+   pre-existing, and never call one unrelated without investigating and reporting it.
 5. **Never modify a test to make it pass.** If a test fails after your change, your code is wrong:
    its financial assertions were computed by hand. The one exception is the developer confirming the
    expected behavior has changed.
@@ -49,7 +49,7 @@ reviewer remembers it. A gate is a floor: rules 2, 3, 6, 8, 10 and 13 are judgme
     every branch, every mapping entry.
 13. **No gold-plating.** Build exactly what was asked: no speculative abstraction, no flexibility
     nobody asked for, no handling of impossible cases. Propose a simpler approach before building
-    the complex one.
+    the complex one. If 200 lines could be 50, rewrite it.
 14. **One source of truth for any value.** A value is derived or stored, and each kind has one home.
     Derived: one walk, one producer, and every caller reaches it. Two spellings that agree today are
     still two spellings (a fifth spelling of one interest expression agreed over 200,000 random
@@ -82,8 +82,9 @@ coordinates the others. Begin implementation work with `/charter`, present a des
   for everyone. CI runs on pull requests, queue groups and pushes to `main`, not on pushes to `dev`.
   Pushing your own branch to back up work is always fine, and is not a request to merge.
 - **A release is a session of its own**, `/release` in the worktree `~/projects/shekel-release`, on
-  the developer's word. It merges a cut of `dev` into `main` by a pull request, then resyncs `dev`
-  by a pull request from `main`.
+  the developer's word: it merges a cut of `dev` into `main` by a pull request. Any pull request
+  that lands in `main` (a release, a hotfix, a records-only merge) is followed by a resync, a pull
+  request from `main` into `dev` through `dev`'s queue.
 - **A stop leaves its note on the task the next session starts** (`/handoff`), and that session's
   whole prompt is `Resume plan#T`.
 - **A session that stops to wait on the developer's answer alerts first**: a PushNotification naming
@@ -96,7 +97,8 @@ coordinates the others. Begin implementation work with `/charter`, present a des
   written outside the deploy pipeline. Dev and throwaway databases take full CRUD.
 - **A security audit**, anything recording a security finding or production's security setup, is
   written in the private repository `saltyreformed-labs/shekel-audits` (`~/projects/shekel-audits`),
-  never in this tree, so an open finding is never public.
+  never in this tree, so an open finding is never public; cite one as `shekel-audits/<path>`.
+  `.gitignore` refuses the moved audits' names under `docs/audits/` as a backstop.
 - **Planning documents lag the code**: the code as committed and recent git history say what
   shipped. Anything under an `archive/` or `historical/` directory governs nothing. Each arc's
   reasoning is its own document (`docs/audits/balance_architecture/README.md`,
@@ -157,26 +159,28 @@ invariants 4 and 5.
 columns in Python or Jinja; the rule and its gates are in `.claude/rules/coding.md`.
 
 **No new package without approval.** Dependencies are declared in `pyproject.toml` and locked in
-`uv.lock`, and the edit hook stops on a change to either until you confirm it was approved.
+`uv.lock`. Ask before `uv add` or `uv lock`: the edit hook flags a change to either file only after
+the edit is made, and never sees a `uv` command.
+
+**Production is Docker (Gunicorn, Nginx, Cloudflare Tunnel) on bare-metal Arch Linux**: no Ubuntu
+packages, no exposed ports, no systemd, in any file that builds or runs it.
 
 ## Tests
 
-Each `./scripts/test.sh` run gets a postgres cluster of its own. It deselects the container-spawning
-`tests/test_deploy` tests by default (`-m "not docker"`): they leave no line in the report, so a
-green local run says nothing about them, and CI runs them all. The rest of what a run needs loads
-from `.claude/rules/testing.md` with any file under `tests/`.
+Each `./scripts/test.sh` run gets a postgres cluster of its own. Read `.claude/rules/testing.md`
+before a gating run, since a change to `app/` alone never loads it: zero tolerance, the
+rootless-daemon refusal, the deselected `tests/test_deploy` and the Kiritimati check are there.
 
 ## Standards
 
 A fact lives in one tier. This file states a rule and points; `.claude/rules/*` hold the must-knows
 for the files their `paths:` cover and load with them; `docs/coding-standards.md` and
 `docs/testing-standards.md` hold the rationale and every dated measurement. The `code-reviewer`
-agent holds no copy of them: it loads this file at its start and each rules file as it reads a file
-the rule covers (measured 2026-11-12).
+agent holds no copy of them (`.claude/agents/code-reviewer.md`).
 
 ## Definition of Done
 
-A task is not complete until all of these hold:
+A card is not done until all of these hold:
 
 1. The code is implemented in full: no TODOs, no placeholders.
 2. Docstrings and comments follow the coding rules.

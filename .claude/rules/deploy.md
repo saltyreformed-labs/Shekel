@@ -7,10 +7,9 @@ paths:
 
 # Deployment and compose rules
 
-Docker container (Gunicorn + Nginx + Cloudflare Tunnel) on bare-metal Arch Linux.
-No Ubuntu packages, no exposed ports, no systemd. `.env` config: `.env.example`
-lists every key, and compose refuses to start without each one it requires
-(`${VAR:?...}`).
+Where production runs, and what it never uses, is CLAUDE.md's (Architecture).
+`.env` config: `.env.example` lists every key, and compose refuses to start
+without each one it requires (`${VAR:?...}`).
 
 ## Compose conventions (use these on every new service)
 

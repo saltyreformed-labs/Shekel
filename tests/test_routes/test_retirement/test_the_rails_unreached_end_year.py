@@ -18,9 +18,10 @@ after 2026 adds Monday 2026-06-01, which the 2026-06-19 paycheck (paying
 2026-05-31 through 2026-06-13) pays from that day on, and every paycheck
 after it.
 
-It lives in its own file because ``test_retirement.py`` is past 1,000 lines
-(its split is plan#2000's); the seeding and reading helpers are its classes'
-own, reached through its module so no class is collected twice.
+It sits in the retirement routes' package beside the rail's save and probe
+tests (task plan#3776), whose seeding and reading helpers it shares from the
+package's ``_helpers.py``: the classes' member mixins, which are not ``Test*``
+classes, so binding them here collects nothing a second time.
 """
 
 import re
@@ -31,15 +32,18 @@ import pytest
 
 from app.models.salary_profile import SalaryProfile
 from app.utils.error_fragments import DESIGNED_FRAGMENT_HEADER
+from tests._seed_owner_fixtures import log_in_seed_user
 from tests._test_helpers import freeze_today, make_recurring_raise
-from tests.conftest import log_in_seed_user
-from tests.test_routes import test_retirement
 
-#: The rail-save and rail-probe helpers, reached through the module: a
-#: ``Test*`` class bound to a name of this module would be collected here a
-#: second time.
-_SAVES = test_retirement.TestTheRailSavesARaisesEndYear
-_PROBES = test_retirement.TestTheRailProbesARaisesEndYear
+from ._helpers import (
+    _seed_underfunded,
+    _TestTheRailProbesARaisesEndYearMembers,
+    _TestTheRailSavesARaisesEndYearMembers,
+)
+
+#: The rail-save and rail-probe tests' own reading helpers.
+_SAVES = _TestTheRailSavesARaisesEndYearMembers
+_PROBES = _TestTheRailProbesARaisesEndYearMembers
 
 #: Ruling plan#3492's words for the made-up case: the year saved, and the
 #: payday of the entry holding the raise's last application.
@@ -60,11 +64,7 @@ def _seed_the_rulings_case(auth_client, seed_user, db, monkeypatch) -> int:
     """
     freeze_today(monkeypatch, date(2026, 3, 20))
     log_in_seed_user(auth_client)
-    # Pylint: protected-access -- the seed is the rail tests' own, shared
-    # rather than spelled a second time.
-    test_retirement._seed_underfunded(  # pylint: disable=protected-access
-        seed_user, db.session,
-    )
+    _seed_underfunded(seed_user, db.session)
     profile = (
         db.session.query(SalaryProfile)
         .filter_by(user_id=seed_user["user"].id).one()

@@ -37,7 +37,9 @@ from app.services import mfa_service
 from app.utils.security_events import SecurityEventKind, record_security_event
 from tests._other_user_fixtures import SECOND_USER_EMAIL, SECOND_USER_PASSWORD
 from tests._seed_owner_fixtures import OWNERS_PAGE
-from tests._two_factor_sign_in import sign_in_from_a_trusted_browser
+from tests._two_factor_sign_in import (
+    code_now, sign_in_from_a_trusted_browser, two_factor_row_of,
+)
 
 
 # --- Helpers ---------------------------------------------------------------
@@ -391,6 +393,61 @@ class TestBannerRendering:
         assert 'name="csrf_token"' in form_match.group(1), (
             "dismiss form missing CSRF token field"
         )
+
+
+class TestNoBannerAtTheTwoFactorHold:
+    """A user held at two-factor setup is shown no banner (plan#3862).
+
+    The login gate holds a user without two-factor at its setup
+    (``app/login_gate.py``, plan#3452), and the banner's "Review security
+    settings" link and its Dismiss both lead back there.  A banner shows
+    until it is dismissed, so an owner's undismissed event outlives a reset
+    of his two-factor: a companion who enrolled and was reset meets exactly
+    this.
+    """
+
+    def test_a_held_owners_setup_page_draws_no_banner(
+        self, no_two_factor_client, seed_user,
+    ):
+        """His two-factor reset and an event undismissed: setup draws, the banner does not.
+
+        The same event on an owner with two-factor draws the banner
+        (:meth:`TestBannerRendering.test_a_stored_mfa_disabled_event_still_shows_its_copy`).
+        """
+        record_security_event(seed_user["user"], SecurityEventKind.MFA_ENABLED)
+        db.session.commit()
+
+        response = no_two_factor_client.get("/mfa/setup")
+
+        assert response.status_code == 200
+        assert b"Verify and Enable" in response.data
+        assert b"security-event-banner" not in response.data
+
+    def test_finishing_setup_shows_its_own_event_on_the_next_page(
+        self, no_two_factor_client, seed_user,
+    ):
+        """After setup the banner draws, naming the enrolment that superseded the old event.
+
+        The event held back at setup is replaced by the one the confirm
+        records, so the next page's banner says two-factor was turned on.
+        """
+        user_id = seed_user["user"].id
+        record_security_event(seed_user["user"], SecurityEventKind.PASSWORD_CHANGED)
+        db.session.commit()
+        assert no_two_factor_client.get("/mfa/setup").status_code == 200
+        secret = mfa_service.decrypt_secret(
+            two_factor_row_of(user_id).pending_secret_encrypted,
+        )
+
+        confirmed = no_two_factor_client.post(
+            "/mfa/confirm", data={"totp_code": code_now(secret)},
+        )
+        assert confirmed.status_code == 200
+        response = no_two_factor_client.get("/dashboard")
+
+        assert response.status_code == 200
+        assert b"Two-factor authentication was enabled." in response.data
+        assert b"Your password was changed" not in response.data
 
 
 # --- Cross-user banner isolation ------------------------------------------

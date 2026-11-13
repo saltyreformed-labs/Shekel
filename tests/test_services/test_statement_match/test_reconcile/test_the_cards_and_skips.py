@@ -364,9 +364,9 @@ class TestTheSettledBoundIsLIFTABLE:
     (**R-HU**), so the tab that replaces it has to reach every act the
     register could: on the developer's own account the bound withholds 171 of
     221, which without a way past it would be 171 acts out of reach rather
-    than merely unlisted.  The arithmetic is
-    ``test_release.TestTheRegisterBoundsWhatItRenders``'s; this grades that
-    the PAGE threads the parameter to the settled tabs and to no others.
+    than merely unlisted.  The arithmetic is ``test_release
+    .test_the_screen_and_the_register.TestTheRegisterBoundsWhatItRenders``'s;
+    this grades that the PAGE threads the parameter to the settled tabs and to no others.
     """
 
     def test_the_bound_cuts_and_says_so_and_None_lifts_it(

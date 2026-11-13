@@ -677,7 +677,8 @@ def _remove(row: PlannedRemoval, owner_id: int) -> None:
     removal is a press of one call naming nothing, which refuses any line it
     would free (``match_withdrawal.take_out_of_matches``, ruling
     **R-CC127**): a fence the arguments above keep from firing.
-    ``test_release.TestTheUndoFreesNoLineAnotherActHolds`` grades that
+    ``test_release.test_what_the_undo_refuses
+    .TestTheUndoFreesNoLineAnotherActHolds`` grades that
     through the doors, for an envelope the owner picked and one the act
     minted; with the revision test deleted, both Undos reach the teardown and
     are refused as out of date.

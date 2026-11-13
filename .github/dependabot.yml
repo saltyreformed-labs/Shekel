@@ -31,7 +31,17 @@
 # nothing the rulings exclude.  Each entry also states an explicit
 # ``cooldown`` (zizmor's dependabot-cooldown rule): a release is proposed
 # only once it has been public for a week, which is the window in which a
-# hijacked or broken release is usually pulled upstream.
+# hijacked or broken release is usually pulled upstream.  For an image,
+# Dependabot dates that week from Docker Hub's record of the tag's newest
+# push (``tag_last_pushed``, in dependabot-core's docker update checker,
+# read 2026-11-13 at plan#3692), so the week holds only for a Docker Hub
+# tag that is not pushed again within it.  An image on another registry is
+# dated by nothing and waits no week: uv's, on ghcr.io, is logged "No
+# verified registry publication date source ... skipping cooldown".  A tag
+# its publisher rebuilds in place is pushed again on every upstream update,
+# so its week ends only when a whole week passes with no update before a
+# run, and each such image is excluded from the cooldown by name below
+# (ruling plan#3803).
 version: 2
 updates:
   # The application image's base (Dockerfile FROM ... @sha256).  A digest
@@ -52,6 +62,14 @@ updates:
     target-branch: dev
     cooldown:
       default-days: 7
+      # The python base image waits no week (ruling plan#3803).  Docker
+      # pushes ``3.14-slim`` again on every Python or Debian update, so at
+      # every run from 2026-10-26 to 2026-11-09 Dependabot logged "Skipping
+      # tag 3.14-slim due to cooldown period" and proposed no digest, though
+      # 3.14.10 was in the tag from 2026-10-26.  A broken image still fails
+      # CI before the daily queue lands it, and production takes it only at
+      # a release.
+      exclude: ["python"]
     ignore:
       # The Python version moves only in its own deliberate change: the
       # Dockerfile's FROM tags and .python-version, which every CI job and
@@ -79,6 +97,15 @@ updates:
     target-branch: dev
     cooldown:
       default-days: 7
+      # postgres and nginx wait no week, for the base image's reason above
+      # (rulings plan#3803 and plan#3805): their tags, ``18-alpine`` and
+      # ``1.31-alpine``, are pushed again in place.  From 2026-10-16 to
+      # 2026-11-09 the cooldown skipped nginx's at 8 of the 10 runs that
+      # read it and postgres's at 3 of 9, and on 2026-11-13 neither pin was
+      # the digest its tag named.  valkey keeps the week: its tag names one
+      # exact release, and the digest it named on 2026-11-13 is the one
+      # pinned.
+      exclude: ["postgres", "nginx"]
     commit-message:
       prefix: "chore(deps)"
 

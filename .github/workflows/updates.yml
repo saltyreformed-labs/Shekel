@@ -42,9 +42,22 @@
 #            main's own code with the landing group, which quill's door imports.  It
 #            fetches the tips of main and dev itself: its checkout holds the run's own
 #            commit of main, an old one on a re-run, and no dev.
-#   alert    when the refresh, the publish, the queue or the due job failed: opens an
-#            issue in this repository mentioning the developer, linking the run and naming
-#            each job's result (tools/update/alert.py; ruling plan#2466).  It
+#   scan     Tuesdays: the weekly image scan (plan#2444, ruling plan#2443).
+#            It checks out dev and builds its image by
+#            .github/actions/build-image, the one recipe the release and CI's
+#            image job build by (ruling plan#2752), loaded into the runner's
+#            docker and never pushed; saves it as a file; and runs the
+#            scanner, Grype, on that file by dev's docker-compose.scan.yml,
+#            whose header says what it holds and refuses (rulings plan#3704,
+#            plan#3706, plan#3708).  The build runs dev's package code, so
+#            this job, like the refresh, holds no secret and only the
+#            read-only token.  The scanner's JSON is uploaded as the run's
+#            artifact for the report, which judges it (rulings plan#3710,
+#            plan#3720); a scan that cannot run fails this job, which the
+#            alert reports.
+#   alert    when the refresh, the publish, the queue, the due job or the scan failed:
+#            opens an issue in this repository mentioning the developer, linking the run and
+#            naming each job's result (tools/update/alert.py; ruling plan#2466).  It
 #            holds only the workflow's own token, widened to issues for this job
 #            alone, and installs nothing: main's own code on the runner's Python
 #            with the standard library alone, the issue sent by the runner's gh,
@@ -98,26 +111,31 @@
 # alert reports, and queue nothing it should not.
 #
 # WHOSE CODE.  GitHub runs a schedule only from main, so this workflow runs
-# from the release that brings it: refresh runs dev's refresh, publish,
-# queue and due main's own code.  A branch's copy of this file never reaches the
+# from the release that brings it: refresh runs dev's refresh, scan builds
+# dev's image and runs dev's scanner on it, and publish, queue and due run
+# main's own code.  A branch's copy of this file never reaches the
 # key: that is GitHub's rule (THE KEY), not this file's.  Within a run on
 # main, this file keeps other code from the key: each keyed job checks out
-# the workflow's own commit, and the refresh, which runs dev's code and
-# package code, names no environment.  The refresh's ``github.ref``
+# the workflow's own commit, and the refresh and the scan, which run dev's
+# code and package code, name no environment.  The refresh's ``github.ref``
 # condition keeps a dispatch from any other branch from running anything,
 # where the environment would refuse its publish as a red run.
 #
 # WHEN.  The refresh at 11:17 UTC on Mondays (07:17 New York in summer), after
 # Dependabot's 06:00 New York run; the queue and the due job at 13:47 UTC every
 # day, so the Monday pull requests' checks have finished by the queue's run, and
-# what it lands is read as due the next day.  Both times off the top of
-# the hour, when GitHub may drop queued scheduled runs.  A job's condition
+# what it lands is read as due the next day.  The scan at 11:17 UTC on
+# Tuesdays, 21 hours after Monday's queue put that day's pull requests in
+# dev's merge queue: time for what they move to land before it builds dev's
+# image.  Each time off the top of the hour, when GitHub may drop queued
+# scheduled runs.  A job's condition
 # names its schedule as the trigger list spells it
 # (tools/ci/test_updates_workflow.py holds the two equal).
 #
-# THE TIME LIMITS (rulings plan#2761, plan#2762, plan#2765).  Every step of
-# the refresh, the publish, the queue and the due job carries a
-# ``timeout-minutes`` of its own.  A step cut off by its own limit is marked failed (actions/runner's
+# THE TIME LIMITS (rulings plan#2761, plan#2762, plan#2765, plan#3721).
+# Every step of the refresh, the publish, the queue, the due job and the scan
+# carries a ``timeout-minutes`` of its own.  A step cut off by its own limit
+# is marked failed (actions/runner's
 # StepsRunner.cs, read 2026-11-03), so its job fails and the alert opens its
 # issue.  A job cut off by its own limit is cancelled (GitHub's workflow
 # syntax: the limit is how long GitHub lets a job run "before GitHub
@@ -126,9 +144,11 @@
 # workflows, commit b2e9a22e68, read a timed-out job as cancelled), so a job
 # cut off first ends a stalled run in silence.  Each of those jobs' limits is
 # therefore longer than all its steps' together: its steps' total, with a step
-# using another repository's action counted twice (its post step, if it has
-# one, runs under the same limit: actions/runner's ActionRunner.cs), plus 5
-# for GitHub's setting the job up.  The alert's steps carry none: nothing
+# that runs another repository's action counted twice, whether it names that
+# action itself or uses an action of this repository's that runs one at any
+# depth (its post step, if it has one, runs under the same limit:
+# actions/runner's ActionRunner.cs), plus 5 for GitHub's setting the job up.
+# The alert's steps carry none: nothing
 # reports a stalled report, and its job's limit alone ends it.  What a stall
 # holds until then is the runner and this workflow's one run at a time (its
 # ``concurrency`` group, below); the update App's token GitHub expires an hour
@@ -140,7 +160,12 @@
 # longest of 114 runs, 2026-10-01 to 10-30 on ubuntu-24.04, 0.52 min), and,
 # on the development host 2026-11-03 with no uv cache and no Python, the uv
 # export with BuildKit's cache warm (0.97 s), the landing install (1.47 s)
-# and ``uv lock --upgrade`` (1.04 s).  The queue's own wait is not among
+# and ``uv lock --upgrade`` (1.04 s).  For the scan's: CI's image job, which
+# checks out, builds the image by the same action and checks what it holds
+# (ci.yml's figure: its one run, 1.35 min), and, on the development host
+# 2026-11-13, dev's image built with no layer cache, its base already pulled
+# (50.4 s), and the save-and-scan step's text run as written, Grype's
+# database downloaded (42.3 s).  The queue's own wait is not among
 # them: for the trial merges GitHub has not made, tools/update/queue.py
 # sleeps ``REREADS`` times ``REREAD_SECONDS`` a run at most, however many pull
 # requests it judges, beside one read a round of each still unmade (ruling
@@ -152,6 +177,7 @@ on:
   schedule:
     - cron: "17 11 * * 1"
     - cron: "47 13 * * *"
+    - cron: "17 11 * * 2"
   workflow_dispatch:
 
 permissions:
@@ -316,8 +342,69 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: python -m tools.update.due
 
+  scan:
+    if: github.ref == 'refs/heads/main' && github.event.schedule == '17 11 * * 2'
+    runs-on: ubuntu-26.04
+    timeout-minutes: 40
+    env:
+      # The local name the build loads dev's image under; it is never pushed.
+      IMAGE: shekel:scan
+    steps:
+      - name: Checkout dev
+        timeout-minutes: 5
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: dev
+          persist-credentials: false
+
+      # The one recipe (ruling plan#2752), as CI's image job calls it.  The
+      # action runs docker/build-push-action, whose post step runs under this
+      # step's limit, so the job's limit counts this step twice (ruling
+      # plan#3721).
+      - name: Build dev's image
+        timeout-minutes: 5
+        uses: $/.github/actions/build-image
+        with:
+          push: false
+          load: true
+          tags: ${{ env.IMAGE }}
+
+      # The scanner reads the image as a saved file (ruling plan#3706), which
+      # ``docker save`` writes readable by its owner alone; the scanner runs
+      # as uid 65532, so the file is made readable by all (measured
+      # 2026-11-13 on the development host: mode 600 under umask 022, which
+      # the scanner refused, exiting 1, "permission denied").  Grype writes its
+      # JSON on standard output and its progress on standard error, which stay
+      # apart only with no TTY.  It exits 0 whatever it matches, the report
+      # being the judge; it exits 1 on a database it cannot fetch, cannot
+      # check for a newer one or finds too old, and on a file that is no
+      # image (tests/test_deploy/test_scan_compose.py's header), failing this
+      # step.  The file it wrote is handed to the upload by this step's
+      # output, so its path has one home.
+      - name: Save the image and scan it
+        id: scan
+        timeout-minutes: 5
+        shell: bash
+        env:
+          SCAN_IMAGE: ${{ runner.temp }}/image.tar
+          SCAN_JSON: ${{ runner.temp }}/scan.json
+        run: |
+          docker save --output "${SCAN_IMAGE}" "${IMAGE}"
+          chmod 0644 "${SCAN_IMAGE}"
+          docker compose -f docker-compose.scan.yml run --rm --no-TTY scan > "${SCAN_JSON}"
+          echo "json=${SCAN_JSON}" >> "${GITHUB_OUTPUT}"
+
+      - name: Upload the scanner's JSON
+        timeout-minutes: 5
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: scan
+          path: ${{ steps.scan.outputs.json }}
+          if-no-files-found: error
+          retention-days: 7
+
   alert:
-    needs: [refresh, publish, queue, due]
+    needs: [refresh, publish, queue, due, scan]
     if: failure()
     runs-on: ubuntu-26.04
     timeout-minutes: 5
@@ -338,6 +425,8 @@ jobs:
           PUBLISH: ${{ needs.publish.result }}
           QUEUE: ${{ needs.queue.result }}
           DUE: ${{ needs.due.result }}
+          SCAN: ${{ needs.scan.result }}
         run: >-
           python3 -S -m tools.update.alert "${RUN}"
           "refresh=${REFRESH}" "publish=${PUBLISH}" "queue=${QUEUE}" "due=${DUE}"
+          "scan=${SCAN}"

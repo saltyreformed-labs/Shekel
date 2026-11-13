@@ -1,15 +1,21 @@
-"""Controls for ``updates.yml``, the weekly dependency update (rulings plan#2448-plan#2450):
-which job holds the update App's key, whose code each runs, when each runs, and how long each
-job and step may run (rulings plan#2761, plan#2762, plan#2765).
+"""Controls for ``updates.yml``, the weekly dependency update (rulings plan#2448-plan#2450) and
+the weekly image scan (plan#2444): which job holds the update App's key, whose code each runs,
+when each runs, and how long each job and step may run (rulings plan#2761, plan#2762,
+plan#2765, plan#3721).
 """
 from __future__ import annotations
 
+import os
 import re
+import stat
+from pathlib import Path
 
+import pytest
 import yaml
 
 from tools.ci import arcs
-from tools.ci.test_ci_workflow import _is_a_limit, _workflows
+from tools.ci.test_build_image_action import USES as BUILD_IMAGE
+from tools.ci.test_ci_workflow import _is_a_limit, _run_step, _workflows
 
 
 #: The update workflow (rulings plan#2448-plan#2450), its jobs that hold the App's key, and the
@@ -27,16 +33,24 @@ NO_STEP_LIMITS = "alert"
 #: How a ``uses:`` names an action of this repository's own, which GitHub loads from the
 #: workflow's commit (``$/``) or the checkout (``./``).
 LOCAL_ACTION = ("$/", "./")
+#: The scan's schedule's day of the week, as cron spells Tuesday (plan#2444's spec).
+TUESDAY = "2"
 
 
-def _runs_no_outside_action(uses: str) -> bool:
-    """Whether the action of this repository's that ``uses`` names is composite and runs no
-    action of another repository, in its own steps or in its own actions': so no post step."""
-    folder = arcs.REPO / uses.removeprefix("$/").removeprefix("./")
+def _runs_an_outside_action(uses: str, root: Path = arcs.REPO) -> bool:
+    """Whether a step that ``uses`` this action runs another repository's action, whose post
+    step, if it has one, runs under the step's limit (ruling plan#2765): an action that is not
+    this repository's, or one of this repository's, read from ``root``, that runs one in any of
+    its steps, at any depth (ruling plan#3721).  An action of this repository's must be
+    composite, whose steps are all it runs: one of another kind could carry a post step of its
+    own, which this does not read."""
+    if not uses.startswith(LOCAL_ACTION):
+        return True
+    folder = root / uses.removeprefix("$/").removeprefix("./")
     runs = yaml.safe_load(next(folder.glob("action.y*ml")).read_text(encoding="utf-8"))["runs"]
-    return runs["using"] == "composite" and all(
-        step["uses"].startswith(LOCAL_ACTION) and _runs_no_outside_action(step["uses"])
-        for step in runs["steps"] if "uses" in step)
+    assert runs["using"] == "composite", (uses, runs["using"])
+    return any(_runs_an_outside_action(step["uses"], root)
+               for step in runs["steps"] if "uses" in step)
 
 
 class TestTheUpdateWorkflowKeepsItsKeyFromPackageCode:
@@ -65,12 +79,13 @@ class TestTheUpdateWorkflowKeepsItsKeyFromPackageCode:
                     "contents": "read", "issues": "write"})
 
     def test_a_failed_job_opens_an_issue_with_the_workflow_s_own_token(self):
-        """The alert runs when the refresh, the publish, the queue or the due job failed,
-        holding no secret, variable or mint: main's own code, given the workflow's token and
-        each job's result (ruling plan#2466), in two steps, the checkout and the alert, so it
-        installs nothing and runs on the standard library alone (``-S``; plan#2481)."""
+        """The alert runs when the refresh, the publish, the queue, the due job or the scan
+        failed, a scan that cannot run among them (ruling plan#3710), holding no secret,
+        variable or mint: main's own code, given the workflow's token and each job's result
+        (ruling plan#2466), in two steps, the checkout and the alert, so it installs nothing and
+        runs on the standard library alone (``-S``; plan#2481)."""
         alert = self._workflow()["jobs"]["alert"]
-        assert alert["needs"] == ["refresh", "publish", "queue", "due"]
+        assert alert["needs"] == ["refresh", "publish", "queue", "due", "scan"]
         assert alert["if"] == "failure()"
         text = yaml.safe_dump(alert)
         assert "secrets." not in text and "vars." not in text and MINT not in text
@@ -136,13 +151,15 @@ class TestTheUpdateWorkflowKeepsItsKeyFromPackageCode:
 
     def test_each_job_runs_only_from_main_on_the_schedule_its_condition_names(self):
         """The refresh on Monday's schedule or a dispatch, the queue and the due job on the
-        daily one, each only from main, so a dispatch from a branch runs nothing (the
-        environment, not these conditions, keeps the key from a branch's code); the publish only
-        after the refresh; and one run at a time, each waiting for the one before, never
-        cancelling it, so a dispatch never races Monday's publish, nor the queue a publish."""
+        daily one, the scan on Tuesday's (plan#2444), each only from main, so a dispatch from a
+        branch runs nothing (the environment, not these conditions, keeps the key from a
+        branch's code); the publish only after the refresh; and one run at a time, each waiting
+        for the one before, never cancelling it, so a dispatch never races Monday's publish,
+        nor the queue a publish."""
         workflow = self._workflow()
         on = workflow.get(True, workflow.get("on"))
-        monday, daily = (entry["cron"] for entry in on["schedule"])
+        monday, daily, tuesday = (entry["cron"] for entry in on["schedule"])
+        assert tuesday.split()[2:] == ["*", "*", TUESDAY], tuesday
         assert "workflow_dispatch" in on
         jobs = workflow["jobs"]
         main = "github.ref == 'refs/heads/main'"
@@ -151,6 +168,7 @@ class TestTheUpdateWorkflowKeepsItsKeyFromPackageCode:
             f"github.event.schedule == '{monday}')")
         for name in ("queue", "due"):
             assert jobs[name]["if"] == f"{main} && github.event.schedule == '{daily}'", name
+        assert jobs["scan"]["if"] == f"{main} && github.event.schedule == '{tuesday}'"
         assert jobs["publish"]["needs"] == "refresh" and "if" not in jobs["publish"]
         assert workflow["concurrency"] == {"group": "updates", "cancel-in-progress": False}
 
@@ -176,16 +194,100 @@ class TestTheUpdateWorkflowKeepsItsKeyFromPackageCode:
         assert jobs["refresh"]["steps"][0]["id"] == "checkout"
 
 
+class TestTheScanReadsDevsImageWithNoSecret:
+    """``updates.yml``'s ``scan`` (plan#2444): dev's image built by the one recipe, saved as a
+    file and read by the scanner's compose service, its JSON uploaded for the report, the job
+    holding no secret and only the workflow's read-only token, as its build runs dev's package
+    code."""
+
+    #: The step that saves the image and runs the scanner on it.
+    SCAN_STEP = "Save the image and scan it"
+
+    @staticmethod
+    def _scan() -> dict:
+        """The scan job, read."""
+        return _workflows()[UPDATES]["jobs"]["scan"]
+
+    def test_it_builds_dev_s_image_by_the_one_recipe_and_sees_no_secret(self):
+        """The job holds exactly its keys, so no permission, environment or ``needs``, and
+        names no secret, variable, mint or token; its four steps, in order, set up no builder
+        (ruling plan#2742).  It checks out dev keeping no credential, builds by the one recipe,
+        loaded under the job's image name and never pushed (ruling plan#2752), runs the scanner
+        in one step, and uploads, as the artifact ``scan``, the file that step's output names,
+        failing when there is none."""
+        scan = self._scan()
+        assert set(scan) == {"if", "runs-on", "timeout-minutes", "env", "steps"}
+        assert scan["env"] == {"IMAGE": "shekel:scan"}
+        text = yaml.safe_dump(scan)
+        assert "secrets." not in text and "vars." not in text and MINT not in text
+        assert not re.search(r"\bsecrets\b|\btoken\b", text)
+        checkout, build, step, upload = scan["steps"]
+        assert checkout["uses"].startswith("actions/checkout@")
+        assert checkout["with"] == {"ref": "dev", "persist-credentials": False}
+        assert set(build) == {"name", "timeout-minutes", "uses", "with"}
+        assert build["uses"] == BUILD_IMAGE
+        assert build["with"] == {"push": False, "load": True, "tags": "${{ env.IMAGE }}"}
+        assert step["name"] == self.SCAN_STEP and step["id"] == "scan"
+        assert upload["uses"].startswith("actions/upload-artifact@")
+        assert upload["with"] == {"name": "scan", "path": "${{ steps.scan.outputs.json }}",
+                                  "if-no-files-found": "error", "retention-days": 7}
+
+    def test_the_step_hands_the_scanner_the_file_it_reads_and_names_the_json_written(
+            self, tmp_path):
+        """The step's text, run as GitHub runs it (``shell: bash``), with a stand-in ``docker``
+        that writes a saved image readable by its owner alone, as ``docker save`` does: the
+        job's image is saved to the file the scanner's compose file binds (its
+        ``${VARIABLE:?...}``), made readable by all, as the scanner runs as uid 65532; the
+        scanner's service runs from its compose file with no TTY, its standard output alone the
+        JSON, whose file the step's output names.  A scanner that exits 1 fails the step, which
+        then names no JSON for the upload to find."""
+        step = next(step for step in self._scan()["steps"] if step["name"] == self.SCAN_STEP)
+        assert set(step) == {"name", "id", "timeout-minutes", "shell", "env", "run"}
+        assert step["shell"] == "bash"
+        compose = (arcs.REPO / "docker-compose.scan.yml").read_text(encoding="utf-8")
+        variable, = re.findall(r"\$\{(\w+):\?", compose)
+        assert variable in step["env"], (variable, step["env"])
+        files = {name: value.replace("${{ runner.temp }}", str(tmp_path))
+                 for name, value in step["env"].items()}
+        assert all(value.startswith(f"{tmp_path}/") for value in files.values()), files
+        bin_dir = tmp_path / "bin"
+        bin_dir.mkdir()
+        docker = bin_dir / "docker"
+        docker.write_text(
+            '#!/bin/bash\nprintf "%s\\n" "$*" >> "${CALLS}"\n'
+            'case "$1" in\n'
+            '  save) : > "$3"; chmod 0600 "$3" ;;\n'
+            '  compose) echo "{\\"matches\\": []}"; echo "progress" >&2; exit "${EXIT}" ;;\n'
+            "esac\n", encoding="utf-8")
+        docker.chmod(0o755)
+        for exit_status in (0, 1):
+            calls, output = tmp_path / f"calls{exit_status}", tmp_path / f"output{exit_status}"
+            output.write_text("", encoding="utf-8")
+            ran = _run_step(step["run"], {
+                **files, "PATH": f"{bin_dir}:/usr/bin:/bin", "IMAGE": "shekel:scan",
+                "GITHUB_OUTPUT": str(output), "CALLS": str(calls), "EXIT": str(exit_status)},
+                cwd=tmp_path)
+            assert ran.returncode == exit_status, ran
+            assert calls.read_text(encoding="utf-8").splitlines() == [
+                f"save --output {files[variable]} shekel:scan",
+                "compose -f docker-compose.scan.yml run --rm --no-TTY scan"]
+            assert stat.S_IMODE(os.stat(files[variable]).st_mode) == 0o644
+            json_file, = (value for name, value in files.items() if name != variable)
+            assert Path(json_file).read_text(encoding="utf-8") == '{"matches": []}\n'
+            assert output.read_text(encoding="utf-8") == (
+                "" if exit_status else f"json={json_file}\n")
+
+
 class TestAStalledUpdateRunFailsLoudly:
-    """``updates.yml``'s time limits (rulings plan#2761, plan#2762, plan#2765): a stalled step
-    fails its job, which the alert reports, before its job's own limit could cancel it in
-    silence."""
+    """``updates.yml``'s time limits (rulings plan#2761, plan#2762, plan#2765, plan#3721): a
+    stalled step fails its job, which the alert reports, before its job's own limit could
+    cancel it in silence."""
 
     def test_each_step_s_limit_cuts_it_off_before_its_job_s_limit_could(self):
         """Every job carries a limit (:func:`tools.ci.test_ci_workflow._is_a_limit`), and every
         step of each job but :data:`NO_STEP_LIMITS` one of its own, whose steps carry none; the
-        job's limit is its steps' total, a step using another repository's action counted
-        twice, plus :data:`JOB_LIMIT_MARGIN`.
+        job's limit is its steps' total, a step that runs another repository's action
+        (:func:`_runs_an_outside_action`) counted twice, plus :data:`JOB_LIMIT_MARGIN`.
 
         A step cut off by its own limit fails, so its job fails and the alert, which runs on
         ``failure()``, opens its issue; a job cut off by its own limit is cancelled, which
@@ -206,17 +308,48 @@ class TestAStalledUpdateRunFailsLoudly:
                 continue
             assert all(_is_a_limit(step) for step in limits), (name, limits)
             posts = [step["timeout-minutes"] for step in job["steps"]
-                     if "uses" in step and not step["uses"].startswith(LOCAL_ACTION)]
+                     if "uses" in step and _runs_an_outside_action(step["uses"])]
             assert limit == sum(limits) + sum(posts) + JOB_LIMIT_MARGIN, (name, limit, limits)
 
-    def test_a_step_using_this_repository_s_action_has_no_post_step(self):
-        """Each action of this repository's that an update step uses is composite and runs no
-        action of another repository (:func:`_runs_no_outside_action`), so GitHub runs no post
-        step for it: such a step counts once in its job's limit (ruling plan#2765)."""
-        for name, job in _workflows()[UPDATES]["jobs"].items():
-            for step in job["steps"]:
-                if step.get("uses", "").startswith(LOCAL_ACTION):
-                    assert _runs_no_outside_action(step["uses"]), (name, step["name"])
+    def test_a_step_counts_twice_when_it_runs_another_repository_s_action_at_any_depth(
+            self, tmp_path):
+        """:func:`_runs_an_outside_action`, the rule the limits above are read by (rulings
+        plan#2765, plan#3721): an action of another repository's counts twice, and one of this
+        repository's counts twice when any of its steps runs one, by either local form, at any
+        depth, and once when none does.  Read on this repository's actions as they stand
+        (``build-image`` runs ``docker/build-push-action``; ``install-lock`` runs only
+        ``dockerfile-uv``, which runs none) and on a tree of actions three deep; an action of
+        this repository's that is not composite is refused, not read."""
+        assert _runs_an_outside_action("actions/checkout@v9")
+        assert _runs_an_outside_action("$/.github/actions/build-image")
+        assert not _runs_an_outside_action("$/.github/actions/install-lock")
+        assert not _runs_an_outside_action("$/.github/actions/dockerfile-uv")
+
+        def action(name: str, runs: dict) -> None:
+            folder = tmp_path / ".github/actions" / name
+            folder.mkdir(parents=True)
+            (folder / "action.yml").write_text(yaml.safe_dump({"runs": runs}),
+                                               encoding="utf-8")
+
+        def composite(*uses: str) -> dict:
+            return {"using": "composite",
+                    "steps": [{"run": "true", "shell": "bash"}, *({"uses": u} for u in uses)]}
+
+        action("leaf", composite())
+        action("outside", composite("docker/build-push-action@v9"))
+        action("middle", composite("./.github/actions/leaf", "$/.github/actions/outside"))
+        action("top", composite("$/.github/actions/middle"))
+        action("quiet", composite("$/.github/actions/leaf", "./.github/actions/leaf"))
+        action("node", {"using": "node24", "main": "main.js", "post": "post.js"})
+        action("calls-node", composite("$/.github/actions/node"))
+        for name, twice in (("leaf", False), ("outside", True), ("middle", True),
+                            ("top", True), ("quiet", False)):
+            for form in LOCAL_ACTION:
+                uses = f"{form}.github/actions/{name}"
+                assert _runs_an_outside_action(uses, tmp_path) is twice, uses
+        for name in ("node", "calls-node"):
+            with pytest.raises(AssertionError, match="node24"):
+                _runs_an_outside_action(f"$/.github/actions/{name}", tmp_path)
 
     def test_no_update_job_or_step_may_fail_without_failing(self):
         """``continue-on-error`` would leave a job green after a step cut off by its own limit,

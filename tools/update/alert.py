@@ -2,11 +2,12 @@
 repository titled for the day, which mentions him, links the run and names each job's result.
 
 **It installs nothing** (plan#2481).  Its job (``.github/workflows/updates.yml``'s ``alert``,
-run when the refresh, the publish, the queue or the release-due job failed) runs this module on
-the runner's own Python with the standard library alone (``python3 -S``, which puts no installed
-package on the path), and the runner's own ``gh`` sends the issue.  The other jobs each install
-the lock, a pull of uv from ghcr.io and downloads of its Python and the packages, so a failure
-there would otherwise stop the one job that reports it.  The ubuntu-26.04 image holds Python
+run when the refresh, the publish, the queue, the release-due job or the image scan failed)
+runs this module on the runner's own Python with the standard library alone (``python3 -S``,
+which puts no installed package on the path), and the runner's own ``gh`` sends the issue.
+Every other job but the scan installs the lock, a pull of uv from ghcr.io and downloads of its
+Python and the packages, so a failure there would otherwise stop the one job that reports it.
+The ubuntu-26.04 image holds Python
 3.14.4 and GitHub CLI 2.103.2 (runner-images ``ubuntu26/20261026.180``'s list, read
 2026-11-01).  It holds only the workflow's own token, widened to ``issues: write`` for its one
 job, and runs no package code.

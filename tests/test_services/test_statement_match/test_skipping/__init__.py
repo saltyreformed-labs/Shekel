@@ -18,6 +18,7 @@ asserts about a card.
 **The READER is the fourth subject** (plan step ``bank_import:X-gj-4c-2``):
 what the Skipped tab lists, in what order, and for whom.  It is graded here
 rather than beside the page because it is a query -- who the rows belong to and
-how they are sorted -- where :mod:`.test_reconcile` grades what the page makes
-of them.
+how they are sorted -- where
+:mod:`tests.test_services.test_statement_match.test_reconcile` grades what the
+page makes of them.
 """

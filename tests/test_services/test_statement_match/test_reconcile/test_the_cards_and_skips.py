@@ -225,7 +225,7 @@ class TestTheSkippedTabIsWhereARecordedSkipIsFoundAndUndone:
         one reader and cards by another, disagreeing by one.  Below the bound
         the withheld count is 0 and the equality is exact; the case that
         grades it ABOVE the bound is
-        ``test_skipping.TestTheSkippedTabIsBOUNDEDAndSaysWhatItWithheld``.
+        ``test_skipping.test_the_skipped_tab.TestTheSkippedTabIsBOUNDEDAndSaysWhatItWithheld``.
         Asserted at three sizes, because an equality that holds only at one is
         satisfied by a constant.
         """
@@ -306,10 +306,11 @@ class TestADoublyAnsweredLineIsTHECOSTTwoRefusalsBUY:
     RESULTING state that neither door would admit.  A case that went through
     both would grade the refusals rather than their consequence.  It is also
     why this is a claim about the SCREEN and not a claim that the doors are
-    broken -- they are not, and :mod:`.test_skipping` grades that they are
-    not.  *An earlier draft of this paragraph said "past BOTH doors", and the
-    two service docstrings that cite this class were corrected before it
-    was.*
+    broken -- they are not, and
+    :mod:`tests.test_services.test_statement_match.test_skipping` grades that
+    they are not.  *An earlier draft of this paragraph said "past BOTH
+    doors", and the two service docstrings that cite this class were
+    corrected before it was.*
     """
 
     def test_both_tabs_render_it_and_the_inbox_does_not(

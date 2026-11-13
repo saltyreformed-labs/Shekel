@@ -23,7 +23,8 @@ in SQL: the loader narrows on it, so the fold cannot receive one and its guard
 is deleted; and :func:`~app.services.statement_match._accepted_view
 .accepted_counts` narrows and ALARMS on it, which is the read the Reconcile
 page performs on every render whichever tab is open.  The equality that motion
-bought is graded in ``test_reconcile.TestACaptionCountsOnlyWhatItsTabCanDraw``.
+bought is graded in
+``test_reconcile.test_the_hero.TestACaptionCountsOnlyWhatItsTabCanDraw``.
 """
 
 from app.services.statement_match._accepted_view import (  # pylint: disable=protected-access

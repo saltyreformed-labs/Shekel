@@ -352,8 +352,8 @@ def load_lines(
     the lines a standing *never a purchase* answer barred rather than recorded
     skips, so such a line rendered on Explained and nowhere else.  It is true
     now, and it is MEASURED rather than asserted --
-    ``test_reconcile.TestADoublyAnsweredLineIsTHECOSTTwoRefusalsBUY`` builds
-    the match through the real door at a moment when no skip exists, then
+    ``test_reconcile.test_the_cards_and_skips.TestADoublyAnsweredLineIsTHECOSTTwoRefusalsBUY``
+    builds the match through the real door at a moment when no skip exists, then
     inserts the SKIP row at the ORM tier -- so only the second answer is
     planted, which is the half this refusal owns.  *An earlier draft said
     "past both doors"; only one is bypassed, and the resulting STATE is the

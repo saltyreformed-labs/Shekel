@@ -169,8 +169,8 @@ def skipped_among(
     written at ``X-gj-4a`` and was FALSE until plan step
     ``bank_import:X-gj-4c-2`` gave the Skipped tab the store to read*; it is
     measured now by
-    ``test_reconcile.TestADoublyAnsweredLineIsTHECOSTTwoRefusalsBUY``, which
-    files the match through its real door and then inserts the skip row
+    ``test_reconcile.test_the_cards_and_skips.TestADoublyAnsweredLineIsTHECOSTTwoRefusalsBUY``,
+    which files the match through its real door and then inserts the skip row
     directly -- one door bypassed, not two, and the resulting state one that
     neither would admit.  The refusal itself never depended on it
     -- ruling **R-HP** is the reason -- but a consequence nobody could observe

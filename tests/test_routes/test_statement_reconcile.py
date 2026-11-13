@@ -710,7 +710,8 @@ class TestEveryTabTheServiceBuildsIsServed:
             # **EXACTLY ONE**, which is the template's three-arm partition
             # asserted without restating WHICH kind each tab holds.  That
             # mapping has one home -- ``_tab_sections``, graded by
-            # ``test_reconcile.TestWhichKindOfCARDAPageHoldsIsSTATEDByWhatBuiltThem``
+            # ``TestWhichKindOfCARDAPageHoldsIsSTATEDByWhatBuiltThem`` in
+            # ``test_reconcile/test_the_cards_and_skips.py``
             # -- and a copy of it here would be the second home this step
             # exists to delete.  Zero markers is the blank tab a missing arm
             # draws; two is an arm rendering over another's cards.
@@ -2403,9 +2404,9 @@ class TestTheSettledBoundIsWiredToThePage:
     """Ruling **R-GX**'s bound and the link past it, through the real route.
 
     The arithmetic is the service tier's
-    (``test_reconcile.TestTheSettledBoundIsLIFTABLE``) at a parameterised
-    limit.  What only the route can show is that the page passes the SHIPPED
-    :data:`~app.services.statement_match.REGISTER_LIMIT`, says what it
+    (``test_reconcile.test_the_cards_and_skips.TestTheSettledBoundIsLIFTABLE``) at a
+    parameterised limit.  What only the route can show is that the page passes
+    the SHIPPED :data:`~app.services.statement_match.REGISTER_LIMIT`, says what it
     withheld, offers a link that lifts it, and CARRIES that view through an
     Undo -- so this stages one act past the real boundary and drives it.
 
@@ -4830,7 +4831,7 @@ class TestTheHeroSaysHowFarTheRecordsRun:
     """Finding **BAL-651**, ruling plan#2346, through a real render.
 
     On the books and statement ruling **R-BAL286**'s service test reaches
-    Done with (``test_reconcile``'s
+    Done with (``test_reconcile.test_the_hero``'s
     ``test_the_statement_the_opening_was_TYPED_FROM_can_be_done``): an
     account opened Feb 2 at ``$500.00`` from a statement stating ``$500.00``
     that day, both its lines inside the opening, so nothing is off and

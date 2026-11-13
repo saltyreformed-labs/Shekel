@@ -1123,8 +1123,8 @@ class TestTheSectionTheScreenRenders:
         # *The sweep-per-evidence-group assertions that stood here went with
         # the queue at plan step ``bank_import:X-gi-3``; the live coupling they
         # were about -- no SWEPT card carries a sentence -- is
-        # ``test_reconcile.TestOnlyTheInboxSweeps``, which stages a non-empty
-        # swept set and a non-empty withheld set so it can fire.*
+        # ``test_reconcile.test_the_tabs.TestOnlyTheInboxSweeps``, which stages a
+        # non-empty swept set and a non-empty withheld set so it can fire.*
         assert review.merchants.merchants == ()
         assert {
             entry.summary.merchant for entry in merchant_directory(

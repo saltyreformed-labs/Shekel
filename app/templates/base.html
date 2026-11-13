@@ -217,6 +217,13 @@
                    regression tests assert against. #}
                 <li><h6 class="dropdown-header">{{ nav_name }}</h6></li>
                 <li><hr class="dropdown-divider"></li>
+                {# Every user's own Security page, whatever their role (ruling
+                   plan#3435): it is not Settings, which is the owner's. #}
+                <li>
+                  <a class="dropdown-item" href="{{ url_for('auth.security') }}">
+                    <i class="bi bi-shield-lock"></i> Security
+                  </a>
+                </li>
                 <li>
                   <form action="{{ url_for('auth.logout') }}" method="post">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">

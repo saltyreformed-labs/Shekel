@@ -46,8 +46,8 @@ def _enable_mfa(user_id, codes=None):
     """Persist an enabled MFA config with a known secret and codes.
 
     Mirrors the helper in
-    ``tests/test_routes/test_auth.py::TestMfaLogin._enable_mfa`` but
-    free-standing (this file does not subclass ``TestMfaLogin``).
+    ``tests/test_routes/test_auth/test_mfa_login_and_disable.py::TestMfaLogin._enable_mfa``
+    but free-standing (this file does not subclass ``TestMfaLogin``).
 
     Args:
         user_id: The :attr:`User.id` to attach the config to.

@@ -218,7 +218,15 @@ EVT_TRUSTED_DEVICE_SIGN_IN = _register(
 )
 EVT_TRUSTED_DEVICE_FORGOTTEN = _register(
     "trusted_device_forgotten", AUTH,
-    "User forgot one of their trusted devices in Settings > Security.",
+    "A trusted device was forgotten: by its user on their Security page, or a "
+    "companion's by the owner on Settings > Companions. user_id is who pressed "
+    "Forget, device_user_id whose device it was.",
+)
+EVT_MFA_RESET = _register(
+    "mfa_reset", AUTH,
+    "A user's two-factor was reset (mfa_service.reset_two_factor): by "
+    "scripts/reset_mfa.py, or a companion's by the owner on Settings > "
+    "Companions.",
 )
 EVT_BACKUP_CODES_REGENERATED = _register(
     "backup_codes_regenerated", AUTH,

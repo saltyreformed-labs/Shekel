@@ -13,7 +13,6 @@ from app.services.loan_ledger import (
     LoanCalendars,
     confirmed_shadows_through,
     load_loan_stream,
-    payment_installments,
     payment_visible_on,
     walk_loan_ledger,
 )
@@ -22,7 +21,6 @@ from tests._ledger_reads import loan_correction_lines_at
 from tests._test_helpers import (
     create_loan_account,
     create_settled_transfer,
-    loan_params_for,
 )
 
 from ._helpers import _ORIGINATION, _PAYMENT_DAY, _DUE, _PERIOD, _CLOSED_ON, _loan
@@ -40,9 +38,8 @@ class TestAZeroDollarCloseIsDatedByTheInstallmentItSkips:
         installment it skips -- its interval's (ruling R-R107), which for a
         payment due on the contractual day is its own due date -- and never
         the settle day the close was stated on.  The
-        walk's outcome, the confirmed bound and the installment feed all read
-        that ONE day: a pass on 03-02 has seen the close, a pass on 02-28 has
-        not.  The payment moved nothing, so the whole charge stands unpaid:
+        walk's outcome and the confirmed bound both read that ONE day: a pass
+        on 03-02 has seen the close, a pass on 02-28 has not.  The payment moved nothing, so the whole charge stands unpaid:
         cash 0.00, interest 500.00, principal -500.00.
         """
         with app.app_context():
@@ -75,12 +72,6 @@ class TestAZeroDollarCloseIsDatedByTheInstallmentItSkips:
             assert confirmed_shadows_through(
                 loan.id, scenario_id, date(2026, 2, 28), _ORIGINATION, _PAYMENT_DAY,
             ) == []
-
-            [installment] = payment_installments(
-                loan.id, scenario_id, loan_params_for(db.session, loan.id),
-                options=(), leg_options=(),
-            )
-            assert installment.dates.settled_on == _DUE
 
     def test_the_ledger_books_the_unpaid_charge_on_the_installment(
         self, app, db, seed_user, seed_periods,
@@ -155,7 +146,7 @@ class TestAnOffDayZeroDollarCloseIsDatedByItsIntervalsInstallment:
         The latest installment on or before 03-10 is 02-22, and it is the only
         charge standing (03-22 falls after the stream's last event): 500.00 of
         interest, so cash 0.00 splits interest 500.00, principal -500.00.  The
-        walk's outcome, the confirmed bound, the installment feed and the
+        walk's outcome, the confirmed bound, the read pass's bound and the
         posted correction all read 02-22; the payment keeps 03-10 as its due
         date.  Under R-BAL139 as first built, every one of them read 03-10.
         """
@@ -206,14 +197,6 @@ class TestAnOffDayZeroDollarCloseIsDatedByItsIntervalsInstallment:
                 loan.id, scenario_id, LoanCalendars(),
                 visible_by=date(2026, 2, 21),
             ).payments == []
-
-            [fed] = payment_installments(
-                loan.id, scenario_id, loan_params_for(db.session, loan.id),
-                options=(), leg_options=(),
-            )
-            assert (fed.dates.due_date, fed.dates.settled_on) == (
-                due, installment,
-            )
 
             period_id = seed_periods[_PERIOD].id
             lines = loan_correction_lines_at(

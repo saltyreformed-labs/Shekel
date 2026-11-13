@@ -138,15 +138,20 @@ def _terms(terms):
     recurrence:R16-c-2, so this dump could not see a change to either; on a
     tree whose LoanTerms has no ``recorded_start`` (before that step)
     :func:`_get` reads it as ``None``, an intended shape change on every loan.
+    ``convention``, the loan's interest accrual convention, is a field since
+    plan step recurrence:R16-d and dumped as its member's value; on a tree
+    before that step it reads ``None``, the same intended shape change.
     """
     if terms is None:
         return None
+    convention = _get(terms, "convention")
     return {
         "monthly_payment": _money(_get(terms, "monthly_payment")),
         "current_rate": _money(_get(terms, "current_rate")),
         "is_originated": _get(terms, "is_originated"),
         "is_arm": _get(terms, "is_arm"),
         "recorded_start": _date(_get(terms, "recorded_start")),
+        "convention": None if convention is None else convention.value,
     }
 
 

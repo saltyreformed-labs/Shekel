@@ -55,9 +55,9 @@ from tests._passkeys import (
     passkey_row,
     post_answer,
 )
+from tests._seed_owner_fixtures import SEED_USER_EMAIL, SEED_USER_PASSWORD
 from tests._sign_in import browser_count, make_a_stranger
 from tests._test_helpers import enable_mfa
-from tests.conftest import SEED_USER_EMAIL, SEED_USER_PASSWORD
 
 #: The sentence a refusal says unless the ceremony lapsed: one for another
 #: account's passkey, a forged signature and a replayed answer alike.

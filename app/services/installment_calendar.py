@@ -58,12 +58,12 @@ def due_in_following_month(reference: date, payment_day: int) -> date:
     The rule's one-month step: whatever day of its month *reference* is, the
     answer is *payment_day* in the NEXT calendar month, clamped to that
     month's end.  It seeds the loan's first installment from its origination
-    (:func:`first_installment_date`), the rate engine's contractual
-    schedule from its latest row or anchor
-    (:func:`app.services.rate_period_engine.replay_schedule`), and the
-    schedule-slot walk's step past a contested month
-    (:func:`app.services.amortization_engine.schedule_dates`), whose own copy
-    of this step went at plan step recurrence:R25.
+    (:func:`first_installment_date`) and steps to the installment after a
+    date's own (:func:`installment_after`).  *It seeded the rate engine's
+    replayed schedule from its latest row or anchor too, until plan step
+    recurrence:R16-e deleted that replay (ruling plan#3382), and stepped the
+    schedule-slot walk (``amortization_engine.schedule_dates``) past a
+    contested month until plan task plan#3389 deleted that walk.*
 
     Args:
         reference: Any date; only its month is read.
@@ -73,6 +73,45 @@ def due_in_following_month(reference: date, payment_day: int) -> date:
         *payment_day* in the month after *reference*'s, day-clamped.
     """
     return clamped_day(month_ordinal(reference) + 1, payment_day)
+
+
+def accrual_window(due: date, payment_day: int) -> tuple[date, date]:
+    """Return the window whose interest the installment due on *due* charges.
+
+    ``[the loan's due day in the month before due's, due)``: a loan charges
+    interest in ARREARS, so the installment that falls on *due* charges for the
+    month that ends there.  It is the window every installment walk hands
+    :func:`app.utils.money.installment_interest` (plan step recurrence:R16-d),
+    so no walk spells its own.
+
+    **It spans exactly one calendar month, for every due day and every
+    month**, and that is what keeps ``MONTHLY_1_12`` charging what it charged
+    before the window was an input: that convention counts the months a window
+    spans, so a window opened inside *due*'s own month -- a projection's first
+    row from its own starting day, say -- would charge ``$0.00``.  Consecutive
+    installments' windows abut: each opens on the installment before.
+
+    **The start is read from the MEANT day, not from *due*'s.**  A loan due the
+    31st is due Feb 28 in February, and the window that installment closes
+    opens on Jan 31, not Jan 28; the one after it is ``[Feb 28, Mar 31)``.
+    *payment_day* is what carries the meant day, through the one clamp
+    (:func:`app.utils.dates.clamped_day`).
+
+    **The first installment's window opens on the origination month's due day,
+    not on the origination date.**  Under ``MONTHLY_1_12`` the two are the
+    same one month, because the first installment always falls in the month
+    after origination (:func:`first_installment_date`).  A convention that
+    counts DAYS (plan#3355's daily accrual) has to decide whether the first
+    window opens here or on the funding date; the two differ by days.
+
+    Args:
+        due: The installment's due date.
+        payment_day: The loan's contractual day-of-month due day, 1-31.
+
+    Returns:
+        ``(start, end)``, the window's first day and its EXCLUSIVE end, *due*.
+    """
+    return clamped_day(month_ordinal(due) - 1, payment_day), due
 
 
 def first_installment_date(origination_date: date, payment_day: int) -> date:
@@ -245,6 +284,44 @@ def installment_of(
     if ordinal < month_ordinal(first_installment_date(origination_date, payment_day)):
         return None
     return clamped_day(ordinal, payment_day)
+
+
+def installment_after(
+    origination_date: date, payment_day: int, day: date,
+) -> date:
+    """Return the first installment due strictly AFTER *day*.
+
+    **The installment a loan's record has not reached yet** (ruling
+    plan#3382, plan step recurrence:R16-e): handed the date of the record's
+    last event -- a payment's own due date or an assertion's date, in
+    contract time -- it names where the contract's remaining installments
+    begin (:func:`app.services.loan_resolver.compute_payoff_scenarios`).  An
+    installment due ON *day* is not after it, for the same reason an
+    installment due on an assertion's date is inside the asserted balance
+    (:func:`app.services.rate_period_engine.due_after_anchor`).
+
+    The rule stepped, not searched: the installment whose interval *day*
+    falls in (:func:`installment_of`), then the rule's one-month step
+    (:func:`due_in_following_month`); for a *day* before the first
+    installment -- the origination itself, or a balance asserted between it
+    and the first due date -- the first installment
+    (:func:`first_installment_date`).  Made-up figures, a loan from Jan 5
+    due the 22nd: Feb 10 answers Feb 22, Mar 10 answers Mar 22, and Mar 22
+    answers Apr 22.
+
+    Args:
+        origination_date: The loan's immutable
+            :attr:`~app.models.loan_params.LoanParams.origination_date`.
+        payment_day: The loan's contractual day-of-month due day, 1-31.
+        day: The date to step past.
+
+    Returns:
+        The earliest installment due after *day*.
+    """
+    installment = installment_of(origination_date, payment_day, day)
+    if installment is None:
+        return first_installment_date(origination_date, payment_day)
+    return due_in_following_month(installment, payment_day)
 
 
 def installment_paid_by(

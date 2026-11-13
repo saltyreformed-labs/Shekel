@@ -9,7 +9,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.enums import AcctTypeEnum, StatusEnum
+from app import ref_cache
+from app.enums import AcctTypeEnum, InterestAccrualConventionEnum, StatusEnum
 from app.models.loan_features import RateHistory
 from app.models.ref import AccountType
 from app.services import account_service
@@ -539,7 +540,15 @@ class TestRefinanceForwardOnlyBaseline:
             monthly_payment=state.monthly_payment,
             payoff_date=date(2026, 3, 1),
         )
-        params = SimpleNamespace(payment_day=1)
+        # The loan row's stand-in: its due day, and how its note accrues
+        # interest, which the hypothetical refinance keeps (plan step
+        # recurrence:R16-d).
+        params = SimpleNamespace(
+            payment_day=1,
+            interest_accrual_convention_id=ref_cache.interest_accrual_convention_id(
+                InterestAccrualConventionEnum.MONTHLY_1_12,
+            ),
+        )
         data = {
             "closing_costs": Decimal("0.00"),
             "new_principal": None,

@@ -89,11 +89,17 @@ def calculate_paycheck(basis: PayrollBasis, period: DerivedPeriod, tax_configs,
         tax_configs:  dict with keys (as
                       :meth:`app.services.income_service.ProfilePaychecks.law`
                       resolves them):
-                      - bracket_set: :class:`app.tax_law.FederalRules`, whose
+                      - bracket_set:
+                        :class:`app.services.tax_config_service.FederalTaxRules`, whose
                         ``withholding_rules`` the withholding formula prices on
                       - state_config:
                         :class:`app.services.tax_config_service.StateTaxRules`
                       - fica_config: :class:`app.tax_law.FicaRules`
+                      - basis:
+                        :class:`app.services.tax_config_service.TaxLawBasis`,
+                        which year's rules the three are, carried onto the
+                        paycheck's tax lines as their ``rules`` (plan step
+                        salary:X-at-6, ruling **R-SAL75**)
         configs_by_year: ``{tax_year: configs dict}`` covering the year of
                       every pay stub that may price the paycheck
                       (:func:`~._stubs.tax_years_for`), or ``None`` when
@@ -234,6 +240,7 @@ def project_salary(basis: PayrollBasis, periods: Sequence[DerivedPeriod],
                           subset in any order and every breakdown is the same
                           as it would be alone.
         tax_configs:      dict with bracket_set, state_config, fica_config,
+                          basis,
                           or ``None`` when ``configs_by_year`` is given.
         configs_by_year:  ``{tax_year: configs dict}`` mapping covering
                           every year present in ``periods`` and every

@@ -503,8 +503,8 @@ def load_rate_changes(account_id: int) -> list[RateChangeRecord] | None:
     (:func:`app.services.loan_ledger.compute_loan_payment_splits`)
     builds the loan's rate periods from it via
     :func:`app.services.loan_resolver.resolve_periods` -- without paying for
-    the rest of ``load_loan_context``'s payment-history / escrow /
-    contractual-P&I work.
+    the rest of ``load_loan_context``'s escrow work (its payment list and
+    contractual P&I went at plan task plan#3388).
 
     Args:
         account_id: The loan account whose rate history to load.

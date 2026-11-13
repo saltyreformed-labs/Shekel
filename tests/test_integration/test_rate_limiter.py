@@ -22,7 +22,7 @@ Asserts that the rate-limit posture introduced by audit Commit C-06
 
 The tests use the same "fresh app + flip RATELIMIT_ENABLED" pattern
 already in tests/test_routes/test_errors.py and tests/test_routes/
-test_auth.py, so a single change to the toggle pattern would surface
+test_auth/, so a single change to the toggle pattern would surface
 in all rate-limit suites at once.
 
 Storage backend: TestConfig forces ``memory://`` regardless of the

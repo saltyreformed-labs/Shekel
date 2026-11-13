@@ -119,7 +119,7 @@ from app.models.amount_ownership import AmountOwnership
 
 # The shared synthetic split-loan fixture ($250,000 @ 6%, trued up to $100,000 --
 # distinct so a correct interest figure proves the walk's anchor reset); see
-# SPLIT_LOAN in tests/_test_helpers.py.  _P1/_P2/_P3 are the seed_periods indices
+# SPLIT_LOAN in tests/_test_helpers/_loans.py.  _P1/_P2/_P3 are the seed_periods indices
 # (payment_day=1) due 02-01 / 03-01 / 04-01, in distinct months after the anchor.
 (_ORIGINATION_PRINCIPAL, _ORIGINATION_DATE, _RATE, _ANCHOR_BALANCE,
  _ANCHOR_DATE, _P1, _P2, _P3) = SPLIT_LOAN
@@ -2270,18 +2270,17 @@ class TestSyncLoanAnchorCorrections:
                 loan, scenario_id, PostingSourceEnum.LOAN_TRUEUP,
             ) == []
 
-    def test_opening_payments_trueup_reproduce_resolver_balance(
+    def test_opening_payments_trueup_net_to_the_hand_worked_balance(
         self, app, db, seed_user, seed_periods,
     ):
-        """Opening + payment corrections + true-up net to -(resolver balance).
+        """Opening + payment corrections + true-up net to -(the hand-worked balance).
 
         The genesis payoff: three post-trueup $1,000 payments split to principal
         500.00 + 502.50 + 505.01 = 1507.51 (the running-balance walk from the
-        $100,000 trueup), so the resolver's balance is 100000 - 1507.51 =
-        98492.49.  With the opening (-250000) and true-up (+150000) added, the
-        loan-linked net is (1507.51 payment nets) - 100000 = -98492.49 -- exactly
-        -(the resolver balance), proving the from-origination sum-of-postings
-        reproduces the resolver on a trued-up loan.
+        $100,000 trueup), so the loan owes 100000 - 1507.51 = 98492.49.  With
+        the opening (-250000) and true-up (+150000) added, the loan-linked net is
+        (1507.51 payment nets) - 100000 = -98492.49, proving the
+        from-origination sum-of-postings lands on the trued-up balance.
         """
         with app.app_context():
             scenario_id = seed_user["scenario"].id
@@ -2775,16 +2774,16 @@ class TestPostedLoanBalanceSums:
                 loan.id, scenario_id, _AS_OF,
             ) == Decimal("99000.00")
 
-    def test_running_balance_reproduces_the_resolver_balance(
+    def test_running_balance_reads_back_the_hand_worked_balance(
         self, app, db, seed_user, seed_periods,
     ):
-        """Three $1,000 payments read back the resolver's balance, 98492.49.
+        """Three $1,000 payments read back the hand-worked balance, 98492.49.
 
         The running-balance walk (interest 500.00 / 497.50 / 494.99 on the
         shrinking real balance; principal 500.00 / 502.50 / 505.01) leaves
-        100000 - 1507.51 = 98492.49 -- the resolver's confirmed balance
-        (``test_opening_payments_trueup_reproduce_resolver_balance`` proves the
-        equality against ``account_net``); the reader negates the same
+        100000 - 1507.51 = 98492.49
+        (``test_opening_payments_trueup_net_to_the_hand_worked_balance`` proves
+        the same figure against ``account_net``); the reader negates the same
         linked net to the same figure.
         """
         with app.app_context():

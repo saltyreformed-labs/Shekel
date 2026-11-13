@@ -66,7 +66,7 @@ keep working unchanged:
   FOLD (steps C3b1 / C3b3) and its confirmed schedule rows onto the walk (step
   E1d-b); their remaining job -- the independent window the fold and the
   resolver are graded against -- moved to the oracle's own side
-  (``tests/_test_helpers.py``'s ``posted_loan_balance_at``), so no public
+  (``tests/_ledger_reads.py``'s ``posted_loan_balance_at``), so no public
   balance producer exists outside the ``balance_at`` seam.  The per-payment
   ATTRIBUTION reader that sat beside them (``_reader``, summing each
   payment's posted legs back out of the ledger by shadow) went at plan step

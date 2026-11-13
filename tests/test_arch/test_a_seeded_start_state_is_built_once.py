@@ -33,10 +33,11 @@ from sqlalchemy import text
 
 from app.models.category import Category
 from app.models.user import User
-from tests import conftest as suite_conftest
-from tests.conftest import (
+from tests import _seeded_start_states as seeded_states
+from tests import _worker_database as worker_database
+from tests._seed_owner_fixtures import SEED_USER_EMAIL, build_seed_user
+from tests._seeded_start_states import (
     _build_seeded_snapshot,
-    build_seed_user,
     register_seeded_state,
 )
 
@@ -108,7 +109,7 @@ def _database_exists(name):
     Returns:
         ``True`` when it exists.
     """
-    conn = psycopg.connect(suite_conftest._WORKER_ADMIN_URL)
+    conn = psycopg.connect(worker_database._WORKER_ADMIN_URL)
     try:
         conn.autocommit = True
         with conn.cursor() as cur:
@@ -147,7 +148,7 @@ class TestADeclaredWorldIsPresentAndPrivate:
             "a test declaring a world started without it; the db fixture "
             "cloned the empty template instead of the world's snapshot"
         )
-        assert user.email == suite_conftest.SEED_USER_EMAIL
+        assert user.email == SEED_USER_EMAIL
 
     @pytest.fixture(autouse=True)
     def _record_this_declarer(self, request):
@@ -276,7 +277,7 @@ class TestAnUndeclaredTestIsUntouched:
         """
         request.node.add_marker(pytest.mark.seeded_start_state)
         with pytest.raises(ValueError, match="no world named"):
-            suite_conftest.declared_seeded_state(request)
+            seeded_states.declared_seeded_state(request)
 
 
 @pytest.mark.xdist_group("x_be_2_seeded_start_state")
@@ -354,13 +355,13 @@ class TestTheSeamRefusesWhatItCannotDeliver:
         then caused it to be built would leave a snapshot name cached under a
         builder this fixture had already removed.
         """
-        builders = dict(suite_conftest._SEEDED_STATE_BUILDERS)
-        snapshots = dict(suite_conftest._SEEDED_STATE_SNAPSHOTS)
+        builders = dict(seeded_states._SEEDED_STATE_BUILDERS)
+        snapshots = dict(seeded_states._SEEDED_STATE_SNAPSHOTS)
         yield
-        suite_conftest._SEEDED_STATE_BUILDERS.clear()
-        suite_conftest._SEEDED_STATE_BUILDERS.update(builders)
-        suite_conftest._SEEDED_STATE_SNAPSHOTS.clear()
-        suite_conftest._SEEDED_STATE_SNAPSHOTS.update(snapshots)
+        seeded_states._SEEDED_STATE_BUILDERS.clear()
+        seeded_states._SEEDED_STATE_BUILDERS.update(builders)
+        seeded_states._SEEDED_STATE_SNAPSHOTS.clear()
+        seeded_states._SEEDED_STATE_SNAPSHOTS.update(snapshots)
 
     def test_two_worlds_may_not_share_one_name(self, restore_registry):
         """One name is one world: two would share one snapshot database."""
@@ -405,12 +406,12 @@ class TestTheSeamRefusesWhatItCannotDeliver:
         sufficient rather than merely usual.
         """
         with pytest.raises(RuntimeError, match="non-scalar values"):
-            suite_conftest._plain_data_or_raise("w", {"rows": [1, 2]})
+            seeded_states._plain_data_or_raise("w", {"rows": [1, 2]})
         with pytest.raises(RuntimeError, match="not a dict"):
-            suite_conftest._plain_data_or_raise("w", [1, 2])
+            seeded_states._plain_data_or_raise("w", [1, 2])
         # Scalars a builder legitimately returns are accepted unchanged.
         flat = {"a": 1, "b": "x", "c": None, "d": Decimal("1.00")}
-        assert suite_conftest._plain_data_or_raise("w", flat) is flat
+        assert seeded_states._plain_data_or_raise("w", flat) is flat
 
     def test_the_refusal_is_WIRED_into_the_build(
         self, app, db, restore_registry,
@@ -454,29 +455,29 @@ class TestASnapshotDoesNotOutliveItsSession:
         name no test declares, so the real worlds this worker built are left
         alone; the cache is restored either way.
         """
-        throwaway = f"{suite_conftest._WORKER_DB_NAME}__world_x_be_2_probe"
-        suite_conftest._clone_worker_database(
-            throwaway, suite_conftest._WORKER_ADMIN_URL,
+        throwaway = f"{worker_database._WORKER_DB_NAME}__world_x_be_2_probe"
+        worker_database._clone_worker_database(
+            throwaway, worker_database._WORKER_ADMIN_URL,
         )
         assert _database_exists(throwaway)
 
-        real = dict(suite_conftest._SEEDED_STATE_SNAPSHOTS)
-        suite_conftest._SEEDED_STATE_SNAPSHOTS.clear()
-        suite_conftest._SEEDED_STATE_SNAPSHOTS["x_be_2_probe"] = (
+        real = dict(seeded_states._SEEDED_STATE_SNAPSHOTS)
+        seeded_states._SEEDED_STATE_SNAPSHOTS.clear()
+        seeded_states._SEEDED_STATE_SNAPSHOTS["x_be_2_probe"] = (
             throwaway, {},
         )
         try:
-            suite_conftest._drop_seeded_snapshots()
+            seeded_states._drop_seeded_snapshots()
             assert not _database_exists(throwaway), (
                 "session finish left a world snapshot on the cluster; its "
                 "rows are dated from a session that has ended"
             )
-            assert not suite_conftest._SEEDED_STATE_SNAPSHOTS, (
+            assert not seeded_states._SEEDED_STATE_SNAPSHOTS, (
                 "the cache still names a snapshot that no longer exists, so "
                 "a later build would clone from a database that is gone"
             )
         finally:
-            suite_conftest._SEEDED_STATE_SNAPSHOTS.update(real)
-            suite_conftest._drop_worker_database(
-                throwaway, suite_conftest._WORKER_ADMIN_URL,
+            seeded_states._SEEDED_STATE_SNAPSHOTS.update(real)
+            worker_database._drop_worker_database(
+                throwaway, worker_database._WORKER_ADMIN_URL,
             )

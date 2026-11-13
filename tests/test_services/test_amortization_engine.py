@@ -2,16 +2,14 @@
 Tests for the amortization engine service.
 """
 
-import dataclasses
 from datetime import date
 from decimal import Decimal
 from pathlib import Path
 
 import pytest
 
+from app.enums import InterestAccrualConventionEnum
 from app.services.amortization_engine import (
-    PaymentDates,
-    PaymentRecord,
     PayoffRequest,
     PeriodTerms,
     ProjectionInputs,
@@ -37,6 +35,7 @@ def _terms(
         start_date=start_date,
         annual_rate=annual_rate,
         monthly_pi=monthly_pi,
+        convention=InterestAccrualConventionEnum.MONTHLY_1_12,
     )]
 
 
@@ -806,200 +805,12 @@ class TestAmortizationEngineRegression:
             )
 
 
-class TestPaymentDatesValidation:
-    """Tests for PaymentDates dataclass validation.
-
-    Validates that invalid inputs are caught at construction time
-    with clear error messages rather than producing silent wrong
-    results in the schedule loop.
-
-    **These guards were on ``PaymentRecord`` until plan step balance:X-bl-2b**,
-    which made a payment's three dates ONE value that both the priced record
-    and the loader's installment compose.  The tests moved with the guards:
-    grading the dates through a ``PaymentRecord`` wrapper would be grading the
-    wrapper.
-    """
-
-    def test_string_period_start_raises_type_error(self):
-        """String date must be rejected -- only date instances accepted."""
-        with pytest.raises(TypeError, match="period_start must be a date"):
-            PaymentDates(
-                period_start="2026-02-15",
-                due_date=date(2026, 2, 15),
-                settled_on=date(2026, 2, 15),
-            )
-
-    def test_string_due_date_raises_type_error(self):
-        """String due_date must be rejected -- only date instances accepted.
-
-        ``due_date`` is the installment the payment satisfies, and it is a
-        SEPARATE fact from ``period_start`` (the pay period funding it) and from
-        ``settled_on`` (the day its cash moved), so it carries the same
-        construction-time type guard: a value that conflated any two of them,
-        or carried a stringly-typed date, would mis-key every downstream
-        due-month lookup.
-        """
-        with pytest.raises(TypeError, match="due_date must be a date"):
-            PaymentDates(
-                period_start=date(2026, 2, 15),
-                due_date="2026-03-01",
-                settled_on=date(2026, 2, 15),
-            )
-
-    def test_string_settled_on_raises_type_error(self):
-        """String settled_on must be rejected -- only a date or None accepted.
-
-        ``settled_on`` is the replay-vs-projection cut (plan step X-an), so a
-        stringly-typed one would compare against ``as_of`` by lexicographic
-        accident rather than by chronology.  ``None`` is the one non-date value
-        it accepts, and it means the payment has not settled.
-        """
-        with pytest.raises(
-            TypeError, match="settled_on must be a date or None",
-        ):
-            PaymentDates(
-                period_start=date(2026, 2, 15),
-                due_date=date(2026, 2, 15),
-                settled_on="2026-02-15",
-            )
-
-    def test_bool_settled_on_raises_type_error(self):
-        """A bool settled_on must be rejected -- ``True`` is not a day.
-
-        ``settled_on is not None`` is what ``is_confirmed`` reads, so a ``bool``
-        reaching this field would report the value as confirmed and then fail
-        only deep inside the replay, where ``True <= as_of`` raises with no
-        mention of the value that produced it.  The guard earns its place on
-        the value, not on a migration path -- see
-        :meth:`TestPaymentRecordValidation.test_a_bare_date_as_dates_raises_type_error`
-        for why no stale-caller shape reaches a guard like this one.
-        """
-        with pytest.raises(
-            TypeError, match="settled_on must be a date or None",
-        ):
-            PaymentDates(
-                period_start=date(2026, 2, 15),
-                due_date=date(2026, 2, 15),
-                settled_on=True,
-            )
-
-    def test_is_confirmed_is_derived_from_the_settle_day(self):
-        """``is_confirmed`` IS ``settled_on is not None`` -- never stored (X-an).
-
-        The two facts cannot disagree because there is only one of them: a
-        value carrying a day is confirmed, one carrying none is a plan, and
-        there is no third state to validate against.  Pinned so a future edit
-        that re-introduces the boolean has to delete this test to do it.
-        """
-        settled = PaymentDates(
-            period_start=date(2026, 2, 15),
-            due_date=date(2026, 3, 1),
-            settled_on=date(2026, 2, 28),
-        )
-        projected = PaymentDates(
-            period_start=date(2026, 3, 15),
-            due_date=date(2026, 4, 1),
-            settled_on=None,
-        )
-        assert settled.is_confirmed is True
-        assert projected.is_confirmed is False
-        assert "is_confirmed" not in {
-            f.name for f in dataclasses.fields(PaymentDates)
-        }
-
-
-class TestPaymentRecordValidation:
-    """Tests for PaymentRecord dataclass validation.
-
-    What is left on the record itself since plan step balance:X-bl-2b: the
-    AMOUNT, which is the only part of a payment this type adds, and the guard
-    that it was handed a real :class:`PaymentDates` rather than something
-    shaped like one.  The three date guards are
-    :class:`TestPaymentDatesValidation` above.
-    """
-
-    def test_negative_amount_raises_value_error(self):
-        """Negative payment amount is nonsensical and must be rejected."""
-        with pytest.raises(ValueError, match="amount must be >= 0"):
-            PaymentRecord(
-                PaymentDates(
-                    period_start=date(2026, 2, 15),
-                    due_date=date(2026, 2, 15),
-                    settled_on=date(2026, 2, 15),
-                ),
-                amount=Decimal("-100.00"),
-            )
-
-    def test_float_amount_raises_type_error(self):
-        """Float amount is a precision bug and must be rejected."""
-        with pytest.raises(TypeError, match="amount must be a Decimal"):
-            PaymentRecord(
-                PaymentDates(
-                    period_start=date(2026, 2, 15),
-                    due_date=date(2026, 2, 15),
-                    settled_on=date(2026, 2, 15),
-                ),
-                amount=100.00,
-            )
-
-    def test_a_bare_date_as_dates_raises_type_error(self):
-        """A bare ``date`` must be rejected -- only a PaymentDates is accepted.
-
-        The composition's own guard: without it the record constructs and the
-        failure surfaces deep in the replay as a missing ``period_start``
-        attribute, naming neither the record nor the caller that built it.
-
-        **It is NOT the stale-caller case, and a first draft of this docstring
-        said it was.**  The record's fields were ``(payment_date, due_date,
-        settled_on, amount)`` before plan step balance:X-bl-2b and are
-        ``(dates, amount)`` after, so a stale POSITIONAL call raises on ARITY
-        and a stale KEYWORD call raises ``unexpected keyword argument`` -- and
-        neither reaches this guard.  That correction is the same one
-        ``test_bool_settled_on_raises_type_error`` already carried and this
-        step briefly deleted: the guard earns its place on the value, not on a
-        migration path.
-        """
-        with pytest.raises(TypeError, match="dates must be a PaymentDates"):
-            PaymentRecord(
-                date(2026, 2, 15),
-                amount=Decimal("100.00"),
-            )
-
-    def test_zero_amount_valid(self):
-        """Zero amount is valid -- represents a missed payment."""
-        record = PaymentRecord(
-            PaymentDates(
-                period_start=date(2026, 2, 15),
-                due_date=date(2026, 2, 15),
-                settled_on=None,
-            ),
-            amount=Decimal("0.00"),
-        )
-        assert record.amount == Decimal("0.00")
-
-    def test_valid_construction(self):
-        """Valid PaymentRecord construction succeeds."""
-        record = PaymentRecord(
-            PaymentDates(
-                period_start=date(2026, 2, 15),
-                due_date=date(2026, 2, 15),
-                settled_on=date(2026, 2, 15),
-            ),
-            amount=Decimal("1500.00"),
-        )
-        assert record.dates.period_start == date(2026, 2, 15)
-        assert record.amount == Decimal("1500.00")
-        assert record.dates.is_confirmed is True
-        assert "payment_date" not in {
-            f.name for f in dataclasses.fields(PaymentRecord)
-        }
-
-
 class TestRateChangeRecordValidation:
     """Tests for RateChangeRecord dataclass validation.
 
-    Mirrors TestPaymentRecordValidation: validates that invalid inputs
-    are caught at construction time with clear error messages.
+    Validates that invalid inputs are caught at construction time with
+    clear error messages rather than producing silent wrong results in the
+    schedule loop.
     """
 
     def test_negative_rate_raises_value_error(self):
@@ -1048,7 +859,7 @@ class TestPeriodTermsValidation:
     """Construction-time validation for PeriodTerms and the
     ProjectionInputs empty-terms guard.
 
-    Mirrors TestPaymentRecordValidation: invalid data must fail loudly
+    Mirrors TestRateChangeRecordValidation: invalid data must fail loudly
     at construction, not produce a silently wrong schedule.
     """
 
@@ -1059,6 +870,7 @@ class TestPeriodTermsValidation:
                 start_date=date(2026, 1, 1),
                 annual_rate=Decimal("-0.01"),
                 monthly_pi=Decimal("1500.00"),
+                convention=InterestAccrualConventionEnum.MONTHLY_1_12,
             )
 
     def test_negative_pi_raises_value_error(self):
@@ -1068,6 +880,7 @@ class TestPeriodTermsValidation:
                 start_date=date(2026, 1, 1),
                 annual_rate=Decimal("0.06"),
                 monthly_pi=Decimal("-1.00"),
+                convention=InterestAccrualConventionEnum.MONTHLY_1_12,
             )
 
     def test_float_pi_raises_type_error(self):
@@ -1077,6 +890,7 @@ class TestPeriodTermsValidation:
                 start_date=date(2026, 1, 1),
                 annual_rate=Decimal("0.06"),
                 monthly_pi=1500.00,
+                convention=InterestAccrualConventionEnum.MONTHLY_1_12,
             )
 
     def test_string_date_raises_type_error(self):
@@ -1086,6 +900,7 @@ class TestPeriodTermsValidation:
                 start_date="2026-01-01",
                 annual_rate=Decimal("0.06"),
                 monthly_pi=Decimal("1500.00"),
+                convention=InterestAccrualConventionEnum.MONTHLY_1_12,
             )
 
     def test_empty_terms_schedule_rejected(self):
@@ -1280,11 +1095,13 @@ class TestProjectForward:
                         start_date=self.STARTING_DATE,
                         annual_rate=self.RATE,
                         monthly_pi=contractual,
+                        convention=InterestAccrualConventionEnum.MONTHLY_1_12,
                     ),
                     PeriodTerms(
                         start_date=date(2027, 2, 1),
                         annual_rate=Decimal("0.075"),
                         monthly_pi=recast_pi,
+                        convention=InterestAccrualConventionEnum.MONTHLY_1_12,
                     ),
                 ],
             ),
@@ -1332,11 +1149,13 @@ class TestProjectForward:
                         start_date=self.STARTING_DATE,
                         annual_rate=self.RATE,
                         monthly_pi=contractual,
+                        convention=InterestAccrualConventionEnum.MONTHLY_1_12,
                     ),
                     PeriodTerms(
                         start_date=date(2027, 2, 1),
                         annual_rate=Decimal("0.075"),
                         monthly_pi=recorded,
+                        convention=InterestAccrualConventionEnum.MONTHLY_1_12,
                     ),
                 ],
             ),

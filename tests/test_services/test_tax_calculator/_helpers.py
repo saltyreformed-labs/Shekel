@@ -35,7 +35,10 @@ class _FakeChildTier:
 
 
 class FakeFederalRules:
-    """Minimal stand-in for a year's federal rules, an ``app.tax_law.FederalRules``.
+    """Minimal stand-in for a year's federal rules for one filing status.
+
+    What the resolver hands the calculator, an
+    ``app.services.tax_config_service.FederalTaxRules``.
 
     Bracket data below is for testing only and does not represent
     actual IRS bracket values.
@@ -59,8 +62,9 @@ class FakeFederalRules:
     def withholding_rules(self):
         """The rules withholding prices on: these, as the fake states no withholding figure.
 
-        Mirrors :attr:`app.tax_law.FederalRules.withholding_rules`, which the
-        withholding formula reads (ruling plan#3213).
+        Mirrors
+        :attr:`app.services.tax_config_service.FederalTaxRules.withholding_rules`,
+        which the withholding formula reads (ruling plan#3213).
         """
         return self
 

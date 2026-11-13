@@ -85,7 +85,7 @@
 #
 # Without these three steps the WAN path will 404 and Gunicorn will
 # refuse start (FORWARDED_ALLOW_IPS without a matching reverse-proxy
-# source = no trusted forwarded headers).  See docs/runbook.md "Shared-
+# source = no trusted forwarded headers).  See docs/runbook/2_deployment.md "Shared-
 # mode deployment" for the rollback procedure.
 #
 # USAGE
@@ -103,7 +103,7 @@
 #   docker compose up -d
 #
 # Either invocation must produce the same merged config.  See
-# docs/runbook.md "Shared-mode deployment" for the sync procedure that
+# docs/runbook/2_deployment.md "Shared-mode deployment" for the sync procedure that
 # keeps the on-host override in step with this file.
 #
 # CONTAINER HARDENING INHERITANCE (Commit C-35)
@@ -393,7 +393,7 @@ services:
   #
   # The password file, 0640, and the host copy of deploy/valkey/ are
   # made by scripts/reconcile_prod_to_canonical.sh (steps 3 and 7) on a
-  # fresh host, and by the Valkey cutover (docs/runbook.md 2.6) on the
+  # fresh host, and by the Valkey cutover (docs/runbook/2_deployment.md 2.6) on the
   # host that ran Redis.
   # Mode rationale: compose v2 ignores the uid/gid/mode fields on a file
   # secret's reference; the container sees the HOST file.  The valkey

@@ -127,7 +127,8 @@ def _a_savings_account(seed_user):
     # Its BOOKS open the day before that assertion (plan step X-f3c-2b,
     # ruling **R-HG**): an opening equity is the closing balance for its own
     # day, and this suite's bank lines post on ``bootstrap_period.start_date``
-    # itself.  Same shape ``tests/conftest.py``'s own factories take.
+    # itself.  Same shape the seeded owners' factories take
+    # (``tests/_seed_owner_fixtures.py``, ``tests/_other_user_fixtures.py``).
     open_books_before_the_first_assertion(db.session, account)
     return account
 

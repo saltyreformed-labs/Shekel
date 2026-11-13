@@ -50,7 +50,7 @@ Review: Josh, 2026-11-11 (ruling plan#3497): the drop and re-create of
 ``ck_users_security_event_kind`` approved.
 
 Revision ID: 66184d995b1c
-Revises: 5f2c46a35a79
+Revises: 08fda2e0b18b
 Create Date: 2026-11-10
 """
 from alembic import op
@@ -59,11 +59,11 @@ import sqlalchemy as sa
 
 # Revision identifiers, used by Alembic.
 revision = '66184d995b1c'
-# The head of ``card/2538`` at authoring, measured (236 revisions, one head).
-# Another lane landing a revision first makes two heads, which git merges
-# cleanly and ``flask db upgrade`` refuses: re-point this at the measured head
-# as the last edit before the pull request.
-down_revision = '5f2c46a35a79'
+# The head of ``dev`` when ``card/2538`` merged it on 2026-11-13, measured
+# (one head once this points at it).  Another lane landing a revision first
+# makes two heads, which git merges cleanly and ``flask db upgrade`` refuses:
+# re-point this at the measured head as the last edit before the pull request.
+down_revision = '08fda2e0b18b'
 branch_labels = None
 depends_on = None
 

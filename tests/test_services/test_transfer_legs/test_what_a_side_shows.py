@@ -342,7 +342,8 @@ class TestALegsDisplayProjections:
         ``TestAStillPlannedTransferIsOfferedAsItsLeg`` case
         ``test_each_side_is_offered_on_its_own_account_keyed_by_the_transfer``,
         and a settled one, each side holding its dated record, by
-        ``test_calendar_service.py``'s ``TestATransferIsALegOfItsParent``
+        ``test_calendar_service/test_edge_cases_and_transfers.py``'s
+        ``TestATransferIsALegOfItsParent``
         case ``test_a_settled_leg_is_a_paid_cell_worth_its_record``.  Each
         fails under a side answering its transfer's own name in its corner
         (only where the transfer is saved and the side holds no record, or
@@ -354,7 +355,7 @@ class TestALegsDisplayProjections:
         each side's kept un-dated record (ruling R-BAL61), and a saved
         transfer of a definition, generated or placed.  A side answering its
         transfer's own name only in either state passed every file named
-        here (measured by that fix's review).  ``test_calendar_service.py``'s
+        here (measured by that fix's review).  ``test_calendar_service/test_month_detail.py``'s
         ``TestDayAssignment::test_due_date_none_fallback``,
         ``test_spending_report_service.py``'s
         ``TestATransferIsALegOfItsParent`` and

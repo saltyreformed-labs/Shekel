@@ -55,13 +55,30 @@ nothing would differ if the gate followed it -- when the check lived on the
 view it DID follow it, the view being dispatched after every hook.  The
 order is pinned so that it is one thing, in
 ``tests/test_routes/test_auth_required.py``.
+
+**A signed-in user who must have two-factor and has not set it up is held at
+its setup** (ruling plan#3434: every companion must use two-factor, and there
+is no switch).  Such a user reaches the endpoints in
+:data:`TWO_FACTOR_SETUP_ENDPOINTS` -- setup, its confirmation, and signing out
+-- and the public ones, and nothing else: every other request is sent to
+setup without running, an htmx one by ``HX-Redirect``
+(:func:`~app.utils.auth_helpers.full_page_redirect`), so a POST is never
+performed.  The check is per request and reads the database's answer, so a
+session signed in before the rule existed is held at its next request like a
+fresh sign-in, and a user whose two-factor is cleared (``scripts/reset_mfa.py``,
+which ends their sessions too) meets the hold at their next sign-in.  Who
+must have it is :attr:`~app.models.user.User.must_have_two_factor`, its one
+home, so this module never reads the role.  An unmatched URL is held too, as
+an anonymous one is bounced: the hold has no exception the route table does
+not name.
 """
 
-from flask import request
+from flask import Response, request, url_for
 from flask_login import current_user
 from flask_login.config import EXEMPT_METHODS
 
 from app.extensions import login_manager
+from app.utils.auth_helpers import full_page_redirect
 
 #: Every endpoint an anonymous visitor may reach, by ENDPOINT NAME -- the
 #: whole of the policy.  Keyed by endpoint rather than by path for the reason
@@ -95,9 +112,36 @@ PUBLIC_ENDPOINTS = frozenset({
     "static_pass.service_worker",
 })
 
+#: What a signed-in user who owes two-factor may reach beside the public
+#: endpoints, by ENDPOINT NAME (ruling plan#3434): the setup page, the POST
+#: that confirms it, and signing out.  ``tests/test_routes/test_auth_required.py``
+#: pins this set's exact contents and that every name resolves, as it does
+#: :data:`PUBLIC_ENDPOINTS`.
+TWO_FACTOR_SETUP_ENDPOINTS = frozenset({
+    "auth.mfa_setup",
+    "auth.mfa_confirm",
+    "auth.logout",
+})
+
+
+def _hold_at_two_factor_setup() -> Response:
+    """Send a user who owes two-factor to its setup, the request not performed.
+
+    The one answer the hold ends a request with, so a test observes the
+    hold's decision by counting calls here, as the anonymous sweep counts
+    :meth:`~flask_login.LoginManager.unauthorized`.
+
+    Returns:
+        The redirect to ``/mfa/setup``, by ``HX-Redirect`` for htmx.
+    """
+    return full_page_redirect(url_for("auth.mfa_setup"))
+
 
 def register_login_gate(app):
     """Refuse every request that is not authenticated and not declared public.
+
+    And hold a signed-in user who owes two-factor at its setup (the module
+    docstring says what that lets through).
 
     Args:
         app: The Flask application being built.  The hook reads ITS config
@@ -108,18 +152,23 @@ def register_login_gate(app):
 
     @app.before_request
     def _require_login():
-        """Bounce an anonymous request unless its endpoint is public.
+        """Bounce an anonymous request unless its endpoint is public; hold one owing two-factor.
 
         Returns:
-            ``None`` to let the request through, or the login redirect
-            :meth:`~flask_login.LoginManager.unauthorized` builds -- a
-            ``before_request`` hook returning a response ends the request
-            there, which is what stops every later hook and the view.
+            ``None`` to let the request through, the login redirect
+            :meth:`~flask_login.LoginManager.unauthorized` builds, or the
+            hold's redirect to two-factor setup -- a ``before_request`` hook
+            returning a response ends the request there, which is what stops
+            every later hook and the view.
         """
         if request.method in EXEMPT_METHODS or app.config.get("LOGIN_DISABLED"):
             return None
         if request.endpoint in PUBLIC_ENDPOINTS:
             return None
-        if current_user.is_authenticated:
+        if not current_user.is_authenticated:
+            return login_manager.unauthorized()
+        if request.endpoint in TWO_FACTOR_SETUP_ENDPOINTS:
             return None
-        return login_manager.unauthorized()
+        if current_user.must_have_two_factor and not current_user.has_two_factor:
+            return _hold_at_two_factor_setup()
+        return None

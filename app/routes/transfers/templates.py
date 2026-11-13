@@ -17,6 +17,7 @@ again.
 """
 
 import logging
+from typing import Any
 
 from flask import Response, abort, flash, redirect, render_template, request, url_for
 from flask_login import current_user
@@ -35,7 +36,8 @@ from app.services import (
     category_service,
     template_amount_service,
 )
-from app.services.pay_calendar import calendar_for
+from app.services.pay_calendar import DerivedPeriod, calendar_for
+from app.services.recurrence import RecurrenceSubmission
 from app.routes._commit_helpers import (
     STALE_EDITING_MESSAGE,
     StaleConflictContext,
@@ -52,7 +54,6 @@ from app.services.balance_at import BalanceContext
 from app.routes._recurrence_conflict_chooser import PreEditTemplateState
 from app.routes._recurrence_form_helpers import (
     author_recurrence_for_create,
-    recurrence_spec_for_create,
     resolve_recurrence_rule_for_update,
 )
 from app.routes._recurrence_form_refusals import (
@@ -66,7 +67,7 @@ from app.routes._recurrence_form_render import (
 )
 from app.routes._form_errors import load_form_or_redirect
 from app.routes._redirect_target import RedirectTarget
-from app.schemas.validation import RECURRENCE_END_BOUND_KEY
+from app.schemas.validation import RECURRENCE_SUBMISSION_KEY
 from app.routes._loan_destination import (
     loan_destination_locks,
     loan_destination_locks_for_edit,
@@ -206,7 +207,11 @@ def new_transfer_template():
     )
 
 
-def _settle_create_references(data, start_period_id):
+def _settle_create_references(
+    data: dict[str, Any],
+    submission: RecurrenceSubmission,
+    start_period_id: int | None,
+) -> tuple[DerivedPeriod | None, RecurrenceSubmission | Response]:
     """Refuse, or settle, everything the create payload REFERS to.
 
     One step rather than three consecutive guards, and the reason is the route
@@ -255,17 +260,21 @@ def _settle_create_references(data, start_period_id):
        just proved are the owner's -- reading them first would be an IDOR.
 
     Args:
-        data: The validated payload, mutated in place by step 3.
+        data: The validated payload, read for the references it names.
+        submission: What the form stated about the recurrence
+            (:class:`~app.services.recurrence.RecurrenceSubmission`), already
+            popped from *data* by the caller; step 3 settles it.
         start_period_id: The submitted pay period, already popped from *data*
             by the caller, or ``None``.
 
     Returns:
-        ``(start_period, refusal)``.  *start_period* is the resolved
+        ``(start_period, settled)``.  *start_period* is the resolved
         :class:`~app.services.pay_calendar.DerivedPeriod` the caller threads to
         :func:`~._instances.materialize_initial_transfers`, or ``None`` when
-        the submission named no period.  *refusal* is ``None`` when every
-        reference checks out and *data* is ready to build, else the redirect
-        the caller returns verbatim.
+        the submission named no period.  *settled* is the submission the
+        create authors from once every reference checks out (step 3's,
+        with a loan's derived start stated in it), else the redirect the
+        caller returns verbatim.
 
     Raises:
         PayCalendarError: When the owner holds no pay schedule, from the
@@ -292,7 +301,9 @@ def _settle_create_references(data, start_period_id):
             return None, redirect(url_for("transfers.new_transfer_template"))
 
     return start_period, settle_first_occurrence(
-        data, redirect=RedirectTarget("transfers.new_transfer_template"),
+        submission,
+        to_account_id=data["to_account_id"],
+        redirect=RedirectTarget("transfers.new_transfer_template"),
     )
 
 
@@ -326,12 +337,17 @@ def create_transfer_template():
     data = payload
 
     start_period_id = data.pop("start_period_id", None)
-    start_period, refusal = _settle_create_references(data, start_period_id)
-    if refusal is not None:
-        return refusal
+    # What the form stated about the recurrence: the schema consumed every
+    # recurrence key into ONE submission (plan step R7e), popped here so the
+    # TransferTemplate constructor below receives no stray kwarg.
+    start_period, settled = _settle_create_references(
+        data, data.pop(RECURRENCE_SUBMISSION_KEY), start_period_id,
+    )
+    if isinstance(settled, Response):
+        return settled
 
-    # Create the recurrence rule via the F-24 preamble, or NO rule when the
-    # form says "Does not repeat".  ``rule is None`` is the one-time transfer
+    # The spec the settled submission authors, or NO rule when the form says
+    # "Does not repeat".  ``rule is None`` is the one-time transfer
     # since plan step R2e-3 -- the same shape a one-time transaction template
     # has always had -- and it is the create form's DEFAULT selection.
     #
@@ -342,11 +358,7 @@ def create_transfer_template():
     # ``AttributeError: 'NoneType' object has no attribute 'id'`` -- a 500
     # (defect **D13**), measured on both the absent and the empty spelling.
     new_form = RedirectTarget("transfers.new_transfer_template")
-    spec = recurrence_spec_for_create(
-        data,
-        user_id=current_user.id,
-        redirect=new_form,
-    )
+    spec = settled.authored(current_user.id)
 
     # The form's Amount is ``amount`` since plan step X-bp, which is not a
     # column: it is the price the series opens at below, the definition's
@@ -471,8 +483,8 @@ def update_transfer_template(template_id):
     one-time transfer into one, or a repeating transfer moved onto one --
     takes the create door's two loan-destination rules through
     :func:`~app.routes._loan_destination.settle_destination_for_update`,
-    which derives the first occurrence into the payload and decides the
-    closing bound the write states; and a loan's standing payment cannot be
+    which states in the submission the derived first occurrence and the
+    closing bound the write carries; and a loan's standing payment cannot be
     moved off its loan at all (ruling **R-R76**).  The FK ownership check
     therefore runs FIRST, because that settle reads the destination's loan
     terms.
@@ -521,11 +533,11 @@ def update_transfer_template(template_id):
     # schema (plan step R7b-4 moved it there from the shared recurrence
     # mixin), so a submission can still carry it and the pop is still needed.
     data.pop("start_period_id", None)
-    # The closing bound, composed by the schema's ``@post_load`` into ONE
-    # value under the mode key.  ABSENT when the form stated no bound --
-    # a disabled control, or a partial update -- which the helpers read as
-    # "leave the stored one alone" (plan step R7b-3).
-    end_bound = data.pop(RECURRENCE_END_BOUND_KEY, None)
+    # What the form stated about the recurrence, which the schema's
+    # ``@post_load`` consumed every recurrence control into (plan step R7e):
+    # each field stated, cleared or not mentioned -- a disabled control, or a
+    # partial update, which the helpers read as "leave the stored one alone".
+    submission = data.pop(RECURRENCE_SUBMISSION_KEY)
 
     # The template's before-image, captured BEFORE anything overwrites it
     # (plan step R2e-1).  ``had_recurrence_rule`` is what lets the
@@ -586,31 +598,26 @@ def update_transfer_template(template_id):
     stranding = StrandingCheck.before_the_edit(template, pass_ctx)
     # The pre-write recurrence step, in two halves that share one refusal.
     # FIRST what the destination the edit LEAVES decides about the rule's
-    # bounds (plan step R7d-f-4): the derived first occurrence is written
-    # into ``data`` for the second half to read, and the closing bound the
-    # write states comes back settled (rulings **R-R76**, **R-R77**).  THEN
-    # re-point, rebuild, or clear the recurrence rule from the update payload
-    # (F-24): the helper dispatches the existing-rule (mutate in place) vs
-    # no-existing-rule (build + link) branches and pops every recurrence key
-    # from ``data``.
+    # bounds (plan step R7d-f-4): the submission comes back settled, the
+    # derived first occurrence and the closing bound the write states in it
+    # (rulings **R-R76**, **R-R77**).  THEN re-point, rebuild, or clear the
+    # recurrence rule from the settled submission (F-24): the helper
+    # dispatches the existing-rule (mutate in place) vs no-existing-rule
+    # (build + link) branches.
     #
     # Ahead of both, a typed amount on a derive-mode loan payment is refused:
     # it states no price, and its form shows no Amount box (ruling plan#2694).
     refusal = refuse_a_typed_worked_out_amount(template, data, edit_form)
     if refusal is None:
-        end_bound, refusal = settle_destination_for_update(
-            template, data,
-            end_bound=end_bound, pass_ctx=pass_ctx, redirect=edit_form,
+        settled = settle_destination_for_update(
+            template, data, submission, pass_ctx=pass_ctx, redirect=edit_form,
         )
-    if refusal is None:
-        refusal = resolve_recurrence_rule_for_update(
-            template,
-            data,
-            ctx=RecurrenceFormContext(
-                end_bound=end_bound,
-                redirect=edit_form,
-            ),
-            pass_ctx=pass_ctx,
+        refusal = settled if isinstance(settled, Response) else (
+            resolve_recurrence_rule_for_update(
+                template,
+                ctx=RecurrenceFormContext(submission=settled, redirect=edit_form),
+                pass_ctx=pass_ctx,
+            )
         )
     if refusal is not None:
         return refusal

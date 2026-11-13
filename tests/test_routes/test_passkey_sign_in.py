@@ -47,6 +47,7 @@ from tests._passkeys import (
     passkey_row,
     post_answer,
 )
+from tests._seed_owner_fixtures import SEED_USER_EMAIL, SEED_USER_PASSWORD
 from tests._sign_in import browser_count, make_known
 from tests._test_helpers import (
     HeldOwnerKey,
@@ -57,7 +58,6 @@ from tests._test_helpers import (
     enable_mfa,
     owner_lock_key,
 )
-from tests.conftest import SEED_USER_EMAIL, SEED_USER_PASSWORD
 
 #: The sentence every refusal but a lapsed ceremony's says: one for a passkey
 #: no account holds, one that does not verify, one of a disabled account, so

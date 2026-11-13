@@ -54,7 +54,7 @@
 #                       Overview > Application Audience (AUD) Tag.
 #                       64-character hex string.
 #
-# See docs/runbook.md for the full step-by-step setup procedure.
+# See docs/runbook/6_cloudflare.md for the full step-by-step setup procedure.
 
 # ── Tunnel Identity ──────────────────────────────────────────────
 # The tunnel UUID, assigned when the tunnel is created.
@@ -147,7 +147,7 @@ ingress:
       #   Zero Trust > Access > Applications > Add an application
       #   > Self-hosted > <DOMAIN>
       # under a policy that restricts the Allowed Users list to the
-      # operator's email(s).  See docs/runbook.md §6.4 for the
+      # operator's email(s).  See docs/runbook/6_cloudflare.md §6.4 for the
       # dashboard procedure.
       #
       # The ``audTag`` (Application Audience tag) is a 64-character

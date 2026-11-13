@@ -21,7 +21,7 @@ useDefault = true
 description = "Test fixtures, local .env"
 paths = [
   '''(^|/)\.env$''',
-  '''tests/conftest\.py$''',
+  '''tests/_seed_owner_fixtures\.py$''',
   '''tests/test_config/_helpers\.py$''',
   '''tests/test_models/test_account_anchor_invariant\.py$''',
   '''tests/test_routes/test_errors\.py$''',

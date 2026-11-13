@@ -8,8 +8,9 @@ paths:
 # Deployment and compose rules
 
 Docker container (Gunicorn + Nginx + Cloudflare Tunnel) on bare-metal Arch Linux.
-No Ubuntu packages, no exposed ports, no systemd. `.env` config: `DATABASE_URL`,
-`SECRET_KEY`, `TOTP_ENCRYPTION_KEY`.
+No Ubuntu packages, no exposed ports, no systemd. `.env` config: `.env.example`
+lists every key, and compose refuses to start without each one it requires
+(`${VAR:?...}`).
 
 ## Compose conventions (use these on every new service)
 

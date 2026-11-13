@@ -9,15 +9,8 @@ paths:
 Must-knows for models and migrations. Full standards: `docs/coding-standards.md`
 (SQL / Database, Migrations, Audit Triggers).
 
-## Query safety
-
-- **Every query touching user data filters by `user_id`** -- a missing ownership
-  check is an IDOR vulnerability. Security response: 404 for both "not found" and
-  "not yours" (no existence oracle).
-- **Filter soft-deleted rows:** `.filter(Model.is_deleted.is_(False))` unless
-  deleted rows are explicitly needed.
-- **ORM only**, no raw SQL strings. Prevent N+1 with `joinedload` /
-  `selectinload` on the grid route and balance calculator especially.
+Query safety (the `user_id` filter, the 404 rule, soft-deleted rows, ORM only)
+is in `.claude/rules/coding.md`, which loads for every file under `app/`.
 
 ## Schema design
 

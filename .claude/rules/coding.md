@@ -57,6 +57,22 @@ checkers, CI); fix what a gate flags at the root, never with a bare disable.
   -> a `` # Pylint: ``rule`` -- why `` comment immediately above the line. Name every
   disabled rule. Full spec in `docs/coding-standards.md`.
 
+## Routes, queries and security
+
+- **Every route is behind the login gate** (`app/login_gate.py`): no view carries
+  `@login_required`, and a route that must be public is named in `PUBLIC_ENDPOINTS`
+  (gate: `tests/test_arch/test_the_login_gate_has_one_home.py`).
+- **Every query touching user data filters by `user_id`** -- a missing ownership
+  check is an IDOR vulnerability. The ownership helpers are in
+  `app/utils/auth_helpers.py`. Security response: 404 for both "not found" and
+  "not yours" (no existence oracle).
+- **Filter soft-deleted rows:** `.filter(Model.is_deleted.is_(False))` unless
+  deleted rows are explicitly needed.
+- **ORM only**, no raw SQL strings. Prevent N+1 with `joinedload` /
+  `selectinload`, on the grid route and the balance reads (`app/services/balance_at/`)
+  especially.
+- **Structured logging** through `log_event()` (`app/utils/log_events.py`).
+
 ## Reference tables
 
 IDs and enums drive logic; `.name` strings are display only. Never compare a

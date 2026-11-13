@@ -26,7 +26,7 @@ report first.
 
 4. Invoke the `code-reviewer` subagent (via the Task tool) on the diff for the
    judgment-level review the linters cannot do (float-on-money boundaries,
-   user-scoping/IDOR, transfer invariants, DRY/SOLID, test quality).
+   user-scoping/IDOR, CLAUDE.md's transfer rules, DRY/SOLID, test quality).
 
 5. Summarize: what passed, what failed (with output), and the single most
    important thing to address. If everything is green and the review is clean,

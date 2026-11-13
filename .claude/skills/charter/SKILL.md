@@ -10,8 +10,8 @@ description: >
 
 # The work charter
 
-CLAUDE.md's Rules and How work lands sections govern this task; re-read them now if this session
-has not. Then hold the work to this brief:
+CLAUDE.md's Rules and Multi-session operation sections govern this task; re-read them now if this
+session has not. Then hold the work to this brief:
 
 0. **Resume from the card.** A fresh session whose prompt is `Resume plan#T`, the line `/handoff`
    leaves, starts here. `python -m tools.quill.quill show plan#T` prints T and the stop's newest
@@ -93,9 +93,9 @@ has not. Then hold the work to this brief:
    open finding neither marked fixed nor handed on, and it refuses a change to what production
    runs, beyond its pinned versions, that writes no card's done file. Its module docstring states
    every rule. The queue tests the pull request on top of `dev`, and a classifier refusal of the
-   enqueue is a question, never a detour (CLAUDE.md, How work lands). Pushing a branch to back up
-   work is fine. Suite runs need no slot -- each gets its own cluster -- but the wrapper names any
-   peer run it can see, and a gating run of yours slows theirs.
+   enqueue is a question, never a detour (CLAUDE.md, Multi-session operation). Pushing a branch to
+   back up work is fine. Suite runs need no slot -- each gets its own cluster -- but the wrapper
+   names any peer run it can see, and a gating run of yours slows theirs.
 7. **Ask.** An unanswered design question is a STOP, not a fork to take unilaterally. Ask questions
    if anything is unclear.
 8. **Read and answer Josh's comments.** He leaves a comment on a card for the session working it;

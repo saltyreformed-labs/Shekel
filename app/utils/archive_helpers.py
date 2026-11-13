@@ -279,7 +279,8 @@ def transfers_holding_movements(*transfer_scope: ColumnElement) -> HeldMovements
 
     The recurring-transfer permanent delete's refusal
     (:func:`transfer_template_holding_movements`) and the transfer archive's
-    receipt (``routes/transfers/lifecycle._archive``) ask it.  Over
+    receipt (``routes/_transfer_lifecycle.archive_transfer_definition``) ask
+    it.  Over
     the one ``transfer_legs`` join the pay-period doors' question reads
     (:func:`~app.services.transfer_legs.held_transfer_entries`, ruling
     **R-BAL125**), and counted by TRANSFER, so a transfer whose two legs

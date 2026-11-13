@@ -208,8 +208,8 @@ class TestArchivePromotesTheNextOldest:
         the standing payment is inactive with its projected rows retired.
 
         NEGATIVE CONTROL: delete the ``sync_loan_payment_start_or_refuse``
-        call from ``lifecycle._archive`` and the promoted start stays the
-        owner's -- the hole this leaf closes.
+        call from ``_transfer_lifecycle.archive_transfer_definition`` and the
+        promoted start stays the owner's -- the hole this leaf closes.
         """
         with app.app_context():
             loan = _mortgage(seed_user)
@@ -243,8 +243,8 @@ class TestArchivePromotesTheNextOldest:
         Until the review this door moved the rule and left the rows, so the
         grid and the Recurring surface disagreed until the next edit.
 
-        NEGATIVE CONTROL: pass ``rows_follow=False`` from ``_archive`` and
-        the 15th rows stay.
+        NEGATIVE CONTROL: pass ``rows_follow=False`` from
+        ``archive_transfer_definition`` and the 15th rows stay.
         """
         with app.app_context():
             loan = _mortgage(seed_user)
@@ -321,8 +321,9 @@ class TestArchivePromotesTheNextOldest:
         same probe against ``b58df005`` answered ``StaleDataError`` (measured
         while this leaf was built).
 
-        NEGATIVE CONTROL: replace ``flush_or_handle_stale`` in ``_archive``
-        with a bare ``db.session.flush()`` and this is a 500.
+        NEGATIVE CONTROL: replace ``flush_or_handle_stale`` in
+        ``archive_transfer_definition`` with a bare ``db.session.flush()`` and
+        this is a 500.
         """
         import app.routes.transfers.lifecycle as lifecycle  # pylint: disable=import-outside-toplevel
 
@@ -525,7 +526,8 @@ class TestHardDeletePromotesOnBothArms:
         (``archive_helpers.transfer_template_has_paid_history``), forced
         ``True`` the way the hard-delete defense-in-depth case forces it
         ``False``: what this case grades is that the fallback arm reaches
-        ``_archive`` and its promotion, not how history is detected.
+        ``archive_transfer_definition`` and its promotion, not how history is
+        detected.
         """
         with app.app_context():
             loan = _mortgage(seed_user)

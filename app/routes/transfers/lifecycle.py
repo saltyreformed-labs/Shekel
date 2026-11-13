@@ -16,8 +16,11 @@ still stand for it.  Archiving soft-deletes its projected rows that hold
 nothing (through the transfer service), unarchiving restores them and fills
 forward, and hard-delete either destroys the unsettled rows with the
 template or -- where settled history stands, or a leg holds a payment (plan
-step ``credit_card:CC-5-4a-4``) -- falls back to the archive
-(:func:`_archive`, the one spelling both archive arms share).  What the
+step ``credit_card:CC-5-4a-4``) -- falls back to the archive.  The archive
+and the unarchive are each ONE act, in :mod:`app.routes._transfer_lifecycle`
+since task plan#3697, because an account's archive and unarchive perform them
+too, for a card's one payment; the archive's two arms here have shared it
+since plan step R7d-g-2.  What the
 template IS (its CRUD routes, its form payload, its recurrence rule) stays in
 ``templates.py``, and what happens to a NON-repeating template's single row on
 an edit is :mod:`app.routes.transfers._instances`.
@@ -62,23 +65,16 @@ from app.routes._commit_helpers import (
     commit_or_handle_stale,
     flush_or_handle_stale,
 )
-from app.routes._recurrence_conflict_chooser import PreEditTemplateState
 from app.routes._redirect_target import RedirectTarget
-from app.routes._standing_payment import (
-    regenerate_or_refuse,
-    sync_loan_payment_start_or_refuse,
+from app.routes._standing_payment import sync_loan_payment_start_or_refuse
+from app.routes._transfer_lifecycle import (
+    archive_transfer_definition,
+    unarchive_transfer_definition,
 )
 from app.routes.transfers._bp import transfers_bp
-from app.services import (
-    definition_unarchive,
-    template_amount_service,
-    transfer_service,
-)
-from app.services.balance_at import BalanceContext
+from app.services import transfer_service
 from app.utils import archive_helpers
 from app.utils.auth_helpers import get_or_404, require_owner
-from app.utils.balance_predicates import is_projected_clause
-from app.utils.dates import display_today
 
 logger = logging.getLogger(__name__)
 
@@ -97,88 +93,16 @@ def _stale_context(log_label, template_id):
     )
 
 
-def _archive(template, ctx):
-    """Archive *template*: stop generation, retire its projected rows, promote the next.
-
-    The one spelling of the archive both :func:`archive_transfer_template`
-    and :func:`hard_delete_transfer_template`'s history arm run (it was
-    written out twice until plan step R7d-g-2).  Three steps, in the one
-    order they can run in:
-
-    1. ``is_active = False``, FLUSHED under the stale guard: the
-       version-pinned ``UPDATE`` lands here, before the service's soft-deletes
-       flush and before anything reads the active set.
-    2. Every projected, non-deleted transfer of the template that HOLDS
-       NOTHING is soft-deleted THROUGH the transfer service, which every
-       write of a transfer goes through (``CLAUDE.md``, Architecture).  Its
-       two shadow transactions went with it (a three-level cascade: template
-       archival -> transfer soft-delete -> shadow soft-delete) until plan
-       step ``balance:X-bi-6-4d-2`` deleted the shadows.  **A transfer
-       either of whose legs holds a payment is kept** (plan step
-       ``credit_card:CC-5-4a-4``, rulings **R-CC63**, **R-CC65**): a
-       Projected leg holds one only as a reverted settle's kept payment, which
-       may still be matched to the bank's line, and a row holding a movement
-       is history the archive leaves as it is
-       (``archive_helpers.transfer_holds_nothing``).  Routed through the
-       centralized ``is_projected_clause`` (D6-09 / MED-02) parameterised on
-       ``Transfer`` so the rule "what does a Projected filter look like in
-       SQL" is shared with the Transaction filter sites.
-    3. The loan this template pays into, if it is one, has its standing
-       payment re-derived (ruling **R-R85**): with this template out of the
-       active set the next-oldest transfer into the loan is PROMOTED and its
-       start becomes the contract's -- honouring a stop its owner authored
-       (ruling **R-R82**), or refusing the archive whole where the derived
-       start would pass that stop.
-
-    Nothing commits here; the caller owns the commit and its own flash.
-
-    Args:
-        template: The owner-checked :class:`TransferTemplate` to archive.
-        ctx: The stale-race context the caller reports through.
-
-    Returns:
-        ``(retired, kept)`` -- the number of projected transfers retired and
-        the :class:`~app.utils.archive_helpers.HeldMovements` of the
-        projected ones kept -- or a refusal :class:`Response` (the stale race,
-        or the promotion's refusal) the caller returns verbatim, the session
-        rolled back.
-    """
-    template.is_active = False
-    stale = flush_or_handle_stale(ctx)
-    if stale is not None:
-        return stale
-
-    projected = (
-        Transfer.transfer_template_id == template.id,
-        is_projected_clause(Transfer),
-        Transfer.is_deleted.is_(False),
-    )
-    kept = archive_helpers.transfers_holding_movements(*projected)
-    transfers_to_delete = (
-        db.session.query(Transfer)
-        .filter(*projected, archive_helpers.transfer_holds_nothing())
-        .all()
-    )
-    for xfer in transfers_to_delete:
-        transfer_service.delete_transfer(xfer.id, current_user.id, soft=True)
-
-    refused = sync_loan_payment_start_or_refuse(
-        template.to_account_id, redirect=_LIST,
-    )
-    if refused is not None:
-        return refused
-    return len(transfers_to_delete), kept
-
-
 @transfers_bp.route("/transfers/<int:template_id>/archive", methods=["POST"])
 @require_owner
 def archive_transfer_template(template_id):
     """Archive a transfer template (stops future generation, keeps history).
 
     Soft-deletes the template's projected transfers that hold nothing,
-    via the transfer service (:func:`_archive`).  Where the template was a
-    loan's standing payment, the next-oldest transfer into that loan is
-    promoted and its start re-derived (:func:`_archive`, ruling **R-R85**).
+    via the transfer service
+    (:func:`~app.routes._transfer_lifecycle.archive_transfer_definition`).  Where the template
+    was a loan's standing payment, the next-oldest transfer into that loan is
+    promoted and its start re-derived (the same act, ruling **R-R85**).
 
     Optimistic locking (commit C-18 / F-010): the template's
     ``version_id`` is enforced by SQLAlchemy on the
@@ -191,7 +115,7 @@ def archive_transfer_template(template_id):
         abort(404)
 
     ctx = _stale_context("archive_transfer_template", template_id)
-    archived = _archive(template, ctx)
+    archived = archive_transfer_definition(template, ctx)
     if not isinstance(archived, tuple):
         return archived
     removed, kept = archived
@@ -215,35 +139,14 @@ def archive_transfer_template(template_id):
 def unarchive_transfer_template(template_id):
     """Unarchive a transfer template.
 
-    Restores the transfers the archive hid, less any the books now drop
-    (rulings **R-PC93**, **R-PC95** and **R-PC96**,
-    :class:`~app.services.definition_unarchive.UnarchiveScope`): a transfer
-    its owner deleted by hand is soft-deleted exactly as the archive hides
-    one, and one the books have passed would come back inside the opening
-    balance, so it stays deleted and the flash names it.  **An unarchive of a
-    template that is not archived restores nothing**: its soft-deleted
-    transfers are its owner's own deletions, and a stale tab's button is the
-    only way to post here for one.  Then --
-    BEFORE anything generates from it -- re-derives the standing payment of
-    the loan it pays into (ruling **R-R85**): the restored definition is that
-    payment once more, or newly if it is older than the live one, and its
-    start is the contract's from this moment.  A stop its owner authored
-    earlier is honoured (ruling **R-R82**); a start that would pass it
-    refuses the unarchive whole.  This is where plan ledger row **REC-522**'s
-    start half closes: until plan step R7d-g-2 the restored rule regenerated
-    from whatever start it stored, with no sync.
-
-    **The rows are then brought in line by the MAINTAIN pass, not a plain
-    fill-forward** (developer 2026-09-13, after this leaf's adversarial
-    review).  Restored rows sit on the dates the rule named when it was
-    archived; where the sync has just moved the rule -- a promoted second
-    transfer restored as the standing payment -- a fill-forward wrote the
-    contract's dates BESIDE them, two debits a month.  The maintain pass
-    (``_standing_payment.regenerate_or_refuse``, ruling **R-R19**'s) keeps
-    the rows the rule still names, creates the missing ones and retires the
-    rest unless they carry the owner's records, from the owner's civil day
-    forward -- for a rule that did not move, exactly the fill-forward it
-    replaces.
+    The act is :func:`~app.routes._transfer_lifecycle.unarchive_transfer_definition`,
+    the one an account's unarchive calls for its card's payment too (task
+    plan#3697): refused while either account is archived, then the transfers
+    the archive hid restored, less any the books now drop (the flash names
+    them), the loan's standing payment re-derived, and the rows maintained.
+    **An unarchive of a template that is not archived restores nothing**: its
+    soft-deleted transfers are its owner's own deletions, and a stale tab's
+    button is the only way to post here for one.
 
     Optimistic locking: see :func:`archive_transfer_template`.
     """
@@ -258,53 +161,11 @@ def unarchive_transfer_template(template_id):
         )
         return redirect(url_for("transfers.list_transfer_templates"))
 
-    # What comes back and what stays deleted: the ONE scope the books
-    # refusals count too (``definition_unarchive``), read on a PRE-WRITE pass
-    # before anything is restored.  The maintain pass below builds its own.
-    unarchive = definition_unarchive.unarchive_scope_on(
-        template, BalanceContext.build(current_user.id),
-    )
-    stays_deleted = definition_unarchive.stays_deleted_notice(unarchive)
-
     ctx = _stale_context("unarchive_transfer_template", template_id)
-    template.is_active = True
-    stale = flush_or_handle_stale(ctx)
-    if stale is not None:
-        return stale
-
-    transfers_to_restore = (
-        db.session.query(Transfer).filter(*unarchive.restores()).all()
-    )
-
-    # Restore transfers via the service so all mutations
-    # flow through the single enforcement point (design doc section 4.1).
-    for xfer in transfers_to_restore:
-        transfer_service.restore_transfer(xfer.id, current_user.id)
-
-    restored_count = len(transfers_to_restore)
-
-    # ``rows_follow=False``: the pass just below brings this definition's
-    # rows along whether or not the sync moved it.
-    refused = sync_loan_payment_start_or_refuse(
-        template.to_account_id, redirect=_LIST, rows_follow=False,
-    )
-    if refused is not None:
-        return refused
-
-    if template.recurs:
-        refused = regenerate_or_refuse(
-            template,
-            PreEditTemplateState(
-                series=template_amount_service.series_image(template),
-                had_recurrence_rule=True,
-                # A transfer names two accounts; no account question is asked.
-                account_id=None,
-            ),
-            display_today(),
-            redirect=_LIST,
-        )
-        if refused is not None:
-            return refused
+    unarchived = unarchive_transfer_definition(template, ctx)
+    if not isinstance(unarchived, tuple):
+        return unarchived
+    restored_count, stays_deleted = unarchived
 
     conflict = commit_or_handle_stale(ctx)
     if conflict is not None:
@@ -342,7 +203,7 @@ def hard_delete_transfer_template(template_id):
 
     Both paths can take a loan's standing payment out of the active set, so
     both re-derive that loan's standing payment afterwards (ruling
-    **R-R85**): the history arm through :func:`_archive`, the no-history arm
+    **R-R85**): the history arm through the archive act, the no-history arm
     once the template's ``DELETE`` has flushed.  Decomposed into the two arms
     at plan step R7d-g-2, when that second sync made a seventh return.
 
@@ -391,7 +252,8 @@ def _archive_instead_of_delete(template, template_id, refusal):
     A template with settled history, or a transfer holding a payment, is
     never destroyed; it is archived in place of the deletion the owner asked
     for -- if it was still active -- and the flash says why, once the
-    archive has committed.  The archive is :func:`_archive`'s, promotion
+    archive has committed.  The archive is
+    :func:`~app.routes._transfer_lifecycle.archive_transfer_definition`, promotion
     included, so a transfer holding a payment stays live.
 
     Args:
@@ -406,7 +268,7 @@ def _archive_instead_of_delete(template, template_id, refusal):
         ctx = _stale_context(
             "hard_delete_transfer_template archive-fallback", template_id,
         )
-        archived = _archive(template, ctx)
+        archived = archive_transfer_definition(template, ctx)
         if not isinstance(archived, tuple):
             return archived
         conflict = commit_or_handle_stale(ctx)

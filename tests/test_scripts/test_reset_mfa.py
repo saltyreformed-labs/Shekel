@@ -15,7 +15,9 @@ import pytest
 from app.models.user import MfaConfig, User
 from app.services import mfa_service
 from scripts.reset_mfa import parse_args, reset_mfa
+from tests._request_race import race_two_requests, signed_in_clients
 from tests._test_helpers import store_backup_codes
+from tests._two_factor_sign_in import two_factor_row_of
 
 #: Backup codes the owner's row holds, so a reset has them to clear.
 _BACKUP_CODES = ["aaaaaaaa", "bbbbbbbb"]
@@ -275,6 +277,56 @@ class TestResetMfa:
             assert config.totp_secret_encrypted is None
             assert config.backup_codes is None
             assert config.confirmed_at is None
+
+
+def _run_the_reset(app, email):
+    """Run the script's reset for *email* in an app context of its own, as the script runs it.
+
+    Its own session and connection, so the race below meets it as production
+    does: a process beside the app's, holding no request.
+    """
+    with app.app_context():
+        reset_mfa(email)
+
+
+class TestTheResetWaitsForASaveInFlight:
+    """The reset takes every account's write lock before it reads anything (ruling plan#3823)."""
+
+    def test_a_reset_during_regenerate_lands_after_it(self, app, seed_user):
+        """A reset started while Regenerate backup codes saves waits for it, then clears its codes.
+
+        Without the lock the reset committed between the login gate's read of
+        the two-factor row and Regenerate's write, and Regenerate wrote ten
+        new backup codes back onto the row the reset had just cleared
+        (measured 2026-11-13, plan#3775).  With it the reset waits on the
+        owner's lock the save holds, and runs once the save has committed,
+        so the row ends reset, with none of the save's codes.
+        """
+        with app.app_context():
+            # Read here: each side of the race runs on a thread with no app
+            # context, where an expired instance cannot refresh itself.
+            owner_id, email = seed_user["user"].id, seed_user["user"].email
+            (browser,) = signed_in_clients(app, count=1)
+
+            save, reset = race_two_requests(
+                app, owner_id,
+                lambda: browser.post("/mfa/regenerate-backup-codes"),
+                lambda: _run_the_reset(app, email),
+            )
+
+            assert reset.waited, (
+                "the reset did not wait on the owner's write lock the save held, "
+                "so it could commit partway through the save"
+            )
+            assert save.response.status_code == 200
+            assert b"Save Your Backup Codes" in save.response.data
+            row = two_factor_row_of(owner_id)
+            assert row.is_enabled is False
+            assert row.totp_secret_encrypted is None
+            assert row.backup_codes is None, (
+                f"the row the reset cleared holds {len(row.backup_codes)} backup "
+                f"codes: the save wrote them after the reset"
+            )
 
 
 class TestParseArgs:

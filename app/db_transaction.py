@@ -199,8 +199,9 @@ and Alembic hold no request, so nothing here locks for them: the three deploy
 reconciles lock every owner at their own start
 (:func:`app.services.user_write_lock.lock_every_user_writes`), and a script
 that writes an existing owner's data must take that owner's lock at its own
-start in the same way -- four operator scripts do not yet
-(:mod:`app.services.user_write_lock` names them).
+start in the same way, as the two-factor reset does (ruling plan#3823) --
+three operator scripts do not yet (:mod:`app.services.user_write_lock` names
+them).
 
 **What this module does NOT do**, said here because the boundary is worth
 knowing rather than discovering: a COMMAND's own re-render still reads at

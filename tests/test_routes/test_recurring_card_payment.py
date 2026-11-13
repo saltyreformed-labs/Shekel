@@ -20,7 +20,7 @@ from tests.test_services.test_the_recurring_page_counts_a_card_bill_once import 
     _plain_transfer,
 )
 
-_NOTE = "Not in the totals: it pays the card's bills, which are"
+_NOTE = "Not in the totals: it pays the card's bills, which the totals count"
 
 
 @pytest.mark.usefixtures("seed_periods_today")

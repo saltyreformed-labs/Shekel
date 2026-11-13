@@ -310,13 +310,70 @@ def _table_globals(table: symtable.SymbolTable) -> set[str]:
     return found
 
 
+#: The statements whose bodies are a scope of their own, so an annotation inside one is not
+#: its enclosing function's.
+_SCOPES = (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
+
+
+def _local_annotations(function: ast.FunctionDef | ast.AsyncFunctionDef) -> list[ast.expr]:
+    """The annotation of each annotated assignment in ``function``'s own body, not in a
+    function or class nested in it."""
+    found = []
+    pending = list(function.body)
+    while pending:
+        node = pending.pop()
+        if isinstance(node, ast.AnnAssign):
+            found.append(node.annotation)
+        elif not isinstance(node, _SCOPES):
+            pending.extend(ast.iter_child_nodes(node))
+    return found
+
+
+def _scopes(text: str, name: str) -> symtable.SymbolTable:
+    """``text``'s symbol table, each local variable's annotation read as a statement of
+    its function.
+
+    Python never evaluates a local variable's annotation (PEP 526), so :mod:`symtable`
+    records no name one reads; a reader and pylint each read them, and a part that
+    dropped such a name's import fails pylint's ``undefined-variable``.  Each annotation
+    is appended to its function's body as an expression statement, so symtable resolves
+    its names as Python would were the annotation evaluated there.  It goes last, after
+    every ``global`` or ``nonlocal`` declaration (a read before one is a SyntaxError);
+    symtable's classification is otherwise flow-insensitive, so the position changes no
+    name's scope.  A string annotation (``made: "Pattern"``) is a constant to symtable and
+    is not parsed here, so the names in one are not counted.
+
+    A block with no local annotation is read as written, and one with any is restated by
+    :func:`ast.unparse`, which recurses in Python: a block nested deeper than it can
+    recurse is refused, not misread.
+    """
+    tree = ast.parse(text, filename=name)
+    found = [(node, _local_annotations(node)) for node in ast.walk(tree)
+             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))]
+    if not any(annotations for _, annotations in found):
+        return symtable.symtable(text, name, "exec")
+    for function, annotations in found:
+        function.body.extend(ast.Expr(value=annotation) for annotation in annotations)
+    try:
+        restated = ast.unparse(tree)
+    except RecursionError as exc:
+        holders = sorted({function.name for function, annotations in found if annotations})
+        raise Refusal(f"the local annotations in {holders} cannot be read: the block nests "
+                      "deeper than ast.unparse recurses") from exc
+    return symtable.symtable(restated, name, "exec")
+
+
 def free_names(text: str) -> frozenset[str]:
     """The module-level names a block of top-level source reads and does not bind itself.
 
     Resolved by :mod:`symtable`, so a local, a parameter or a comprehension variable that
-    shares a module-level name is NOT counted: the scopes are Python's, not a guess.
+    shares a module-level name is NOT counted: the scopes are Python's, not a guess.  A
+    local variable's annotation counts as a read (:func:`_scopes`), though Python never
+    evaluates one: an output's imports need it, and the checks of what a node reaches at
+    run time (a ``globals()`` key's readers, a class member reaching its own class) count
+    it too, so they refuse where only an annotation names the key or the class.
     """
-    top = symtable.symtable(text, "<block>", "exec")
+    top = _scopes(text, "<block>")
     found = {s.get_name() for s in top.get_symbols()
              if s.is_referenced() and not s.is_assigned() and not s.is_imported()}
     for child in top.get_children():
@@ -328,7 +385,7 @@ def member_free_names(member_lines: tuple[str, ...]) -> frozenset[str]:
     """:func:`free_names` for a class member's lines, read inside a stand-in class so the
     class scope is Python's own (a method does not see a class attribute by bare name)."""
     probe = "class _SplitProbe:\n" + "\n".join(member_lines) + "\n"
-    top = symtable.symtable(probe, "<member>", "exec")
+    top = _scopes(probe, "<member>")
     found: set[str] = set()
     for child in top.get_children():
         found |= _table_globals(child)

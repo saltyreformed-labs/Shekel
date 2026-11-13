@@ -5,4 +5,6 @@ publish of that folder (``publish``) and the daily queue (``queue``), by the job
 the update App's token (``app``) and run main's own code and no package code but the
 ``landing`` group's, installed from main's lock, each file checked against its hash; the
 daily issue saying a release is due (``due``, ruling plan#2829) on that code and that group
-with no App's token; and the alert of a failed run (``alert``)."""
+with no App's token; the report of the weekly image scan (``scan``, rulings plan#3710,
+plan#3720), on the lock's interpreter and the standard library alone, with no App's token; and
+the alert of a failed run (``alert``)."""

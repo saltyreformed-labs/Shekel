@@ -92,6 +92,7 @@ INSTALLS = {
     ("updates.yml", "publish"): {"install": "landing"},
     ("updates.yml", "queue"): {"install": "landing"},
     ("updates.yml", "due"): {"install": "landing"},
+    ("updates.yml", "report"): {"install": "python"},
 }
 
 #: The triggers under which a step's PATH write lets a pull request's code run with the

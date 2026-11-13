@@ -30,11 +30,11 @@ from tests._companions import (
     COMPANIONS_PAGE, another_owners_companion, companion_row,
     landed_on_companions, text_of,
 )
-from tests._test_helpers import enable_mfa
+from tests._test_helpers import enable_mfa, store_backup_codes
 from tests._trusted_devices import FIREFOX_LINUX, SAFARI_IPHONE, trust
 from tests._two_factor_sign_in import (
     SEED_COMPANION_EMAIL, code_now, post_her_password, redirect_path,
-    sign_in_seed_companion_by_password, two_factor_row_of,
+    sign_in_seed_companion, sign_in_seed_companion_by_password, two_factor_row_of,
 )
 from tests._seed_owner_fixtures import SEED_USER_EMAIL
 
@@ -51,12 +51,11 @@ def _reset_url(companion_id):
 def _her_browser_with_two_factor(app, companion_id):
     """Return a browser signed in as her, her two-factor on with a backup code.
 
-    She signs in with her password and gets two-factor after: the session
-    then reaches her pages (the hold reads her two-factor on each request),
-    and no code of her secret has been typed.
+    Her shared sign-in, on a browser she trusts, so the session reaches her
+    pages and no code of her secret has been typed.
     """
-    browser = sign_in_seed_companion_by_password(app)
-    enable_mfa(db.session, companion_id, backup_codes=("1234-5678",))
+    browser = sign_in_seed_companion(app)
+    store_backup_codes(db.session, companion_id, ("1234-5678",))
     assert browser.get(_HER_PAGE).status_code == 200
     return browser
 

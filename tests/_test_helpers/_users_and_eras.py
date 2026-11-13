@@ -13,8 +13,9 @@ def enable_mfa(db_session, user_id, backup_codes=()):
     """Turn two-factor on for *user_id* with a fresh secret, and commit.
 
     A FRESH secret per call, so two users (or two tests) never share a
-    replay-prevention step.  Nine files carried a private copy of this before
-    plan#2173 wrote it here; they still do.
+    replay-prevention step.  The one enrolment of a test account: the private
+    copies nine files carried before plan#2173 wrote it here are gone
+    (plan#3600).
 
     **Every shared test account is made with two-factor** (plan#3600): the
     fixture that creates it calls this, as production holds an account without

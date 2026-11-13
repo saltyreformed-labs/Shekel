@@ -24,7 +24,7 @@ from app.models.transaction import Transaction
 from app.models.user import User
 from app.services import mfa_service
 from scripts.reset_mfa import reset_mfa
-from tests._test_helpers import enable_mfa, generate_row_of, make_expense_template
+from tests._test_helpers import generate_row_of, make_expense_template
 from tests.test_routes.test_auth_required import spy_on_the_hold
 from tests._two_factor_sign_in import (
     SEED_COMPANION_EMAIL,
@@ -33,6 +33,7 @@ from tests._two_factor_sign_in import (
     sign_in_seed_companion,
     sign_in_seed_companion_by_password,
     two_factor_row_of,
+    two_factor_secret_of,
 )
 
 _SETUP = "/mfa/setup"
@@ -252,12 +253,12 @@ class TestSheCannotTurnItOff:
 
     @staticmethod
     def _enrolled(app, companion_id):
-        """Her browser, signed in with her password, then given two-factor.
+        """Her browser, signed in through her shared sign-in, and her secret.
 
-        So the one code a case types is the first her secret ever accepts.
+        The sign-in types no code, so the one code a case types is the first
+        her secret ever accepts.
         """
-        browser = sign_in_seed_companion_by_password(app)
-        return browser, enable_mfa(db.session, companion_id)
+        return sign_in_seed_companion(app), two_factor_secret_of(companion_id)
 
     def test_the_disable_page_refuses_her(self, app, seed_companion):
         """GET ``/mfa/disable`` sends her to her Security page, saying why."""

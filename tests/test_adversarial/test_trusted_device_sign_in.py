@@ -24,8 +24,6 @@ the companion is made without it, so a test of hers turns it on.
 import logging
 import time
 
-from datetime import datetime, timezone
-
 import pyotp
 import sqlalchemy
 
@@ -33,7 +31,6 @@ from app.config import ProdConfig
 from app.extensions import db
 from app.models.known_device import KnownDevice
 from app.models.user import MfaConfig
-from app.services import mfa_service
 from scripts.reset_mfa import reset_mfa
 from tests._test_helpers import enable_mfa, store_backup_codes
 from tests._seed_owner_fixtures import SEED_USER_EMAIL, SEED_USER_PASSWORD
@@ -132,17 +129,6 @@ def _move_the_trust_back(seed_user, interval):
         "SET trusted_at = trusted_at - CAST(:interval AS interval) "
         "WHERE user_id = :id"
     ), {"interval": interval, "id": seed_user["user"].id})
-    db.session.commit()
-
-
-def _enrol_a_new_authenticator(user_id):
-    """Turn two-factor back on for *user_id* under a fresh secret, committed."""
-    config = db.session.query(MfaConfig).filter_by(user_id=user_id).one()
-    config.is_enabled = True
-    config.totp_secret_encrypted = mfa_service.encrypt_secret(
-        mfa_service.generate_totp_secret(),
-    )
-    config.confirmed_at = datetime.now(timezone.utc)
     db.session.commit()
 
 
@@ -416,7 +402,7 @@ class TestWhatForgetsTheDevice:
             user_id=user_id,
         ).one().is_enabled is False, "Setup failed: two-factor is still on"
         browser.post("/logout")
-        _enrol_a_new_authenticator(user_id)
+        enable_mfa(db.session, user_id)
 
         assert _asked_the_code(
             _password(browser, SEED_USER_EMAIL, SEED_USER_PASSWORD),
@@ -495,7 +481,7 @@ class TestWhatForgetsTheDevice:
         browser.post("/logout")
 
         reset_mfa(SEED_USER_EMAIL)
-        _enrol_a_new_authenticator(seed_user["user"].id)
+        enable_mfa(db.session, seed_user["user"].id)
 
         assert _asked_the_code(
             _password(browser, SEED_USER_EMAIL, SEED_USER_PASSWORD),

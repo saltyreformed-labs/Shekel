@@ -20,7 +20,9 @@
 # this workflow deploys anything.  WUD, watching ``shekel-prod-app`` by
 # digest (docker-compose.yml), reports a rebuilt "latest" production does not
 # run at its daily scan, 09:00 New York, after this one.  Off the top of the
-# hour, when GitHub may drop queued scheduled runs.
+# hour, when GitHub may drop queued scheduled runs.  In a public repository
+# GitHub turns a schedule off after 60 days with no repository activity
+# (as tax-law.yml states); a release, a merge into main, is activity.
 #
 # One build at a time (``concurrency`` below): a rebuild and a release
 # build never run together, and no run cancels another, each waiting its
@@ -300,7 +302,7 @@ jobs:
               echo "\`\`\`"
               echo "cosign verify \\"
               echo "    --certificate-identity-regexp \\"
-              echo "    \"https://github.com/${{ github.repository }}/.github/workflows/docker-publish.yml@.*\" \\"
+              echo "    '^https://github\.com/${{ github.repository }}/\.github/workflows/docker-publish\.yml@refs/heads/main\$' \\"
               echo "    --certificate-oidc-issuer https://token.actions.githubusercontent.com \\"
               echo "    ghcr.io/${{ github.repository }}@${DIGEST}"
               echo "\`\`\`"

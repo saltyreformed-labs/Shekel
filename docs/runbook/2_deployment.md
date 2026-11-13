@@ -467,32 +467,47 @@ seconds each restart takes; the developer has logged out by then (`/release` ste
 on to step 2. Any other exit is a STOP: with no `snapshot=` line nothing was written; with one, step
 3 puts the files back first.
 
-Without this step, `shekel-deploy`'s own `docker compose up -d app` would recreate both anyway, as
-dependencies of the app whose configuration changed (measured below), so a database that will not
-start on its new image would fail inside the deploy, whose rollback runs compose again on the new
-files. Here it fails on its own, before the app is touched.
+Were this step to copy the files and leave the recreate to the deploy, `shekel-deploy`'s own
+`docker compose up -d app` would recreate both anyway, as dependencies of the app whose
+configuration changed (measured below), so a database that will not start on its new image would
+fail inside the deploy, whose rollback runs compose again on the new files. Here it fails on its
+own, before the app is touched.
 
 **2. Deploy and verify**, as every release does (`/release` step 11). `shekel-deploy` recreates the
 app, its new label with it; the database and Valkey already match the files, so compose leaves them
 as they are. Then the read-back:
 
 ```bash
+rc=0
 for c in shekel-prod-db shekel-prod-valkey shekel-prod-app; do
-    docker inspect "$c" --format "$c {{.Config.Image}} watch={{index .Config.Labels \"wud.watch\"}} digest={{index .Config.Labels \"wud.watch.digest\"}} health={{.State.Health.Status}}"
-done; echo "exit=$?"
+    docker inspect "$c" --format "$c {{.Config.Image}} watch={{index .Config.Labels \"wud.watch\"}} digest={{index .Config.Labels \"wud.watch.digest\"}} health={{.State.Health.Status}}" || rc=1
+done; echo "exit=$rc"
 ```
 
-Each line must read `watch=true digest=true health=healthy`, the database's and Valkey's images
-`main`'s pins; anything else is a STOP for the developer. WUD lists the three at its next scan
-(daily at 09:00 New York); after it, this prints all three names, and before it `[]`:
+`exit=0` only when every inspect answered. Each line must read
+`watch=true digest=true health=healthy`, the database's and Valkey's images `main`'s pins; anything
+else is a STOP for the developer. Then have WUD scan now, as its store refreshes only at its daily
+09:00 New York scan otherwise:
+
+```bash
+/opt/docker/scripts/update-stack.sh --dry-run --no-notes; echo "exit=$?"
+```
+
+The homelab's update script asks WUD's API for a scan with WUD's own credentials (its `rescan`),
+then reports what each container WUD watches could update to and changes nothing: a dry run stops
+before any update, prompt or recreate. Its exit grades every container on the host, not this step (3
+means one somewhere could not be checked), so read its output and go on. A `WARNING: rescan failed`
+line means WUD did not scan, which the read below then shows. WUD sends its own notices of any
+update the scan finds, as at its daily scan. Then this prints all three names:
 
 ```bash
 T=$(mktemp -d) && cp /opt/docker/monitoring/wud/data/wud.sqlite* "$T/" \
     && python3 -I -c 'import sqlite3, sys; print(sorted(r[0] for r in sqlite3.connect(sys.argv[1]).execute("select name from containers") if r[0].startswith("shekel-prod-")))' "$T/wud.sqlite"; echo "exit=$?"; rm -rf "$T"
 ```
 
-It reads a copy of WUD's store, so WUD's own file is never opened. On 2026-11-13 it listed 23
-containers and none of Shekel's.
+It reads a copy of WUD's store, so sqlite never opens WUD's own file. It must print
+`['shekel-prod-app', 'shekel-prod-db', 'shekel-prod-valkey']`; anything else is a STOP for the
+developer. On 2026-11-13 the store listed 23 containers and none of Shekel's.
 
 **3. Rollback**, while step 1's snapshot is there:
 
@@ -506,7 +521,14 @@ P=/opt/docker/shekel; S=<step 1's snapshot path>
 It puts the old files back and recreates the database and Valkey on their old images and labels; the
 app keeps running. It undoes step 1 alone: `shekel-deploy`'s own rollback re-pins the app's image,
 and the app keeps its `wud.watch` label until compose next recreates it. The snapshot holds no
-secret, `.env` not among its files, and the release's last act removes it (`rm -r "$S"`).
+secret, `.env` not among its files.
+
+**4. Clean up**, once step 2's read-back holds, as nothing then needs step 3:
+
+```bash
+S=<step 1's snapshot path>
+[ -s "$S/docker-compose.yml" ] && rm -r "$S"; echo "exit=$?"
+```
 
 **Measured 2026-11-13**, on the rootless daemon with Docker Compose 5.7.1: a throwaway project of
 three services, `db` on production's Postgres digest and `valkey` on its Valkey 9.1.2, each with

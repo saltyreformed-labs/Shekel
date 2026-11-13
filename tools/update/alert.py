@@ -40,7 +40,7 @@ from datetime import UTC, date, datetime
 
 from tools.update.app import DEVELOPER, REPOSITORY_VARIABLE, unset
 
-#: The variable holding the workflow's own token, which the alert's job and the due job each
+#: The variable holding the workflow's own token, which each ``alert`` job and the due job
 #: widen to ``issues: write``: the one ``gh`` reads first.
 ISSUE_TOKEN_VARIABLE = "GH_TOKEN"
 

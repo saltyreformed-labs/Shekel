@@ -26,7 +26,6 @@ from app.extensions import db
 from app.models.transfer_template import TransferTemplate
 from app.services import recurring_view
 from app.services.balance_at import BalanceContext
-from app.services.generation_schedule import GenerationSchedule
 from app.services.recurrence_engine import generate_for_template
 from tests._test_helpers import (
     create_savings_account,
@@ -36,7 +35,11 @@ from tests._test_helpers import (
     state_template_price,
 )
 from tests.oracles.recurrence_baseline import EVERY_PERIOD, MONTHLY
-from tests.test_services.test_card_payment_price import _card, _works_out
+from tests.test_services.test_card_payment_price import (
+    _card,
+    _generated,
+    _works_out,
+)
 
 _JAN_20 = date(2026, 1, 20)
 _ZERO = Decimal("0.00")
@@ -48,13 +51,7 @@ def _phone_on_the_card(seed_user, card):
         db.session, seed_user, "100.00", name="Phone", account=card,
     )
     db.session.commit()
-    generate_for_template(
-        template,
-        GenerationSchedule.for_pass(BalanceContext.build(template.user_id)),
-        seed_user["scenario"].id,
-    )
-    db.session.commit()
-    return template
+    return _generated(seed_user, generate_for_template, template)
 
 
 def _payment_paying_jan_16s_phone(seed_user, card):

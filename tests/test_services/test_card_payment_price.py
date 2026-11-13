@@ -32,9 +32,12 @@ from app.models.card_payment_settings import CardPaymentSettings
 from app.models.transfer import Transfer
 from app.models.transfer_template import TransferTemplate
 from app.services import template_amount_service, transfer_recurrence, transfer_service
-from app.services.balance_at import BalanceContext, balance_at, cash_balance_at
-from app.services.balance_at._cash_fold import assembled_fold
-from app.services.balance_at._cash_periods import period_view_of
+from app.services.balance_at import (
+    BalanceContext,
+    balance_at,
+    cash_balance_at,
+    grid_balance_view,
+)
 from app.services.card_terms import set_terms
 from app.services.cash_ledger import (
     AmountRule,
@@ -119,7 +122,22 @@ def _works_out(seed_user, card, mode, *, on_due_dates=False, paid_from=None):
     else:
         make_every_period_rule(db.session, template)
     db.session.flush()
-    transfer_recurrence.generate_for_template(
+    return _generated(seed_user, transfer_recurrence.generate_for_template, template)
+
+
+def _generated(seed_user, generate, template):
+    """*template*, its rows written by *generate* on a fresh read pass, committed.
+
+    *generate* is the engine of *template*'s kind: ``transfer_recurrence``'s for
+    a transfer, as :func:`_works_out` passes, and ``recurrence_engine``'s for a
+    bill, as the bill on the card of
+    :mod:`tests.test_services.test_the_recurring_page_counts_a_card_bill_once`
+    passes.  Each walks the owner's whole schedule into the baseline scenario.
+
+    Returns:
+        The committed template.
+    """
+    generate(
         template,
         GenerationSchedule.for_pass(BalanceContext.build(template.user_id)),
         seed_user["scenario"].id,
@@ -257,9 +275,7 @@ class TestEverythingOnTheCard:
         assert _price(template, date(2026, 1, 30)) == _ZERO
 
         ctx = BalanceContext.build(seed_user["user"].id, as_of=_JAN_1)
-        view = period_view_of(
-            assembled_fold(seed_user["account"], ctx), ctx.reported_periods(),
-        )
+        view = grid_balance_view(seed_user["account"], ctx)
         assert view.columns[seed_periods[1].id].expense == Decimal("500.00")
 
     def test_an_overdue_row_is_not_paid_twice(self, seed_user, seed_periods):
@@ -417,28 +433,10 @@ class TestTheStatementBalance:
     @pytest.mark.usefixtures("seed_periods")
     def test_a_dormant_card_refuses(self, seed_user):
         """A statement's rule on a card with no terms refuses rather than guess."""
-        card = _dormant_card(seed_user)
-        template = TransferTemplate(
-            user_id=seed_user["user"].id,
-            from_account_id=seed_user["account"].id,
-            to_account_id=card.id,
-            name="Pay the Visa",
+        template = _works_out(
+            seed_user, _dormant_card(seed_user),
+            CardPaymentModeEnum.STATEMENT_BALANCE,
         )
-        db.session.add(template)
-        db.session.flush()
-        db.session.add(CardPaymentSettings(
-            template=template, user_id=template.user_id,
-            mode_id=ref_cache.card_payment_mode_id(
-                CardPaymentModeEnum.STATEMENT_BALANCE,
-            ),
-        ))
-        make_every_period_rule(db.session, template)
-        transfer_recurrence.generate_for_template(
-            template,
-            GenerationSchedule.for_pass(BalanceContext.build(template.user_id)),
-            seed_user["scenario"].id,
-        )
-        db.session.commit()
 
         with pytest.raises(AmountUnresolvable, match="no terms"):
             _price(template, date(2026, 1, 16))
@@ -520,9 +518,7 @@ class TestEveryReaderReadsOneAnswer:
         )
         ctx = BalanceContext.build(seed_user["user"].id, as_of=_JAN_1)
         checking = seed_user["account"]
-        view = period_view_of(
-            assembled_fold(checking, ctx), ctx.reported_periods(),
-        )
+        view = grid_balance_view(checking, ctx)
 
         assert view.columns[seed_periods[0].id].expense == _ZERO
         assert view.columns[seed_periods[1].id].expense == Decimal("700.00")
@@ -543,7 +539,9 @@ class TestARowOutsideThePlanStillAnswers:
         _spend(seed_user, card, seed_periods[0], "500.00", date(2026, 1, 5))
         template = _works_out(seed_user, card, CardPaymentModeEnum.CARD_BALANCE)
         row = _row(template, date(2026, 1, 16))
-        row.status_id = ref_cache.status_id(StatusEnum.CANCELLED)
+        transfer_service.update_transfer(
+            row.id, row.user_id, status_id=ref_cache.status_id(StatusEnum.CANCELLED),
+        )
         db.session.commit()
 
         assert _price(template, date(2026, 1, 16)) == Decimal("500.00")

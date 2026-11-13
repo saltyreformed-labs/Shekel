@@ -189,9 +189,9 @@ A card is not done until all of these hold:
 5. The full suite passes.
 6. The pass and fail counts are shown to the developer.
 7. A migration is tested in both directions, upgrade and downgrade.
-8. A neutral adversarial review of the design and the diff ran (the card's "Adversarial review"
-   task): a fresh subagent grading the change's claims about itself hardest, since its tests cannot
-   grade them. Each finding is fixed or filed.
+8. The card's one neutral adversarial review, of its design and whole diff, ran before its pull
+   request (its "Adversarial review" task): a fresh subagent grading the change's claims about
+   itself hardest, since its tests cannot grade them. Each finding is fixed or filed.
 9. Each commit message reads `<type>(<scope>): <what changed>`.
 
 ## Style

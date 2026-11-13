@@ -9,6 +9,11 @@ brings the card into being.  The amount is the card's to work out
 a card with none works): the rows store no figure, and a row reads $0.00 when
 nothing is owed.
 
+**It stops and starts with the card** (task plan#3697): the account's archive
+and unarchive doors (:mod:`app.routes.accounts.lifecycle`) archive and restore
+it through the transfers' own acts, and an archived account re-typed into a
+card has the payment made here archived at once.
+
 **Two calls, because the refusals come before any write.**  :func:`plan_payoff`
 answers who pays and what the payment is called, or refuses with a sentence,
 while nothing is written yet: a card the owner cannot pay from anywhere is not

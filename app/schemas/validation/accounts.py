@@ -166,6 +166,12 @@ class AccountUpdateSchema(BaseSchema):
     asserted balance, and it is reached only through ``accounts.true_up``.
     ``AccountCreateSchema`` keeps its own, which is the account's OPENING and a
     different fact from a later reading.
+
+    **It carried ``is_active`` until task plan#3697**, which no form rendered:
+    a forged POST could archive an account past the archive door's refusal
+    and leave a card's payment active on an archived card.  Archive and
+    unarchive are their own doors, so the field is now dropped as every
+    unknown field is.
     """
 
     @pre_load
@@ -175,7 +181,6 @@ class AccountUpdateSchema(BaseSchema):
 
     name = fields.String(validate=validate.Length(min=1, max=100))
     account_type_id = RowId()
-    is_active = fields.Boolean()
     version_id = RowId(validate=validate.Range(min=1))
 
 

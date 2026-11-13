@@ -28,6 +28,7 @@ from decimal import Decimal
 
 from flask import abort, flash, redirect, render_template, request, url_for
 from flask_login import current_user
+from sqlalchemy.orm.exc import StaleDataError
 
 from app.exceptions import ValidationError
 from app.extensions import db
@@ -36,9 +37,11 @@ from app.models.pay_period import PayPeriod
 from app.models.ref import AccountType
 from app.routes._commit_helpers import (
     StaleConflictContext,
-    regenerate_and_commit_or_stale,
+    commit_or_handle_stale,
+    handle_stale_conflict,
 )
 from app.routes._redirect_target import RedirectTarget
+from app.routes._transfer_lifecycle import archive_transfer_definition
 from app.routes.accounts._bp import accounts_bp
 from app.routes.accounts.opening import books_opening_context
 from app.services import (
@@ -70,8 +73,13 @@ from app.utils.dates import display_today
 logger = logging.getLogger(__name__)
 
 # Field allowlist for the account update route: which submitted form
-# fields may be written back to the Account via setattr.
-_ACCOUNT_UPDATE_FIELDS = {"name", "account_type_id", "sort_order", "is_active"}
+# fields may be written back to the Account via setattr.  ``is_active`` is not
+# one (task plan#3697): the archive and unarchive doors
+# (:mod:`app.routes.accounts.lifecycle`) are the one writer of it, so a card's
+# payment is archived and restored with the card however the flag moves, and
+# the archive's refusal of an account active recurring transfers name is
+# never bypassed.  No form here renders the field; only a forged POST sent it.
+_ACCOUNT_UPDATE_FIELDS = {"name", "account_type_id", "sort_order"}
 
 
 # ── Account CRUD ───────────────────────────────────────────────────
@@ -481,7 +489,7 @@ def update_account(account_id):
             setattr(account, field, value)
     type_changed = account.account_type_id != old_type_id
 
-    # The side effects and the commit live inside the same try/except
+    # The side effects run inside a stale-race guard, as the commit does,
     # because the resync below flushes the pending Account mutation -- the
     # version-pinned WHERE clause is checked at flush time, so
     # ``StaleDataError`` would otherwise escape outside the catch.
@@ -533,9 +541,13 @@ def update_account(account_id):
         R-PC85, R-PC86): an account whose books opened before this paycheck's
         payday is paid from that payday (ruling plan#2669), as a payment set up
         by hand is, and one opened later is paid from the next.
+
+        Returns:
+            The payment it made, or ``None`` when the save brought no card
+            into being.
         """
         if not type_changed:
-            return
+            return None
         # Flush the new FK and expire the stale ``account_type``
         # relationship so the re-class and the resync's classifier both
         # read the NEW type (the relationship attribute is not refreshed
@@ -547,31 +559,46 @@ def update_account(account_id):
         account_posting_service.sync_account_anchor_postings_all_scenarios(
             account.id,
         )
-        if payoff is not None:
-            card_payoff.make_payoff(
-                account, payoff, BalanceContext.build(current_user.id),
-            )
+        if payoff is None:
+            return None
+        return card_payoff.make_payoff(
+            account, payoff, BalanceContext.build(current_user.id),
+        )
 
-    # The reconcile step must run inside the same stale-race guard as
-    # the commit (it flushes and can itself raise StaleDataError).
-    conflict = regenerate_and_commit_or_stale(
-        _reconcile_type_effects,
-        ctx=StaleConflictContext(
-            logger=logger,
-            log_label="update_account",
-            log_id=account_id,
-            flash_message=(
-                "This account was changed by another action while you were "
-                "editing.  Please reload and try again."
-            ),
-            redirect=RedirectTarget(
-                "accounts.edit_account",
-                {"account_id": account_id},
-            ),
+    ctx = StaleConflictContext(
+        logger=logger,
+        log_label="update_account",
+        log_id=account_id,
+        flash_message=(
+            "This account was changed by another action while you were "
+            "editing.  Please reload and try again."
+        ),
+        redirect=RedirectTarget(
+            "accounts.edit_account",
+            {"account_id": account_id},
         ),
     )
-    if conflict is not None:
-        return conflict
+    # The reconcile step must run inside the same stale-race guard as
+    # the commit (it flushes and can itself raise StaleDataError).
+    try:
+        made = _reconcile_type_effects()
+    except StaleDataError:
+        return handle_stale_conflict(ctx)
+    # **A re-type of an ARCHIVED account into a card archives the payment it
+    # just made** (task plan#3697), through the transfers' own archive act,
+    # the one the card's own archive door performs: an archived card's
+    # payment is archived however the card came to be archived, and an
+    # active payment on an archived card is the state that door refuses to
+    # leave.  Unarchiving the card brings it back.
+    if made is None or account.is_active:
+        conflict = commit_or_handle_stale(ctx)
+        if conflict is not None:
+            return conflict
+    else:
+        # The act commits the re-type with the payment's archive.
+        archived = archive_transfer_definition(made, ctx)
+        if not isinstance(archived, tuple):
+            return archived
 
     logger.info("Updated account: %s (id=%d)", account.name, account.id)
     flash(f"Account '{account.name}' updated.", "success")

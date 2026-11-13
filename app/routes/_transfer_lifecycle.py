@@ -1,15 +1,18 @@
 """
 Shekel Budget App -- A Recurring Transfer's ARCHIVE and UNARCHIVE, One Act Each
 
-The two acts that take a transfer definition out of the owner's active set and
-bring it back, each ONE function every door performing it calls (task
-plan#3697, plan step ``credit_card:CC-6``):
+The acts that take a transfer definition out of the owner's active set, bring
+it back, or delete it for good, each ONE function every door performing it
+calls (task plan#3697, plan step ``credit_card:CC-6``):
 
 * :func:`archive_transfer_definition` -- the transfer archive door, the
   transfer hard-delete's history arm, and an account's archive, which takes a
   card's one payment with it.
 * :func:`unarchive_transfer_definition` -- the transfer unarchive door, and an
   account's unarchive, which brings the card's payment back.
+* :func:`destroy_transfer_definition` -- the transfer hard-delete's
+  no-history arm, moved here beside the other two because the three share
+  their ending: the loan's standing payment re-derived, then the commit.
 
 They lived in :mod:`app.routes.transfers.lifecycle` (the archive as its
 private ``_archive`` since plan step R7d-g-2, the unarchive written out in
@@ -24,7 +27,11 @@ transfer row directly: every soft-delete and restore goes through
 
 **Each act takes the door's stale-race context and refuses through it**, its
 redirect included, so a refusal returns the owner to the page they pressed.
-Nothing commits here; the door owns its commit and its own flash.
+**Each act ends with the door's commit**, under that same guard: every door
+performing one commits straight after it, the door's own writes made before
+the call riding in the same transaction, so the commit is part of the act
+rather than six copies of it.  The door owns its flash, made once the act
+has committed.
 """
 
 from flask import Response, flash
@@ -32,10 +39,12 @@ from flask_login import current_user
 
 from app.extensions import db
 from app.models.account import Account
+from app.models.ref import Status
 from app.models.transfer import Transfer
 from app.models.transfer_template import TransferTemplate
 from app.routes._commit_helpers import (
     StaleConflictContext,
+    commit_or_handle_stale,
     flush_or_handle_stale,
 )
 from app.routes._recurrence_conflict_chooser import PreEditTemplateState
@@ -104,6 +113,8 @@ def archive_transfer_definition(
        start would pass that stop.  For any other destination, a card
        included, the producer reads nothing and writes nothing.
 
+    Then the commit, under the same guard.
+
     Args:
         template: The owner-checked :class:`TransferTemplate` to archive,
             active.
@@ -113,9 +124,9 @@ def archive_transfer_definition(
     Returns:
         ``(retired, kept)`` -- the number of projected transfers retired and
         the :class:`~app.utils.archive_helpers.HeldMovements` of the
-        projected ones kept -- or a refusal :class:`Response` (the stale race,
-        or the promotion's refusal) the caller returns verbatim, the session
-        rolled back.
+        projected ones kept, committed -- or a refusal :class:`Response` (the
+        stale race, or the promotion's refusal) the caller returns verbatim,
+        the session rolled back.
     """
     template.is_active = False
     stale = flush_or_handle_stale(ctx)
@@ -141,6 +152,9 @@ def archive_transfer_definition(
     )
     if refused is not None:
         return refused
+    conflict = commit_or_handle_stale(ctx)
+    if conflict is not None:
+        return conflict
     return len(transfers_to_delete), kept
 
 
@@ -219,7 +233,7 @@ def unarchive_transfer_definition(
     the rows the rule still names, creates the missing ones and retires the
     rest unless they carry the owner's records, from the owner's civil day
     forward -- for a rule that did not move, exactly the fill-forward it
-    replaces.
+    replaces.  Then the commit, under the same guard.
 
     Args:
         template: The owner-checked :class:`TransferTemplate` to unarchive,
@@ -231,8 +245,8 @@ def unarchive_transfer_definition(
     Returns:
         ``(restored, stays_deleted)`` -- the number of transfers restored and
         :func:`~app.services.definition_unarchive.stays_deleted_notice`'s
-        sentence or ``None`` -- or a refusal :class:`Response` the caller
-        returns verbatim, the session rolled back.
+        sentence or ``None``, committed -- or a refusal :class:`Response` the
+        caller returns verbatim, the session rolled back.
     """
     refused = _archived_endpoint_refusal(template, ctx)
     if refused is not None:
@@ -282,11 +296,89 @@ def unarchive_transfer_definition(
         )
         if refused is not None:
             return refused
+    conflict = commit_or_handle_stale(ctx)
+    if conflict is not None:
+        return conflict
     return len(transfers_to_restore), stays_deleted
+
+
+def destroy_transfer_definition(
+    template: TransferTemplate, ctx: StaleConflictContext,
+) -> Response | None:
+    """Permanently delete *template* and its unsettled transfers, then commit.
+
+    The transfer hard-delete's no-history arm, moved here from
+    ``routes/transfers/lifecycle._destroy`` beside the archive and the
+    unarchive (task plan#3697): the three acts of a transfer definition's
+    lifecycle, each ending with the loan's standing payment re-derived and
+    the door's commit.
+
+    Permanently deletes the linked transfers through the transfer service,
+    which every write of a transfer goes through (``CLAUDE.md``,
+    Architecture); the delete CASCADE-deleted their shadow transactions too
+    until plan step ``balance:X-bi-6-4d-2`` deleted the shadows.  None of them
+    holds a payment: the caller archived on that (plan step
+    ``credit_card:CC-5-4a-4``), so the service's removal act takes nothing.
+    ``transfer_service.delete_transfer`` flushes but does not commit, so all
+    deletions are atomic within a single DB transaction.
+
+    Defense in depth (F-14 / commit C-21 mirror): the bulk delete is
+    additionally constrained to ``Status.is_settled = False`` rows via the
+    semantic ``Status.is_settled`` boolean -- the same shape
+    ``templates.py::hard_delete_template`` applies after CRIT-05.  Even if
+    ``transfer_template_has_paid_history`` regresses, is bypassed, or races
+    a concurrent mark-done that lands between the guard check and the loop
+    below, settled transfers (Paid, Received) cannot be physically
+    destroyed by this act.  Survivors retain their
+    ``transfer_template_id``; the column's FK is ``ON DELETE SET NULL`` (see
+    ``app/models/transfer.py``) so they become detached settled history when
+    the parent template is removed below.
+
+    Args:
+        template: The owner-checked :class:`TransferTemplate`, with no
+            settled history and no transfer holding a payment.
+        ctx: The door's stale-race context; a refusal redirects to its
+            ``redirect``.
+
+    Returns:
+        ``None`` once committed, or a refusal :class:`Response` (the stale
+        race, or the promotion's refusal) the caller returns verbatim, the
+        session rolled back.
+    """
+    # Read before the DELETE flushes: the promotion below is asked of the
+    # loan this template paid into, once it is out of the active set.
+    to_account_id = template.to_account_id
+    settled_status_ids = db.session.query(Status.id).filter(
+        Status.is_settled.is_(True)
+    ).scalar_subquery()
+    deletable_transfers = (
+        db.session.query(Transfer)
+        .filter(
+            Transfer.transfer_template_id == template.id,
+            Transfer.status_id.notin_(settled_status_ids),
+        )
+        .all()
+    )
+    for xfer in deletable_transfers:
+        transfer_service.delete_transfer(xfer.id, current_user.id, soft=False)
+
+    db.session.delete(template)
+    # The version-pinned DELETE lands here, under the guard, so the
+    # promotion below reads an active set this template has left.
+    stale = flush_or_handle_stale(ctx)
+    if stale is not None:
+        return stale
+    refused = sync_loan_payment_start_or_refuse(
+        to_account_id, redirect=ctx.redirect,
+    )
+    if refused is not None:
+        return refused
+    return commit_or_handle_stale(ctx)
 
 
 __all__ = [
     "UNARCHIVE_NEEDS_ITS_ACCOUNTS",
     "archive_transfer_definition",
+    "destroy_transfer_definition",
     "unarchive_transfer_definition",
 ]

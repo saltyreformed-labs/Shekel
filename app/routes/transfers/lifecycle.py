@@ -53,26 +53,19 @@ now lands the pinned statement first, where the race can be reported.
 import logging
 
 from flask import abort, flash, redirect, url_for
-from flask_login import current_user
 
-from app.extensions import db
-from app.models.ref import Status
-from app.models.transfer import Transfer
 from app.models.transfer_template import TransferTemplate
 from app.routes._commit_helpers import (
     STALE_ACTION_MESSAGE,
     StaleConflictContext,
-    commit_or_handle_stale,
-    flush_or_handle_stale,
 )
 from app.routes._redirect_target import RedirectTarget
-from app.routes._standing_payment import sync_loan_payment_start_or_refuse
 from app.routes._transfer_lifecycle import (
     archive_transfer_definition,
+    destroy_transfer_definition,
     unarchive_transfer_definition,
 )
 from app.routes.transfers._bp import transfers_bp
-from app.services import transfer_service
 from app.utils import archive_helpers
 from app.utils.auth_helpers import get_or_404, require_owner
 
@@ -120,10 +113,6 @@ def archive_transfer_template(template_id):
         return archived
     removed, kept = archived
 
-    conflict = commit_or_handle_stale(ctx)
-    if conflict is not None:
-        return conflict
-
     stays = kept.stays("transfer", named=True)
     flash(
         f"Recurring transfer '{template.name}' archived. "
@@ -166,10 +155,6 @@ def unarchive_transfer_template(template_id):
     if not isinstance(unarchived, tuple):
         return unarchived
     restored_count, stays_deleted = unarchived
-
-    conflict = commit_or_handle_stale(ctx)
-    if conflict is not None:
-        return conflict
     flash(
         f"Recurring transfer '{template.name}' unarchived. "
         f"{restored_count} projected transfer(s) restored."
@@ -271,9 +256,6 @@ def _archive_instead_of_delete(template, template_id, refusal):
         archived = archive_transfer_definition(template, ctx)
         if not isinstance(archived, tuple):
             return archived
-        conflict = commit_or_handle_stale(ctx)
-        if conflict is not None:
-            return conflict
     # Flashed AFTER the archive, and only once it committed: a refusal above
     # (the promotion's, or the stale race) sends its own sentence, and this
     # one beside it would report an archive that did not happen.
@@ -284,26 +266,11 @@ def _archive_instead_of_delete(template, template_id, refusal):
 def _destroy(template, template_id):
     """The no-history arm of :func:`hard_delete_transfer_template`: delete it.
 
-    Permanently deletes the linked transfers through the transfer service,
-    which every write of a transfer goes through (``CLAUDE.md``,
-    Architecture); the delete CASCADE-deleted their shadow transactions too
-    until plan step ``balance:X-bi-6-4d-2`` deleted the shadows.  None of them
-    holds a payment: the caller archived on that (plan step
-    ``credit_card:CC-5-4a-4``), so the service's removal act takes nothing.
-    ``transfer_service.delete_transfer`` flushes but does not commit, so all
-    deletions are atomic within a single DB transaction.
-
-    Defense in depth (F-14 / commit C-21 mirror): the bulk delete is
-    additionally constrained to ``Status.is_settled = False`` rows via the
-    semantic ``Status.is_settled`` boolean -- the same shape
-    ``templates.py::hard_delete_template`` applies after CRIT-05.  Even if
-    ``transfer_template_has_paid_history`` regresses, is bypassed, or races
-    a concurrent mark-done that lands between the guard check and the loop
-    below, settled transfers (Paid, Received) cannot be physically
-    destroyed by this route.  Survivors retain their
-    ``transfer_template_id``; the column's FK is ``ON DELETE SET NULL`` (see
-    ``app/models/transfer.py``) so they become detached settled history when
-    the parent template is removed below.
+    The act is
+    :func:`~app.routes._transfer_lifecycle.destroy_transfer_definition`: its
+    unsettled transfers deleted through the transfer service, the template
+    deleted, the loan's standing payment re-derived, committed.  This arm
+    flashes once it has.
 
     Args:
         template: The owner-checked :class:`TransferTemplate`, with no
@@ -314,36 +281,10 @@ def _destroy(template, template_id):
         The redirect to the template list, or a refusal :class:`Response`.
     """
     template_name = template.name
-    # Read before the DELETE flushes: the promotion below is asked of the
-    # loan this template paid into, once it is out of the active set.
-    to_account_id = template.to_account_id
-    settled_status_ids = db.session.query(Status.id).filter(
-        Status.is_settled.is_(True)
-    ).scalar_subquery()
-    deletable_transfers = (
-        db.session.query(Transfer)
-        .filter(
-            Transfer.transfer_template_id == template.id,
-            Transfer.status_id.notin_(settled_status_ids),
-        )
-        .all()
+    refused = destroy_transfer_definition(
+        template, _stale_context("hard_delete_transfer_template", template_id),
     )
-    for xfer in deletable_transfers:
-        transfer_service.delete_transfer(xfer.id, current_user.id, soft=False)
-
-    ctx = _stale_context("hard_delete_transfer_template", template_id)
-    db.session.delete(template)
-    # The version-pinned DELETE lands here, under the guard, so the
-    # promotion below reads an active set this template has left.
-    stale = flush_or_handle_stale(ctx)
-    if stale is not None:
-        return stale
-    refused = sync_loan_payment_start_or_refuse(to_account_id, redirect=_LIST)
     if refused is not None:
         return refused
-    conflict = commit_or_handle_stale(ctx)
-    if conflict is not None:
-        return conflict
-
     flash(f"Recurring transfer '{template_name}' permanently deleted.", "info")
     return redirect(url_for("transfers.list_transfer_templates"))

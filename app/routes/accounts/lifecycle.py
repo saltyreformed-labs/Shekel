@@ -43,10 +43,16 @@ from app.models.transfer_template import TransferTemplate
 from app.routes._commit_helpers import (
     StaleConflictContext,
     commit_or_handle_stale,
+    flush_or_handle_stale,
 )
 from app.routes._redirect_target import RedirectTarget
+from app.routes._transfer_lifecycle import (
+    archive_transfer_definition,
+    unarchive_transfer_definition,
+)
 from app.routes.accounts._bp import accounts_bp
 from app.services import (
+    card_payoff,
     definition_delete,
     ledger_account_service,
     transfer_service,
@@ -57,36 +63,86 @@ from app.utils.auth_helpers import fresh_login_required, get_or_404, require_own
 logger = logging.getLogger(__name__)
 
 
+def _stale_context(log_label: str, account_id: int) -> StaleConflictContext:
+    """Return the stale-race context every door here reports through.
+
+    Args:
+        log_label: The door's label for the conflict's log line.
+        account_id: The account's id, for the log line.
+
+    Returns:
+        The :class:`StaleConflictContext`, redirecting to the accounts
+        cockpit, where each of these doors is pressed.
+    """
+    return StaleConflictContext(
+        logger=logger,
+        log_label=log_label,
+        log_id=account_id,
+        flash_message=(
+            "This account was changed by another action.  Please reload "
+            "the page and try again."
+        ),
+        redirect=RedirectTarget("savings.dashboard"),
+    )
+
+
+def _own_payment(account: Account) -> TransferTemplate | None:
+    """Return the card's one payment, archived or not, or ``None`` for any other account.
+
+    Every card has one payment, made by the door that brings the card into
+    being (task plan#2933), and its settings row names the card
+    (:func:`app.services.card_payoff.card_payment_on`); only a card's can.
+
+    Args:
+        account: The owner-checked account.
+
+    Returns:
+        The payment's :class:`TransferTemplate`, or ``None``.
+    """
+    settings = card_payoff.card_payment_on(account.id)
+    return None if settings is None else settings.template
+
+
 @accounts_bp.route("/accounts/<int:account_id>/archive", methods=["POST"])
 @require_owner
 def archive_account(account_id):
-    """Archive an account (soft delete).
+    """Archive an account (soft delete), and a card's one payment with it.
 
-    The Account model carries a ``version_id_col`` (commit C-17),
-    so a concurrent mutation interleaving with this archive will
-    raise ``StaleDataError`` at flush time.  The handler converts
-    it into a flash + redirect so the user can retry against the
-    fresh row state instead of seeing a 500.
+    **Refused while an active recurring transfer names the account**, from
+    either side: archiving it would leave the transfer writing rows onto an
+    account withdrawn from every projection.  **A card's own payment is not
+    one of them** (task plan#3697): every card has one (task plan#2933), so
+    the refusal would hold every card, and the payment is archived WITH the
+    card instead, through the transfers' own archive act
+    (:func:`~app.routes._transfer_lifecycle.archive_transfer_definition`), so
+    its projected rows that hold nothing are retired as the Recurring page's
+    Archive retires them, and a row holding a recorded payment stays.  Any
+    other recurring transfer naming the card still refuses.  A payment
+    already archived is left as it is.
+
+    The Account model carries a ``version_id_col`` (commit C-17), so a
+    concurrent mutation interleaving with this archive raises
+    ``StaleDataError`` at flush time; the act flushes the account's and the
+    payment's writes together under the stale guard, and the commit is
+    guarded too, each converting the race into a flash + redirect so the
+    user can retry against the fresh row state instead of seeing a 500.
     """
     account = get_or_404(Account, account_id)
     if account is None:
         abort(404)
 
-    # Guard: prevent archiving if active transfer templates reference this account.
-
-    active_transfers = (
-        db.session.query(TransferTemplate)
-        .filter(
-            TransferTemplate.user_id == current_user.id,
-            TransferTemplate.is_active.is_(True),
-            db.or_(
-                TransferTemplate.from_account_id == account_id,
-                TransferTemplate.to_account_id == account_id,
-            ),
-        )
-        .first()
-    )
-    if active_transfers:
+    payment = _own_payment(account)
+    others = [
+        TransferTemplate.user_id == current_user.id,
+        TransferTemplate.is_active.is_(True),
+        db.or_(
+            TransferTemplate.from_account_id == account_id,
+            TransferTemplate.to_account_id == account_id,
+        ),
+    ]
+    if payment is not None:
+        others.append(TransferTemplate.id != payment.id)
+    if db.session.query(TransferTemplate).filter(*others).first():
         flash(
             "Cannot archive this account -- it is used by active recurring transfers. "
             "Archive those recurring transfers first.",
@@ -94,50 +150,77 @@ def archive_account(account_id):
         )
         return redirect(url_for("savings.dashboard"))
 
+    ctx = _stale_context("archive_account", account_id)
     account.is_active = False
-    conflict = commit_or_handle_stale(StaleConflictContext(
-        logger=logger,
-        log_label="archive_account",
-        log_id=account_id,
-        flash_message=(
-            "This account was changed by another action.  Please reload "
-            "the page and try again."
-        ),
-        redirect=RedirectTarget("savings.dashboard"),
-    ))
-    if conflict is not None:
-        return conflict
+    with_payment = ""
+    if payment is None or not payment.is_active:
+        conflict = commit_or_handle_stale(ctx)
+        if conflict is not None:
+            return conflict
+    else:
+        # The act commits the account's write with the payment's.
+        archived = archive_transfer_definition(payment, ctx)
+        if not isinstance(archived, tuple):
+            return archived
+        removed, kept = archived
+        stays = kept.stays("row", named=True)
+        with_payment = (
+            f", and its payment '{payment.name}' with it: {removed} projected "
+            "payment(s) removed" + (f"; {stays}" if stays else "")
+        )
     logger.info("Archived account: %s (id=%d)", account.name, account.id)
-    flash(f"Account '{account.name}' archived.", "info")
+    flash(f"Account '{account.name}' archived{with_payment}.", "info")
     return redirect(url_for("savings.dashboard"))
 
 
 @accounts_bp.route("/accounts/<int:account_id>/unarchive", methods=["POST"])
 @require_owner
 def unarchive_account(account_id):
-    """Unarchive an account.
+    """Unarchive an account, and a card's one payment with it.
 
+    **A card's payment comes back with the card** (task plan#3697): every
+    card has one payment (task plan#2933), so an active card has an active
+    one.  It is restored through the transfers' own unarchive act
+    (:func:`~app.routes._transfer_lifecycle.unarchive_transfer_definition`),
+    so the rows its archive hid come back, less any the books now drop (the
+    flash names them), and its rows are maintained from today.  That act
+    refuses while the account the payment comes out of is archived, and then
+    the card stays archived too, the flash naming the account to unarchive
+    first.  Only an unarchive of an ARCHIVED account touches the payment: a
+    stale tab's press on an active one changes nothing.
+
+    The account's write is flushed under the stale guard BEFORE the act,
+    whose pre-write read pass would otherwise autoflush it outside any guard.
     See :func:`archive_account` for the optimistic-lock contract.
     """
     account = get_or_404(Account, account_id)
     if account is None:
         abort(404)
 
+    payment = _own_payment(account) if not account.is_active else None
+    ctx = _stale_context("unarchive_account", account_id)
     account.is_active = True
-    conflict = commit_or_handle_stale(StaleConflictContext(
-        logger=logger,
-        log_label="unarchive_account",
-        log_id=account_id,
-        flash_message=(
-            "This account was changed by another action.  Please reload "
-            "the page and try again."
-        ),
-        redirect=RedirectTarget("savings.dashboard"),
-    ))
-    if conflict is not None:
-        return conflict
+    with_payment = "."
+    if payment is None or payment.is_active:
+        conflict = commit_or_handle_stale(ctx)
+        if conflict is not None:
+            return conflict
+    else:
+        stale = flush_or_handle_stale(ctx)
+        if stale is not None:
+            return stale
+        # The act commits the account's write with the payment's.
+        unarchived = unarchive_transfer_definition(payment, ctx)
+        if not isinstance(unarchived, tuple):
+            return unarchived
+        restored, stays_deleted = unarchived
+        with_payment = (
+            f", and its payment '{payment.name}' with it: {restored} "
+            "projected payment(s) restored."
+            + (f" {stays_deleted}" if stays_deleted else "")
+        )
     logger.info("Unarchived account: %s (id=%d)", account.name, account.id)
-    flash(f"Account '{account.name}' unarchived.", "success")
+    flash(f"Account '{account.name}' unarchived{with_payment}", "success")
     return redirect(url_for("savings.dashboard"))
 
 
@@ -161,16 +244,9 @@ def _archive_instead_of_delete(account, account_id, reason):
     flash(reason, "warning")
     if account.is_active:
         account.is_active = False
-        conflict = commit_or_handle_stale(StaleConflictContext(
-            logger=logger,
-            log_label="hard_delete_account archive-fallback",
-            log_id=account_id,
-            flash_message=(
-                "This account was changed by another action.  "
-                "Please reload the page and try again."
-            ),
-            redirect=RedirectTarget("savings.dashboard"),
-        ))
+        conflict = commit_or_handle_stale(
+            _stale_context("hard_delete_account archive-fallback", account_id),
+        )
         if conflict is not None:
             return conflict
     return redirect(url_for("savings.dashboard"))
@@ -428,16 +504,9 @@ def hard_delete_account(account_id):
     # handler converts into a flash + redirect rather than a 500.
     account_name = account.name
     db.session.delete(account)
-    conflict = commit_or_handle_stale(StaleConflictContext(
-        logger=logger,
-        log_label="hard_delete_account",
-        log_id=account_id,
-        flash_message=(
-            "This account was changed by another action.  Please reload "
-            "the page and try again."
-        ),
-        redirect=RedirectTarget("savings.dashboard"),
-    ))
+    conflict = commit_or_handle_stale(
+        _stale_context("hard_delete_account", account_id),
+    )
     if conflict is not None:
         return conflict
 

@@ -14,7 +14,10 @@ secret at rest.
 Like ``/mfa/disable``, the reset also bumps the user's
 ``session_invalidated_at``: it ends every session of the user and forgets
 every trusted device of theirs (plan#2173, ruling plan#2406, "turning 2FA
-off ... forgets them all").
+off ... forgets them all").  And it removes every passkey of theirs, with any
+add of one in flight (plan#2538): a passkey signs in on its own, so a reset
+for a lost phone that kept its passkey would keep the phone a way in.  They
+sign in with their password afterwards, and may add a passkey again.
 
 **The reset is ONE act, ``mfa_service.reset_two_factor``** (ruling
 plan#3441), which the owner's "Reset two-factor" for a companion on
@@ -39,13 +42,15 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
 def reset_mfa(email: str | None) -> None:
-    """Disable MFA and clear all stored MFA material for the user.
+    """Disable MFA, clear all stored MFA material and remove the user's passkeys.
 
     Runs the one reset act, ``mfa_service.reset_two_factor``: it clears
     the encrypted TOTP secret, hashed backup codes, confirmation
     timestamp, replay-prevention step boundary, and any pending setup
-    ciphertext, and bumps the user's ``session_invalidated_at``, which
-    this commits together.  The clear also runs when
+    ciphertext, removes every passkey of the user and any add of one in
+    flight, and bumps the user's ``session_invalidated_at``, which
+    this commits together.  A user with no MFA to clear but a passkey is
+    reset too.  The clear also runs when
     ``is_enabled`` is already ``False`` but residual material remains
     (an orphaned secret from a manual DB intervention, an interrupted
     disable flow, or an abandoned ``/mfa/setup`` whose encrypted
@@ -79,10 +84,10 @@ def reset_mfa(email: str | None) -> None:
         print(f"Error: No user found with email '{email}'.")
         sys.exit(1)
 
-    # "Nothing to clear" (no row, or one already fully reset) writes
-    # nothing, and its sessions are left alone.
+    # "Nothing to clear" (no row, or one already fully reset, and no
+    # passkey) writes nothing, and its sessions are left alone.
     if not mfa_service.reset_two_factor(user):
-        print(f"MFA is not enabled for {email}.")
+        print(f"MFA is not enabled for {email}, and they hold no passkey.")
         return
     db.session.commit()
 
@@ -94,8 +99,8 @@ def reset_mfa(email: str | None) -> None:
     )
 
     print(
-        f"MFA has been disabled for {email}; their sessions are ended and "
-        f"their trusted devices forgotten."
+        f"MFA has been disabled for {email}; their passkeys are removed, "
+        f"their sessions ended and their trusted devices forgotten."
     )
 
 
@@ -110,7 +115,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         argparse.Namespace with ``email`` (str) and ``force`` (bool).
     """
     parser = argparse.ArgumentParser(
-        description="Disable MFA for a user (emergency recovery)."
+        description="Disable MFA and remove the passkeys of a user (emergency recovery)."
     )
     parser.add_argument("email", help="Email address of the user to reset.")
     parser.add_argument(
@@ -125,7 +130,8 @@ if __name__ == "__main__":
 
     if not args.force:
         confirm = input(
-            f"Reset MFA for {args.email}? This cannot be undone. [y/N] "
+            f"Reset MFA for {args.email} and remove their passkeys? This cannot "
+            "be undone. [y/N] "
         )
         if confirm.lower() != "y":
             print("Aborted.")

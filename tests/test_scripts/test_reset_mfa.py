@@ -6,9 +6,13 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 from app.extensions import db
+from app.models.passkey import Passkey
+from app.models.passkey_add import PasskeyAdd
 from app.models.user import MfaConfig, User
-from app.services import mfa_service
+from app.services import mfa_service, passkey_service
 from scripts.reset_mfa import parse_args, reset_mfa
+from tests._passkeys import ORIGIN, add_committed
+from tests._test_helpers import enable_mfa
 
 
 class TestResetMfa:
@@ -272,6 +276,94 @@ class TestResetMfa:
             assert config.totp_secret_encrypted is None
             assert config.backup_codes is None
             assert config.confirmed_at is None
+
+
+class TestResetMfaPasskeys:
+    """The reset removes every passkey and the add in flight (plan#2538, task plan#3487).
+
+    A passkey signs in on its own, so the reset for a lost phone removes the
+    phone's passkey with its code; an account with no code to clear but a
+    passkey, or an add of one in flight, is reset too.
+    """
+
+    @staticmethod
+    def _held_by(user_id):
+        """Return how many passkeys and adds in flight *user_id* holds."""
+        return (
+            db.session.query(Passkey).filter_by(user_id=user_id).count(),
+            db.session.query(PasskeyAdd).filter_by(user_id=user_id).count(),
+        )
+
+    def test_the_passkeys_go_with_the_mfa(self, app, db, seed_user, second_user, capsys):
+        """MFA on and two passkeys: all cleared, said so; another account's passkey kept."""
+        with app.app_context():
+            user = seed_user["user"]
+            enable_mfa(db.session, user.id)
+            add_committed(user)
+            add_committed(user)
+            theirs, _ = add_committed(second_user["user"])
+
+            reset_mfa(user.email)
+
+            assert capsys.readouterr().out == (
+                f"MFA has been disabled for {user.email}; their passkeys are "
+                f"removed, their sessions ended and their trusted devices "
+                f"forgotten.\n"
+            )
+            assert self._held_by(user.id) == (0, 0)
+            assert db.session.query(MfaConfig).filter_by(
+                user_id=user.id,
+            ).one().is_enabled is False
+            assert db.session.get(Passkey, theirs) is not None
+
+    def test_a_passkey_with_no_mfa_is_reset(self, app, db, seed_user, capsys):
+        """No MFA row, one passkey: it goes and the sessions end."""
+        with app.app_context():
+            user = seed_user["user"]
+            add_committed(user)
+            before = datetime.now(timezone.utc)
+
+            reset_mfa(user.email)
+
+            assert "MFA has been disabled" in capsys.readouterr().out
+            assert self._held_by(user.id) == (0, 0)
+            assert db.session.query(MfaConfig).filter_by(user_id=user.id).count() == 0
+            bumped = db.session.query(User.session_invalidated_at).filter_by(
+                id=user.id,
+            ).scalar()
+            assert bumped is not None and bumped >= before
+
+    def test_an_add_in_flight_alone_is_reset(self, app, db, seed_user, capsys):
+        """No MFA and no passkey, an add begun: the add goes and the sessions end."""
+        with app.app_context():
+            user = seed_user["user"]
+            passkey_service.registration_options(user, origin=ORIGIN)
+            db.session.commit()
+            assert self._held_by(user.id) == (0, 1)
+
+            reset_mfa(user.email)
+
+            assert "MFA has been disabled" in capsys.readouterr().out
+            assert self._held_by(user.id) == (0, 0)
+            assert db.session.query(User.session_invalidated_at).filter_by(
+                id=user.id,
+            ).scalar() is not None
+
+    def test_nothing_to_reset_says_there_is_no_passkey_either(
+        self, app, db, seed_user, capsys,
+    ):
+        """No MFA and no passkey: told so, and the sessions are left alone."""
+        with app.app_context():
+            user = seed_user["user"]
+
+            reset_mfa(user.email)
+
+            assert capsys.readouterr().out == (
+                f"MFA is not enabled for {user.email}, and they hold no passkey.\n"
+            )
+            assert db.session.query(User.session_invalidated_at).filter_by(
+                id=user.id,
+            ).scalar() is None
 
 
 class TestParseArgs:

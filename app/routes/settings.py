@@ -15,6 +15,7 @@ from flask_login import current_user
 from app import ref_cache, tax_law
 from app.enums import RoleEnum
 from app.exceptions import RequiredRecordMissing
+from app.routes._passkeys import remove_passkey_or_404
 from app.routes._trusted_devices import forget_device_or_404, trusted_device_rows
 from app.utils.auth_helpers import fresh_login_required, require_owner
 from app.utils.digit_strings import parse_row_id
@@ -37,7 +38,7 @@ from app.services import (
     pay_period_locks,
     pay_schedule_service,
 )
-from app.services import mfa_service
+from app.services import mfa_service, passkey_service
 from app.services.auth_service import hash_password
 from app.services.pay_calendar import calendar_at_schedule
 from app.utils.dates import display_today
@@ -394,6 +395,7 @@ def _empty_section_context():
         "active_companions": [],
         "inactive_companions": [],
         "companion_devices": {},
+        "companion_passkeys": {},
         "edit_companion_id": None,
         "form_values": {},
         "pp_periods": [],
@@ -476,7 +478,7 @@ def _load_account_types_context():
 # --- Companion account management ----------------------------------------
 #
 # Companions are created, edited, deactivated, and reactivated here, their
-# trusted devices forgotten and their two-factor reset.
+# passkeys removed, their trusted devices forgotten and their two-factor reset.
 # Every route below applies two guards on top of the application's login
 # gate and the @require_owner decorator:
 #   1. Target user must have role_id == COMPANION.  This rejects any
@@ -515,11 +517,17 @@ def _load_companions_context(raw_edit_id):
 
     Returns:
         A dict with keys ``active_companions``, ``inactive_companions``,
-        ``companion_devices``, ``edit_companion_id``, and ``form_values``.
+        ``companion_devices``, ``companion_passkeys``, ``edit_companion_id``,
+        and ``form_values``.
         ``companion_devices`` maps each active companion's id to her live
         trusted devices, built by the one builder the Security page lists a
         user's own with (ruling plan#3439); an inactive companion has none,
-        since deactivating her ended every trust.  The form_values
+        since deactivating her ended every trust.  ``companion_passkeys``
+        maps each active companion's id to her passkeys, most recently added
+        first, as the Security page lists a user's own (plan#2538).  An
+        inactive companion's are kept but not listed: no passkey signs in a
+        deactivated account, and her row shows only that she is deactivated;
+        reactivated, her row lists them again.  The form_values
         dict pre-populates the edit form with the matching companion's
         email and display name when a valid ``edit`` id is supplied.
     """
@@ -556,6 +564,9 @@ def _load_companions_context(raw_edit_id):
         "active_companions": active,
         "inactive_companions": inactive,
         "companion_devices": {c.id: trusted_device_rows(c.id) for c in active},
+        "companion_passkeys": {
+            c.id: passkey_service.list_passkeys(c.id) for c in active
+        },
         "edit_companion_id": edit_id,
         "form_values": values,
     }
@@ -581,6 +592,7 @@ def _render_companions_section(errors=None, form_values=None,
         "active_companions": ctx["active_companions"],
         "inactive_companions": ctx["inactive_companions"],
         "companion_devices": ctx["companion_devices"],
+        "companion_passkeys": ctx["companion_passkeys"],
         "edit_companion_id": edit_companion_id,
         "form_values": form_values or {},
     })
@@ -717,7 +729,7 @@ def companion_edit(companion_id):
 def companion_deactivate(companion_id):
     """Soft-delete a companion by flipping is_active to False.
 
-    The companion's entries, MFA config, and settings row are
+    The companion's entries, MFA config, passkeys and settings row are
     preserved.  Flask-Login's user_loader rejects any session whose
     user has is_active=False, so all live companion sessions become
     invalid on their next request.
@@ -807,6 +819,47 @@ def companion_forget_device(companion_id: int, device_id: int) -> Response:
 
 
 @settings_bp.route(
+    "/settings/companions/<int:companion_id>/passkeys/<int:passkey_id>/remove",
+    methods=["POST"],
+)
+@require_owner
+def companion_remove_passkey(companion_id: int, passkey_id: int) -> Response:
+    """Remove one of a companion's passkeys (plan#2538, as ruled for her devices, plan#3439).
+
+    The owner's Remove beside each passkey Settings > Companions lists for
+    her: the act a user's own Remove on their Security page runs
+    (:func:`~app.routes._passkeys.remove_passkey_or_404`), so the passkey no
+    longer signs her in, her "was this you?" banner is raised as when she
+    removes one herself, and the log names the owner as who pressed it.  Her
+    password and code still sign her in.
+
+    Another owner's companion, the owner's own id and any user who is not a
+    companion are refused by :func:`_load_companion_or_404` before a passkey
+    is looked up; a passkey of another user and an id no passkey holds are
+    refused by the act.  All are one 404, the security response rule.
+
+    No step-up re-auth, as the owner's Forget of her device asks none, and
+    for the reason the Security page's Remove asks none: removing a passkey
+    takes a way in away and grants none.
+
+    Args:
+        companion_id: The ``auth.users.id`` of the owner's companion.
+        passkey_id: The ``auth.passkeys.id`` the request names.
+
+    Returns:
+        A redirect to Settings > Companions.
+    """
+    companion = _load_companion_or_404(companion_id)
+    remove_passkey_or_404(companion, passkey_id)
+    flash(
+        f"Passkey removed. It no longer signs "
+        f"{companion.display_name or companion.email} in.",
+        "success",
+    )
+    return redirect(url_for("settings.show", section="companions"))
+
+
+@settings_bp.route(
     "/settings/companions/<int:companion_id>/reset-two-factor",
     methods=["POST"],
 )
@@ -817,10 +870,17 @@ def companion_reset_two_factor(companion_id: int) -> Response:
 
     The one reset act ``scripts/reset_mfa.py`` runs too
     (:func:`~app.services.mfa_service.reset_two_factor`): her secret and
-    backup codes are cleared, every session of hers ends and every trusted
-    device of hers is forgotten.  Every companion must have two-factor
-    (ruling plan#3434), so at her next sign-in the login gate holds her at
+    backup codes are cleared, her passkeys are removed with any add of one
+    in flight, every session of hers ends and every trusted device of hers
+    is forgotten.  Every companion must have two-factor (ruling plan#3434),
+    so at her next sign-in, by her password, the login gate holds her at
     setup until she enrols her authenticator again.
+
+    A companion holding a passkey always has two-factor on, so the
+    condition below never leaves one of hers in place: the login gate holds
+    a companion without it at setup, where no passkey can be added,
+    ``/mfa/disable`` refuses her, and every reset removes her passkeys with
+    her code.
 
     A re-confirmed password first, as the other doors that change a
     companion's account ask.  **A companion whose two-factor is not on is

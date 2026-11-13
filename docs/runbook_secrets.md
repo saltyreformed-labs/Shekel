@@ -390,7 +390,8 @@ The full rotation has four steps and one optional cleanup deploy:
    - `skipped` -- rows that could not be decrypted under any configured key.
      **A non-zero `skipped` count means the script exits with code 2.** Do not proceed to step 5;
      instead inspect the application log for the row id(s) and reconcile manually (typically by
-     resetting MFA for the affected user via `scripts/reset_mfa.py`).
+     resetting MFA for the affected user via `scripts/reset_mfa.py`, which also removes their
+     passkeys, so they sign in with their password and add any passkey again).
 
 5. **Prune `TOTP_ENCRYPTION_KEY_OLD` at the next deploy** (optional but recommended). Once
    `scripts/rotate_totp_key.py` reports zero skipped rows, the retired key is no longer needed.

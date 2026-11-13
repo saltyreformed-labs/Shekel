@@ -154,7 +154,9 @@ KIND_DISPLAY: dict[str, dict[str, str]] = {
             "review your active sessions."
         ),
     },
-    # Whoever removed it was signed in to the account, and the password and
+    # Whoever removed it was signed in to the account, or was the budget's
+    # owner removing a companion's on Settings > Companions, most likely for
+    # a phone she lost, which a new password answers too.  The password and
     # code still sign it in beside any passkey (ruling plan#3541), so the
     # copy points at the password.
     SecurityEventKind.PASSKEY_REMOVED.value: {

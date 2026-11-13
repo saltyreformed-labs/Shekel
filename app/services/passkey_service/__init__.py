@@ -69,7 +69,11 @@ must not race take row locks of their own, after it: a completion reads the
 passkey ``FOR UPDATE``, so two completions of one answer cannot both read it
 before either moves its ``last_used_at``; and the add's keeping locks the
 account's own row before it counts, then reads the add's row ``FOR UPDATE``,
-so two keepings at once cannot both pass the cap or both keep one add.
+so two keepings at once cannot both pass the cap or both keep one add.  A
+reset's removal of every passkey (:func:`remove_every_passkey`) locks the
+account's row first too, so a keeping in flight either keeps before it, and
+is removed by it, or keeps nothing after it; ``scripts/reset_mfa.py`` takes
+no owner's lock, so that order is the row lock's alone.
 
 **The clock is the process's**, read by :func:`._ceremony.now` alone, once per
 act, and a challenge an act issues is issued at that same reading.
@@ -78,8 +82,9 @@ act, and a challenge an act issues is issued at that same reading.
 shares: the relying party, the user handle, the clock, a ceremony's state,
 and the checks every assertion meets.  :mod:`._adding` holds the add's three
 acts, and whether a refused add's passkey may be one an account keeps
-(:func:`may_be_kept`); this module, the sign-in and the re-confirm, and listing, removing and
-holding a passkey.  :mod:`._responses` reads what the browser sent, and
+(:func:`may_be_kept`); this module, the sign-in and the re-confirm, listing,
+removing and holding a passkey, and a reset's removal of every one.
+:mod:`._responses` reads what the browser sent, and
 :mod:`._refusals` names each refusal.
 
 Architecture:
@@ -93,16 +98,18 @@ Architecture:
 from collections.abc import Mapping
 
 from fido2.webauthn import UserVerificationRequirement
-from sqlalchemy import ColumnElement, exists, select
+from sqlalchemy import ColumnElement, delete, exists, select
 
 from app.exceptions import NotFoundError
 from app.extensions import db
 from app.models.passkey import Passkey
+from app.models.passkey_add import PasskeyAdd
 from app.models.user import User
 from app.services.passkey_service import _ceremony
 from app.services.passkey_service._adding import (
     add_passkey,
     complete_registration,
+    lock_the_account,
     may_be_kept,
     registration_options,
 )
@@ -129,6 +136,7 @@ __all__ = [
     "passkey_held_by",
     "re_confirm_options",
     "registration_options",
+    "remove_every_passkey",
     "remove_passkey",
     "sign_in_account",
     "sign_in_options",
@@ -396,6 +404,40 @@ def remove_passkey(user_id: int, passkey_id: int) -> None:
         )
     db.session.delete(passkey)
     db.session.flush()
+
+
+def remove_every_passkey(user_id: int) -> bool:
+    """Remove every passkey *user_id* holds and its add in flight: a reset's share.
+
+    The reset of an account's two-factor removes its passkeys with its code
+    (:func:`app.services.mfa_service.reset_two_factor`, the one reset act,
+    ruling plan#3441): a passkey signs in on its own (ruling plan#3465), so a
+    reset for a lost phone that kept the phone's passkey would keep the phone
+    a way in.  The add in flight goes too, so a passkey the device made
+    before the reset is never kept after it: its keeping finds no add, and
+    is refused as expired.
+
+    The account's own row is locked first (:func:`._adding.lock_the_account`),
+    as the add's options and its keeping lock it before the add's row, so a
+    keeping in flight either keeps first, and its passkey is removed here, or
+    waits and then finds its add gone; and a removal and a keeping cannot
+    each hold a row the other waits on.
+
+    Args:
+        user_id: The ``auth.users.id`` whose passkeys to remove.
+
+    Returns:
+        True when a passkey or an add in flight was removed; False, nothing
+        deleted, when the account held neither.
+    """
+    lock_the_account(user_id)
+    removed = db.session.execute(
+        delete(Passkey).where(Passkey.user_id == user_id)
+    ).rowcount
+    abandoned = db.session.execute(
+        delete(PasskeyAdd).where(PasskeyAdd.user_id == user_id)
+    ).rowcount
+    return removed + abandoned > 0
 
 
 def passkey_held_by(user_id: int | ColumnElement[int]) -> ColumnElement[bool]:

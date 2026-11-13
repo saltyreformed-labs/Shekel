@@ -20,6 +20,7 @@ from cryptography.fernet import Fernet, MultiFernet
 
 from app.extensions import db
 from app.models.user import MfaConfig, User
+from app.services import passkey_service
 from app.utils.digit_strings import is_ascii_digits
 
 
@@ -521,7 +522,9 @@ def reset_two_factor(user: User) -> bool:
     What ``scripts/reset_mfa.py`` does for a lost authenticator and what the
     owner's "Reset two-factor" on Settings > Companions does for a companion,
     stated once so the two cannot drift.  It clears every piece of stored MFA
-    material and disables the row (:func:`clear_mfa_material`), and in the
+    material and disables the row (:func:`clear_mfa_material`), removes every
+    passkey of the account and its add in flight
+    (:func:`~app.services.passkey_service.remove_every_passkey`), and in the
     same transaction bumps the user's ``session_invalidated_at`` on the
     process clock, so every session of theirs ends and every trusted device
     of theirs is forgotten: a device is trusted only while it was trusted at
@@ -529,12 +532,20 @@ def reset_two_factor(user: User) -> bool:
     is exactly when a trust the old authenticator vouched for must die,
     or a browser trusted under it would skip the code of the one enrolled
     after.  A user the rule requires two-factor of (``User.must_have_two_factor``)
-    then meets setup at their next sign-in.
+    then meets setup at their next sign-in, and signs in with their password
+    until they add a passkey again.
+
+    **The passkeys go because a passkey signs in on its own** (ruling
+    plan#3465): a lost phone's passkey is as much a way in as its
+    authenticator, so a reset that kept it would leave the phone signing in.
+    They are removed first, and that removal locks the account's own row
+    before any other row the reset touches, as an add's keeping does.
 
     A row already disabled but still carrying material (an orphaned secret
     from a manual database change, an interrupted disable, or an abandoned
     setup's pending ciphertext) is cleared too: no decryptable secret may stay
-    at rest past the reset.
+    at rest past the reset.  An account with no two-factor to clear but a
+    passkey or an add in flight is reset too, for the passkey's sake.
 
     Mutates the rows and does NOT commit: the caller commits, and logs.
 
@@ -542,16 +553,20 @@ def reset_two_factor(user: User) -> bool:
         user: The persistent user whose two-factor to reset.
 
     Returns:
-        True when the reset cleared the row.  False, writing nothing, when
-        there was nothing to clear: no row, or a disabled one with no
-        material left (:func:`has_mfa_material`); their sessions are left
-        alone then.
+        True when the reset cleared the row or removed a passkey or an add in
+        flight.  False, writing nothing, when there was nothing to clear: no
+        row, or a disabled one with no material left
+        (:func:`has_mfa_material`), and no passkey or add; their sessions are
+        left alone then.
     """
+    passkeys_removed = passkey_service.remove_every_passkey(user.id)
     mfa_config = db.session.query(MfaConfig).filter_by(user_id=user.id).first()
-    if mfa_config is None or (
-        not mfa_config.is_enabled and not has_mfa_material(mfa_config)
-    ):
+    two_factor_held = mfa_config is not None and (
+        mfa_config.is_enabled or has_mfa_material(mfa_config)
+    )
+    if not two_factor_held and not passkeys_removed:
         return False
-    clear_mfa_material(mfa_config)
+    if two_factor_held:
+        clear_mfa_material(mfa_config)
     user.session_invalidated_at = datetime.now(timezone.utc)
     return True

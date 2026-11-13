@@ -1,5 +1,6 @@
-"""Listing and removing one's own passkeys, and the one statement of holding any."""
+"""Listing and removing passkeys, a reset's removal of all, and the statement of holding any."""
 
+import json
 from datetime import timedelta
 
 import pytest
@@ -10,7 +11,9 @@ from app.extensions import db
 from app.models.passkey import Passkey
 from app.models.user import User
 from app.services import passkey_service
-from tests._passkeys import T0, Clock, add
+from app.services.passkey_service import PasskeyRefusal, PasskeyRefused
+from tests._passkeys import ORIGIN, T0, Clock, SoftwareAuthenticator, add
+from tests.test_services.test_passkey_service._helpers import add_row
 
 
 @pytest.fixture(name="clock")
@@ -104,3 +107,61 @@ class TestHoldingAPasskey:
             .where(User.id.in_([user.id, second_user["user"].id]))
         ).all())
         assert held == {user.id: True, second_user["user"].id: False}
+
+
+class TestRemovingEvery:
+    """A reset's share: every passkey of the account and its add in flight, and no one else's."""
+
+    def test_every_passkey_and_the_add_go_and_another_accounts_stay(
+        self, user, second_user, clock,
+    ):
+        """Two passkeys and an add begun: all gone, True; the other account's two kept."""
+        add(clock, user)
+        add(clock, user)
+        passkey_service.registration_options(user, origin=ORIGIN)
+        theirs, _ = add(clock, second_user["user"])
+        passkey_service.registration_options(second_user["user"], origin=ORIGIN)
+
+        assert passkey_service.remove_every_passkey(user.id) is True
+
+        assert passkey_service.list_passkeys(user.id) == []
+        assert add_row(user) is None
+        assert [each.id for each in passkey_service.list_passkeys(
+            second_user["user"].id,
+        )] == [theirs.id]
+        assert add_row(second_user["user"]) is not None
+
+    def test_an_add_in_flight_alone_is_removed(self, user, clock):
+        """No passkey yet, an add begun: the add goes, True."""
+        passkey_service.registration_options(user, origin=ORIGIN)
+
+        assert passkey_service.remove_every_passkey(user.id) is True
+
+        assert add_row(user) is None
+
+    def test_an_account_holding_neither_removes_nothing(self, user, second_user, clock):
+        """False, and the other account's passkey is untouched."""
+        theirs, _ = add(clock, second_user["user"])
+
+        assert passkey_service.remove_every_passkey(user.id) is False
+
+        assert db.session.get(Passkey, theirs.id) is not None
+
+    def test_a_passkey_made_before_the_removal_is_never_kept_after_it(self, user, clock):
+        """Registered, then removed: its keeping finds no add, is refused, keeps nothing."""
+        authenticator = SoftwareAuthenticator()
+        options, state = passkey_service.registration_options(user, origin=ORIGIN)
+        sign_in_options, sign_in_state = passkey_service.complete_registration(
+            user, json.dumps(authenticator.create(options)), "iPhone",
+            origin=ORIGIN, state=state,
+        )
+
+        passkey_service.remove_every_passkey(user.id)
+
+        with pytest.raises(PasskeyRefused) as refused:
+            passkey_service.add_passkey(
+                user, json.dumps(authenticator.get(sign_in_options)),
+                origin=ORIGIN, state=sign_in_state,
+            )
+        assert refused.value.refusal is PasskeyRefusal.EXPIRED
+        assert passkey_service.list_passkeys(user.id) == []

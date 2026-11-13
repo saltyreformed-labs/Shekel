@@ -175,7 +175,9 @@ class User(UserMixin, TimestampMixin, db.Model):
         and the one reset act clear
         (:func:`~app.services.mfa_service.reset_two_factor`), which
         ``scripts/reset_mfa.py`` and the owner's Reset two-factor for a
-        companion on Settings > Companions both run.
+        companion on Settings > Companions both run, and which removes the
+        account's passkeys with it.  A passkey is not two-factor here: it
+        signs in on its own, beside the password and code (ruling plan#3541).
 
         Returns:
             True when the user's ``auth.mfa_configs`` row is enabled.

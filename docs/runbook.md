@@ -93,7 +93,7 @@ Measured against the running maintainer host 2026-08-08. The nginx row differs b
 | `scripts/backup_retention.sh` | Prune old backups | `./scripts/backup_retention.sh [--dry-run]` |
 | `scripts/integrity_check.py` | Validate database integrity | `docker exec shekel-prod-app python scripts/integrity_check.py [--verbose] [--category CAT]` |
 | `scripts/audit_cleanup.py` | Clean old audit log entries | `docker exec shekel-prod-app python scripts/audit_cleanup.py [--days N] [--dry-run]` |
-| `scripts/reset_mfa.py` | Emergency MFA reset for a user | `docker exec shekel-prod-app python scripts/reset_mfa.py <email>` |
+| `scripts/reset_mfa.py` | Emergency MFA reset for a user: also removes their passkeys, ends their sessions and forgets their trusted devices | `docker exec shekel-prod-app python scripts/reset_mfa.py <email>` |
 | `scripts/seed_ref_tables.py` | Seed reference lookup tables | `docker exec shekel-prod-app python scripts/seed_ref_tables.py` |
 | `scripts/seed_user.py` | Create initial seed user | `docker exec shekel-prod-app python scripts/seed_user.py` |
 

@@ -1,4 +1,5 @@
 {% from "_form_macros.html" import render_field, render_errors %}
+{% from "auth/_passkey.html" import passkey_summary %}
 {% from "auth/_trusted_device.html" import device_summary %}
 
 <h5 class="mb-3"><i class="bi bi-people"></i> Companion Accounts</h5>
@@ -58,6 +59,7 @@
 {% if active_companions %}
   <div class="list-group mb-4">
     {% for comp in active_companions %}
+    {% set passkeys = companion_passkeys[comp.id] %}
     <div class="list-group-item">
       {% if edit_companion_id == comp.id %}
       {# Inline edit form for this row. #}
@@ -126,12 +128,14 @@
           </a>
           {% if comp.has_two_factor %}
           {# For a lost or replaced phone (ruling plan#3441): she sets
-             two-factor up again at her next sign-in.  Amber outline per the
-             D5 convention: a reset is a deactivate-genus control. #}
+             two-factor up again at her next sign-in.  The reset removes her
+             passkeys too, which the confirmation names while she holds any.
+             Amber outline per the D5 convention: a reset is a
+             deactivate-genus control. #}
           <form method="POST"
                 action="{{ url_for('settings.companion_reset_two_factor', companion_id=comp.id) }}"
                 class="d-inline"
-                data-confirm="Reset two-factor authentication for {{ comp.display_name or comp.email }}? They are signed out everywhere, their trusted devices are forgotten, and they set it up again with their authenticator app the next time they use Shekel.">
+                data-confirm="Reset two-factor authentication for {{ comp.display_name or comp.email }}? They are signed out everywhere, {% if passkeys %}their passkeys are removed, {% endif %}their trusted devices are forgotten, and they set it up again with their authenticator app the next time they use Shekel.">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <button type="submit" class="btn btn-sm btn-outline-warning"
                     title="Reset two-factor">
@@ -151,6 +155,31 @@
           </form>
         </div>
       </div>
+      {# Her passkeys, each removable by the owner (plan#2538, as ruled for
+         her trusted devices, plan#3439): drawn by the macro the Security
+         page draws one's own with.  Only a companion with two-factor can
+         hold one, since the login gate holds her at its setup until then. #}
+      {% if passkeys %}
+      <div class="small fw-semibold mt-3">Passkeys</div>
+      {% for passkey in passkeys %}
+      <div class="d-flex justify-content-between align-items-start flex-wrap gap-2 mt-2">
+        <div>{{ passkey_summary(passkey) }}</div>
+        <form method="POST"
+              action="{{ url_for('settings.companion_remove_passkey', companion_id=comp.id, passkey_id=passkey.id) }}"
+              class="d-inline"
+              data-confirm="Remove this passkey? It will no longer sign {{ comp.display_name or comp.email }} in.">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          {# Amber outline per the D5 convention, as Forget is: removing a
+             passkey takes a way in away and destroys no data. #}
+          <button type="submit" class="btn btn-sm btn-outline-warning">
+            <i class="bi bi-x-circle"></i> Remove
+          </button>
+        </form>
+      </div>
+      {% endfor %}
+      {% elif comp.has_two_factor %}
+      <div class="text-muted small mt-2">No passkeys.</div>
+      {% endif %}
       {# Her trusted devices, each forgettable by the owner (ruling
          plan#3439): the rows the Security page lists one's own as. #}
       {% set devices = companion_devices[comp.id] %}

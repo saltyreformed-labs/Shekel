@@ -1,5 +1,6 @@
 """Two acts at once: an answer completed twice, the cap past a held account, an add replaced.
 
+And a reset's removal of every passkey past a keeping that holds the account.
 The owner's lock serialises an account's requests, but a companion whose
 owner is gone has none to take, so the decisions that must not race take
 row locks of their own (the service's module docstring).  Each case holds the
@@ -120,6 +121,53 @@ def test_a_keeping_counts_what_the_accounts_lock_holder_wrote(app, bare_user, mo
     assert refusal is PasskeyRefusal.TOO_MANY
     db.session.expire_all()
     assert len(passkey_service.list_passkeys(user_id)) == 10
+
+
+def test_a_reset_while_a_keeping_holds_the_account_removes_what_it_kept(
+    app, bare_user, monkeypatch,
+):
+    """A keeping holds the account and has kept its passkey; the reset waits, then removes it.
+
+    A reset's removal (:func:`passkey_service.remove_every_passkey`) locks the
+    account's row before it deletes, as the keeping locks it before it
+    writes, so it deletes what the keeping kept.  A removal that took no lock
+    would not wait, would see no passkey yet, and the one kept meanwhile
+    would outlive the reset.
+    """
+    Clock(monkeypatch)
+    user_id = bare_user["user"].id
+    db.session.commit()
+
+    def removal():
+        """The reset's removal, in a session of its own, committed."""
+        removed = passkey_service.remove_every_passkey(user_id)
+        db.session.commit()
+        return removed
+
+    holder = db.engine.connect()
+    try:
+        holder.execute(
+            text("SELECT id FROM auth.users WHERE id = :id FOR NO KEY UPDATE"),
+            {"id": user_id},
+        )
+        holder.execute(
+            text(
+                "INSERT INTO auth.passkeys"
+                " (user_id, credential_id, public_key, sign_count, name,"
+                " created_at, last_used_at)"
+                " VALUES (:user_id, :credential_id, :public_key, 0, 'iPhone', :at, :at)"
+            ),
+            {
+                "user_id": user_id, "credential_id": b"\x0b" * 16,
+                "public_key": SoftwareAuthenticator().cose_key(), "at": T0,
+            },
+        )
+        removed = act_past_a_held_row(app, holder, removal)
+    finally:
+        holder.close()
+    assert removed is True
+    db.session.expire_all()
+    assert passkey_service.list_passkeys(user_id) == []
 
 
 def test_a_registration_completed_while_a_newer_add_replaces_it_completes_nothing(

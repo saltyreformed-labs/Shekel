@@ -288,7 +288,7 @@ def _add_in_flight(
     return add
 
 
-def _lock_the_account(user_id: int) -> None:
+def lock_the_account(user_id: int) -> None:
     """Lock *user_id*'s own row ``FOR NO KEY UPDATE``, the lock the cap is counted under.
 
     Taken by the add's options and its keeping before they count, so each
@@ -297,10 +297,14 @@ def _lock_the_account(user_id: int) -> None:
     written meanwhile that names the account is not held up.  It is the
     first row lock either act takes, because a deletion of the account would
     lock its row before the rows its cascade deletes, and the two orders
-    would deadlock.
+    would deadlock.  A reset's removal of every passkey and the add in
+    flight takes it first too
+    (:func:`app.services.passkey_service.remove_every_passkey`), for the
+    same reason: it deletes the add's row, which the keeping locks after
+    this one.
 
     Args:
-        user_id: The account adding a passkey.
+        user_id: The account whose row to lock.
     """
     db.session.execute(
         select(User.id).where(User.id == user_id).with_for_update(key_share=True)
@@ -323,7 +327,7 @@ def _refuse_a_full_account(user_id: int) -> None:
     """Refuse an add to an account that holds :data:`MAX_PASSKEYS` already.
 
     Asked at each of the add's three acts.  When its options are made, under
-    the account's row lock (:func:`_lock_the_account`), which an older add's
+    the account's row lock (:func:`lock_the_account`), which an older add's
     keeping in flight holds, so the device is never asked to make a passkey
     the add would refuse (it would keep it, and Shekel would not); when its
     registration completes, so the device is not asked to sign in with one;
@@ -526,7 +530,7 @@ def registration_options(
     the passkey can sign in with no email typed and no password; every
     passkey the account holds is excluded, so a device that holds one says so.
     The cap is counted under the account's row lock
-    (:func:`_lock_the_account`), and the add is written to the account's row
+    (:func:`lock_the_account`), and the add is written to the account's row
     (:func:`_begin_add`), replacing any older add in flight, and every
     account's dead add is deleted (:func:`_delete_dead_adds`), so a write:
     the route's request is a command.
@@ -544,7 +548,7 @@ def registration_options(
     Raises:
         PasskeyRefused: ``TOO_MANY``.
     """
-    _lock_the_account(user.id)
+    lock_the_account(user.id)
     _refuse_a_full_account(user.id)
     moment = _ceremony.now()
     options, begun = _ceremony.server(origin).register_begin(
@@ -632,7 +636,7 @@ def add_passkey(
     counter read as at every assertion.  Its last use is set to this moment:
     the passkey has signed in once.
 
-    The account's own row is locked first (:func:`_lock_the_account`),
+    The account's own row is locked first (:func:`lock_the_account`),
     before the add's row and the count, so two keepings of one account, or a
     keeping and a newer add's options, wait for each other there, an owner's
     lock held or not (the package docstring), and each reads what the other
@@ -663,7 +667,7 @@ def add_passkey(
             ``ACCOUNT_DISABLED``; ``COUNTER_DID_NOT_RISE``; ``ALREADY_ADDED``.
     """
     moment = _ceremony.now()
-    _lock_the_account(user.id)
+    lock_the_account(user.id)
     add = _add_in_flight(user, state, Ceremony.ADD_SIGN_IN, moment)
     _refuse_a_full_account(user.id)
     assertion = read_assertion(response_json)

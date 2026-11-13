@@ -808,8 +808,8 @@ def unversioned_between(root: Path, old: str, new: str) -> tuple[Reason, ...]:
     """Why the change from commit ``old`` to commit ``new`` is no change that moves pinned
     versions alone, none across a major, over every file of the tree it changes, each a
     :class:`Reason` (:func:`_reasons`); none when it is one: the daily update queue's
-    reading, which leaves a pull request with a reason and mentions the developer once for
-    each thing it waits on.
+    reading, which leaves a pull request with a reason and tells so once for each thing it
+    waits on.
 
     Raises:
         tools.ci.gitcmd.GitError: when git cannot read either commit, or a file it changes.

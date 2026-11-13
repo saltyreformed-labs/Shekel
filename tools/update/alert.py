@@ -13,7 +13,8 @@ job, and runs no package code.
 
 A mention is what reaches him (measured 2026-10-27, on the tracker), and an issue is a
 mention's home that a failed run always has; he closes it once what failed is fixed.  Each
-failed run opens one, and a re-run that fails again opens another.
+failed run opens one, and a re-run that fails again opens another.  ``quill sync`` files a card
+for each one still open, once, so it reaches the board too (ruling plan#3619).
 
 Usage, where ``<result>`` is each job's as GitHub gives it (``success``, ``failure``,
 ``cancelled`` or ``skipped``)::
@@ -39,13 +40,16 @@ from tools.update.app import DEVELOPER, REPOSITORY_VARIABLE, unset
 #: The variable holding the workflow's own token, which the alert's job and the due job each
 #: widen to ``issues: write``: the one ``gh`` reads first.
 ISSUE_TOKEN_VARIABLE = "GH_TOKEN"
+#: How the title of each issue the alert opens begins, the failed run's day after it: what
+#: ``quill sync`` knows an alert's issue by, beside the bot that opened it (ruling plan#3619).
+FAILED = "The weekly update failed "
 
 
 def issue(day: date, run: str, results: Sequence[tuple[str, str]]) -> dict[str, str]:
     """The issue telling the developer that the run at ``run`` failed on ``day``: its title and
     body, each of ``results`` a job's name and result."""
     lines = "\n".join(f"- {job}: {result}" for job, result in results)
-    return {"title": f"The weekly update failed {day:%Y-%m-%d}",
+    return {"title": f"{FAILED}{day:%Y-%m-%d}",
             "body": f"@{DEVELOPER} the weekly update's run failed: {run}\n\n{lines}\n\n"
                     "Close this issue once what failed is fixed (ruling plan#2466)."}
 

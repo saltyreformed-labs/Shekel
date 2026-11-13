@@ -155,6 +155,7 @@ from tools.quill import (
     _sync,
     _tasks,
     _versions,
+    _waits,
     _watch,
 )
 from tools.quill._arcs import other_labels
@@ -399,14 +400,16 @@ def _card_refusal(card: Card) -> str | None:
     return None
 
 
-def _text_refusal(card: Card, path: str, body: str) -> str | None:
-    """Why ``body``, read from ``path``, is not ``card``'s new text; None when it may be.
+def _text_refusal(card: Card, path: str, body: str, old: str) -> str | None:
+    """Why ``body``, read from ``path``, is not ``card``'s new text over ``old``, its text as
+    it stands; None when it may be.
 
     A text that is only space would blank the card's spec or question: edit
     never blanks a text (a finding's, the check refuses too).  A question's
     text in a ruling's shape is what only its conversion writes: ``_filing``
     reads such an edit of quill's as an earlier conversion's
-    (``_Asked.converted_before``).
+    (``_Asked.converted_before``).  A text dropping a line that holds what the weekly update
+    told is one ``quill sync`` would file again (:func:`_waits.edit_refusal`).
     """
     if not body.strip():
         return f"{path} holds no text: edit never blanks a card's text"
@@ -415,7 +418,7 @@ def _text_refusal(card: Card, path: str, body: str) -> str | None:
                 "...\" then \"Answer: ...\"), which only its conversion writes: `quill file "
                 f"ruling --from-question plan#{card.number}` turns an answered question into "
                 "its ruling")
-    return None
+    return _waits.edit_refusal(f"plan#{card.number}", old, body)
 
 
 def cmd_edit(args, tracker: Tracker, _root: Path) -> int:
@@ -435,10 +438,10 @@ def cmd_edit(args, tracker: Tracker, _root: Path) -> int:
     card = _one(tracker, args.card)
     if why := _card_refusal(card):
         raise Refused(why)
-    body = None
+    body = old = None
     if args.body_file is not None:
-        body = _read(args.body_file)
-        if why := _text_refusal(card, args.body_file, body):
+        body, old = _read(args.body_file), tracker.body(card.number)
+        if why := _text_refusal(card, args.body_file, body, old):
             raise Refused(why)
     written = {part for part, new in ((TITLE, args.title), (BODY, body)) if new is not None}
     draft = Draft(card.kind, card.title if args.title is None else args.title, body,
@@ -453,7 +456,7 @@ def cmd_edit(args, tracker: Tracker, _root: Path) -> int:
             tracker.retitle(number, args.title)
             print(f"retitled plan#{number}: {card.title!r} -> {args.title!r}")
     if body is not None:
-        if normalized(tracker.body(number)) == normalized(body):
+        if normalized(old) == normalized(body):
             print(f"plan#{number}'s text is already this text: not written")
         else:
             tracker.set_body(number, body)
@@ -775,10 +778,12 @@ def cmd_sync(args, tracker: Tracker, root: Path) -> int:
     put each card's arc labels back to display its Arc, over a read of every card (R-BAL354,
     :func:`_relabel.put_back`), reporting each card whose Arc no label can fix; put on the
     board each task whose step is on it and that is not (ruling plan#1842,
-    :func:`_tasks.put_on_board`); and last write the board's Status of every card it holds
+    :func:`_tasks.put_on_board`); and then write the board's Status of every card it holds
     from git (rulings plan#1873, plan#1905, :func:`_status.sync_statuses`).  Each is display
     of the plan, so a failed write in one costs nothing above it; run again, it makes the
-    writes still owed.
+    writes still owed.  Last, file a card for each pull request or issue the weekly update
+    told a wait on while no card for it is open, and put each later wait told there on that
+    card (rulings plan#3619, plan#3620, plan#3722, :func:`_waits.file_waits`).
 
     Prints a REPORT for each thing a person must fix in the tracker, which makes
     it exit 1, and a HISTORY line for each thing ``dev`` and ``main`` already hold
@@ -786,8 +791,8 @@ def cmd_sync(args, tracker: Tracker, root: Path) -> int:
     about the cards it decides, and each entry under ``plan/ships`` or ``plan/tasks`` there
     that is no card's (:attr:`_git.Shipped.history`).
 
-    What it reads: :func:`_sync.every_card`.  ``quill watch`` runs the same producer over
-    the cards a moved branch names (:mod:`_watch`).
+    What it reads: :func:`_sync.every_card`, and the waits pass its own (:mod:`_waits`).
+    ``quill watch`` runs the same producer over the cards a moved branch names (:mod:`_watch`).
     """
     reads = _git.read(root)
     shipped = reads.shipped.cards
@@ -800,7 +805,8 @@ def cmd_sync(args, tracker: Tracker, root: Path) -> int:
     _tasks.put_on_board(tracker, decided.cards, args.dry_run)
     for line in (shown := _status.sync_statuses(tracker, decided.cards, reads, args.dry_run)):
         print(f"REPORT: {line}")
-    return 1 if changes.reports or reports or shown else 0
+    waits = _waits.file_waits(tracker, args.dry_run)
+    return 1 if changes.reports or reports or shown or waits else 0
 
 
 # -- spec-history, spec-revert ------------------------------------------------------

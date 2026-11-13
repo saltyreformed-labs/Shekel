@@ -1,9 +1,11 @@
-# Shekel Budget App -- the weekly image scan's scanner
+# Shekel Budget App -- the daily image scan's scanner
 #
 # Grype (ruling plan#3704) reads the app image saved as a file and writes,
 # on its standard output, every CVE it matches there as JSON, which
-# tools/update/scan.py judges (ruling plan#3720).  Run, from the
-# repository's root, as:
+# tools/update/scan.py judges (ruling plan#3720).  `quill scan` runs it
+# (tools/update/scan.py, ruling plan#3825) over production's image, saved,
+# on the developer's rootless daemon (ruling plan#3822), as, from the
+# repository's root, with DOCKER_HOST naming that daemon:
 #
 #   SCAN_IMAGE=/path/to/image.tar \
 #       docker compose -f docker-compose.scan.yml run --rm --no-TTY scan
@@ -25,7 +27,7 @@
 # what moves it.
 #
 # WHAT IT HOLDS.  The image file, read-only, and nothing else of the
-# runner's: no Docker socket, no secret, no port.  Its root filesystem is
+# host's: no Docker socket, no secret, no port.  Its root filesystem is
 # read-only, every capability is dropped and none can be gained.
 name: shekel-scan
 

@@ -1,4 +1,4 @@
-"""The weekly image scan's scanner, ``docker-compose.scan.yml`` (rulings plan#3704, plan#3706,
+"""The daily image scan's scanner, ``docker-compose.scan.yml`` (rulings plan#3704, plan#3706,
 plan#3708): Grype by tag and digest, holding the saved app image read-only and nothing else of
 the host, its database downloaded fresh into a tmpfs on every run and refused when stale.
 

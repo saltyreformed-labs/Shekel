@@ -1,18 +1,23 @@
-"""The weekly image scan's judge (:mod:`tools.update.scan`; ruling plan#3720): the scanner's
-JSON judged as data, each CVE with a fix rated HIGH or CRITICAL by any source counted.  The scan
-is a trimmed copy of a real one, ``recorded/scan.json``: seven of the 422 matches Grype v0.121.2
-made on dev's image 2026-11-13, each whole, with the scan's own source, distro and descriptor.
-A case the real scan does not hold is that copy with one value changed."""
+"""The daily image scan (:mod:`tools.update.scan`): its judge (ruling plan#3720), the scanner's
+JSON judged as data, each CVE with a fix rated HIGH or CRITICAL by any source counted; and the
+scan itself (ruling plan#3822), production's image read on its daemon and scanned on the
+rootless one, run with a stand-in for docker.  The scan judged is a trimmed copy of a real one,
+``recorded/scan.json``: seven of the 422 matches Grype v0.121.2 made on dev's image 2026-11-13,
+each whole, with the scan's own source, distro and descriptor.  A case the real scan does not
+hold is that copy with one value changed."""
 from __future__ import annotations
 
 import copy
 import json
+import os
+import stat
 import subprocess
 import sys
 from pathlib import Path
 
 import pytest
 
+from scripts import private_cluster
 from tools.ci.arcs import REPO
 from tools.update import scan
 from tools.update.app import marker, markers
@@ -238,38 +243,237 @@ def test_the_marker_names_the_cve_and_the_package_in_the_form_quill_sync_reads()
     assert markers(_CRITICAL.marker) == (_CRITICAL.marker,)
 
 
-def test_a_file_that_is_no_utf_8_json_is_refused(tmp_path):
+def test_an_answer_that_is_no_utf_8_json_is_refused():
     """Grype's JSON is read as UTF-8; anything else is refused, never read as no match."""
-    assert scan.read(RECORDED) == _recorded()
-    for name, data in (("text", b"no json"), ("bytes", b'{"matches": "\xff"}')):
-        (tmp_path / name).write_bytes(data)
+    assert scan.parsed(RECORDED.read_bytes()) == _recorded()
+    for answer in (b"no json", b'{"matches": "\xff"}', b""):
         with pytest.raises(scan.NotAScan, match="it is no JSON"):
-            scan.read(tmp_path / name)
+            scan.parsed(answer)
 
 
-def test_the_module_runs_with_no_package_installed():
-    """Run by an interpreter given no installed package (``-S``; ``-E`` so no variable of this
-    run's puts one back), the module imports and answers."""
-    done = subprocess.run([sys.executable, "-E", "-S", "-m", scan.__name__, "--help"],
+def test_the_module_imports_with_no_package_installed():
+    """Imported by an interpreter given no installed package (``-S``; ``-E`` so no variable of
+    this run's puts one back), the module and what it imports load (ruling plan#3825)."""
+    done = subprocess.run([sys.executable, "-E", "-S", "-c", f"import {scan.__name__}"],
                           cwd=REPO, capture_output=True, text=True, check=False)
-    assert (done.returncode, done.stderr) == (0, "")
-    assert done.stdout.startswith("usage: python -m tools.update.scan ")
+    assert (done.returncode, done.stdout, done.stderr) == (0, "", "")
 
 
-def test_main_says_how_many_matches_of_the_recorded_scan_count(capsys):
-    """The recorded scan, judged from its file: its one CRITICAL CVE counts, and it exits 0."""
-    assert scan.main([str(RECORDED)]) == 0
-    assert capsys.readouterr() == (
-        "update scan: CVEs with a fix rated HIGH or CRITICAL: 1\n", "")
+# -- the scan of production's image ----------------------------------------------------------
+
+#: The daemon the stand-in names rootless.
+_ROOTLESS = "unix:///run/user/1000/docker.sock"
+#: The digest the stand-in's production container runs.
+_IMAGE = "sha256:" + "4f19" * 16
+#: The commit the stand-in's image was built from.
+_BUILT_FROM = "0123456789abcdef" * 2 + "01234567"
 
 
-@pytest.mark.parametrize("given", ["missing", "not-json"])
-def test_main_refuses_a_scan_it_cannot_read(given, tmp_path, capsys):
-    """A file missing, or no scan, exits 1 saying why, never read as a clean scan."""
-    path = tmp_path / "scan.json"
-    if given == "not-json":
-        path.write_text('{"matches": [', encoding="utf-8")
-    assert scan.main([str(path)]) == 1
-    captured = capsys.readouterr()
-    assert captured.out == ""
-    assert captured.err.startswith(f"update scan: {path} was refused: ")
+def _labelled(labels: object) -> dict:
+    """The recorded scan as Grype writes it of an image whose labels are ``labels``."""
+    scanned = _recorded()
+    scanned["source"]["target"]["labels"] = labels
+    return scanned
+
+
+class _Docker:
+    """A stand-in for docker (:data:`tools.update.scan.Docker`): each call recorded, as its
+    daemon, its arguments, the variables it adds and its seconds.  An inspect answers
+    ``image``; a save writes the file it names as docker does, 0600; the scanner answers
+    ``answer``, the mode of the file it was handed recorded as it runs; and the command
+    ``failing`` names raises as a failed one."""
+
+    def __init__(self, image: str = _IMAGE, answer: bytes | None = None,
+                 failing: str | None = None) -> None:
+        """A stand-in whose inspect answers ``image``, whose scanner answers ``answer`` (a
+        labelled copy of the recorded scan when None), and whose ``failing`` command fails."""
+        self.calls: list[tuple[str, list[str], dict[str, str], int]] = []
+        self.image = image
+        self.answer = (json.dumps(_labelled({scan.REVISION: _BUILT_FROM})).encode()
+                       if answer is None else answer)
+        self.failing = failing
+        self.mode: int | None = None
+
+    def __call__(self, daemon, arguments, added, seconds) -> bytes:
+        """One docker command, as the class says."""
+        self.calls.append((daemon, list(arguments), dict(added), seconds))
+        if arguments[0] == self.failing:
+            raise scan.ScanFailed(f"docker {arguments[0]} failed")
+        if arguments[0] == "inspect":
+            return f"{self.image}\n".encode()
+        if arguments[0] == "save":
+            saved = Path(arguments[arguments.index("--output") + 1])
+            saved.write_bytes(b"an image")
+            saved.chmod(0o600)
+            return b""
+        self.mode = stat.S_IMODE(Path(added["SCAN_IMAGE"]).stat().st_mode)
+        return self.answer
+
+
+@pytest.fixture(name="rootless")
+def _rootless(monkeypatch):
+    """The cluster module's daemon, the rootless one, says it is rootless."""
+    monkeypatch.setattr(private_cluster, "endpoint", lambda: _ROOTLESS)
+    monkeypatch.setattr(private_cluster, "asked_rootless", lambda: True)
+
+
+def _saved(docker: _Docker) -> Path:
+    """The file the stand-in's save wrote."""
+    save, = (arguments for _, arguments, _, _ in docker.calls if arguments[0] == "save")
+    return Path(save[save.index("--output") + 1])
+
+
+@pytest.mark.usefixtures("rootless")
+def test_a_scan_reads_production_on_its_daemon_and_scans_the_saved_file_on_the_rootless_one():
+    """Production's container's image is read and saved on the system daemon, by its digest; the
+    scanner reads the saved file, world-readable, on the rootless daemon; the commit is the
+    scanned image's label; and the file is gone once the scan ends (ruling plan#3822)."""
+    docker = _Docker()
+    assert scan.scanned(REPO, docker) == scan.Scanned(_IMAGE, _BUILT_FROM, (_CRITICAL,))
+    saved = str(_saved(docker))
+    assert docker.calls == [
+        (scan.PRODUCTION, ["inspect", "--format", "{{.Image}}", "shekel-prod-app"], {},
+         scan.DOCKER_SECONDS),
+        (scan.PRODUCTION, ["save", "--output", saved, _IMAGE], {}, scan.DOCKER_SECONDS),
+        (_ROOTLESS, ["compose", "--file", str(REPO / scan.COMPOSE), "run", "--rm", "--no-TTY",
+                     "scan"], {"SCAN_IMAGE": saved}, scan.SCAN_SECONDS)]
+    assert docker.mode == 0o644
+    assert not Path(saved).parent.exists()
+
+
+@pytest.mark.parametrize("asked, said", [(False, "is not rootless"),
+                                         (None, "could not be asked what it is")])
+def test_a_scanner_daemon_not_rootless_refuses_the_scan_before_production_is_read(
+        asked, said, monkeypatch):
+    """No sanction lets the scanner run on another daemon than a rootless one, and the refusal
+    comes before any read of production, saying how to start the rootless daemon."""
+    monkeypatch.setattr(private_cluster, "endpoint", lambda: "")
+    monkeypatch.setattr(private_cluster, "asked_rootless", lambda: asked)
+    monkeypatch.setenv("SHEKEL_ALLOW_HOST_DOCKER", "1")
+    docker = _Docker()
+    with pytest.raises(scan.ScanFailed, match=f"docker's default daemon {said}: start it"):
+        scan.scanned(REPO, docker)
+    assert not docker.calls
+
+
+@pytest.mark.usefixtures("rootless")
+@pytest.mark.parametrize("image", ["", "4f19" * 16, "sha256:" + "4F19" * 16,
+                                   f"ghcr.io/saltyreformed-labs/shekel@{_IMAGE}"])
+def test_a_container_that_names_no_image_digest_saves_nothing(image):
+    """What the inspect answers is a digest or the scan stops there."""
+    docker = _Docker(image=image)
+    with pytest.raises(scan.ScanFailed, match="which is no image digest"):
+        scan.scanned(REPO, docker)
+    assert [arguments[0] for _, arguments, _, _ in docker.calls] == ["inspect"]
+
+
+@pytest.mark.usefixtures("rootless")
+@pytest.mark.parametrize("failing", ["save", "compose"])
+def test_the_saved_file_is_deleted_however_the_scan_fails(failing):
+    """A save or a scan that fails leaves no saved image behind."""
+    docker = _Docker(failing=failing)
+    with pytest.raises(scan.ScanFailed, match=f"docker {failing} failed"):
+        scan.scanned(REPO, docker)
+    assert not _saved(docker).parent.exists()
+
+
+@pytest.mark.usefixtures("rootless")
+@pytest.mark.parametrize("labels", [None, {}, {scan.REVISION: "latest"},
+                                    {scan.REVISION: _BUILT_FROM[:12]},
+                                    {scan.REVISION: _BUILT_FROM.upper()},
+                                    {scan.REVISION: 7}])
+def test_a_scanned_image_naming_no_commit_is_refused(labels):
+    """The commit later steps read the image's fixes at is the label's whole sha, or the scan
+    is refused: dev's recorded image, built with no label, among them."""
+    docker = _Docker(answer=json.dumps(_labelled(labels)).encode())
+    with pytest.raises(scan.NotAScan, match="names no commit it was built from"):
+        scan.scanned(REPO, docker)
+    with pytest.raises(scan.NotAScan, match="names no commit it was built from"):
+        scan.revision(_recorded())
+
+
+@pytest.mark.usefixtures("rootless")
+def test_a_scanner_answer_that_is_no_scan_is_refused():
+    """What the scanner writes is judged as data: no JSON is no scan."""
+    with pytest.raises(scan.NotAScan, match="it is no JSON"):
+        scan.scanned(REPO, _Docker(answer=b"Error: no image"))
+
+
+@pytest.mark.parametrize("lines, count", [([], 0), (['CONTAINER_NAME="${SHEKEL_CONTAINER_NAME'
+                                                     ':-a}"', 'CONTAINER_NAME="${SHEKEL_'
+                                                     'CONTAINER_NAME:-b}"'], 2)])
+def test_production_s_container_is_the_one_the_deploy_script_names_once(lines, count, tmp_path):
+    """The deploy script's default for ``SHEKEL_CONTAINER_NAME`` names the container, as the
+    release reads it; a script naming none, or two, is refused."""
+    assert scan.container(REPO) == "shekel-prod-app"
+    (tmp_path / "deploy").mkdir()
+    (tmp_path / scan.DEPLOY_SCRIPT).write_text("\n".join(["#!/usr/bin/env bash", *lines]) + "\n",
+                                               encoding="utf-8")
+    with pytest.raises(scan.ScanFailed, match=f"names production's container {count} times"):
+        scan.container(tmp_path)
+
+
+# -- the scan's docker, a real process -------------------------------------------------------
+
+#: A stand-in ``docker`` on the path: what each command does is the script's, which records
+#: the daemon it was handed, and the variable the scanner reads, for each command it runs.
+_FAKE_DOCKER = """#!/bin/sh
+printf '%s %s %s\\n' "$1" "$DOCKER_HOST" "$SCAN_IMAGE" >> "$SCAN_TEST_LOG"
+case "$1" in
+  inspect) {inspect} ;;
+  save) printf 'an image' > "$3"; chmod 600 "$3" ;;
+  compose) cat "$SCAN_TEST_ANSWER" ;;
+esac
+"""
+
+
+def _on_path(tmp_path: Path, monkeypatch, inspect: str) -> Path:
+    """A stand-in ``docker`` first on the path whose inspect runs ``inspect``, its log's path;
+    the scanner answers a labelled copy of the recorded scan."""
+    binary = tmp_path / "bin" / "docker"
+    binary.parent.mkdir()
+    binary.write_text(_FAKE_DOCKER.replace("{inspect}", inspect), encoding="utf-8")
+    binary.chmod(0o755)
+    answer = tmp_path / "answer.json"
+    answer.write_text(json.dumps(_labelled({scan.REVISION: _BUILT_FROM})), encoding="utf-8")
+    monkeypatch.setenv("PATH", f"{binary.parent}{os.pathsep}{os.environ['PATH']}")
+    monkeypatch.setenv("SCAN_TEST_ANSWER", str(answer))
+    monkeypatch.setenv("SCAN_TEST_LOG", str(tmp_path / "log"))
+    monkeypatch.setenv("DOCKER_HOST", "unix:///an/inherited/daemon")
+    monkeypatch.setenv("SCAN_IMAGE", "/an/inherited/file")
+    return tmp_path / "log"
+
+
+@pytest.mark.usefixtures("rootless")
+def test_each_docker_command_runs_on_the_daemon_the_scan_names(tmp_path, monkeypatch):
+    """The real docker runner: each command is handed its own daemon whatever ``DOCKER_HOST``
+    this process holds, and only the scanner the saved file's path."""
+    log = _on_path(tmp_path, monkeypatch, f"echo {_IMAGE}")
+    done = scan.scanned(REPO)
+    assert (done.image, done.revision, done.found) == (_IMAGE, _BUILT_FROM, (_CRITICAL,))
+    inspect, save, run = log.read_text(encoding="utf-8").splitlines()
+    assert inspect == save.replace("save", "inspect", 1) == (
+        f"inspect {scan.PRODUCTION} /an/inherited/file")
+    assert run.startswith(f"compose {_ROOTLESS} /") and run.endswith("/image.tar")
+
+
+@pytest.mark.usefixtures("rootless")
+@pytest.mark.parametrize("inspect, said", [
+    ('echo "first line" >&2; echo "Error: No such object: shekel-prod-app" >&2; exit 3',
+     "exited 3: Error: No such object: shekel-prod-app"),
+    ("exit 1", "exited 1: it said nothing")])
+def test_a_docker_command_that_fails_says_its_last_line_of_error(inspect, said, tmp_path,
+                                                                 monkeypatch):
+    """docker's exit status and the last line it wrote on its error stream are the failure's."""
+    _on_path(tmp_path, monkeypatch, inspect)
+    with pytest.raises(scan.ScanFailed, match=f"docker inspect on {scan.PRODUCTION} {said}$"):
+        scan.scanned(REPO)
+
+
+@pytest.mark.usefixtures("rootless")
+def test_a_docker_command_that_does_not_finish_in_time_fails(tmp_path, monkeypatch):
+    """A daemon that does not answer ends the scan as a failure, never a hang."""
+    _on_path(tmp_path, monkeypatch, "exec sleep 5")
+    monkeypatch.setattr(scan, "DOCKER_SECONDS", 1)
+    with pytest.raises(scan.ScanFailed, match="did not finish within 1 s"):
+        scan.scanned(REPO)

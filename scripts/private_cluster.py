@@ -9,7 +9,7 @@ starts and stops it here; the release rehearsal kit's bench
 container (``balance:R-BAL327``).  It is a container on a rootless daemon this module
 chooses, and a start refuses any other (:func:`daemon`), reached over a UNIX SOCKET in a
 directory under ``XDG_RUNTIME_DIR``, with no network and no port.  ``client`` judges no
-daemon: it runs its tool in the container it is named, on the daemon :func:`_endpoint` names,
+daemon: it runs its tool in the container it is named, on the daemon :func:`endpoint` names,
 and the rehearsal kit names only the id its own start handed over (the K1a-3 review's B-2).
 
 A cluster is OWNED BY A TOKEN its caller makes before starting it (the coordinator's ruling on
@@ -376,11 +376,13 @@ def _runtime_dir() -> Path:
     return Path(os.environ.get("XDG_RUNTIME_DIR") or f"/run/user/{os.getuid()}")
 
 
-def _endpoint() -> str:
+def endpoint() -> str:
     """The daemon every docker command here is handed, as ``DOCKER_HOST``: that variable when
     it is set and not empty, else the rootless daemon's socket in :func:`_runtime_dir` when
     one is there, else ``""``, docker's own default.  An absent rootless socket is no fallback
-    to anything: :func:`daemon` then refuses what docker's default turns out to be."""
+    to anything: :func:`daemon` then refuses what docker's default turns out to be.  Public
+    for the image scan, which runs its scanner here once :func:`asked_rootless` says so
+    (``tools/update/scan.py``, ruling plan#3822)."""
     given = os.environ.get("DOCKER_HOST", "")
     if given:
         return given
@@ -409,8 +411,21 @@ def _sanctioned() -> bool:
     return _on_ci() or os.environ.get(_HOST_DOCKER_OVERRIDE) == "1"
 
 
+def asked_rootless() -> bool | None:
+    """Whether the daemon :func:`endpoint` names says it is rootless, by the security options
+    ``docker info`` lists, or None when it cannot be asked: its socket outlives a stopped
+    daemon, so a stopped one is never called one that is not rootless.  The ONE spelling of
+    that question, which :func:`daemon` asks and the image scan asks before it runs its
+    scanner (``tools/update/scan.py``, ruling plan#3822), with no sanction."""
+    try:
+        asked = _docker("info", "--format", "{{.SecurityOptions}}")
+    except ClusterError:
+        return None
+    return None if asked.returncode else "rootless" in asked.stdout
+
+
 def daemon() -> str:
-    """The daemon a cluster goes to (:func:`_endpoint`, ``""`` for docker's own default), once
+    """The daemon a cluster goes to (:func:`endpoint`, ``""`` for docker's own default), once
     it is known to be rootless or a container per run on it is sanctioned (:func:`_sanctioned`).
 
     THE DAEMON IS NOT THE SYSTEM ONE.  The system daemon on this host runs the production
@@ -439,16 +454,12 @@ def daemon() -> str:
         ClusterError: when the daemon cannot be asked what it is, or is not rootless, and no
             sanction applies.
     """
-    endpoint = _endpoint()
-    try:
-        asked = _docker("info", "--format", "{{.SecurityOptions}}")
-        answer = None if asked.returncode else asked.stdout
-    except ClusterError:
-        answer = None
-    if (answer is not None and "rootless" in answer) or _sanctioned():
-        return endpoint
-    where = endpoint or "the default socket"
-    if answer is None:
+    named = endpoint()
+    rootless = asked_rootless()
+    if rootless or _sanctioned():
+        return named
+    where = named or "the default socket"
+    if rootless is None:
         raise ClusterError(f"could not ask {where} what it is, so whether a cluster would land "
                            "on the production daemon is UNKNOWN, and none is started.  Start "
                            "the rootless daemon with 'systemctl --user start docker.service' "
@@ -490,9 +501,9 @@ def _in_container(container: str, tool: str, *args: str, attach_stdin: bool = Fa
 
 def _docker_env() -> dict[str, str]:
     """The environment a docker command runs in: this process's, with ``DOCKER_HOST`` the
-    daemon :func:`_endpoint` names when it names one."""
-    endpoint = _endpoint()
-    return {**os.environ, "DOCKER_HOST": endpoint} if endpoint else dict(os.environ)
+    daemon :func:`endpoint` names when it names one."""
+    named = endpoint()
+    return {**os.environ, "DOCKER_HOST": named} if named else dict(os.environ)
 
 
 def _docker(*args: str) -> subprocess.CompletedProcess[str]:
@@ -513,9 +524,9 @@ def _docker(*args: str) -> subprocess.CompletedProcess[str]:
     ended in a traceback.  Nothing else reads the text for more than that: a container's id
     is hex.
 
-    It is handed the daemon :func:`_endpoint` names as it runs, whether or not its caller
+    It is handed the daemon :func:`endpoint` names as it runs, whether or not its caller
     exported one.  The daemon is not judged again mid-start: :func:`daemon` judged the one
-    :func:`_endpoint` named at the start's door, so a rootless socket that vanishes between
+    :func:`endpoint` named at the start's door, so a rootless socket that vanishes between
     the start's ``docker info`` and its ``docker run`` sends the run to docker's default (the
     K1a-3 review's B-1, a noted follow-up).
 
@@ -884,7 +895,7 @@ def _stop(args: argparse.Namespace) -> int:
 
 def _client(args: argparse.Namespace) -> int:
     """``client``, as the module says: this process BECOMES the ``docker exec`` that runs the
-    tool, handed the daemon :func:`_endpoint` names, so a dump streams to the tool and its
+    tool, handed the daemon :func:`endpoint` names, so a dump streams to the tool and its
     output back with no copy in between, and the tool's exit status is this process's.  It
     returns only when docker cannot be run at all, naming why: exit 2."""
     argv = ["docker", *_in_container(args.container, args.tool, *args.arguments,

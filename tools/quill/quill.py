@@ -55,11 +55,12 @@ unfinished prerequisites just ahead of it, never one On hold (rulings plan#1830,
 plan#1832; :mod:`_next`).  ``watch`` runs every minute from the same clone, never beside
 ``sync`` (``shekel-plan-watch.timer``): the same producer over each card whose branch moved
 since its last pass, so the board shows a push within a minute (rulings plan#1871, plan#1874,
-:mod:`_watch`).  ``answer`` answers the developer's comments on a card, and ``next``
-names each claimed card, and each task under one, holding one no answer has followed
-(plan#1822, ruling plan#1924, :mod:`_comments`).  ``note`` posts a stop's note on the task a
-claimed card's next session starts and prints its prompt (rulings plan#1921, plan#1922,
-:mod:`_notes`).
+:mod:`_watch`).  ``scan`` scans the image production is running, daily from this host, and
+says what it found (rulings plan#3820, plan#3825, :mod:`_scan`).  ``answer`` answers the
+developer's comments on a card, and ``next`` names each claimed card, and each task under
+one, holding one no answer has followed (plan#1822, ruling plan#1924, :mod:`_comments`).
+``note`` posts a stop's note on the task a claimed card's next session starts and prints its
+prompt (rulings plan#1921, plan#1922, :mod:`_notes`).
 ``pr`` opens a card's pull request into ``dev``, its text naming the card so the card links it,
 and ``file question --owner`` links a question to the step it is asked for, a link its ruling
 keeps (plan#1861's item 10, :mod:`_pr`, :mod:`_filing`).  ``arc`` sets a card's Arc and puts
@@ -106,6 +107,7 @@ Usage, from the repository root (``plan#N`` or ``N`` names a card)::
     python -m tools.quill.quill drop plan#N --why REASON
     python -m tools.quill.quill sync [--dry-run]
     python -m tools.quill.quill watch [--dry-run]
+    python -m tools.quill.quill scan
     python -m tools.quill.quill pr plan#N --title TITLE --body-file TEXT
     python -m tools.quill.quill spec-history plan#N [--since BRANCH_OR_DATE]
     python -m tools.quill.quill spec-revert plan#N --to EDIT_ID
@@ -113,7 +115,7 @@ Usage, from the repository root (``plan#N`` or ``N`` names a card)::
 
 Exit status: 0 done (for ``watch``, its REPORT lines printed: they alert from ``sync``, ruling
 plan#1907); 1 refused, with nothing written (or, for ``sync``, a
-REPORT a person must act on); 2 a call failed -- GitHub, git, the network, or
+REPORT a person must act on); 2 a call failed -- GitHub, git, the network, docker (``scan``), or
 a file the command reads or writes (the App's credentials, a ``--body-file``,
 ``export``'s file) -- or the command line itself is not one of the forms above
 (argparse's usage error), before anything is read.  Every write is printed as it
@@ -150,6 +152,7 @@ from tools.quill import (
     _notes,
     _pr,
     _relabel,
+    _scan,
     _status,
     _sync,
     _tasks,
@@ -214,6 +217,7 @@ from tools.quill.setup_tracker import (
     PLAN,
     TASK,
 )
+from tools.update.scan import ScanFailed
 
 #: How a command reaches the plan's tracker: quill's App, narrowed to its repository.  The
 #: release tool's command line reaches it the same way (``tools/release/release.py``).
@@ -882,6 +886,8 @@ def parser() -> argparse.ArgumentParser:
     commands.add_parser("watch", help="write the state of each card whose branch moved since "
                                       "the last pass, from git").add_argument(
         "--dry-run", action="store_true")
+    commands.add_parser("scan", help="scan the image production is running for CVEs, from "
+                                     "this host")
     history = commands.add_parser("spec-history", help="a card's body edits")
     history.add_argument("card", type=card_number)
     history.add_argument("--since", help="an ISO date or time, or a branch (from its start)")
@@ -909,12 +915,13 @@ COMMANDS: dict[str, Callable[..., int]] = {
 #: The commands handed how to reach the tracker, ``connect``, in place of a tracker: each
 #: connects only once it has something to read or write there.  ``watch`` runs every minute,
 #: and most minutes ask git alone (:mod:`_watch`); ``pr`` writes the code repository and reads
-#: nothing of the tracker (:mod:`_pr`).
-CONNECTS_LATE: dict[str, Callable[..., int]] = {"watch": _watch.cmd_watch, "pr": _pr.cmd_pr}
+#: nothing of the tracker (:mod:`_pr`); ``scan`` writes nothing there yet (:mod:`_scan`).
+CONNECTS_LATE: dict[str, Callable[..., int]] = {"watch": _watch.cmd_watch, "pr": _pr.cmd_pr,
+                                                "scan": _scan.cmd_scan}
 
 #: What a command's failed call raises: exit status 2 (:func:`exit_status`).
 FAILURES = (GitHubError, TrackerError, GitError, requests.RequestException, OSError,
-            CredentialsError, _pr.PullRequestError)
+            CredentialsError, _pr.PullRequestError, ScanFailed)
 
 
 def main(argv: list[str] | None = None, connect: Callable[[], Tracker] = CONNECT,

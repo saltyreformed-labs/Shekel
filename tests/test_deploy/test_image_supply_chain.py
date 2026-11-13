@@ -36,16 +36,14 @@ import re
 import shutil
 import subprocess
 import tomllib
-from pathlib import Path
 
 import pytest
 import yaml
 
+from tests._repo_root import REPO_ROOT
 from tests.test_deploy._compose import CONFIG_ENV
 from tests.test_deploy._compose import config as compose_config
 from tests.test_deploy.test_uv_build_hashes import BUILD_HASHES_SETTING, PYPROJECT
-
-REPO_ROOT = Path(__file__).resolve().parents[2]
 
 # ── Files under assertion ──────────────────────────────────────────
 DOCKERFILE = REPO_ROOT / "Dockerfile"

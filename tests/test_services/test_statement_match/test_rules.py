@@ -23,8 +23,6 @@ from decimal import Decimal
 
 import pytest
 
-from app import ref_cache
-from app.enums import StatusEnum, TxnTypeEnum
 from app.exceptions import ValidationError
 from app.models.merchant import Merchant
 from app.models.merchant_rule import MerchantRule
@@ -36,11 +34,9 @@ from app.services.pay_calendar import calendar_for
 from app.services.statement_import import delete_import
 from app.services.statement_match import (
     account_merchants,
-    CONTAINER_ANSWERS,
     LinePipeline,
     merchant_directory,
     pipeline_for,
-    Placement,
     PlacementKind,
     PurchaseDestination,
     review_set,
@@ -50,29 +46,29 @@ from app.services.statement_match import (
     StandingRule,
     state_rules,
 )
-from app.services.statement_match._placement import (  # pylint: disable=protected-access
+from app.services.statement_match._placement import (
     placements_for,
 )
-from app.services.statement_match._bars import (  # pylint: disable=protected-access
+from app.services.statement_match._bars import (
     CreationBars,
 )
-from app.services.statement_match._section import (  # pylint: disable=protected-access
+from app.services.statement_match._section import (
     merchant_summary,
 )
-from app.services.statement_match._rules import (  # pylint: disable=protected-access
+from app.services.statement_match._rules import (
     _named_templates,
     active_category_names,
     is_inflow,
     offerable_templates,
     rules_for,
 )
-from app.services.statement_match._stating import (  # pylint: disable=protected-access
+from app.services.statement_match._stating import (
     _columns_of,
     _refuse_unknown_merchants,
 )
 
 from tests._test_helpers import generate_row_of, moved_by_the_owner
-from ._builders import (
+from tests.test_services.test_statement_match._builders import (
     a_bank_line,
     a_later_period,
     a_merchant,
@@ -84,13 +80,6 @@ from ._builders import (
     the_merchant_id,
     an_import,
 )
-
-# Pylint: protected-access -- the private names imported above are this
-# PACKAGE's internals and have no importer outside it, so exporting them from
-# ``statement_match.__init__`` would be the surface rule 13 forbids; the tests
-# for a module reach into it, which is the same allowance every sibling here
-# takes for ``_candidates`` and ``_propose``.
-# pylint: disable=protected-access
 
 
 #: A stand-in merchant ROW ID for the cases that build a

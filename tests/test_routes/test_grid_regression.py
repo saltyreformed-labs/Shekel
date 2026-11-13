@@ -32,13 +32,19 @@ land, these tests will be updated alongside them.
 #   credit, cancelled, settled.
 # ------------------------------------------------------------------
 
+from datetime import timedelta
 from decimal import Decimal
 
+from app import ref_cache
+from app.enums import StatusEnum
 from app.extensions import db
 from app.models.account import Account
 from app.models.transaction import Transaction
+from app.models.transfer import Transfer
+from app.models.transfer_template import TransferTemplate
 from app.models.ref import Status, TransactionType
 from app.services import cash_ledger, status_seam
+from app.services.balance_at import BalanceContext
 
 from tests._test_helpers import (
     current_pay_period,
@@ -47,8 +53,7 @@ from tests._test_helpers import (
     make_expense_template,
     one_off_row_of,
 )
-from tests._cards import add_card
-from tests._legacy_credit import plant_old_credit
+from tests._cards import add_card, add_card_by_its_door
 
 
 class TestPaydayWorkflowRegression:
@@ -421,13 +426,19 @@ class TestPaydayWorkflowRegression:
           - Past period:    1 projected expense ($150)
           - Current period: 1 income ($2,000) + 2 expenses ($500, $300)
           - Anchor:         $1,000 at period 0 (from seed_periods_today)
+          - A card owing $0.00 the day before the current period, added today
+            with its one payment (plan task plan#2933): a payoff row each
+            payday from the current paycheck, paying what the card owes the
+            day before it
 
         Steps:
           1. True-up anchor to $5,000 at current period
           2. Mark income as received
           3. Carry forward from past period (moves $150 to current)
           4. Mark $500 expense as done
-          5. Mark $300 expense as credit (payback in future period)
+          5. Mark $300 expense as credit (on the card from the current
+             period's first day; the card's payoff row pays it in the future
+             period, where the press wrote a payback until plan task plan#2929)
 
         Hand-calculated balances after all steps (the FOLD, ruling R-DH (a)):
 
@@ -435,14 +446,17 @@ class TestPaydayWorkflowRegression:
               received income ($2,000) -- settled the SAME day as the
                                           assertion, so it is inside it
               done expense ($500) -- same day, so inside it too
-              credit expense ($300) -- excluded (a credit purchase leaves via
-                                       its CC Payback sibling, never checking)
+              credit expense ($300) -- on the card, so none of it leaves
+                                       checking now
+              the card's payoff row ($0.00) -- what the card owed the day
+                                       before the period's first day
               carried-forward expense ($150) -- still projected, so ruling R-G
                                        lands it at as_of + 1, inside this period
             balance = 5,000 - 150 = $4,850
 
           Future period:
-              CC payback ($300) -- still projected, counted
+              the card's payoff row ($300) -- what the card owes the day
+                                       before it, the $300 put on it
             balance = 4,850 - 300 = $4,550
 
         **These figures moved TWICE, and the second move is ruling R-DH (a)
@@ -499,6 +513,10 @@ class TestPaydayWorkflowRegression:
             future_period = next(
                 p for p in seed_periods_today
                 if derived_span(p).period_index == derived_span(current_period).period_index + 1
+            )
+            card = add_card_by_its_door(
+                auth_client, seed_user,
+                owed_on=current_period.start_date - timedelta(days=1),
             )
 
             # -- Create test transactions --
@@ -574,9 +592,11 @@ class TestPaydayWorkflowRegression:
             )
             assert resp.status_code == 200
 
-            # -- Step 5: the expense in the old Credit shape (no door writes it since plan task plan#2929; plan#2933 puts the press back here once the card's payoff row repays it) --
-            plant_old_credit(expense_credit)
-            db.session.commit()
+            # -- Step 5: Mark expense as credit: it goes on the card --
+            resp = auth_client.post(
+                f"/transactions/{expense_credit.id}/mark-credit"
+            )
+            assert resp.status_code == 200
 
             # -- Verify final state --
 
@@ -593,16 +613,29 @@ class TestPaydayWorkflowRegression:
             assert income_txn.status.name == "Received"
             assert past_expense.pay_period_id == current_period.id
             assert expense_done.status.name == "Paid"
-            assert expense_credit.status.name == "Credit"
+            # Drawn as Credit, its $300.00 moved on the card.
+            assert status_seam.drawn_status_id(expense_credit) == (
+                ref_cache.status_id(StatusEnum.CREDIT)
+            )
+            assert [(m.account_id, m.amount) for m in expense_credit.entries] == [
+                (card.id, Decimal("300.00")),
+            ]
 
-            # Verify CC payback exists in the future period.
-            payback = (
-                db.session.query(Transaction)
-                .filter_by(credit_payback_for_id=expense_credit.id)
+            # Verify the card's payoff row pays it in the future period.
+            template = db.session.query(TransferTemplate).filter_by(
+                to_account_id=card.id,
+            ).one()
+            payoff = (
+                db.session.query(Transfer)
+                .filter_by(
+                    transfer_template_id=template.id,
+                    pay_period_id=future_period.id,
+                )
                 .one()
             )
-            assert payback.pay_period_id == future_period.id
-            assert payback.estimated_amount == Decimal("300.00")
+            assert cash_ledger.resolve_transfer_amount(
+                payoff, BalanceContext.build(seed_user["user"].id).amounts(),
+            ) == Decimal("300.00")
 
             # -- Verify balance via balance-row endpoint --
             resp = auth_client.get(

@@ -21,15 +21,22 @@ else, so the two cannot come to disagree about what a card's payment is.
 **The payer is the primary**, the account the grid opens on
 (:func:`app.services.account_resolver.resolve_grid_account` with no override,
 the bill form's default payer for the same reason, plan#2931): the caller
-resolves it and hands it in, as the read pass is the caller's.  It must be able
-to pay a card, so a card -- the new one included, when a re-type would make the
-primary itself a card -- is refused rather than replaced by a guess.
+resolves it before the card's write and hands it in, as the read pass is the
+caller's.  It must be able to pay a card, so a card is refused rather than
+replaced by a guess, and so is the account a re-type would make a card while
+the grid opens on it: the owner picks the grid's account, not the re-type.
 
-**It starts today** (plan#2669): a pay-period repeat normalises its first
-occurrence onto the paycheck that holds it, so the first row is the current
-paycheck's, dated its payday, and pays what the card owed the day before.
-Measured on a card added mid-paycheck owing $500.00: that row prices $500.00
-and every later one $0.00.
+**It starts in the current paycheck** (plan#2669): the repeat starts on the
+pass's day, and a pay-period repeat normalises that onto the paycheck holding
+it, so its first occurrence is that paycheck's payday.  No row lands on or
+before an account's books opening (rulings R-PC85, R-PC86), so the first row
+follows from when the card's books open.  A card added today opens today, so
+its first row is the next payday: measured through the create door, a card
+added on Nov 13 owing $500.00 in the paycheck that began Nov 9 is paid
+$500.00 on Nov 23, then $0.00 (``test_the_card_payoff``).  An account re-typed
+into a card is paid from the current paycheck's payday when its books opened
+before that payday, as a payment set up by hand is, and from the next when they
+opened later.
 
 Boundary discipline: no Flask import; the caller owns the transaction.
 """
@@ -60,12 +67,20 @@ NO_ACCOUNT_TO_PAY_FROM = (
     "Add one first."
 )
 
-#: The refusal when the primary is a card, or would become one.
+#: The refusal when the primary is a card.
 PRIMARY_CANNOT_PAY_A_CARD = (
     "'{card}' needs an account to pay it from: a card's payment comes out of "
     "the account the grid opens on, and that is '{primary}', which is a card. "
     "Choose a checking or savings account as the grid's account in Settings "
     "first."
+)
+
+#: The refusal when a re-type would make the primary itself a card.
+PRIMARY_CANNOT_BECOME_A_CARD = (
+    "'{card}' cannot become a credit card while the grid opens on it: a "
+    "card's payment comes out of the account the grid opens on each payday. "
+    "Choose another checking or savings account as the grid's account in "
+    "Settings first."
 )
 
 #: The refusal when the payment's name is taken by another recurring transfer.
@@ -133,13 +148,15 @@ def plan_payoff(
         The :class:`Payoff` :func:`make_payoff` writes.
 
     Raises:
-        ValidationError: When there is no primary, when the primary is a card
-            or is the account becoming one, or when the payment's name is
-            already a recurring transfer's.
+        ValidationError: When there is no primary, when the primary is the
+            account becoming a card or is a card, or when the payment's name
+            is already a recurring transfer's.
     """
     if primary is None:
         raise ValidationError(NO_ACCOUNT_TO_PAY_FROM.format(card=card_name))
-    if primary.id == card_id or is_revolving(primary):
+    if primary.id == card_id:
+        raise ValidationError(PRIMARY_CANNOT_BECOME_A_CARD.format(card=card_name))
+    if is_revolving(primary):
         raise ValidationError(PRIMARY_CANNOT_PAY_A_CARD.format(
             card=card_name, primary=primary.name,
         ))
@@ -159,11 +176,11 @@ def make_payoff(
 ) -> TransferTemplate:
     """Write *card*'s payment: its definition, its settings, its repeat, its rows.
 
-    Each payday from the pass's day (plan#2669), the whole balance worked out,
-    no figure stated (plan#2667).  Built in the order the doors build a
-    definition: the
-    template and its settings, then the repeat authored onto it, then the rows
-    ``transfer_recurrence`` writes through ``transfer_service``.
+    Each payday from the paycheck holding the pass's day (plan#2669), the
+    whole balance worked out, no figure stated (plan#2667).  Built in the
+    order the doors build a definition: the template and its settings, then
+    the repeat authored onto it, then the rows ``transfer_recurrence`` writes
+    through ``transfer_service``.
 
     Args:
         card: The card, flushed, of a revolving type.

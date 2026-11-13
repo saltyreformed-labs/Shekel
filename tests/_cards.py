@@ -2,17 +2,24 @@
 
 A Credit press puts the row on the owner's card, so every test of the press
 needs one.  Many files build their own (``_card`` in a dozen of them); this is
-the one the Credit press's tests share.  And the one way left to keep a BILL's
-payment on a card under a row that is not the card's
-(:func:`move_definition_to_checking`).
+the one the Credit press's tests share.  A card with its one payment, as the
+create door makes it (plan task plan#2933): through the door itself
+(:func:`add_card_by_its_door`), or by its acts on a calendar fixed in the past
+(:func:`add_card_with_its_payoff`).
+And the one way left to keep a BILL's payment on a card under a row that is
+not the card's (:func:`move_definition_to_checking`).
 """
 
+from datetime import date
 from decimal import Decimal
 
 from app.extensions import db
 from app.models.account import Account
+from app.models.ref import AccountType
 from app.models.transaction import Transaction
-from app.services import recurrence_engine
+from app.models.user import UserSettings
+from app.services import card_payoff, recurrence_engine
+from app.services.account_resolver import resolve_grid_account
 from app.services.balance_at import BalanceContext
 from app.services.generation_schedule import GenerationSchedule
 from tests._test_helpers import create_account_of_type
@@ -35,6 +42,83 @@ def add_card(seed_user, name: str = "Visa") -> Account:
     return create_account_of_type(
         seed_user, db.session, "Credit Card", name, anchor_balance=Decimal("0.00"),
     )
+
+
+def add_card_by_its_door(
+    auth_client, seed_user, *, owed_on: date, name: str = "Visa",
+) -> Account:
+    """POST the create form for a card owing nothing on *owed_on*; return the card it made.
+
+    The door makes the card's one payment with it (plan task plan#2933) on its
+    read pass for today, so the payment repeats from the paycheck holding
+    today.  *owed_on* is the day the $0.00 owed is true, which is the day its
+    books open too: a purchase put on the card after it is owed, and one dated
+    on or before it is inside that $0.00.
+
+    Args:
+        auth_client: The owner's logged-in client.
+        seed_user: The ``seed_user`` fixture dict (the owner).
+        owed_on: The form's "balance as of" day.
+        name: The card's name.
+
+    Returns:
+        The card :class:`~app.models.account.Account`.
+    """
+    card_type = db.session.query(AccountType).filter_by(
+        name="Credit Card", user_id=None,
+    ).one()
+    resp = auth_client.post("/accounts", data={
+        "name": name,
+        "account_type_id": card_type.id,
+        "anchor_balance": "0.00",
+        "observed_on": owed_on.isoformat(),
+    }, follow_redirects=True)
+    assert f"Account &#39;{name}&#39; created." in resp.get_data(as_text=True)
+    return db.session.query(Account).filter_by(
+        user_id=seed_user["user"].id, name=name,
+    ).one()
+
+
+def add_card_with_its_payoff(
+    seed_user, name: str = "Visa", *, added_on: date,
+) -> Account:
+    """Return a new card of the owner's, owing nothing, with its one payment made as of *added_on*.
+
+    **The create door's three acts, in its order** (``routes/accounts/crud.
+    create_account``, plan task plan#2933): the payment settled against the
+    owner's primary before the card is written
+    (``card_payoff.plan_payoff``), the card, then the payment made on a read
+    pass (``card_payoff.make_payoff``).  The pass is held at *added_on*
+    because a test's calendar is fixed -- ``seed_periods`` opens on Jan 2 2026
+    -- while the door's pass reads today, so the day the card is added is the
+    test's to state.  Its books open before any day a fixture could date a
+    row (:func:`add_card`), so its first row is the payday of the paycheck
+    holding *added_on*, priced at what the card owes the day before.
+
+    Args:
+        seed_user: The ``seed_user`` fixture dict (the owner); its Checking is
+            the primary that pays the card.
+        name: The card's name.
+        added_on: The day the card is added: its payment repeats from the
+            paycheck holding it (ruling plan#2669).
+
+    Returns:
+        The card :class:`~app.models.account.Account`, its payment and rows
+        flushed.
+    """
+    user_id = seed_user["user"].id
+    payoff = card_payoff.plan_payoff(
+        user_id, name,
+        resolve_grid_account(
+            user_id,
+            db.session.query(UserSettings).filter_by(user_id=user_id).one(),
+        ),
+    )
+    card = add_card(seed_user, name)
+    card_payoff.make_payoff(
+        card, payoff, BalanceContext.build(user_id, as_of=added_on),
+    )
+    return card
 
 
 def add_savings(seed_user, name: str = "Savings", *, observed_on=None) -> Account:

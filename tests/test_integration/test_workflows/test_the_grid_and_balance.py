@@ -7,17 +7,23 @@ payday.
 from datetime import timedelta
 from decimal import Decimal
 
+from app import ref_cache
+from app.enums import StatusEnum
 from app.models.ref import AccountType, Status, TransactionType
 from app.models.transaction import Transaction
 from app.models.transaction_template import TransactionTemplate
+from app.models.transfer import Transfer
+from app.models.transfer_template import TransferTemplate
 from app.services import account_service
 from app.services import (
     carry_forward_service,
     recurrence_engine,
+    status_seam,
     transaction_service,
 )
 from app.services import balance_at
 from app.services.balance_at import BalanceContext
+from app.services.cash_ledger import resolve_transfer_amount
 from app.services.generation_schedule import GenerationSchedule
 from app.services.pay_calendar import calendar_for
 from tests._test_helpers import (
@@ -31,9 +37,10 @@ from tests._test_helpers import (
     state_template_price,
 )
 from tests.oracles.recurrence_baseline import MONTHLY
-from app.services.row_valuation import settled_contribution, settled_figure
+from app.services.row_valuation import settled_figure
 from app.models.amount_ownership import AmountOwnership
-from tests._legacy_credit import plant_old_credit
+from app.utils.balance_predicates import is_projected
+from tests._cards import add_card_with_its_payoff
 
 
 class TestSalaryToGrid:
@@ -249,6 +256,24 @@ class TestAnchorTrueUpBalance:
 # ── Full Workflow Integration Test ───────────────────────────────────
 
 
+def _payoff_rows_in(db, card, period, *, as_of):
+    """The card's payoff rows filed in *period*: ``(date, price, is projected)``, by date.
+
+    Priced by a read pass held at *as_of*, the figure every reader of the row
+    reaches (``cash_ledger.resolve_transfer_amount``).
+    """
+    template = db.session.query(TransferTemplate).filter_by(
+        to_account_id=card.id,
+    ).one()
+    basis = BalanceContext.build(card.user_id, as_of=as_of).amounts()
+    return sorted(
+        (row.due_date, resolve_transfer_amount(row, basis), is_projected(row))
+        for row in db.session.query(Transfer).filter_by(
+            transfer_template_id=template.id, pay_period_id=period.id,
+        )
+    )
+
+
 class TestFullBudgetWorkflow:
     """End-to-end payday reconciliation workflow."""
 
@@ -259,15 +284,25 @@ class TestFullBudgetWorkflow:
         mark credit → carry forward. Verifies final state of all
         transactions across both periods with exact Decimal amounts.
 
+        The owner has a card, added on Jan 2 with its one payment (plan task
+        plan#2933): a payoff row each payday, paying what the card owes the
+        day before.
+
         Steps:
           1. Create 3 projected expenses in period 0.
           2. Mark first as 'done' with actual_amount different from estimated.
-          3. Mark second as 'credit' (creates payback in period 1).
+          3. Mark second as 'credit': it goes on the card on Jan 2, its
+             paycheck's first day, and the card's payoff row pays it in
+             period 1 (where the press wrote a payback until plan#2929).
           4. Leave third as 'projected'.
-          5. Carry forward from period 0 → period 1 (moves the projected item).
+          5. Carry forward from period 0 → period 1: the projected item, and
+             the card's $0.00 payoff row of Jan 2 with it.
           6. Assert final state of both periods.
         """
         with app.app_context():
+            card = add_card_with_its_payoff(
+                seed_user, added_on=seed_periods[0].start_date,
+            )
             expense_type = db.session.query(TransactionType).filter_by(name="Expense").one()
 
             # Step 1: Create 3 projected expenses in period 0.
@@ -302,7 +337,6 @@ class TestFullBudgetWorkflow:
                 category_id=seed_user["categories"]["Groceries"].id,
             )
             db.session.commit()
-            txn2_id = txn2.id
 
             # Step 2: Mark Rent as 'done' with a CORRECTION -- the figure a
             # human read off a statement, which the settle records as
@@ -313,8 +347,8 @@ class TestFullBudgetWorkflow:
             )
             db.session.commit()
 
-            # Step 3: Dining Out in the old Credit shape (no door writes it since plan task plan#2929; plan#2933 puts the press back here once the card's payoff row repays it) -> payback in period 1.
-            plant_old_credit(db.session.get(Transaction, txn2_id))
+            # Step 3: Dining Out on the card -> the card's payoff row pays it in period 1.
+            transaction_service.mark_as_credit(db.session.get(Transaction, txn2.id))
             db.session.commit()
 
             # Step 4: Gas Station stays projected.
@@ -324,7 +358,10 @@ class TestFullBudgetWorkflow:
                 balance_ctx=BalanceContext.build(seed_user["user"].id),
             )
             db.session.commit()
-            assert count == 1  # Only Gas Station (projected) moves.
+            # Gas Station (projected) moves, and so does the card's payoff row
+            # of Jan 2, which nothing marked: a carried worked-out row counts
+            # its new paycheck's money too (plan#2859).
+            assert count == 2
 
             # Step 6: Assert final state.
             db.session.expire_all()
@@ -339,25 +376,40 @@ class TestFullBudgetWorkflow:
             assert by_name_p0["Rent"].status.name == "Paid"
             assert resolved_amount(by_name_p0["Rent"]) == Decimal("1200.00")
             assert settled_figure(by_name_p0["Rent"]) == Decimal("1195.00")
-            assert by_name_p0["Dining Out"].status.name == "Credit"
+            # Dining Out is drawn Credit, its $75.00 moved on the card, none on checking.
+            assert status_seam.drawn_status_id(by_name_p0["Dining Out"]) == (
+                ref_cache.status_id(StatusEnum.CREDIT)
+            )
             assert resolved_amount(by_name_p0["Dining Out"]) == Decimal("75.00")
-            assert settled_contribution(by_name_p0["Dining Out"]) == Decimal("0")
+            assert [
+                (m.account_id, m.amount) for m in by_name_p0["Dining Out"].entries
+            ] == [(card.id, Decimal("75.00"))]
 
             # Period 0 has no projected transactions remaining.
             p0_projected = [t for t in period0_txns if t.status.name == "Projected"]
             assert len(p0_projected) == 0
 
-            # Period 1: 2 transactions -- payback + carried-forward Gas Station.
+            # Period 1: 1 transaction -- the carried-forward Gas Station.
             period1_txns = db.session.query(Transaction).filter_by(
                 pay_period_id=seed_periods[1].id,
             ).filter(Transaction.is_deleted.is_(False)).all()
-            assert len(period1_txns) == 2
+            assert len(period1_txns) == 1
+
+            # And the card's payoff rows, projected, paying together the
+            # $75.00 the payback did.  Jan 2's keeps its date when carried, but
+            # the fold dates a row by its paycheck (``attribution_day``), so it
+            # counts on Jan 16 as Jan 16's own does.  Two rows on one day are
+            # priced by id: the carried one, made first, pays the $75.00 owed
+            # at the end of Jan 15, and Jan 16's own sees it as a credit,
+            # max(0, 75.00 - 75.00) = $0.00.  75.00 + 0.00 = $75.00.
+            assert _payoff_rows_in(
+                db, card, seed_periods[1], as_of=seed_periods[0].start_date,
+            ) == [
+                (seed_periods[0].start_date, Decimal("75.00"), True),
+                (seed_periods[1].start_date, Decimal("0.00"), True),
+            ]
 
             by_name_p1 = {t.name: t for t in period1_txns}
-            assert by_name_p1["CC Payback: Dining Out"].estimated_amount == Decimal("75.00")
-            assert by_name_p1["CC Payback: Dining Out"].status.name == "Projected"
-            assert by_name_p1["CC Payback: Dining Out"].credit_payback_for_id == txn2_id
-
             assert resolved_amount(by_name_p1["Gas Station"]) == Decimal("45.50")
             assert by_name_p1["Gas Station"].status.name == "Projected"
             assert by_name_p1["Gas Station"].pay_period_id == seed_periods[1].id

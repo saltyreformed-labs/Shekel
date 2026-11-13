@@ -1,35 +1,60 @@
-"""The mark-as-credit workflow: a payback in the next period leaving the balance unaffected, and
-its edge cases (a row already on credit, done or cancelled, unmarking removing the payback, an
-income row refused).
+"""The mark-as-credit workflow: the row on the card and the card's payoff row paying it next
+paycheck, leaving checking unaffected now, and its edge cases (a row already on credit, done or
+cancelled, unmarking removing an old payback, an income row refused).
 
 **Since plan task plan#2929 the press writes no payback**: it puts the row on the card (rulings
-plan#2887, plan#2888), graded in ``tests/test_services/test_credit_puts_the_row_on_the_card.py``.
-The payback shape here is an OLD Credit row's, planted (``tests._legacy_credit``), and its
-balance is the one the new press must reproduce to the cent once the card's payoff row repays
-it (plan#2933, which puts the press back in this file's first test).  The payback's own figure
-and the last paycheck's refusal went with the payback.
+plan#2887, plan#2888), graded in ``tests/test_services/test_credit_puts_the_row_on_the_card.py``,
+and since plan task plan#2933 the card is made with its payoff row, which pays it.  The first
+test presses Credit and reads checking to the cent as it read when the press wrote a payback
+(ruling plan#2888).  The edge cases of an OLD Credit row plant its payback shape
+(``tests._legacy_credit``): 21 rows on production still hold one, and keep its path until
+plan#1034's re-plan.
 """
 
 from decimal import Decimal
 
 import pytest
 
+from app import ref_cache
+from app.enums import StatusEnum
 from app.models.ref import Status, TransactionType
 from app.models.transaction import Transaction
-from app.services import credit_workflow, transaction_service
+from app.models.transfer import Transfer
+from app.models.transfer_template import TransferTemplate
+from app.services import credit_workflow, status_seam, transaction_service
 from app.services import balance_at
 from app.services.balance_at import BalanceContext
+from app.services.cash_ledger import resolve_transfer_amount
+from tests._cards import add_card_with_its_payoff
 from tests._legacy_credit import plant_old_credit
 from tests._test_helpers import one_off_row_of
-from app.services.row_valuation import settled_contribution
 
 
 class TestCreditPaybackBalance:
-    """Credit workflow → payback in next period → balance unaffected."""
+    """Credit → the card's payoff row pays it next paycheck → checking unaffected now."""
 
-    def test_credit_creates_payback_and_zeroes_effective(self, app, db, seed_user, seed_periods):
-        """Marking as credit creates payback and makes original effective_amount 0."""
+    def test_credit_is_paid_off_next_paycheck_and_zeroes_effective(
+        self, app, db, seed_user, seed_periods,
+    ):
+        """Credit puts the $75.00 on the card, and the card's payoff row pays it next paycheck.
+
+        Named ``test_credit_creates_payback_and_zeroes_effective`` while the
+        press wrote a CC Payback row (until plan task plan#2929).  The card is
+        added on Jan 2, the first payday, with its one payment (plan task
+        plan#2933): a payoff row each payday paying what the card owes the day
+        before.  Dinner Out has no date, so Credit puts it on the card on its
+        paycheck's first day, Jan 2 (``credit_day``).  Checking reads as it read
+        with the payback (ruling plan#2888, to the cent):
+
+        * Jan 2's payoff row pays what the card owed at the end of Jan 1, $0.00,
+          so period 0 is 1,000.00 - 0.00 = $1,000.00;
+        * Jan 16's pays what it owed at the end of Jan 15, the $75.00, so
+          period 1 is 1,000.00 - 75.00 = $925.00.
+        """
         with app.app_context():
+            card = add_card_with_its_payoff(
+                seed_user, added_on=seed_periods[0].start_date,
+            )
             expense_type = db.session.query(TransactionType).filter_by(name="Expense").one()
 
             txn = one_off_row_of(
@@ -44,35 +69,42 @@ class TestCreditPaybackBalance:
             )
             db.session.commit()
 
-            # The old Credit shape -- a payback in the next period.
-            payback = plant_old_credit(txn)
+            transaction_service.mark_as_credit(txn)
             db.session.commit()
 
             db.session.refresh(txn)
 
-            # Original transaction is credit status → effective_amount is 0.
-            assert txn.status.name == "Credit"
-            assert settled_contribution(txn) == Decimal("0")
-
-            # Payback exists in next period with matching amount.
-            assert payback.pay_period_id == seed_periods[1].id
-            assert payback.estimated_amount == Decimal("75.00")
-            assert payback.credit_payback_for_id == txn.id
-
-            # Balance: the Credit txn contributes 0, the payback the full
-            # amount.  Read through the seam (plan step X-g4b) rather than by
-            # handing a producer a hand-loaded row list -- the fold loads the
-            # account's own rows, which is what makes the Credit exclusion a
-            # property of the PRODUCER here rather than of this query.
-            balances = balance_at.cash_balance_map(
-                seed_user["account"],
-                BalanceContext.build(
-                    seed_user["user"].id, as_of=seed_periods[0].start_date,
-                ),
+            # Drawn as Credit, its $75.00 moved on the card and none on checking.
+            assert status_seam.drawn_status_id(txn) == ref_cache.status_id(
+                StatusEnum.CREDIT,
             )
-            # Period 0: credit txn → $0 effect, balance stays 1000.
+            assert [(m.account_id, m.amount) for m in txn.entries] == [
+                (card.id, Decimal("75.00")),
+            ]
+            assert credit_workflow.get_active_payback(txn.id) is None
+
+            # The payoff row pays nothing in period 0 and the $75.00 in period 1.
+            ctx = BalanceContext.build(
+                seed_user["user"].id, as_of=seed_periods[0].start_date,
+            )
+            template = db.session.query(TransferTemplate).filter_by(
+                to_account_id=card.id,
+            ).one()
+            payoff = {
+                row.pay_period_id: resolve_transfer_amount(row, ctx.amounts())
+                for row in db.session.query(Transfer).filter_by(
+                    transfer_template_id=template.id,
+                )
+            }
+            assert payoff[seed_periods[0].id] == Decimal("0.00")
+            assert payoff[seed_periods[1].id] == Decimal("75.00")
+
+            # Balance: read through the seam (plan step X-g4b), so the fold
+            # loads the account's own rows and the payoff row's legs.
+            balances = balance_at.cash_balance_map(seed_user["account"], ctx)
+            # Period 0: the row is on the card, so checking stays 1000.
             assert balances[seed_periods[0].id] == Decimal("1000.00")
-            # Period 1: payback expense of $75 → balance drops.
+            # Period 1: the payoff row of $75 leaves checking.
             assert balances[seed_periods[1].id] == Decimal("925.00")
 
 

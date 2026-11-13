@@ -37,6 +37,7 @@ from app.models.investment_params import InvestmentParams
 from app.models.loan_features import RateHistory
 from app.models.loan_params import LoanParams
 from app.models.pay_period import PayPeriod
+from app.models.ref import AccountType
 from app.models.savings_goal import SavingsGoal
 from app.models.transaction import Transaction
 from app.models.transaction_template import TransactionTemplate
@@ -64,6 +65,7 @@ from app.services.account_params import ensure_type_params
 from app.services.account_projection import (
     AccountProjectionKind,
     classify_account,
+    is_revolving,
     is_revolving_type,
 )
 from app.services.account_resolver import resolve_grid_account
@@ -151,22 +153,29 @@ def new_account():
     )
 
 
-def _settle_card_payoff(account_type, name):
-    """Return a new card's payment as settled before the card is written.
+def _settle_card_payoff(account_type, name, *, becoming=None):
+    """Return the payment a door bringing a card into being makes, settled before its write.
 
-    Every card has one payment (task plan#2933), and the refusals that
-    payment can meet are asked here, before any write, so a card nothing can
-    pay is refused with nothing left behind.  The payer is the owner's
-    primary, resolved before the card exists so the resolver can never answer
-    the card itself.
+    Every card has one payment (task plan#2933), and the two doors that bring
+    a card into being both call this: account creation, and a re-type into a
+    revolving type.  The refusals that payment can meet are asked here, before
+    any write, so a card nothing can pay is refused with nothing left behind.
+    The payer is the owner's primary, resolved before the type changes, so the
+    resolver reads the accounts as they are; the account becoming a card may
+    be that primary, which :func:`app.services.card_payoff.plan_payoff`
+    refuses.
 
     Args:
-        account_type: The type the owner picked, owner-checked.
-        name: The new account's name.
+        account_type: The type the account will have, owner-checked.
+        name: The account's name as it will be.
+        becoming: For a re-type, the account whose type changes; ``None`` for
+            a card not yet made.  An account that is a card already is not
+            brought into being, so a save that keeps a card a card makes
+            nothing.
 
     Returns:
         The :class:`~app.services.card_payoff.Payoff` to make once the card
-        exists, or ``None`` for a type that is not a card.
+        exists, or ``None`` when no card comes into being.
 
     Raises:
         ValidationError: From :func:`app.services.card_payoff.plan_payoff`,
@@ -174,9 +183,42 @@ def _settle_card_payoff(account_type, name):
     """
     if not is_revolving_type(account_type):
         return None
+    if becoming is not None and is_revolving(becoming):
+        return None
     return card_payoff.plan_payoff(
         current_user.id, name,
         resolve_grid_account(current_user.id, current_user.settings),
+        card_id=None if becoming is None else becoming.id,
+    )
+
+
+def _settle_retype_payoff(account, data):
+    """Return the payment a re-type into a card makes, settled before the re-type.
+
+    :func:`_settle_card_payoff` for the update door, asked of what the save
+    will leave: the submitted type and name, or the account's own where the
+    form sent none.
+
+    Args:
+        account: The owned account being saved, its type the current one.
+        data: The update payload, every gate passed
+            (``_validate_update_account``), so a submitted type is visible to
+            the owner.
+
+    Returns:
+        The :class:`~app.services.card_payoff.Payoff` to make after the
+        re-type, or ``None`` when the save brings no card into being.
+
+    Raises:
+        ValidationError: From :func:`app.services.card_payoff.plan_payoff`,
+            with the sentence the owner reads.
+    """
+    return _settle_card_payoff(
+        db.session.get(
+            AccountType, data.get("account_type_id", account.account_type_id),
+        ),
+        data.get("name", account.name),
+        becoming=account,
     )
 
 
@@ -437,6 +479,15 @@ def update_account(account_id):
         flash(failure[0], failure[1])
         return redirect(url_for("accounts.edit_account", account_id=account_id))
 
+    # A re-type into a card brings a card into being, so it makes the card's
+    # one payment (task plan#2933): its refusals are asked here, before the
+    # first setattr, so a card nothing can pay leaves the account untouched.
+    try:
+        payoff = _settle_retype_payoff(account, data)
+    except ValidationError as exc:
+        flash(str(exc), "warning")
+        return redirect(url_for("accounts.edit_account", account_id=account_id))
+
     old_type_id = account.account_type_id
     for field, value in data.items():
         if field in _ACCOUNT_UPDATE_FIELDS:
@@ -485,6 +536,16 @@ def update_account(account_id):
         should have written.  Reached through the shared seeder rather than a
         second copy of it: two doors establishing one invariant two ways is how
         they come to disagree.
+
+        **It makes the card's one payment when the re-type brings a card into
+        being** (task plan#2933), settled before the setattr loop, through the
+        same :func:`app.services.card_payoff.make_payoff` account creation
+        calls.  Last, after the re-class and the re-sync, and on a read pass
+        built then, so the pass reads the account as the card it now is.  The
+        first row follows from when the account's books opened (rulings
+        R-PC85, R-PC86): an account whose books opened before this paycheck's
+        payday is paid from that payday (ruling plan#2669), as a payment set up
+        by hand is, and one opened later is paid from the next.
         """
         if not type_changed:
             return
@@ -499,6 +560,10 @@ def update_account(account_id):
         account_posting_service.sync_account_anchor_postings_all_scenarios(
             account.id,
         )
+        if payoff is not None:
+            card_payoff.make_payoff(
+                account, payoff, BalanceContext.build(current_user.id),
+            )
 
     # The reconcile step must run inside the same stale-race guard as
     # the commit (it flushes and can itself raise StaleDataError).

@@ -56,7 +56,6 @@ from app import ref_cache
 from app.enums import AcctCategoryEnum
 from app.extensions import db
 from app.models.account import Account
-from app.models.card_payment_settings import CardPaymentSettings
 from app.models.ref import AccountType
 from app.models.savings_goal import SavingsGoal
 from app.schemas.validation import (
@@ -70,6 +69,7 @@ from app.schemas.validation import (
     InterestParamsUpdateSchema,
 )
 from app.services.account_category import is_liability_category
+from app.services.card_payoff import card_payment_on
 from app.services.ledger_lines import accounts_hold_lines, linked_ledger_class
 from app.services.recurring_transfer_query import due_date_repeats_into
 
@@ -431,7 +431,7 @@ def _refuse_leaving_the_card_kind(account):
         ``(message, category)`` when a worked-out card payment or a repeat on
         its due dates names the account, else ``None``.
     """
-    payment = _card_payment_on(account.id)
+    payment = card_payment_on(account.id)
     if payment is not None:
         return (
             CARD_PAYMENT_KEEPS_ITS_CARD.format(
@@ -448,26 +448,6 @@ def _refuse_leaving_the_card_kind(account):
             "warning",
         )
     return None
-
-
-def _card_payment_on(account_id):
-    """Return the worked-out card payment settings naming *account_id*, or None.
-
-    At most one row can (``uq_card_payment_settings_card_account_id``).
-
-    Args:
-        account_id: ``budget.accounts.id`` of the account being re-typed,
-            owner-checked by the route.
-
-    Returns:
-        The :class:`~app.models.card_payment_settings.CardPaymentSettings` row,
-        or ``None`` when no payment names the account.
-    """
-    return (
-        db.session.query(CardPaymentSettings)
-        .filter_by(card_account_id=account_id)
-        .one_or_none()
-    )
 
 
 def _validate_account_type_boundary_edit(account_type, data):

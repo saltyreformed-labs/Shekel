@@ -62,10 +62,6 @@ from tests.test_routes._statement_forms import (
 from tests._test_helpers import open_owner_calendar, payback_row_of
 from tests.test_services.test_outstanding_difference import _opened_on, _settle
 from tests.test_services.test_statement_import.test_anchor import _seed_import
-# Pylint: ``shekel-private-module-import`` -- the statement-match builders are
-# the one way a test stages a bank line, a scope and an accepted act as the
-# app does, the convention this module's siblings keep.
-# pylint: disable=shekel-private-module-import
 from tests.test_services.test_statement_match._builders import (
     a_bank_line,
     a_later_period,
@@ -2693,31 +2689,8 @@ class TestTheBooksAlreadyHoldSentenceIsONESpelling:
             assert "This pay period already holds" not in page
 
 
-class TestThePaneOffersWHEREADifferenceGoes:
-    """Plan steps **bank_import:X-gj-3a** and **X-gp**; rulings **R-GD(a)**,
-    **R-FN** and **R-BI2**.
-
-    A group's difference could only ever become an uncategorized row before
-    X-gj-3a, whatever the owner knew about it.  On the developer's own data
-    that is seven payroll deposits and seven `$0.04`-`$0.06` rows a year, with
-    the salary row left permanently under what the employer paid -- while the
-    two flat allowances beside it matched the bank exactly in all eleven of
-    their occurrences, which is what makes *which member* an answerable
-    question for a person and an underivable one for the app.
-
-    **ONE control whose options ARE the acts** (X-gp).  That step drew the
-    landing as a select inside the re-price wrapper and the consent as a box
-    outside it whose sentence was composed from the select, and the door
-    compared only the box's figure -- so *mint a `$0.05` row* and *write
-    `$2,473.43` to the salary row* submitted the SAME consent.  Every act is
-    one option now, labelled with what it writes, valued with the figure AND
-    the member (``consent-<line>``), and the cases below read that control
-    where they read the select.
-
-    **No member is pre-selected** (developer, 2026-09-01): a group has nothing
-    the app can point at to justify one, and an unjustified default on a money
-    control is what ruling **R-FZ(b)** removed from this screen.
-    """
+class _TestThePaneOffersWHEREADifferenceGoesMembers:
+    """The pane helpers ``TestARefusedApplyKeepsTheOwnersTicks`` reads as well."""
 
     @staticmethod
     def _a_payroll_deposit(seed_user, db, amount="2573.43"):
@@ -2770,6 +2743,35 @@ class TestThePaneOffersWHEREADifferenceGoes:
             _match_url(seed_user["account"].id, line.id),
             data=MultiDict(body),
         ).get_data(as_text=True)
+
+
+class TestThePaneOffersWHEREADifferenceGoes(
+    _TestThePaneOffersWHEREADifferenceGoesMembers,
+):
+    """Plan steps **bank_import:X-gj-3a** and **X-gp**; rulings **R-GD(a)**,
+    **R-FN** and **R-BI2**.
+
+    A group's difference could only ever become an uncategorized row before
+    X-gj-3a, whatever the owner knew about it.  On the developer's own data
+    that is seven payroll deposits and seven `$0.04`-`$0.06` rows a year, with
+    the salary row left permanently under what the employer paid -- while the
+    two flat allowances beside it matched the bank exactly in all eleven of
+    their occurrences, which is what makes *which member* an answerable
+    question for a person and an underivable one for the app.
+
+    **ONE control whose options ARE the acts** (X-gp).  That step drew the
+    landing as a select inside the re-price wrapper and the consent as a box
+    outside it whose sentence was composed from the select, and the door
+    compared only the box's figure -- so *mint a `$0.05` row* and *write
+    `$2,473.43` to the salary row* submitted the SAME consent.  Every act is
+    one option now, labelled with what it writes, valued with the figure AND
+    the member (``consent-<line>``), and the cases below read that control
+    where they read the select.
+
+    **No member is pre-selected** (developer, 2026-09-01): a group has nothing
+    the app can point at to justify one, and an unjustified default on a money
+    control is what ruling **R-FZ(b)** removed from this screen.
+    """
 
     def test_a_GROUP_with_a_difference_is_offered_the_choice(
         self, auth_client, db, seed_user,
@@ -3660,20 +3662,9 @@ class TestTheSKIPVerbIsPressableFromTheRenderedPage:
         assert _skipped_tab_count(inbox) == 1
 
 
-class TestTheMatchPaneIsReachableWithNoScript:
-    """Plan step ``bank_import:X-gi-1``, ruling **bank_import:R-KA**.
-
-    The MATCH pane is a fragment fetched on ``intersect once``, which never
-    fires with scripting off -- so the tab was a permanent spinner, and a
-    parked card payment (ADD barred by **R-GJ**, TRANSFER doorless, SKIP shut
-    by **R-JI**) had no reachable act at all once
-    ``bank_import:X-gi-2`` deletes the workbench its ``<noscript>`` pointed
-    at.  ``?open=<line_id>`` puts that one card's rows in the document.
-
-    **Every case here reads the rendered PAGE**, because what this step moved
-    is which bytes a browser with no JavaScript receives, and no service test
-    one tier down can see that.
-    """
+class _TestTheMatchPaneIsReachableWithNoScriptMembers:
+    """The staging ``TestTheScriptlessPathRECORDSTheMatch`` and
+    ``TestARefusedApplyKeepsTheOwnersTicks`` read as well."""
 
     def _a_card_payment_and_a_payback_another_period_holds(
         self, seed_user, db,
@@ -3724,6 +3715,24 @@ class TestTheMatchPaneIsReachableWithNoScript:
                       amount="700.00")
         db.session.commit()
         return line, "Payback an earlier period"
+
+
+class TestTheMatchPaneIsReachableWithNoScript(
+    _TestTheMatchPaneIsReachableWithNoScriptMembers,
+):
+    """Plan step ``bank_import:X-gi-1``, ruling **bank_import:R-KA**.
+
+    The MATCH pane is a fragment fetched on ``intersect once``, which never
+    fires with scripting off -- so the tab was a permanent spinner, and a
+    parked card payment (ADD barred by **R-GJ**, TRANSFER doorless, SKIP shut
+    by **R-JI**) had no reachable act at all once
+    ``bank_import:X-gi-2`` deletes the workbench its ``<noscript>`` pointed
+    at.  ``?open=<line_id>`` puts that one card's rows in the document.
+
+    **Every case here reads the rendered PAGE**, because what this step moved
+    is which bytes a browser with no JavaScript receives, and no service test
+    one tier down can see that.
+    """
 
     def test_the_noscript_names_this_page_this_tab_and_this_card(
         self, auth_client, db, seed_user,
@@ -4021,7 +4030,7 @@ class TestTheScriptlessPathRECORDSTheMatch:
         self, auth_client, db, seed_user,
     ):
         """`-$793.23` explained by `-$93.23` + `-$700.00`, from the page alone."""
-        line, _ = TestTheMatchPaneIsReachableWithNoScript(
+        line, _ = _TestTheMatchPaneIsReachableWithNoScriptMembers(
         )._a_card_payment_and_a_payback_another_period_holds(seed_user, db)
 
         page = _open(auth_client, seed_user, line.id, tab="transfers")
@@ -4066,7 +4075,7 @@ class TestTheScriptlessPathRECORDSTheMatch:
         control**: without it this passes against a page that opens EVERY card
         on MATCH, which would change what an untouched card submits.
         """
-        line, _ = TestTheMatchPaneIsReachableWithNoScript(
+        line, _ = _TestTheMatchPaneIsReachableWithNoScriptMembers(
         )._a_card_payment_and_a_payback_another_period_holds(seed_user, db)
 
         opened = _open(auth_client, seed_user, line.id, tab="transfers")
@@ -4110,7 +4119,7 @@ class TestARefusedApplyKeepsTheOwnersTicks:
         Returns:
             The staged bank line.
         """
-        line, _ = TestTheMatchPaneIsReachableWithNoScript(
+        line, _ = _TestTheMatchPaneIsReachableWithNoScriptMembers(
         )._a_card_payment_and_a_payback_another_period_holds(seed_user, db)
         return line
 
@@ -4326,7 +4335,7 @@ class TestARefusedApplyKeepsTheOwnersTicks:
         the render graded is the search-narrowed one and not a plain re-price
         (adversarial review 2026-09-11).
         """
-        pane_of = TestThePaneOffersWHEREADifferenceGoes()
+        pane_of = _TestThePaneOffersWHEREADifferenceGoesMembers()
         line, _, _ = pane_of._a_payroll_deposit(seed_user, db)
         tokens = _row_tokens(
             pane_of._pane(auth_client, seed_user, line), line.id,

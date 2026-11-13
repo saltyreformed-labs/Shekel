@@ -530,7 +530,10 @@ unchanged (it carries a fixed list, which held every variable production's `.env
 2026-11-13), and copies from `main` both compose files, `deploy/valkey/` and
 `deploy/postgres/provision_roles.sh` (0755), and the shared Nginx files where they differ. This card
 changes `nginx.conf` and `users.acl` by one comment line each, the runbook path they name, so
-neither Nginx nor Valkey needs a reload for it. The script prints its snapshot directory
+neither Nginx nor Valkey needs a reload for it. The base file also carries each image pin `main`
+moved since production's copy was made: on 2026-11-13 the database's Postgres digest (a rebuild of
+the same 18.6) and Valkey from 9.1.2 to 9.1.3, which steps 2 and 3 start and step 4 puts back. The
+script prints its snapshot directory
 (`snapshot saved to /opt/docker/shekel/.reconcile-snapshot-<ts>/`) and the old `.env`'s copy
 (`backed up to /opt/docker/shekel/.env.bak.<ts>`): keep both paths for step 4.
 
@@ -567,8 +570,11 @@ and something after them failed.
 
 When the dump must be restored, run 2.3's restore through its step 4 first, while the database
 container is still the new files' (2.3's step 3 runs the provisioning script, which only that
-container holds). Then, in place of 2.3's step 5, and directly when no restore is needed, with step
-1's two paths:
+container holds). A table the failed release's migration added makes 2.3's step 3 refuse,
+`cannot drop schema budget because other objects depend on it`, and its one transaction changes
+nothing (finding plan#3674): `--clean` drops only what the dump holds. Measured: with the table its
+`DETAIL` line names dropped, step 3 run again restored the dump. Then, in place of 2.3's step 5, and
+directly when no restore is needed, with step 1's two paths:
 
 ```bash
 P=/opt/docker/shekel; S=<step 1's snapshot directory>; B=<step 1's .env copy>
@@ -584,11 +590,12 @@ It puts back today's pin, both compose files and the Valkey copy, makes the data
 without the new mounts and the app on today's image, whose own start deploys as the superuser, and
 removes the migrate container, an orphan to today's files. Then `verify_prod_deploy.sh` must print
 `VERIFY OK`. The database needs no change: `shekel_owner` keeps every object, and the superuser
-reaches them all. What step 1 added stays, as today's files read none of it: the owner's password
-file, which the database's `shekel_owner` holds and a later run of step 1 keeps, and the
-provisioning script's copy. A later deploy of today's image makes any new table the superuser's,
-which a retry's step 2 hands to the owner. Production is then behind `main`, as after any
-rolled-back release.
+reaches them all. What else step 1 changed stays, and today's image runs alike with it: the owner's
+password file, which the database's `shekel_owner` holds and a later run of step 1 keeps; the
+provisioning script's copy; `app_role_password` at 0644, which today's app reads as the file's
+owner; and the shared `nginx.conf`'s one comment line. A later deploy of today's image makes any new
+table the superuser's, which a retry's step 2 hands to the owner. Production is then behind `main`,
+as after any rolled-back release.
 
 **5. After `VERIFY OK`, the nightly audit cleanup.** Its unit,
 `/etc/systemd/system/shekel-audit-cleanup.service` (its reference copy beside the compose files),
@@ -618,5 +625,38 @@ login; who runs it, and when, is question plan#3513's.
 provisioning script on a database the superuser owned (2026-11-12), a grant to the web login kept
 through the hand-over (2026-11-13: the web login wrote a table the script had just handed to the
 owner), the owner's audit cleanup and the web login's refusal of it (2026-11-12), and
-`shekel-deploy`'s layout refusal (plan#3424). The blocks in sequence, from today's image and files
-through step 4's way back, are rehearsed before this card's pull request (plan#3669).
+`shekel-deploy`'s layout refusal (plan#3424).
+
+**Measured in sequence** on 2026-11-13 (plan#3669), on a throwaway stack on the rootless daemon laid
+out as production is: its two compose files and `.env`, its running image (`main` at `c9a43df68`),
+its secret files' names and modes with new values, and its same-day nightly dump, in which the
+superuser owned every object and no `shekel_owner` existed. Steps 1 to 3 ran as written but for the
+paths (a stand-in for `/opt/docker/shekel`, the shared Nginx files and a local registry; the
+reconcile script with only those changed), to an image of this card's branch merged with `dev`:
+
+- **Steps 1 and 2, with today's image serving.** Step 1 exited 0, making the owner's password file
+  and adding to `.env`'s settings only its placeholder and three empty `SEED_USER_*` lines. The
+  rewrite writes the script's own comments, so production's note on why those three lines were
+  removed is in the `.env` copy alone; empty, they seed nothing. Step 2 handed over 118 objects (the
+  database, 5 schemas, 90 tables, 22 routines), after which every object was the owner's. The app's
+  `/health` answered 500 once as the database came back and 200 a second later, and a signed-in page
+  answered 200 on every request through the restart and the hand-over.
+- **Step 3.** `deploy OK`, the app down about 7 seconds while the migrate service ran the deploy and
+  healthy 10 seconds after, `VERIFY OK`, and the signed-in page 200 before and after on one session.
+  The app held its four secret files and no superuser or owner password, in its files or in
+  gunicorn's environment.
+- **Step 4, both ways.** A release whose migration raised before the deploy committed: the refusal
+  said `it needs no restore`, and the block exited 0. One whose migration committed before its app
+  failed: `the dump must be restored before it starts`; 2.3's step 3 refused as above, and with that
+  table dropped, steps 3 and 4 and the block exited 0. Each ended on today's image and today's
+  files, byte for byte, with `VERIFY OK` and every object still the owner's.
+- **A retry after each rollback.** Step 1 kept the owner's password file each time. Step 2 handed
+  over what was made in between: after the first, the one table made as the superuser (a stand-in
+  for a later release of today's image, as today's own start made none); after the second, nothing.
+- **Step 5, on copies of the two unit files.** The `sed` changed one line in each, and the dry run
+  exited 0, deleting nothing; the old line under the new files exited 1,
+  `DATABASE_URL must be set in production.`
+
+Rehearsal only: the rootless daemon shows a container the host's operating user as root, so the
+secret files were owned by the uid it shows as 1000, production's operating user, and step 1 ran in
+that daemon's user namespace to set their modes.

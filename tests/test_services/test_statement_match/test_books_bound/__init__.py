@@ -35,11 +35,12 @@ open the day before the bootstrap pay period, so every line inside them is
 also before the pay calendar and the calendar bound catches it first -- the
 two bounds are disjoint and the calendar is applied first.  The shape that
 exercises this one is the developer's own: books opening ON the calendar's
-first day.  :func:`_books_open_on` goes through the table's ONE writer rather
-than a raw ``INSERT``, which is the right habit -- but it is NOT evidence that
-a door could produce the state, and a first version of this paragraph said it
-was.  ``stage_account_opening`` explicitly does not bound the day; the DOOR
-does.  What makes these fixtures production shapes is that the day chosen is
-one ``apply_opening_restatement`` would accept, which is asserted where it
-matters -- ``test_opening_restatement.py``'s own door cases.
+first day.  :func:`_helpers._books_open_on` goes through the table's ONE
+writer rather than a raw ``INSERT``, which is the right habit -- but it is NOT
+evidence that a door could produce the state, and a first version of this
+paragraph said it was.  ``stage_account_opening`` explicitly does not bound
+the day; the DOOR does.  What makes these fixtures production shapes is that
+the day chosen is one ``apply_opening_restatement`` would accept, which is
+asserted where it matters -- the door's own day cases,
+``TestTheDaysItRefuses`` in ``test_opening_restatement/test_the_writer.py``.
 """

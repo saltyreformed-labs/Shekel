@@ -25,8 +25,9 @@ def _books_open_on(db, seed_user, day, equity="1000.00"):
     Note:
         The WRITER, not the door: ``stage_account_opening`` appends without
         bounding the day (``opening_service`` states that in as many words),
-        so a caller here is responsible for choosing a day the door would take.
-        Every day this module passes is one the account's own records allow.
+        so a caller in this package is responsible for choosing a day the
+        door would take.  Every day the package passes is one the account's
+        own records allow.
     """
     opening_service.stage_account_opening(
         account=seed_user["account"],

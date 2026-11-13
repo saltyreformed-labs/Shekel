@@ -172,7 +172,8 @@ class TestTheReviewPassStopsOfferingIt:
 
         This case grades the OFFER SPLIT
         (``_gaps._split_at_books_open``); the DOOR is graded by
-        ``test_the_CREATE_door_ACCEPTS_a_swipe_made_before_the_books`` below.
+        ``test_the_CREATE_door_ACCEPTS_a_swipe_made_before_the_books`` in
+        ``test_the_doors.py``.
         Both are needed: an earlier draft of this case claimed to guard the
         door while asserting only on ``review_set``, so the door mutation it
         named would have survived it.  Found by adversarial test review

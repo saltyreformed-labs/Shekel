@@ -21,13 +21,17 @@ The marker the assertions check for is ``id="mfa-nag-banner"`` from the
 partial.  Asserting on the DOM id rather than the copy text means the
 copy can be tweaked without breaking the test, while still proving the
 banner element rendered.
+
+Every shared account is made with two-factor (plan#3600), so an owner who
+sees the banner is ``no_two_factor_client``'s, the seed owner after the reset
+act took it away.
 """
 
 from flask_login import login_user
 
 from app.extensions import db
-from app.models.user import MfaConfig
 from app.services import mfa_service
+from tests._two_factor_sign_in import reset_two_factor_of, two_factor_row_of
 
 
 _NAG_MARKER = b'id="mfa-nag-banner"'
@@ -35,60 +39,36 @@ _NAG_LINK = b'href="/mfa/setup"'
 _NAG_COPY = b"Enable two-factor authentication to protect your financial data."
 
 
-def _enable_mfa_for(user):
-    """Persist a fully-enabled MfaConfig row for *user*.
-
-    Mirrors the production ``/mfa/confirm`` end-state: a real encrypted
-    secret, a hashed backup-code list, and ``is_enabled=True``.  Using
-    ``mfa_service`` rather than hand-rolled fixtures keeps the test
-    coupled to the production encrypt/hash paths -- if those change the
-    fixture follows automatically.
-    """
-    config = MfaConfig(
-        user_id=user.id,
-        is_enabled=True,
-        totp_secret_encrypted=mfa_service.encrypt_secret("TESTBASE32SECRET"),
-        backup_codes=mfa_service.hash_backup_codes(
-            ["aaaaaaaaaaaaaaaaaaaaaaaaaaaa"]
-        ),
-    )
-    db.session.add(config)
-    db.session.commit()
-
-
 def _add_pending_mfa_for(user):
-    """Persist an MfaConfig row that is mid-setup (is_enabled=False).
+    """Give *user*'s reset two-factor row a pending setup (is_enabled=False).
 
     Models the state where a user visited ``/mfa/setup`` (writing a
     pending secret) but never POSTed ``/mfa/confirm``.  The nag must
     keep appearing in this state -- the user is still unprotected.
     """
-    config = MfaConfig(
-        user_id=user.id,
-        is_enabled=False,
-        pending_secret_encrypted=mfa_service.encrypt_secret("TESTBASE32SECRET"),
-    )
-    db.session.add(config)
+    config = two_factor_row_of(user.id)
+    config.pending_secret_encrypted = mfa_service.encrypt_secret("TESTBASE32SECRET")
     db.session.commit()
 
 
 class TestMfaNagOwnerVisibility:
     """Banner appears for owner-role users without enabled MFA."""
 
-    def test_banner_shows_for_owner_with_no_mfa_row(self, auth_client):
-        """A fresh owner with no MfaConfig row sees the nag on every page.
+    def test_banner_shows_for_owner_with_no_mfa_row(self, no_two_factor_client):
+        """An owner without two-factor sees the nag on every page.
 
-        ``seed_user`` does not create an MfaConfig row, so the
-        ``has_enabled_mfa`` query returns False and the banner renders.
+        ``seed_user`` is made with two-factor (plan#3600), and the fixture's
+        reset takes it away, so the ``has_enabled_mfa`` query returns False
+        and the banner renders.
         """
-        resp = auth_client.get("/")
+        resp = no_two_factor_client.get("/")
         assert resp.status_code == 200
         assert _NAG_MARKER in resp.data
         assert _NAG_LINK in resp.data
         assert _NAG_COPY in resp.data
 
     def test_banner_shows_for_owner_with_pending_only_mfa(
-        self, auth_client, seed_user,
+        self, no_two_factor_client, seed_user,
     ):
         """A pending-but-unconfirmed setup keeps the banner visible.
 
@@ -98,14 +78,12 @@ class TestMfaNagOwnerVisibility:
         """
         _add_pending_mfa_for(seed_user["user"])
 
-        resp = auth_client.get("/")
+        resp = no_two_factor_client.get("/")
         assert resp.status_code == 200
         assert _NAG_MARKER in resp.data
 
-    def test_banner_hidden_when_mfa_enabled(self, auth_client, seed_user):
-        """An owner with confirmed MFA does NOT see the banner."""
-        _enable_mfa_for(seed_user["user"])
-
+    def test_banner_hidden_when_mfa_enabled(self, auth_client):
+        """An owner with confirmed MFA, as the seed owner is made, does NOT see the banner."""
         resp = auth_client.get("/")
         assert resp.status_code == 200
         assert _NAG_MARKER not in resp.data
@@ -134,6 +112,7 @@ class TestMfaNagOtherRolesAndAnonymous:
             processor for processor in app.template_context_processors[None]
             if processor.__name__ == "inject_mfa_nag_visible"
         )
+        reset_two_factor_of(seed_user["user"].id)
         for user, visible in (
             (seed_companion["user"], False), (seed_user["user"], True),
         ):
@@ -156,14 +135,14 @@ class TestMfaNagOtherRolesAndAnonymous:
 class TestMfaNagEndpointSuppression:
     """Banner is suppressed on the MFA enrolment endpoints themselves."""
 
-    def test_banner_suppressed_on_mfa_setup_page(self, auth_client):
+    def test_banner_suppressed_on_mfa_setup_page(self, no_two_factor_client):
         """``/mfa/setup`` must not render the nag above its own form.
 
         The banner exists to drive the user to ``/mfa/setup``; once they
         are there it is redundant and visually noisy.  The context
         processor filters any ``auth.mfa_*`` endpoint.
         """
-        resp = auth_client.get("/mfa/setup")
+        resp = no_two_factor_client.get("/mfa/setup")
         assert resp.status_code == 200
         assert _NAG_MARKER not in resp.data
 
@@ -180,21 +159,21 @@ class TestMfaNagAcrossOwnerPages:
     subset.
     """
 
-    def test_banner_on_settings_page(self, auth_client):
+    def test_banner_on_settings_page(self, no_two_factor_client):
         """Settings dashboard renders the banner."""
-        resp = auth_client.get("/settings")
+        resp = no_two_factor_client.get("/settings")
         assert resp.status_code == 200
         assert _NAG_MARKER in resp.data
 
-    def test_banner_on_savings_dashboard(self, auth_client):
+    def test_banner_on_savings_dashboard(self, no_two_factor_client):
         """Savings dashboard renders the banner."""
-        resp = auth_client.get("/savings")
+        resp = no_two_factor_client.get("/savings")
         assert resp.status_code == 200
         assert _NAG_MARKER in resp.data
 
-    def test_banner_on_grid_index(self, auth_client):
+    def test_banner_on_grid_index(self, no_two_factor_client):
         """Budget grid renders the banner."""
-        resp = auth_client.get("/grid")
+        resp = no_two_factor_client.get("/grid")
         assert resp.status_code == 200
         assert _NAG_MARKER in resp.data
 
@@ -202,7 +181,7 @@ class TestMfaNagAcrossOwnerPages:
 class TestMfaNagDismissibility:
     """Banner is a Bootstrap dismissible alert (data-bs-dismiss)."""
 
-    def test_banner_includes_dismiss_button(self, auth_client):
+    def test_banner_includes_dismiss_button(self, no_two_factor_client):
         """The partial must render a Bootstrap close button.
 
         The plan calls for "dismissible" -- Bootstrap's standard
@@ -210,7 +189,7 @@ class TestMfaNagDismissibility:
         dismissal only; the banner reappears on the next navigation
         until ``MfaConfig.is_enabled=True``.
         """
-        resp = auth_client.get("/")
+        resp = no_two_factor_client.get("/")
         assert resp.status_code == 200
         assert _NAG_MARKER in resp.data
         assert b'data-bs-dismiss="alert"' in resp.data

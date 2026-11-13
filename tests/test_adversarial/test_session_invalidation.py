@@ -33,7 +33,6 @@ where the pieces are correct individually but wired together wrong.
 from datetime import datetime, timedelta, timezone
 
 from app.extensions import db
-from app.models.user import MfaConfig
 from app.services import mfa_service
 from app.services.mfa_service import TotpVerificationResult
 from tests._test_helpers import store_backup_codes

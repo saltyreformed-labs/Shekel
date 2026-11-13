@@ -33,7 +33,11 @@ from tests._test_helpers import (
     rebuild_calendar,
     rhythm_of,
 )
-from tests._two_factor_sign_in import sign_in_from_a_trusted_browser
+from tests._two_factor_sign_in import (
+    reset_two_factor_of,
+    sign_in_by_password,
+    sign_in_from_a_trusted_browser,
+)
 
 
 #: Where a finished sign-in lands an owner who asked for no page: the dashboard.
@@ -600,6 +604,21 @@ def auth_client(app, db, client, seed_user):  # pylint: disable=unused-argument
     Logs in via the login form to get a proper session.
     """
     return log_in_seed_user(client)
+
+
+@pytest.fixture()
+def no_two_factor_client(app, db, client, seed_user):  # pylint: disable=unused-argument
+    """A browser signed in as the seed owner, whose two-factor a reset took away.
+
+    The owner an account without two-factor is: one the reset act cleared
+    (``scripts/reset_mfa.py``, through
+    :func:`tests._two_factor_sign_in.reset_two_factor_of`), signed in with the
+    password alone, as production signs in an account before its setup.  For
+    a test of setup, or of what an account without two-factor meets.  The
+    reset runs before the sign-in, since it ends every session of the account.
+    """
+    reset_two_factor_of(seed_user["user"].id)
+    return sign_in_by_password(client, SEED_USER_EMAIL, SEED_USER_PASSWORD, OWNERS_PAGE)
 
 
 @pytest.fixture()

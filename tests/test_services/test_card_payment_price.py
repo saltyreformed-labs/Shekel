@@ -659,9 +659,10 @@ class TestTheNextRowIsTheOneItsNextDateNames:
 
     Plan task plan#3700: the row the Recurring page's Next column names, worked
     out or typed over (the column reads this same answer since plan#3894,
-    :mod:`tests.test_services.test_the_recurring_page_names_a_card_payment`).  It was the earliest worked-out row still in the plan, so
-    an unmarked row dated before the day held the figure, and a typed row was
-    passed by.  $800 of groceries on the card Jan 3, counted from that date.
+    :mod:`tests.test_services.test_the_recurring_page_names_a_card_payment`).
+    It was the earliest worked-out row still in the plan, so an unmarked row
+    dated before the day held the figure, and a typed row was passed by.  $800
+    of groceries on the card Jan 3, counted from that date.
     """
 
     def test_an_unmarked_row_before_the_day_is_not_next(

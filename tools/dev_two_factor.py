@@ -10,8 +10,8 @@ two-factor row and signed in with the password alone; once every account must
 use two-factor (plan#3452), an account without it reaches only setup.  So the
 copy's account gets a key of dev's own instead: one this module writes under
 the dev app's ``TOTP_ENCRYPTION_KEY``, and whose current code the dev-app tools
-(``tools/playwright/shekel_shot.py``, ``tests/manual/save_dev_session.py``)
-type at ``/mfa/verify``.
+type at ``/mfa/verify``, each through this module's one sign-in
+(:func:`sign_in_with_dev_key`).
 
 The key is the base32 secret in ``SHEKEL_DEV_TOTP_SECRET``, read from the
 process environment, then from the checkout's ``.env`` (git-ignored, never
@@ -47,8 +47,10 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING
+from urllib.parse import urlsplit
 
 import pyotp
+from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 from sqlalchemy.engine import make_url
 
 if TYPE_CHECKING:
@@ -63,6 +65,18 @@ ENV_FILE = Path(__file__).resolve().parents[1] / ".env"
 #: The hosts a database the writer may write is reached at: this host's
 #: loopback, where the dev database binds and production's does not.
 LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
+
+#: The sign-in form, the code form a password leads to, and the prefix of every
+#: two-factor page: a page under it (the code form, or the setup an account
+#: without two-factor is held at) is not signed in yet, whatever the cookie says.
+LOGIN_PATH = "/login"
+CODE_PATH = "/mfa/verify"
+TWO_FACTOR_PREFIX = "/mfa/"
+
+#: The sign-in form's fields and button (``app/templates/auth/login.html``).
+_EMAIL_FIELD = "#email"
+_PASSWORD_FIELD = "#password"
+_PASSWORD_SUBMIT = 'button[type="submit"]'
 
 #: The code form's field and its own submit button on ``/mfa/verify``
 #: (``app/templates/auth/mfa_verify.html``): the page holds a second form,
@@ -142,6 +156,92 @@ def type_dev_code(page: Page) -> None:
     """
     page.fill(_CODE_FIELD, pyotp.TOTP(dev_secret()).now())
     page.click(_CODE_SUBMIT)
+
+
+def signed_in(url: str) -> bool:
+    """Return whether a settled *url* is past the sign-in doors.
+
+    Not the sign-in form, and not a two-factor page: the code form a password
+    leads to, or the setup an account without two-factor is held at.
+
+    Args:
+        url: The page's settled URL.
+
+    Returns:
+        True when the browser is on one of the account's pages.
+    """
+    path = urlsplit(url).path
+    return path != LOGIN_PATH and not path.startswith(TWO_FACTOR_PREFIX)
+
+
+def sign_in_with_dev_key(
+    page: Page, base_url: str, email: str, password: str, timeout_ms: int,
+) -> bool:
+    """Sign *page* in to the dev app as *email*: the password, then the dev key's code.
+
+    The one sign-in every dev-app tool performs (``tools/playwright/
+    shekel_shot.py``, ``tests/manual/save_dev_session.py``,
+    ``tests/manual/verify_anchor_ack.py``).  The password sends the browser to
+    ``/mfa/verify``, where :func:`type_dev_code` types the code.  CSRF needs no
+    handling: the browser submits each rendered form's own token.
+
+    Args:
+        page: An open Playwright page.
+        base_url: The dev app's origin, e.g. ``http://127.0.0.1:5000``.
+        email: The account's email.
+        password: Its password.
+        timeout_ms: How long each form's answer may take to settle.
+
+    Returns:
+        True when the browser reached the account's pages.  False when it
+        stopped at the sign-in form, the code form or setup;
+        :func:`why_not_signed_in` says which and its fix, from ``page.url``.
+    """
+    page.goto(base_url + LOGIN_PATH, wait_until="domcontentloaded")
+    page.fill(_EMAIL_FIELD, email)
+    page.fill(_PASSWORD_FIELD, password)
+    page.click(_PASSWORD_SUBMIT)
+    try:
+        page.wait_for_url(
+            lambda url: urlsplit(url).path != LOGIN_PATH, timeout=timeout_ms,
+        )
+        if urlsplit(page.url).path == CODE_PATH:
+            type_dev_code(page)
+            page.wait_for_url(signed_in, timeout=timeout_ms)
+    except PlaywrightTimeoutError:
+        return False
+    return signed_in(page.url)
+
+
+def why_not_signed_in(url: str, email: str) -> str:
+    """Return where a sign-in that did not finish stopped, why, and its fix.
+
+    Args:
+        url: The page's settled URL, one :func:`signed_in` says is not past
+            the sign-in doors.
+        email: The account's email, for the fix's command.
+
+    Returns:
+        One sentence naming the page and what to do.
+    """
+    path = urlsplit(url).path
+    if path == LOGIN_PATH:
+        return (
+            f"It stopped at {path}: the email or password was refused; check "
+            "the credentials."
+        )
+    fix = f"python -m tools.dev_two_factor {email}"
+    if path == CODE_PATH:
+        return (
+            f"It stopped at {path}: the code was refused.  Either a sign-in in "
+            "the same 30 seconds used it already (retry after them), or the "
+            "copy's account does not have the dev key, as a production copy's "
+            f"does not (its secret is under production's key): {fix}"
+        )
+    return (
+        f"It stopped at {path}: the account has no two-factor, so it is held "
+        f"at its setup: {fix}"
+    )
 
 
 def refuse_unless_loopback(database_uri: str) -> None:

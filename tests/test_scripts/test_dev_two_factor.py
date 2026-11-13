@@ -6,7 +6,9 @@ What is graded here: it refuses any database off this host's loopback before
 the app is even built, so production's two-factor is never touched; it
 replaces every piece of the copy's two-factor material, production's secret
 among them; and a code of the dev key then signs the account in through the
-real password and code forms.
+real password and code forms; and the dev-app tools' one sign-in
+(:func:`tools.dev_two_factor.sign_in_with_dev_key`) answers whether it got in,
+and why not, at each page a sign-in can stop on.
 
 The seed owner is made with two-factor (plan#3600), so a production copy's
 row is the owner's own row made to hold production's material
@@ -20,6 +22,7 @@ from urllib.parse import urlsplit
 
 import pyotp
 import pytest
+from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
 import app as app_package
 import app.config as app_config
@@ -240,3 +243,103 @@ class TestWriteDevKey:
         assert page.status_code == 200
         assert nav_name == "Test User"
         assert nav_name in page.get_data(as_text=True)
+
+
+class _ScriptedPage:
+    """A stand-in for a Playwright page: each click lands where the case says.
+
+    It records what was typed into each field, and its ``wait_for_url``
+    raises Playwright's own timeout when the page is not where the predicate
+    asks, as a real page does once its wait runs out.
+    """
+
+    def __init__(self, *landings):
+        """Start blank; the Nth click lands on the Nth of *landings* (paths)."""
+        self.url = "about:blank"
+        self.typed = {}
+        self._landings = list(landings)
+
+    def goto(self, url, wait_until=None):  # pylint: disable=unused-argument
+        """Open *url*.
+
+        Pylint: ``unused-argument`` -- ``wait_until`` is Playwright's keyword,
+        which the sign-in passes; a page here has nothing to wait for.
+        """
+        self.url = url
+
+    def fill(self, selector, value):
+        """Type *value* into the field *selector* names."""
+        self.typed[selector] = value
+
+    def click(self, selector):  # pylint: disable=unused-argument
+        """Submit the form: the page lands on the next landing.
+
+        Pylint: ``unused-argument`` -- ``selector`` is Playwright's; every
+        click here submits the page's one form.
+        """
+        self.url = _DEV_APP + self._landings.pop(0)
+
+    def wait_for_url(self, predicate, timeout):  # pylint: disable=unused-argument
+        """Return at once when *predicate* holds of the page, else time out.
+
+        Pylint: ``unused-argument`` -- ``timeout`` is Playwright's keyword,
+        which the sign-in passes; the page here never moves on its own.
+        """
+        if not predicate(self.url):
+            raise PlaywrightTimeoutError(f"still at {self.url}")
+
+
+#: The dev app's origin the stand-in page answers for.
+_DEV_APP = "http://127.0.0.1:5000"
+
+
+class TestSignInWithDevKey:
+    """The dev-app tools' one sign-in: the password, then the dev key's code."""
+
+    @pytest.fixture(autouse=True)
+    def _dev_key(self, monkeypatch):
+        """The dev key the code is typed from."""
+        monkeypatch.setenv(dev_two_factor.SECRET_VARIABLE, _DEV_KEY)
+
+    def _sign_in(self, page):
+        """Sign *page* in as the seed owner through the function under test."""
+        return dev_two_factor.sign_in_with_dev_key(
+            page, _DEV_APP, SEED_USER_EMAIL, SEED_USER_PASSWORD, timeout_ms=1,
+        )
+
+    def test_the_password_then_the_dev_keys_code_signs_in(self):
+        """Sent to the code form, it types the dev key's code; landing on a page, it is in."""
+        page = _ScriptedPage("/mfa/verify", "/grid")
+
+        assert self._sign_in(page) is True
+        assert page.typed["#email"] == SEED_USER_EMAIL
+        assert page.typed["#password"] == SEED_USER_PASSWORD
+        assert pyotp.TOTP(_DEV_KEY).verify(page.typed["#totp_code"], valid_window=1)
+
+    def test_a_refused_code_is_not_signed_in_and_says_why(self):
+        """Left at the code form, it answers no, and the sentence names the dev key's fix."""
+        page = _ScriptedPage("/mfa/verify", "/mfa/verify")
+
+        assert self._sign_in(page) is False
+        why = dev_two_factor.why_not_signed_in(page.url, SEED_USER_EMAIL)
+        assert why.startswith("It stopped at /mfa/verify: the code was refused.")
+        assert f"python -m tools.dev_two_factor {SEED_USER_EMAIL}" in why
+
+    def test_a_refused_password_is_not_signed_in_and_says_why(self):
+        """Left at the sign-in form, it answers no without typing a code."""
+        page = _ScriptedPage("/login")
+
+        assert self._sign_in(page) is False
+        assert "#totp_code" not in page.typed
+        why = dev_two_factor.why_not_signed_in(page.url, SEED_USER_EMAIL)
+        assert why.startswith("It stopped at /login: the email or password was refused")
+
+    def test_an_account_held_at_setup_is_not_signed_in_and_says_why(self):
+        """An account without two-factor lands on setup: no, and the fix is the dev key."""
+        page = _ScriptedPage("/mfa/setup")
+
+        assert self._sign_in(page) is False
+        assert "#totp_code" not in page.typed
+        why = dev_two_factor.why_not_signed_in(page.url, SEED_USER_EMAIL)
+        assert why.startswith("It stopped at /mfa/setup: the account has no two-factor")
+        assert f"python -m tools.dev_two_factor {SEED_USER_EMAIL}" in why

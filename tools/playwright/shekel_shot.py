@@ -25,8 +25,9 @@ Credentials
 -----------
 Every account signs in with its password and then a two-factor code (plan#3452).
 The dev copy's account has the dev key as its two-factor, written by
-``tools/dev_two_factor.py``, and this helper types that key's current code at
-``/mfa/verify`` (``SHEKEL_DEV_TOTP_SECRET``, that module's docstring).  The
+``tools/dev_two_factor.py``, and this helper signs in through that module's
+one sign-in, which types that key's current code at ``/mfa/verify``
+(``SHEKEL_DEV_TOTP_SECRET``, that module's docstring).  The
 email and password are resolved, in order, from:
 
 1. ``SHEKEL_DEV_LOGIN_EMAIL`` / ``SHEKEL_DEV_LOGIN_PASSWORD`` in the process env;
@@ -60,7 +61,6 @@ import argparse
 import os
 import sys
 from pathlib import Path
-from urllib.parse import urlsplit
 
 from playwright.sync_api import Error as PlaywrightError
 from playwright.sync_api import Page
@@ -76,18 +76,14 @@ sys.path.insert(0, str(REPO_ROOT))
 # Pylint: ``wrong-import-position`` -- this import must FOLLOW the ``sys.path``
 # line above, which is what makes ``tools`` importable when run as a script.
 # pylint: disable=wrong-import-position
-from tools.dev_two_factor import read_env_file, type_dev_code  # noqa: E402
+from tools.dev_two_factor import (  # noqa: E402
+    LOGIN_PATH, read_env_file, sign_in_with_dev_key, signed_in, why_not_signed_in,
+)
 # pylint: enable=wrong-import-position
 
 STATE_PATH = Path(__file__).resolve().parent / ".auth" / "state.json"
 
 DEFAULT_BASE_URL = "http://127.0.0.1:5000"
-LOGIN_PATH = "/login"
-# The code form a sign-in lands on before the account's pages, and the setup
-# page an account without two-factor is held at: a page under this prefix is
-# not signed in yet, whatever the cookie says.
-TWO_FACTOR_PREFIX = "/mfa/"
-CODE_PATH = "/mfa/verify"
 # A page that requires authentication; an unauthenticated hit 302-redirects to
 # ``/login?next=...``, and a half-finished sign-in stays under ``/mfa/``.
 AUTHED_PROBE_PATH = "/"
@@ -112,22 +108,6 @@ USER_AGENT = (
     "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) "
     "Chrome/148.0.0.0 Safari/537.36"
 )
-
-
-def _signed_in(url: str) -> bool:
-    """Return whether a settled *url* is past the sign-in doors.
-
-    Not the sign-in form, and not a two-factor page: the code form a password
-    leads to, or the setup an account without two-factor is held at.
-
-    Args:
-        url: The page's settled URL.
-
-    Returns:
-        True when the browser is on one of the account's pages.
-    """
-    path = urlsplit(url).path
-    return path != LOGIN_PATH and not path.startswith(TWO_FACTOR_PREFIX)
 
 
 def _resolve_credentials() -> tuple[str | None, str | None, str]:
@@ -176,43 +156,7 @@ def _is_authenticated(page: Page, base_url: str) -> bool:
         at two-factor.
     """
     page.goto(base_url + AUTHED_PROBE_PATH, wait_until="domcontentloaded")
-    return _signed_in(page.url)
-
-
-def _perform_login(page: Page, base_url: str, email: str, password: str) -> bool:
-    """Fill and submit the login form, then the code form, returning whether it authenticated.
-
-    The password sends the browser to ``/mfa/verify``, where the dev key's
-    current code is typed (:func:`tools.dev_two_factor.type_dev_code`).  The
-    form has no "Remember me" box since plan#2173 deleted it; the saved
-    storage state carries the session cookie itself, which is what reuse rests
-    on.  CSRF needs no special handling: the real browser submits the rendered form's
-    hidden token with the matching session cookie.
-
-    Args:
-        page: An open Playwright page.
-        base_url: The dev app origin.
-        email: Login email.
-        password: Login password.
-
-    Returns:
-        True when the sign-in reached the account's pages (success), False when
-        it stayed on the login page (bad credentials or a form error) or on the
-        code form (a code refused: the copy's account does not have the dev key).
-    """
-    page.goto(base_url + LOGIN_PATH, wait_until="domcontentloaded")
-    page.fill("#email", email)
-    page.fill("#password", password)
-    page.click('button[type="submit"]')
-    try:
-        page.wait_for_url(lambda url: urlsplit(url).path != LOGIN_PATH,
-                          timeout=NAV_TIMEOUT_MS)
-        if urlsplit(page.url).path == CODE_PATH:
-            type_dev_code(page)
-            page.wait_for_url(_signed_in, timeout=NAV_TIMEOUT_MS)
-    except PlaywrightTimeoutError:
-        return False
-    return _signed_in(page.url)
+    return signed_in(page.url)
 
 
 def _save_state_after_auth(page: Page, context, base_url: str, source: str) -> None:
@@ -277,20 +221,17 @@ def capture(base_url: str, manual: bool, headed: bool) -> Path:
                     f"{MANUAL_LOGIN_TIMEOUT_MS // 1000}s...",
                     file=sys.stderr,
                 )
-                page.wait_for_url(_signed_in, timeout=MANUAL_LOGIN_TIMEOUT_MS)
+                page.wait_for_url(signed_in, timeout=MANUAL_LOGIN_TIMEOUT_MS)
                 _save_state_after_auth(page, context, base_url, "manual login")
             else:
-                if not _perform_login(page, base_url, email, password):
+                if not sign_in_with_dev_key(
+                    page, base_url, email, password, NAV_TIMEOUT_MS,
+                ):
                     raise SystemExit(
-                        f"Automated login failed for {email} (source: {source}), "
-                        f"stopping at {urlsplit(page.url).path}.  At /login the "
-                        "saved dev password may be stale -- set "
-                        "SHEKEL_DEV_LOGIN_PASSWORD in .env.  At /mfa/verify the "
-                        "code was refused: a sign-in in the same 30 seconds used "
-                        "it already (retry after them), or the copy's account "
-                        "does not have the dev key -- run "
-                        f"python -m tools.dev_two_factor {email}.  At /mfa/setup "
-                        "it has no two-factor -- run the same.  Or use --manual."
+                        f"Automated login failed for {email} (source: {source}).  "
+                        f"{why_not_signed_in(page.url, email)}  A stale password "
+                        "is set as SHEKEL_DEV_LOGIN_PASSWORD in .env.  Or use "
+                        "--manual."
                     )
                 _save_state_after_auth(page, context, base_url, f"login as {email}")
         finally:
@@ -363,7 +304,7 @@ def _screenshot_once(playwright, target: str, out_path: Path, full_page: bool) -
             # HTMX polling can keep the network busy; the DOM is loaded enough
             # to shoot, so fall through rather than fail the screenshot.
             pass
-        if not _signed_in(page.url):
+        if not signed_in(page.url):
             return False
         out_path.parent.mkdir(parents=True, exist_ok=True)
         page.screenshot(path=str(out_path), full_page=full_page)

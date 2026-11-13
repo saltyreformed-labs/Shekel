@@ -68,7 +68,7 @@ Two additional defensive tests guard the surrounding contracts:
      proposed (see the migration docstring for the chain-replay
      rationale).
   8. **Helper return-value contract.**  The migration's
-     ``_drop_and_recreate_fk`` and ``_assert_fk_ondelete`` helpers
+     ``drop_and_recreate_fk`` and ``assert_fk_ondelete`` helpers
      return True iff DDL ran (or raise on mismatch).
 
 Tests bootstrap an Alembic ``MigrationContext`` against the test
@@ -89,10 +89,8 @@ shekel-audits/security-2026-04-15/remediation-plan.md.
 # fixture-only requests like ``seed_user`` that ensure conftest
 # fixtures have produced a populated DB but whose return values the
 # assertion does not depend on.  ``protected-access`` is required to
-# call the migration's helper functions (prefixed with a leading
-# underscore by convention to mark them as private to the migration
-# module); the tests exercise these directly to assert their return-
-# value contracts.
+# read the migration's ``_CONFDELTYPE_TO_LABEL``; its two helpers the
+# tests call directly are public since ruling plan#3737.
 from __future__ import annotations
 
 import importlib.util
@@ -279,7 +277,7 @@ def _force_fk_to_legacy_state(
     Drops the current (new-name, new-ondelete) constraint and adds
     one under the legacy name with the legacy ondelete clause.  The
     helper is the test-side mirror of
-    ``_M_C43._drop_and_recreate_fk`` -- we issue raw DDL here
+    ``_M_C43.drop_and_recreate_fk`` -- we issue raw DDL here
     instead of calling the helper backwards so the test stays
     independent of the helper's API.
 
@@ -615,7 +613,7 @@ class TestUpgradeIdempotent:
     def test_drop_and_recreate_fk_returns_false_for_each_ref_fk(
         self, app, db, seed_user,
     ):
-        """Every ``_drop_and_recreate_fk`` call returns False for ref FKs.
+        """Every ``drop_and_recreate_fk`` call returns False for ref FKs.
 
         False is the no-op signal: the FK already has the new name
         and the new ondelete clause, no DDL was issued.  True would
@@ -633,9 +631,9 @@ class TestUpgradeIdempotent:
             with Operations.context(ctx):
                 with patch.object(op, "get_bind", return_value=bind):
                     for spec in _M_C43.REF_FK_SPECS:
-                        result = _M_C43._drop_and_recreate_fk(bind, *spec)
+                        result = _M_C43.drop_and_recreate_fk(bind, *spec)
                         assert result is False, (
-                            f"_drop_and_recreate_fk reported True (DDL "
+                            f"drop_and_recreate_fk reported True (DDL "
                             f"ran) for {spec[0]}.{spec[7]} against a "
                             f"template that should already carry the "
                             f"post-C-43 state."
@@ -644,7 +642,7 @@ class TestUpgradeIdempotent:
     def test_drop_and_recreate_fk_returns_false_for_transfers(
         self, app, db, seed_user,
     ):
-        """``_drop_and_recreate_fk`` returns False for the transfers FK.
+        """``drop_and_recreate_fk`` returns False for the transfers FK.
 
         Same idempotency contract as the ref-FK loop but exercises
         the CASCADE path of the helper (every spec in REF_FK_SPECS
@@ -660,11 +658,11 @@ class TestUpgradeIdempotent:
             ctx = MigrationContext.configure(connection=bind)
             with Operations.context(ctx):
                 with patch.object(op, "get_bind", return_value=bind):
-                    result = _M_C43._drop_and_recreate_fk(
+                    result = _M_C43.drop_and_recreate_fk(
                         bind, *_M_C43.TRANSFERS_PAY_PERIOD_SPEC,
                     )
                     assert result is False, (
-                        "_drop_and_recreate_fk reported True (DDL ran) "
+                        "drop_and_recreate_fk reported True (DDL ran) "
                         "for budget.fk_transfers_pay_period_id against "
                         "a template that should already carry the "
                         "post-C-43 state."
@@ -1130,7 +1128,7 @@ class TestHelperReturnValueContracts:
     def test_drop_and_recreate_fk_returns_true_when_creating(
         self, app, db, seed_user, restore_c43_state,
     ):
-        """``_drop_and_recreate_fk`` returns True when DDL runs.
+        """``drop_and_recreate_fk`` returns True when DDL runs.
 
         Drops the new FK and re-installs the legacy state; calls the
         helper; asserts True.  Mirrors the C-42
@@ -1160,10 +1158,10 @@ class TestHelperReturnValueContracts:
             ctx = MigrationContext.configure(connection=bind)
             with Operations.context(ctx):
                 with patch.object(op, "get_bind", return_value=bind):
-                    result = _M_C43._drop_and_recreate_fk(bind, *spec)
+                    result = _M_C43.drop_and_recreate_fk(bind, *spec)
             db.session.commit()
             assert result is True, (
-                "_drop_and_recreate_fk returned False when the FK was "
+                "drop_and_recreate_fk returned False when the FK was "
                 "in the legacy state -- the helper's True/False "
                 "contract is broken."
             )
@@ -1171,32 +1169,32 @@ class TestHelperReturnValueContracts:
     def test_assert_fk_ondelete_passes_when_clause_matches(
         self, app, db, seed_user,
     ):
-        """``_assert_fk_ondelete`` passes silently on the canonical state."""
+        """``assert_fk_ondelete`` passes silently on the canonical state."""
         with app.app_context():
             bind = db.session.connection()
             # No raise = pass.
-            _M_C43._assert_fk_ondelete(
+            _M_C43.assert_fk_ondelete(
                 bind, "ref", "fk_account_types_category_id", "RESTRICT",
             )
 
     def test_assert_fk_ondelete_raises_on_mismatch(
         self, app, db, seed_user,
     ):
-        """``_assert_fk_ondelete`` raises RuntimeError on ondelete mismatch."""
+        """``assert_fk_ondelete`` raises RuntimeError on ondelete mismatch."""
         with app.app_context():
             bind = db.session.connection()
             with pytest.raises(RuntimeError, match="ondelete="):
-                _M_C43._assert_fk_ondelete(
+                _M_C43.assert_fk_ondelete(
                     bind, "ref", "fk_account_types_category_id", "CASCADE",
                 )
 
     def test_assert_fk_ondelete_raises_on_missing(
         self, app, db, seed_user,
     ):
-        """``_assert_fk_ondelete`` raises RuntimeError when the FK is absent."""
+        """``assert_fk_ondelete`` raises RuntimeError when the FK is absent."""
         with app.app_context():
             bind = db.session.connection()
             with pytest.raises(RuntimeError, match="is .*missing"):
-                _M_C43._assert_fk_ondelete(
+                _M_C43.assert_fk_ondelete(
                     bind, "ref", "fk_does_not_exist_anywhere", "RESTRICT",
                 )

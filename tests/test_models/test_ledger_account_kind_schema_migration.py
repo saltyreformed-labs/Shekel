@@ -28,7 +28,7 @@ These tests assert, without re-executing DDL in the worker:
     ON DELETE RESTRICT, and the partial unique + the shape CHECK exist with the
     model's exact predicates -- the proof that ``upgrade`` ran and matches the
     model (the behavioural proof that each constraint *enforces* its rule lives
-    in ``test_ledger_account.py``; this file proves the named objects exist so
+    in ``test_ledger_account/``; this file proves the named objects exist so
     the downgrade's drop-by-name will find them and that there is no
     model-vs-migration drift);
   * the three-step backfill's shape -> kind mapping (the

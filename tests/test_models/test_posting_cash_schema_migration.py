@@ -29,7 +29,7 @@ schema.  These tests assert, without re-executing DDL in the worker:
   * this migration's own objects are present in the live catalog with the
     exact predicates / FK actions / CHECK the model declares -- the proof
     that ``upgrade`` ran and matches the models (the behavioural proof that
-    each constraint *enforces* its rule lives in ``test_ledger_account.py``
+    each constraint *enforces* its rule lives in ``test_ledger_account/``
     / ``test_journal_entry.py``; this file proves the named objects exist so
     the downgrade's drop-by-name will find them);
   * the ``downgrade`` is not a bare pass -- it drops every object the

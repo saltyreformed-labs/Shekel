@@ -246,8 +246,7 @@
   --bs-btn-hover-color: #000;
 }
 
-/* Solid destructive button (MFA disable, pay-period reset, confirm
-   modal).  .btn-danger compiles #DC3545 as a literal, so the
+/* Solid destructive button (pay-period reset, confirm modal).  .btn-danger compiles #DC3545 as a literal, so the
    --bs-danger remap never reaches it -- same mechanism as the outline
    skins above (polish audit RC3, swept app-wide in S11).  The dark
    danger token is bright, so the fill takes dark ink. */

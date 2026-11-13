@@ -299,9 +299,8 @@ class TestInvalidateOtherSessionsLoadUserIntegration:
         the loader's own answer for that cookie.
 
         The session is signed in first (``stamp_login_session``), as
-        every caller's is: ``/mfa/verify`` stamps it just before its
-        backup-code call, and ``/mfa/disable`` runs on a signed-in
-        session.  Since plan#2173 the loader refuses a session with no
+        its one caller's is: ``/mfa/verify`` stamps it just before its
+        backup-code call.  Since plan#2173 the loader refuses a session with no
         activity stamp, and the developer confirmed that change on
         2026-10-30, so a bare request context no longer stands in for one.
         """

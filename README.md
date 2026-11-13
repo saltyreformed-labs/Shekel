@@ -64,7 +64,7 @@ Edit `.env` and set these values:
 | `SECRET_KEY` | Yes | Run `openssl rand -hex 32` and paste the output. |
 | `APP_ROLE_PASSWORD` | Yes | The app's least-privilege database role. Run `openssl rand -hex 24` and paste the output. |
 | `SHEKEL_VALKEY_PASSWORD` | Yes | The rate limiter's store. Run `openssl rand -hex 24` and paste the output. |
-| `TOTP_ENCRYPTION_KEY` | No | Required before enabling MFA/TOTP. See [MFA Setup](#mfa-setup). |
+| `TOTP_ENCRYPTION_KEY` | Yes | Every account must set up two-factor (TOTP) before it reaches any page, and two-factor needs this key: without it no one can use the app. See [MFA Setup](#mfa-setup). |
 | `REGISTRATION_ENABLED` | No | Set to `true` to enable the `/register` endpoint. Default in production: `false` (see [Security](#security)). |
 | `SEED_USER_EMAIL` | No | Login email, `admin@shekel.local` in `.env.example`. While it is set, the first boot creates this user and the two rows below are required. **Remove from `.env` after the first successful boot** (see [Security](#security)). |
 | `SEED_USER_PASSWORD` | With `SEED_USER_EMAIL` | Login password, at least 12 characters. The app refuses to start with `.env.example`'s `ChangeMe!2026`. **Remove from `.env` after the first successful boot** (see [Security](#security)). |
@@ -158,7 +158,7 @@ docker volume rm shekel-prod-pgdata
 | `POSTGRES_PASSWORD` error on startup | Set `POSTGRES_PASSWORD` in your `.env` file. |
 | `SECRET_KEY` error on startup | Set `SECRET_KEY` in your `.env` file. Run `openssl rand -hex 32` to generate one. |
 | `shekel-prod-pgdata ... not found` on first run | Run `docker volume create shekel-prod-pgdata` before `docker compose up`. |
-| MFA enable fails with "TOTP_ENCRYPTION_KEY" message | Set `TOTP_ENCRYPTION_KEY` in `.env`. See [MFA Setup](#mfa-setup) for generation instructions. |
+| Two-factor setup says "The server administrator must set TOTP_ENCRYPTION_KEY" | Set `TOTP_ENCRYPTION_KEY` in `.env`. See [MFA Setup](#mfa-setup) for generation instructions. |
 | `/register` returns 404 | `REGISTRATION_ENABLED` is `false` (the production default). Set `REGISTRATION_ENABLED=true` in `.env` to re-enable. |
 | Nginx fails with "mount ... not a directory" | `deploy/nginx-bundled/nginx.conf` was missing when the stack started, so Docker made a directory in its place. Remove it with `rmdir deploy/nginx-bundled/nginx.conf` (with `sudo` if Docker runs as root), then run the block of [step 2](#2-download-configuration-files) that downloads the files again from your `shekel` directory. |
 | App does not start or shows blank page | Run `docker compose logs app` and check for error messages. |
@@ -318,10 +318,9 @@ If you expose Shekel outside your local network, take these additional steps:
 1. **Verify public registration is disabled.** `REGISTRATION_ENABLED` defaults to `false` in
    production (set in `docker-compose.yml` and enforced by `ProdConfig`). Confirm with
    `docker exec shekel-prod-app env | grep REGISTRATION_ENABLED` -- the value should be `false`.
-2. **Enable MFA for all users.** Open Security from the menu under your name and choose Set Up
-   Two-Factor Authentication. A companion account must use it, so the app holds a companion at that
-   setup at her next sign-in until she has it. This requires `TOTP_ENCRYPTION_KEY` to be set (see
-   [MFA Setup](#mfa-setup) below).
+2. **Every account uses two-factor.** The app holds each account, yours too, at two-factor setup at
+   its first sign-in until it has set it up, and no account can turn it off. This requires
+   `TOTP_ENCRYPTION_KEY` to be set (see [MFA Setup](#mfa-setup) below).
 3. **Verify HTTPS.** Cloudflare Tunnel and Tailscale handle TLS automatically. If using a different
    method, ensure your reverse proxy terminates HTTPS.
 4. **Change the default seed password immediately** if you used the default `ChangeMe!2026`.
@@ -342,7 +341,9 @@ If you expose Shekel outside your local network, take these additional steps:
 
 ### MFA Setup
 
-Multi-factor authentication (TOTP) requires an encryption key for storing secrets at rest.
+Every account must use multi-factor authentication (TOTP), which requires an encryption key for
+storing secrets at rest. Without it, every account is held at a setup page that cannot finish, so no
+one can use the app.
 
 Generate a key using one of these methods:
 
@@ -361,8 +362,8 @@ Paste the output into your `.env` file as `TOTP_ENCRYPTION_KEY=<key>`, then rest
 docker compose restart app
 ```
 
-You can then enable MFA from Security, in the menu under your name: Set Up Two-Factor
-Authentication.
+Each account then sets up two-factor at its next sign-in: the app holds it at the setup page until
+it does.
 
 **Do not use `openssl rand` as a substitute.** It produces an incompatible key format. Only the
 Fernet method above generates a valid key.

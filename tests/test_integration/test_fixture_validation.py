@@ -34,6 +34,10 @@ from tests._test_helpers import (
     one_off_row_of,
 )
 from tests._seed_owner_fixtures import SEED_USER_BOOTSTRAP_START
+from tests._trusted_devices import device_cookie_name
+from tests._two_factor_sign_in import (
+    SEED_COMPANION_EMAIL, SEED_COMPANION_PASSWORD, sign_in_from_a_trusted_browser,
+)
 from tests.oracles.recurrence_baseline import MONTHLY
 from tests._definition_price import newest_price
 
@@ -174,6 +178,26 @@ class TestSecondAuthClient:
 
         resp = auth_client.get("/settings")
         assert resp.status_code == 200
+
+
+class TestTheSharedSignIn:
+    """The one shared sign-in refuses an account it could not sign in past setup."""
+
+    def test_an_account_without_two_factor_is_refused_by_name(
+        self, app, client, seed_companion,
+    ):
+        """The seed companion, made without two-factor, is refused before any trust is written.
+
+        Through ``User.has_two_factor``, the property the login gate reads:
+        signed in by password she would be held at setup, so a trusted browser
+        could not stand in for her code.
+        """
+        with app.app_context():
+            with pytest.raises(AssertionError, match="has no two-factor"):
+                sign_in_from_a_trusted_browser(
+                    client, SEED_COMPANION_EMAIL, SEED_COMPANION_PASSWORD, "/companion/",
+                )
+            assert client.get_cookie(device_cookie_name(seed_companion["user"].id)) is None
 
 
 class TestSeedFullUserData:

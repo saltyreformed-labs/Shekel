@@ -40,6 +40,7 @@ from tests._seeded_start_states import (
     _build_seeded_snapshot,
     register_seeded_state,
 )
+from tests._two_factor_sign_in import two_factor_secret_of
 
 
 #: How many times this file's world has been BUILT in this process, and how
@@ -57,13 +58,16 @@ def _build_arch_probe_world(db):
         db: The Flask-SQLAlchemy extension to write through.
 
     Returns:
-        dict with the owner's ``user_id`` and default ``account_id``.
+        dict with the owner's ``user_id``, default ``account_id``, and the
+        ``two_factor_secret`` the build wrote, read under the build's key.
     """
     _BUILDS.append(1)
     seed_user = build_seed_user(db)
+    user_id = seed_user["user"].id
     return {
-        "user_id": seed_user["user"].id,
+        "user_id": user_id,
         "account_id": seed_user["account"].id,
+        "two_factor_secret": two_factor_secret_of(user_id),
     }
 
 
@@ -341,6 +345,35 @@ class TestTheFirstWorldSurvivesTheSecondBeingBuilt:
             f"a test declaring 'arch_probe' was given {user.display_name!r} "
             f"-- the second world's build overwrote this world's snapshot, so "
             f"the two are sharing one database"
+        )
+
+
+@pytest.mark.xdist_group("x_be_2_seeded_start_state")
+@pytest.mark.seeded_start_state("arch_probe")
+class TestAWorldsTwoFactorSecretIsReadInEveryTest:
+    """The owner's two-factor secret a build wrote is read back by every declaring test.
+
+    Ruling plan#3625: the suite holds one two-factor encryption key per test
+    process (``set_totp_key``).  A world is built once per worker, so its
+    owner's secret is encrypted under the key in force at the build, and a
+    key per test would leave it unreadable from the next test on.  Both arms
+    read it, so under a key per test whichever runs second fails, in the
+    order-free shape of the isolation arms; pinned to this file's worker so
+    both read one build.
+    """
+
+    def test_the_owners_secret_is_read_arm_one(self, db, seeded_world):
+        """This test reads the secret the build wrote."""
+        assert (
+            two_factor_secret_of(seeded_world["user_id"])
+            == seeded_world["two_factor_secret"]
+        )
+
+    def test_the_owners_secret_is_read_arm_two(self, db, seeded_world):
+        """The twin of :meth:`test_the_owners_secret_is_read_arm_one`."""
+        assert (
+            two_factor_secret_of(seeded_world["user_id"])
+            == seeded_world["two_factor_secret"]
         )
 
 

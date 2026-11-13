@@ -143,38 +143,34 @@ class User(UserMixin, TimestampMixin, db.Model):
     )
     role = db.relationship("UserRole", lazy="joined")
     # The user's one two-factor row, read through :attr:`has_two_factor`.
-    # View-only: every write of the row goes through its own query, and a
-    # deleted user's row goes with them by the foreign key's ``ON DELETE
-    # CASCADE``.  Loaded on first read and kept for the rest of the request,
-    # whose closing rollback expires it, so the login gate, the Security page
-    # and the enrolment nag ask the database once between them.
+    # View-only: assigning it links or makes no row, and a deleted user's row
+    # goes with them by the foreign key's ``ON DELETE CASCADE``.  Loaded on
+    # first read and kept until the transaction ends (a commit or a rollback
+    # expires it, the request's closing one among them), so the login gate
+    # asks the database once, at the start of the request's first
+    # transaction, and the view after it reads the gate's answer until it
+    # commits.  A page drawn after a commit (Regenerate's codes) reads the
+    # row again.  The doors behind the gate write
+    # the row it loaded (Regenerate backup codes, the re-confirm page's code
+    # check; ruling plan#3826), and the doors the gate lets through without
+    # two-factor read their own.
     mfa_config = db.relationship("MfaConfig", uselist=False, viewonly=True)
-
-    @property
-    def must_have_two_factor(self) -> bool:
-        """Return whether this user must use two-factor authentication.
-
-        **The one statement of that rule** (ruling plan#3434): every companion
-        must, and there is no switch, so it is the role's and nothing stores
-        it.  The login gate holds a user it names at setup until they have
-        it, ``/mfa/disable`` refuses them, and the Security page and the setup
-        page say it is required.  None of those reads the role.
-
-        Returns:
-            True for a companion, False for an owner.
-        """
-        return self.role_id == ref_cache.role_id(RoleEnum.COMPANION)
 
     @property
     def has_two_factor(self) -> bool:
         """Return whether this user has two-factor authentication turned on.
 
+        Every account must have it, whatever its role, and there is no switch
+        (plan#3452, widening ruling plan#3434 from companions to every
+        account): the login gate holds a signed-in user without it at setup
+        (``app/login_gate.py``), so this is the one question the rule asks.
+
         A row whose setup was started and never confirmed is not two-factor:
-        ``is_enabled`` is what ``/mfa/confirm`` sets, and what ``/mfa/disable``
-        and the one reset act clear
-        (:func:`~app.services.mfa_service.reset_two_factor`), which
+        ``is_enabled`` is what ``/mfa/confirm`` sets, and what the one reset
+        act clears (:func:`~app.services.mfa_service.reset_two_factor`), which
         ``scripts/reset_mfa.py`` and the owner's Reset two-factor for a
-        companion on Settings > Companions both run.
+        companion on Settings > Companions both run.  Nothing else clears it:
+        no account can turn two-factor off (ruling plan#3604).
 
         Returns:
             True when the user's ``auth.mfa_configs`` row is enabled.
@@ -355,7 +351,7 @@ class MfaConfig(TimestampMixin, db.Model):
     See audit findings F-005, F-142 / commit C-09.
 
     Related service: app/services/mfa_service.py
-    Related routes: /mfa/setup, /mfa/confirm, /mfa/verify, /mfa/disable
+    Related routes: /mfa/setup, /mfa/confirm, /mfa/verify
     """
 
     __tablename__ = "mfa_configs"

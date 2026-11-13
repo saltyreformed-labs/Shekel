@@ -1,11 +1,13 @@
 """
 Shekel Budget App -- the Jinja context processors.
 
-The five processors Flask runs for each template the application renders, each
+The four processors Flask runs for each template the application renders, each
 adding its values to what the route passed: the welcome checklist, the
-companion role's id, the security-event banner, the MFA enrolment nag and the
-tax-law notice.  The last two read one owner gate,
-:func:`_current_user_is_owner`.  ``create_app`` calls
+companion role's id, the security-event banner and the tax-law notice.  The
+last reads the owner gate, :func:`_current_user_is_owner`.  The owner's
+two-factor enrolment banner was a fifth until plan#3452: every account must
+have two-factor, and the login gate holds one without it at setup, so no page
+it could show on is reached.  ``create_app`` calls
 :func:`register_context_processors` and owns nothing about what any of them
 computes.
 
@@ -24,12 +26,12 @@ import here would load at package import the modules the processors read:
 (measured 2026-11-02).
 """
 
-from flask import Flask, request
+from flask import Flask
 
 
 def register_context_processors(app: Flask) -> None:
-    """Register the welcome-checklist, companion-role, security-event, MFA-nag
-    and tax-law-notice context processors on *app*, in that order.
+    """Register the welcome-checklist, companion-role, security-event and
+    tax-law-notice context processors on *app*, in that order.
 
     Args:
         app: The Flask application being built.
@@ -170,67 +172,6 @@ def register_context_processors(app: Flask) -> None:
         }
 
     @app.context_processor
-    def inject_mfa_nag_visible():
-        """Compute whether the owner-role MFA enrollment nag should render.
-
-        Returns a single template variable, ``mfa_nag_visible``,
-        consumed by ``base.html`` to decide whether to ``{% include %}``
-        ``dashboard/_mfa_nag.html``.
-
-        Visible iff ALL of the following hold:
-
-          * The current request has an authenticated user
-            (anonymous visitors hitting ``/login`` and friends never
-            see the banner -- they cannot act on it).
-          * The current user's ``role_id`` matches the cached owner
-            role.  Companions are excluded by design: the audit
-            scopes the nag to the de facto administrator role, and
-            companions cannot reach ``/settings/companions`` or any
-            other owner-only action that the finding cited as
-            unprotected.
-          * The user has no two-factor (``User.has_two_factor``: no
-            ``MfaConfig`` row with ``is_enabled=True``).
-            A row with ``is_enabled=False`` (e.g. a setup that was
-            started but never confirmed) still counts as "no MFA" and
-            keeps the banner visible.
-          * The current request endpoint is not part of the MFA
-            enrolment / management flow itself (``auth.mfa_*``).
-            Suppressing on those endpoints prevents the banner from
-            stacking on top of the page that fulfils the nag (e.g.
-            ``/mfa/setup`` already shows the QR code; a banner above
-            it just adds noise).
-
-        Failure modes are handled by returning ``mfa_nag_visible=False``
-        so the banner errs on the side of NOT appearing during
-        ambiguous startup windows -- showing a CTA that points to a
-        broken endpoint would be worse than briefly missing the nag.
-
-        Audit reference: F-095 / commit C-12 of the 2026-04-15
-        security remediation plan.
-        """
-        # Pylint: ``import-outside-toplevel`` -- the imports in this context
-        # processor run inside the request-time closure (app-factory pattern) and
-        # pull in app extensions/models kept out of ``app``-package import.
-        # pylint: disable=import-outside-toplevel
-        from flask_login import current_user
-        if not _current_user_is_owner():
-            return {"mfa_nag_visible": False}
-
-        # Suppress on the MFA enrolment / management endpoints.  ``request``
-        # is bound during request handling; context processors only run in
-        # that scope, so a missing ``endpoint`` (e.g. a 404 before route
-        # matching) is treated as "show the banner" rather than swallowing
-        # silently.
-        endpoint = request.endpoint or ""
-        if endpoint.startswith("auth.mfa_"):
-            return {"mfa_nag_visible": False}
-
-        # The user's one two-factor answer, loaded once a request
-        # (``User.has_two_factor``), so the nag asks nothing the login gate or
-        # the page has already asked.
-        return {"mfa_nag_visible": not current_user.has_two_factor}
-
-    @app.context_processor
     def inject_tax_law_notice():
         """Hand ``base.html`` what the tax-law notice names, for the owner only.
 
@@ -243,10 +184,10 @@ def register_context_processors(app: Flask) -> None:
         (rulings salary:R-SAL74, R-SAL86 and R-SAL87: every page, owner only,
         no close button).
 
-        Owner only, as the MFA nag above is: the owner is the one who can have
-        the law added.  It queries nothing -- the law is a module constant --
-        so an owner's render, a partial that never draws the layout included,
-        pays one clock read and a walk of the law's few years.
+        Owner only: the owner is the one who can have the law added.  It
+        queries nothing -- the law is a module constant -- so an owner's
+        render, a partial that never draws the layout included, pays one clock
+        read and a walk of the law's few years.
         """
         if not _current_user_is_owner():
             return {"tax_law_gaps": ()}
@@ -267,11 +208,10 @@ def register_context_processors(app: Flask) -> None:
 def _current_user_is_owner() -> bool:
     """Return True iff the request has an authenticated OWNER-role user.
 
-    The one gate both owner-only banners read (the MFA nag and the tax-law
-    notice).  It fails CLOSED: while the reference cache cannot name the owner
-    role (mid-migration or mid-startup) nobody is confirmed an owner, so
-    neither banner shows -- a banner in an ambiguous startup window is worse
-    than one missed for a moment.
+    The gate the owner-only tax-law notice reads.  It fails CLOSED: while the
+    reference cache cannot name the owner role (mid-migration or mid-startup)
+    nobody is confirmed an owner, so the notice does not show -- a banner in
+    an ambiguous startup window is worse than one missed for a moment.
 
     Returns:
         bool: Whether the current user is authenticated and holds the owner

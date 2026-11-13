@@ -94,9 +94,8 @@ rm /tmp/shekel_backup_20260315_020000.sql.gz
 docker exec shekel-prod-app python scripts/reset_mfa.py your-email@example.com
 # Output: MFA has been disabled for your-email@example.com.
 
-# Log in with email + password (MFA is now disabled).
-# Re-enable MFA from Security, in the menu under your name, after logging in.
-# A companion is held at two-factor setup at her next sign-in instead.
+# Sign in with email + password: the app holds you at two-factor setup until
+# you enroll an authenticator again.  A companion is held there the same way.
 ```
 
 #### Locked out of Cloudflare Access

@@ -284,25 +284,28 @@
        each surface remembering to host an element. #}
   </div>
 
+  {# --- Past the two-factor hold? ---
+     A user without two-factor is held at its setup (app/login_gate.py,
+     plan#3452), so setting it up is the one thing they can do there, and a
+     banner's link or button would lead back to setup.  The banners that ask
+     the user to act read this one answer: the security event's
+     (plan#3862) and the welcome checklist (plan#3777).  Asked here, where
+     the banners draw, so a fragment that never draws the layout asks
+     nothing (ruling balance:R-BAL117), and through the property the gate
+     reads, never a second spelling of it. #}
+  {% set past_the_hold = current_user.is_authenticated and current_user.has_two_factor %}
+
   {# --- Security-event "was this you?" Banner ---
-     Rendered above the MFA nag so a fresh security-relevant change
-     (password rotation, MFA enrol/disable, backup-code regeneration)
-     surfaces on top of any standing security CTA.  Visibility is
+     Rendered first, so a fresh security-relevant change (password
+     rotation, MFA enrolment, backup-code regeneration) surfaces above
+     every other banner.  Visibility is
      computed by the ``inject_security_event_banner`` context
      processor in app/context_processors.py; per-kind copy comes from
      ``KIND_DISPLAY`` in app/utils/security_events.py.  Audit F-091 /
-     commit C-16. #}
-  {% if security_event_visible %}
+     commit C-16.  Not on the held setup page (above); finishing setup
+     records its own event, whose banner the next page shows. #}
+  {% if past_the_hold and security_event_visible %}
     {% include "_security_event_banner.html" %}
-  {% endif %}
-
-  {# --- MFA Enrollment Nag (owner role without MFA enabled) ---
-     Rendered before the welcome banner so the security CTA is the
-     first non-nav element on the page.  See
-     audit F-095 / commit C-12; visibility is computed by the
-     ``inject_mfa_nag_visible`` context processor in app/context_processors.py. #}
-  {% if mfa_nag_visible %}
-    {% include "dashboard/_mfa_nag.html" %}
   {% endif %}
   {#- --- Tax-law notice (owner; rulings salary:R-SAL74, R-SAL86, R-SAL87) ---
      From November 1, on every owner page until next year's tax law is in
@@ -316,8 +319,10 @@
     {% include "_tax_law_notice.html" %}
   {%- endif %}
 
-  {# --- Welcome Banner (Onboarding) --- #}
-  {% if current_user.is_authenticated and onboarding is defined and not onboarding.complete %}
+  {# --- Welcome Banner (Onboarding) ---
+     Not on the held setup page (plan#3777; the hold's answer above): each
+     step's link would lead back there. #}
+  {% if past_the_hold and onboarding is defined and not onboarding.complete %}
   <div id="welcome-banner" class="container-fluid mt-2">
     <div class="card welcome-banner">
       <div class="card-body">

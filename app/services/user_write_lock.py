@@ -13,21 +13,27 @@ decides on, is listed in :func:`app.db_transaction._lock_the_open_transaction`
 step and a known browser's password step right after the account is found,
 before their checks, and a stranger's password step only once its check has
 committed and found the password right (ruling plan#3110); and this module's
-:func:`lock_every_user_writes`, at the start of each deploy reconcile.  No
+:func:`lock_every_user_writes`, at the start of each deploy reconcile and of
+the two-factor reset script.  No
 service takes it for itself any more, and
 ``tests/test_arch/test_the_owner_lock_has_one_home.py`` refuses one that
 tries.  **The writers that take none, each named so it is not mistaken for
 covered**: registration (``/register`` and ``scripts/seed_user.py``) writes a
 user that is not committed, so no other transaction can reach it; and every
 script that writes an EXISTING user's rows holds no request, so nothing takes
-the lock for it.  The deploy reconciles take every owner's at their own start.
-Four operator scripts write rows the lock covers and take none --
-``scripts/reset_mfa.py`` (``mfa_configs``), ``scripts/rotate_totp_key.py``
-(every ``totp_secret_encrypted``), ``scripts/rotate_sessions.py`` (every
+the lock for it.  The deploy reconciles take every owner's at their own start,
+and so does ``scripts/reset_mfa.py`` (``mfa_configs``, ruling plan#3823):
+unlocked, a reset landing between the login gate's read of the two-factor row
+and Regenerate's write left new backup codes on the row it had cleared
+(measured 2026-11-13, plan#3775).  Three operator scripts write rows the lock
+covers and take none -- ``scripts/rotate_totp_key.py`` (every
+``totp_secret_encrypted``), ``scripts/rotate_sessions.py`` (every
 ``users.session_invalidated_at``) and ``scripts/seed_companion.py``'s
 existing-user branch (``role_id`` and ``linked_owner_id``, the lock's key) --
 so each can race a sign-in or an MFA door that holds the lock (reported at
-plan step ``balance:X-bn``'s checkpoint 4 review, 2026-09-29).  *It was
+plan step ``balance:X-bn``'s checkpoint 4 review, 2026-09-29; plan#1675).
+``tools/dev_two_factor.py`` writes ``mfa_configs`` and takes none either; it
+writes only a dev copy, on this host's loopback.  *It was
 taken by sixteen calls in nine modules inside the write paths that needed it
 most, plus three that plan step ``credit_card:CC-5-4a-4`` put inside
 ``row_write_lock`` (the row locks' module, deleted with them at plan step
@@ -171,8 +177,8 @@ def take_owner_write_lock(connection: Connection, owner_id: int) -> None:
     The one statement of the lock, taken by exactly two callers:
     :mod:`app.db_transaction` at the start of every command transaction a
     signed-in request opens and at a sign-in, and
-    :func:`lock_every_user_writes` for the deploy reconciles (the module
-    docstring).  Blocks until any other transaction
+    :func:`lock_every_user_writes` for the deploy reconciles and the
+    two-factor reset script (the module docstring).  Blocks until any other transaction
     holding the same key commits or rolls back; PostgreSQL releases it
     automatically at this transaction's end.
 
@@ -210,9 +216,13 @@ def lock_every_user_writes() -> list[int]:
     its loan twin, and
     :func:`app.services.posting_service.resync_all_cash_postings`.  Those are
     the only transactions in the app that reconcile more than one owner's
-    ledger.  Without it they would take their per-user locks in whatever order
-    their id-ordered enumeration happens to visit owners, and two such
-    transactions running at once could deadlock on that alone.
+    ledger.  Without it those three would take their per-user locks in
+    whatever order their id-ordered enumeration happens to visit owners, and
+    two such transactions running at once could deadlock on that alone.  And
+    for ``scripts/reset_mfa.py``, which resets one account's two-factor but
+    takes every account's lock before it reads that account (ruling
+    plan#3823), so no key is read unlocked to find the one: a companion's is
+    her owner's.
 
     *An earlier version of this docstring said "the two backfills" and missed
     ``resync_all_cash_postings``, which is the FIRST of the three to run at
@@ -222,7 +232,7 @@ def lock_every_user_writes() -> list[int]:
     deliberate: ``SELECT pg_advisory_xact_lock(ns, id) FROM users ORDER BY id``
     would order the RESULT, not the evaluation, so the locks could still be
     taken in scan order.  The user count is small and this runs once per
-    deploy.
+    deploy and once per reset.
 
     Returns:
         The user ids locked, ascending -- for the deploy log and for tests to

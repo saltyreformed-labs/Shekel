@@ -1,21 +1,27 @@
-"""Auth route tests: the two-step two-factor sign-in, /mfa/verify's security cases, and turning
-two-factor off.
-"""
+"""Auth route tests: the two-step two-factor sign-in and /mfa/verify's security cases.
 
-from datetime import datetime, timedelta, timezone
+No account can turn two-factor off (ruling plan#3604), so the tests of
+``/mfa/disable`` went with it.
+"""
 
 from app import create_app
 from app.extensions import db
 from app.models.user import MfaConfig
 from app.services import mfa_service
 from app.services.mfa_service import TotpVerificationResult
+from tests._seed_owner_fixtures import OWNERS_PAGE, SEED_USER_EMAIL, SEED_USER_PASSWORD
+from tests._test_helpers import store_backup_codes
+from tests._two_factor_sign_in import reset_two_factor_of, two_factor_secret_of
 
 
 class TestMfaLogin:
     """Tests for the two-step MFA login flow."""
 
-    def _enable_mfa(self, user_id, known_codes=None):
-        """Helper to enable MFA for a user with a known secret and backup codes.
+    def _its_two_factor(self, user_id, known_codes=None):
+        """Give the shared account's two-factor known backup codes; return them and its secret.
+
+        The account is made with two-factor (plan#3600), so its secret is its
+        row's.
 
         Args:
             user_id: The user's primary key.
@@ -25,23 +31,15 @@ class TestMfaLogin:
         Returns:
             tuple: (plaintext_secret, plaintext_backup_codes)
         """
-        secret = "JBSWY3DPEHPK3PXP"
         if known_codes is None:
             known_codes = ["aaaaaaaa", "bbbbbbbb", "cccccccc"]
-        mfa_config = MfaConfig(
-            user_id=user_id,
-            is_enabled=True,
-            totp_secret_encrypted=mfa_service.encrypt_secret(secret),
-            backup_codes=mfa_service.hash_backup_codes(known_codes),
-        )
-        db.session.add(mfa_config)
-        db.session.commit()
-        return secret, known_codes
+        store_backup_codes(db.session, user_id, known_codes)
+        return two_factor_secret_of(user_id), known_codes
 
     def test_login_with_mfa_redirects_to_verify(self, app, client, seed_user):
         """POST /login with MFA enabled redirects to /mfa/verify instead of grid."""
         with app.app_context():
-            self._enable_mfa(seed_user["user"].id)
+            self._its_two_factor(seed_user["user"].id)
 
             response = client.post("/login", data={
                 "email": "test@shekel.local",
@@ -59,7 +57,7 @@ class TestMfaLogin:
     def test_mfa_verify_page_renders(self, app, client, seed_user):
         """GET /mfa/verify renders the verification form when pending user exists."""
         with app.app_context():
-            self._enable_mfa(seed_user["user"].id)
+            self._its_two_factor(seed_user["user"].id)
 
             # POST to /login to set up pending state.
             client.post("/login", data={
@@ -81,7 +79,7 @@ class TestMfaLogin:
     def test_mfa_verify_valid_totp(self, app, client, seed_user, monkeypatch):
         """POST /mfa/verify with valid TOTP code completes login."""
         with app.app_context():
-            self._enable_mfa(seed_user["user"].id)
+            self._its_two_factor(seed_user["user"].id)
             monkeypatch.setattr(
                 mfa_service, "verify_totp_code",
                 lambda mc, c: TotpVerificationResult.ACCEPTED,
@@ -111,7 +109,7 @@ class TestMfaLogin:
     def test_mfa_verify_invalid_totp(self, app, client, seed_user, monkeypatch):
         """POST /mfa/verify with invalid TOTP code shows generic error."""
         with app.app_context():
-            self._enable_mfa(seed_user["user"].id)
+            self._its_two_factor(seed_user["user"].id)
             monkeypatch.setattr(
                 mfa_service, "verify_totp_code",
                 lambda mc, c: TotpVerificationResult.INVALID,
@@ -155,7 +153,7 @@ class TestMfaLogin:
         monkeypatched here -- the real service is the code under test.
         """
         with app.app_context():
-            self._enable_mfa(seed_user["user"].id)
+            self._its_two_factor(seed_user["user"].id)
 
             client.post("/login", data={
                 "email": "test@shekel.local",
@@ -188,7 +186,7 @@ class TestMfaLogin:
         instead of returning a 500 error.
         """
         with app.app_context():
-            self._enable_mfa(seed_user["user"].id)
+            self._its_two_factor(seed_user["user"].id)
 
             # Step 1: enter pending state via login.
             client.post("/login", data={
@@ -210,7 +208,7 @@ class TestMfaLogin:
     def test_mfa_verify_valid_backup_code(self, app, client, seed_user):
         """POST /mfa/verify with valid backup code completes login and consumes the code."""
         with app.app_context():
-            _, known_codes = self._enable_mfa(seed_user["user"].id)
+            _, known_codes = self._its_two_factor(seed_user["user"].id)
 
             # Step 1: enter pending state.
             client.post("/login", data={
@@ -243,7 +241,7 @@ class TestMfaLogin:
     def test_mfa_verify_invalid_backup_code(self, app, client, seed_user):
         """POST /mfa/verify with invalid backup code shows generic error."""
         with app.app_context():
-            self._enable_mfa(seed_user["user"].id)
+            self._its_two_factor(seed_user["user"].id)
 
             client.post("/login", data={
                 "email": "test@shekel.local",
@@ -265,7 +263,7 @@ class TestMfaLogin:
     def test_mfa_verify_backup_code_consumed(self, app, client, seed_user):
         """A used backup code cannot be reused."""
         with app.app_context():
-            _, known_codes = self._enable_mfa(seed_user["user"].id)
+            _, known_codes = self._its_two_factor(seed_user["user"].id)
 
             # First login cycle: use the first backup code.
             client.post("/login", data={
@@ -291,23 +289,33 @@ class TestMfaLogin:
             assert response.status_code == 200
             assert b"Invalid verification code." in response.data
 
-    def test_login_without_mfa_unchanged(self, app, client, seed_user):
-        """POST /login without MFA enabled completes in one step (existing behavior)."""
+    def test_login_without_mfa_signs_in_and_is_held_at_setup(self, app, client, seed_user):
+        """POST /login without MFA enabled signs in in one step, and setup is next.
+
+        The account's two-factor is reset first, so it has none, as after
+        ``scripts/reset_mfa.py``.  The password alone finishes the sign-in:
+        no code form.  Every account must have two-factor (plan#3452), so the
+        signed-in browser's next page is setup, which an anonymous browser is
+        refused: the sign-in did finish.
+        """
         with app.app_context():
-            # No MFA enabled for seed_user.
+            reset_two_factor_of(seed_user["user"].id)
             response = client.post("/login", data={
-                "email": "test@shekel.local",
-                "password": "testpass",
+                "email": SEED_USER_EMAIL,
+                "password": SEED_USER_PASSWORD,
             }, follow_redirects=False)
 
             assert response.status_code == 302
             location = response.headers.get("Location", "")
-            # Should redirect to grid, not to /mfa/verify.
-            assert "mfa" not in location
+            # Lands where an owner's sign-in lands, not on /mfa/verify.
+            assert location.endswith(OWNERS_PAGE), location
 
-            # User is logged in.
-            grid_resp = client.get("/", follow_redirects=False)
-            assert grid_resp.status_code == 200
+            held = client.get(OWNERS_PAGE, follow_redirects=False)
+            assert held.status_code == 302
+            assert held.headers["Location"].endswith("/mfa/setup")
+            setup = client.get("/mfa/setup", follow_redirects=False)
+            assert setup.status_code == 200
+            assert b"Verify and Enable" in setup.data
 
     def test_mfa_open_redirect_absolute_url_blocked(
         self, app, client, seed_user, monkeypatch
@@ -320,7 +328,7 @@ class TestMfaLogin:
         time AND at redirect time (defense in depth).
         """
         with app.app_context():
-            self._enable_mfa(seed_user["user"].id)
+            self._its_two_factor(seed_user["user"].id)
             monkeypatch.setattr(
                 mfa_service, "verify_totp_code",
                 lambda mc, c: TotpVerificationResult.ACCEPTED,
@@ -354,7 +362,7 @@ class TestMfaLogin:
         uses it after TOTP verification -- both steps must validate.
         """
         with app.app_context():
-            self._enable_mfa(seed_user["user"].id)
+            self._its_two_factor(seed_user["user"].id)
             monkeypatch.setattr(
                 mfa_service, "verify_totp_code",
                 lambda mc, c: TotpVerificationResult.ACCEPTED,
@@ -386,7 +394,7 @@ class TestMfaLogin:
         target after successful TOTP verification.
         """
         with app.app_context():
-            self._enable_mfa(seed_user["user"].id)
+            self._its_two_factor(seed_user["user"].id)
             monkeypatch.setattr(
                 mfa_service, "verify_totp_code",
                 lambda mc, c: TotpVerificationResult.ACCEPTED,
@@ -409,167 +417,6 @@ class TestMfaLogin:
             assert "/templates" in location
 
 
-class TestMfaDisable:
-    """Tests for the MFA disable flow."""
-
-    def _enable_mfa(self, user_id):
-        """Helper to enable MFA for a user with a known secret and backup codes.
-
-        Args:
-            user_id: The user's primary key.
-
-        Returns:
-            tuple: (plaintext_secret, MfaConfig instance)
-        """
-        secret = "JBSWY3DPEHPK3PXP"
-        known_codes = ["aaaaaaaa", "bbbbbbbb", "cccccccc"]
-        mfa_config = MfaConfig(
-            user_id=user_id,
-            is_enabled=True,
-            totp_secret_encrypted=mfa_service.encrypt_secret(secret),
-            backup_codes=mfa_service.hash_backup_codes(known_codes),
-        )
-        db.session.add(mfa_config)
-        db.session.commit()
-        return secret, mfa_config
-
-    def test_mfa_disable_page_renders(self, app, auth_client, seed_user):
-        """GET /mfa/disable renders the confirmation form when MFA is enabled."""
-        with app.app_context():
-            self._enable_mfa(seed_user["user"].id)
-
-            response = auth_client.get("/mfa/disable")
-            assert response.status_code == 200
-            assert b"Disable Two-Factor Authentication" in response.data
-            assert b"current_password" in response.data
-
-    def test_mfa_disable_redirects_if_not_enabled(self, app, auth_client, seed_user):
-        """GET /mfa/disable redirects if MFA is not enabled."""
-        with app.app_context():
-            response = auth_client.get("/mfa/disable", follow_redirects=False)
-            assert response.status_code == 302
-            assert "security" in response.headers.get("Location", "")
-
-    def test_mfa_disable_success(self, app, auth_client, seed_user, monkeypatch):
-        """POST /mfa/disable with valid password + TOTP disables MFA."""
-        with app.app_context():
-            self._enable_mfa(seed_user["user"].id)
-            monkeypatch.setattr(
-                mfa_service, "verify_totp_code",
-                lambda mc, c: TotpVerificationResult.ACCEPTED,
-            )
-
-            response = auth_client.post("/mfa/disable", data={
-                "current_password": "testpass",
-                "totp_code": "123456",
-            }, follow_redirects=True)
-
-            assert response.status_code == 200
-            assert b"Two-factor authentication has been disabled" in response.data
-
-            # Verify MFA is fully cleared in the database.
-            config = (
-                db.session.query(MfaConfig)
-                .filter_by(user_id=seed_user["user"].id)
-                .first()
-            )
-            assert config.is_enabled is False
-            assert config.totp_secret_encrypted is None
-            assert config.backup_codes is None
-            assert config.confirmed_at is None
-
-    def test_mfa_disable_clears_pending_material(
-        self, app, auth_client, seed_user, monkeypatch
-    ):
-        """A successful disable also scrubs pending-setup ciphertext.
-
-        Normal flows cannot leave pending material on an enabled row
-        (/mfa/setup is blocked while enabled; /mfa/confirm clears
-        pending on every exit), but the disable must still scrub it --
-        defense in depth via the clear_mfa_material rule shared with
-        scripts/reset_mfa.py, so no encrypted secret of any kind
-        survives a disable at rest.
-        """
-        with app.app_context():
-            _, mfa_config = self._enable_mfa(seed_user["user"].id)
-            mfa_config.pending_secret_encrypted = (
-                mfa_service.encrypt_secret("ORSXG5A2ORSXG5A2")
-            )
-            mfa_config.pending_secret_expires_at = (
-                datetime.now(timezone.utc) + timedelta(minutes=15)
-            )
-            db.session.commit()
-            monkeypatch.setattr(
-                mfa_service, "verify_totp_code",
-                lambda mc, c: TotpVerificationResult.ACCEPTED,
-            )
-
-            response = auth_client.post("/mfa/disable", data={
-                "current_password": "testpass",
-                "totp_code": "123456",
-            }, follow_redirects=True)
-
-            assert response.status_code == 200
-            config = (
-                db.session.query(MfaConfig)
-                .filter_by(user_id=seed_user["user"].id)
-                .first()
-            )
-            assert config.is_enabled is False
-            assert config.totp_secret_encrypted is None
-            assert config.backup_codes is None
-            assert config.confirmed_at is None
-            assert config.last_totp_timestep is None
-            assert config.pending_secret_encrypted is None
-            assert config.pending_secret_expires_at is None
-
-    def test_mfa_disable_wrong_password(self, app, auth_client, seed_user):
-        """POST /mfa/disable with wrong password shows error."""
-        with app.app_context():
-            self._enable_mfa(seed_user["user"].id)
-
-            response = auth_client.post("/mfa/disable", data={
-                "current_password": "wrongpassword",
-                "totp_code": "123456",
-            }, follow_redirects=True)
-
-            assert response.status_code == 200
-            assert b"Invalid password" in response.data
-
-            # MFA should still be enabled.
-            config = (
-                db.session.query(MfaConfig)
-                .filter_by(user_id=seed_user["user"].id)
-                .first()
-            )
-            assert config.is_enabled is True
-
-    def test_mfa_disable_wrong_totp(self, app, auth_client, seed_user, monkeypatch):
-        """POST /mfa/disable with wrong TOTP code shows error."""
-        with app.app_context():
-            self._enable_mfa(seed_user["user"].id)
-            monkeypatch.setattr(
-                mfa_service, "verify_totp_code",
-                lambda mc, c: TotpVerificationResult.INVALID,
-            )
-
-            response = auth_client.post("/mfa/disable", data={
-                "current_password": "testpass",
-                "totp_code": "000000",
-            }, follow_redirects=True)
-
-            assert response.status_code == 200
-            assert b"Invalid authentication code" in response.data
-
-            # MFA should still be enabled.
-            config = (
-                db.session.query(MfaConfig)
-                .filter_by(user_id=seed_user["user"].id)
-                .first()
-            )
-            assert config.is_enabled is True
-
-
 class TestMfaVerifySecurity:
     """Security tests for the /mfa/verify endpoint.
 
@@ -577,8 +424,11 @@ class TestMfaVerifySecurity:
     rejection of requests with no pending MFA state.
     """
 
-    def _enable_mfa(self, user_id):
-        """Enable MFA for a user with a known secret and backup codes.
+    def _its_two_factor(self, user_id):
+        """Give the shared account's two-factor one known backup code; return its secret.
+
+        The account is made with two-factor (plan#3600), so its secret is its
+        row's.
 
         Args:
             user_id: The user's primary key.
@@ -586,16 +436,8 @@ class TestMfaVerifySecurity:
         Returns:
             str: The plaintext TOTP secret.
         """
-        secret = "JBSWY3DPEHPK3PXP"
-        mfa_config = MfaConfig(
-            user_id=user_id,
-            is_enabled=True,
-            totp_secret_encrypted=mfa_service.encrypt_secret(secret),
-            backup_codes=mfa_service.hash_backup_codes(["aaaaaaaa"]),
-        )
-        db.session.add(mfa_config)
-        db.session.commit()
-        return secret
+        store_backup_codes(db.session, user_id, ["aaaaaaaa"])
+        return two_factor_secret_of(user_id)
 
     def test_mfa_verify_rate_limiting(self, app, seed_user):
         """POST /mfa/verify is rate-limited to 5 attempts per 15 minutes.
@@ -628,7 +470,7 @@ class TestMfaVerifySecurity:
 
                 with rate_app.app_context():
                     # Enable MFA for the seed user.
-                    self._enable_mfa(seed_user["user"].id)
+                    self._its_two_factor(seed_user["user"].id)
 
                     # Login to reach MFA pending state.
                     login_resp = rate_client.post("/login", data={
@@ -679,7 +521,7 @@ class TestMfaVerifySecurity:
         prevents cross-session MFA completion.
         """
         with app.app_context():
-            self._enable_mfa(seed_user["user"].id)
+            self._its_two_factor(seed_user["user"].id)
 
             # Client 1: Login to enter MFA pending state.
             client.post("/login", data={

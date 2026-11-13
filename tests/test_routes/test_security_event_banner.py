@@ -3,12 +3,11 @@
 Audit reference: F-091 (Low) / commit C-16 of the 2026-04-15 security
 remediation plan.
 
-These tests assert the integration between the four credential-changing
+These tests assert the integration between the three credential-changing
 routes and the new security-event columns on ``auth.users``:
 
   * ``POST /change-password``      -> kind = ``password_changed``
   * ``POST /mfa/confirm``          -> kind = ``mfa_enabled``
-  * ``POST /mfa/disable``          -> kind = ``mfa_disabled``
   * ``POST /mfa/regenerate-backup-codes`` -> kind = ``backup_codes_regenerated``
 
 plus the dismiss endpoint:
@@ -22,34 +21,28 @@ banner visibility on the next page load -- the contract is "after
 this change, the user sees a banner explaining what happened" and
 that contract spans the route's commit and the context processor's
 read.
+
+The seed owner is made with two-factor (plan#3600): the regenerate cases
+act on its own, and the setup cases set it up as the owner after a reset
+(``no_two_factor_client``).  ``/mfa/disable`` wrote ``mfa_disabled`` until no
+account could turn two-factor off (ruling plan#3604); a row that recorded it
+still shows its banner, which the rendering cases below grade.
 """
 import re
 from datetime import datetime, timedelta, timezone
 
-import pytest
-
 from app.extensions import db
-from app.models.user import MfaConfig, User
+from app.models.user import User
 from app.services import mfa_service
-from app.services.mfa_service import TotpVerificationResult
+from app.utils.security_events import SecurityEventKind, record_security_event
+from tests._other_user_fixtures import SECOND_USER_EMAIL, SECOND_USER_PASSWORD
+from tests._seed_owner_fixtures import OWNERS_PAGE
+from tests._two_factor_sign_in import (
+    code_now, sign_in_from_a_trusted_browser, two_factor_row_of,
+)
 
 
 # --- Helpers ---------------------------------------------------------------
-
-
-def _enable_mfa(user_id: int) -> str:
-    """Create a confirmed MFA row and return the plaintext secret."""
-    secret = "JBSWY3DPEHPK3PXP"
-    config = MfaConfig(
-        user_id=user_id,
-        is_enabled=True,
-        totp_secret_encrypted=mfa_service.encrypt_secret(secret),
-        backup_codes=mfa_service.hash_backup_codes(["aaaaaaaa"]),
-        confirmed_at=datetime.now(timezone.utc),
-    )
-    db.session.add(config)
-    db.session.commit()
-    return secret
 
 
 def _reload(user_id: int) -> User:
@@ -104,7 +97,7 @@ class TestMfaConfirmStampsSecurityEvent:
     """``/mfa/confirm`` writes ``mfa_enabled`` to the user row."""
 
     def test_successful_mfa_confirm_stamps_event(
-        self, app, auth_client, seed_user, monkeypatch,
+        self, app, no_two_factor_client, seed_user, monkeypatch,
     ):
         """Initial MFA enrolment surfaces an mfa_enabled banner."""
         user_id = seed_user["user"].id
@@ -112,10 +105,10 @@ class TestMfaConfirmStampsSecurityEvent:
             mfa_service, "verify_totp_setup_code", lambda s, c: 12345,
         )
         # Visit setup so the pending secret exists.
-        auth_client.get("/mfa/setup")
+        no_two_factor_client.get("/mfa/setup")
         before = datetime.now(timezone.utc)
 
-        response = auth_client.post(
+        response = no_two_factor_client.post(
             "/mfa/confirm", data={"totp_code": "123456"},
         )
         assert response.status_code == 200
@@ -126,48 +119,21 @@ class TestMfaConfirmStampsSecurityEvent:
         assert before <= user.last_security_event_at <= after
 
     def test_invalid_mfa_confirm_does_not_stamp(
-        self, app, auth_client, seed_user, monkeypatch,
+        self, app, no_two_factor_client, seed_user, monkeypatch,
     ):
         """A bad code keeps the row clean."""
         user_id = seed_user["user"].id
         monkeypatch.setattr(
             mfa_service, "verify_totp_setup_code", lambda s, c: None,
         )
-        auth_client.get("/mfa/setup")
-        auth_client.post(
+        no_two_factor_client.get("/mfa/setup")
+        no_two_factor_client.post(
             "/mfa/confirm", data={"totp_code": "000000"},
             follow_redirects=False,
         )
 
         user = _reload(user_id)
         assert user.last_security_event_kind is None
-
-
-class TestMfaDisableStampsSecurityEvent:
-    """``/mfa/disable`` writes ``mfa_disabled`` to the user row."""
-
-    def test_successful_mfa_disable_stamps_event(
-        self, app, auth_client, seed_user, monkeypatch,
-    ):
-        """Disable surfaces an mfa_disabled banner."""
-        user_id = seed_user["user"].id
-        _enable_mfa(user_id)
-        monkeypatch.setattr(
-            mfa_service, "verify_totp_code",
-            lambda mc, c: TotpVerificationResult.ACCEPTED,
-        )
-        before = datetime.now(timezone.utc)
-
-        response = auth_client.post("/mfa/disable", data={
-            "current_password": "testpass",
-            "totp_code": "123456",
-        }, follow_redirects=True)
-        assert response.status_code == 200
-
-        after = datetime.now(timezone.utc)
-        user = _reload(user_id)
-        assert user.last_security_event_kind == "mfa_disabled"
-        assert before <= user.last_security_event_at <= after
 
 
 class TestRegenerateBackupCodesStampsSecurityEvent:
@@ -178,7 +144,6 @@ class TestRegenerateBackupCodesStampsSecurityEvent:
     ):
         """Regen surfaces a backup_codes_regenerated banner."""
         user_id = seed_user["user"].id
-        _enable_mfa(user_id)
         before = datetime.now(timezone.utc)
 
         response = auth_client.post("/mfa/regenerate-backup-codes")
@@ -198,10 +163,6 @@ class TestDismissEndpoint:
 
     def _stamp(self, user_id: int, when=None):
         """Mark a security event so the banner is visible."""
-        from app.utils.security_events import (  # pylint: disable=import-outside-toplevel
-            SecurityEventKind,
-            record_security_event,
-        )
         user = db.session.get(User, user_id)
         record_security_event(
             user, SecurityEventKind.PASSWORD_CHANGED, now=when,
@@ -343,10 +304,6 @@ class TestBannerRendering:
     ):
         """After dismiss, the next GET no longer carries the banner."""
         # Stamp an event then dismiss it.
-        from app.utils.security_events import (  # pylint: disable=import-outside-toplevel
-            SecurityEventKind,
-            record_security_event,
-        )
         user = seed_user["user"]
         record_security_event(user, SecurityEventKind.MFA_DISABLED)
         db.session.commit()
@@ -366,21 +323,39 @@ class TestBannerRendering:
         assert b"security-event-banner" not in second.data
 
     def test_banner_kind_specific_copy_renders(
-        self, app, auth_client, seed_user, monkeypatch,
+        self, app, no_two_factor_client, seed_user, monkeypatch,
     ):
         """The MFA-enabled banner uses the mfa_enabled copy, not generic."""
         monkeypatch.setattr(
             mfa_service, "verify_totp_setup_code", lambda s, c: 12345,
         )
-        auth_client.get("/mfa/setup")
-        auth_client.post("/mfa/confirm", data={"totp_code": "123456"})
+        no_two_factor_client.get("/mfa/setup")
+        no_two_factor_client.post("/mfa/confirm", data={"totp_code": "123456"})
 
-        response = auth_client.get("/dashboard")
+        response = no_two_factor_client.get("/dashboard")
         assert response.status_code == 200
         # The MFA-enabled title must appear ...
         assert b"Two-factor authentication was enabled" in response.data
         # ... and the password-changed title (a different kind's copy)
         # must NOT, so we know the dispatch is keyed correctly.
+        assert b"Your password was changed" not in response.data
+
+    def test_a_stored_mfa_disabled_event_still_shows_its_copy(
+        self, auth_client, seed_user,
+    ):
+        """A row that recorded ``mfa_disabled`` before ruling plan#3604 shows its banner.
+
+        Nothing writes the kind now, so the row is stamped the way
+        ``/mfa/disable`` stamped it; its title and detail are the kind's own.
+        """
+        record_security_event(seed_user["user"], SecurityEventKind.MFA_DISABLED)
+        db.session.commit()
+
+        response = auth_client.get("/dashboard")
+
+        assert response.status_code == 200
+        assert b"Two-factor authentication was disabled." in response.data
+        assert b"re-enable two-factor authentication immediately" in response.data
         assert b"Your password was changed" not in response.data
 
     def test_banner_dismiss_form_includes_csrf_token(
@@ -395,10 +370,6 @@ class TestBannerRendering:
         this assertion -- only a regression in the form's CSRF wiring
         would.
         """
-        from app.utils.security_events import (  # pylint: disable=import-outside-toplevel
-            SecurityEventKind,
-            record_security_event,
-        )
         record_security_event(
             seed_user["user"], SecurityEventKind.PASSWORD_CHANGED,
         )
@@ -422,6 +393,61 @@ class TestBannerRendering:
         assert 'name="csrf_token"' in form_match.group(1), (
             "dismiss form missing CSRF token field"
         )
+
+
+class TestNoBannerAtTheTwoFactorHold:
+    """A user held at two-factor setup is shown no banner (plan#3862).
+
+    The login gate holds a user without two-factor at its setup
+    (``app/login_gate.py``, plan#3452), and the banner's "Review security
+    settings" link and its Dismiss both lead back there.  A banner shows
+    until it is dismissed, so an owner's undismissed event outlives a reset
+    of his two-factor: a companion who enrolled and was reset meets exactly
+    this.
+    """
+
+    def test_a_held_owners_setup_page_draws_no_banner(
+        self, no_two_factor_client, seed_user,
+    ):
+        """His two-factor reset and an event undismissed: setup draws, the banner does not.
+
+        The same event on an owner with two-factor draws the banner
+        (:meth:`TestBannerRendering.test_a_stored_mfa_disabled_event_still_shows_its_copy`).
+        """
+        record_security_event(seed_user["user"], SecurityEventKind.MFA_ENABLED)
+        db.session.commit()
+
+        response = no_two_factor_client.get("/mfa/setup")
+
+        assert response.status_code == 200
+        assert b"Verify and Enable" in response.data
+        assert b"security-event-banner" not in response.data
+
+    def test_finishing_setup_shows_its_own_event_on_the_next_page(
+        self, no_two_factor_client, seed_user,
+    ):
+        """After setup the banner draws, naming the enrolment that superseded the old event.
+
+        The event held back at setup is replaced by the one the confirm
+        records, so the next page's banner says two-factor was turned on.
+        """
+        user_id = seed_user["user"].id
+        record_security_event(seed_user["user"], SecurityEventKind.PASSWORD_CHANGED)
+        db.session.commit()
+        assert no_two_factor_client.get("/mfa/setup").status_code == 200
+        secret = mfa_service.decrypt_secret(
+            two_factor_row_of(user_id).pending_secret_encrypted,
+        )
+
+        confirmed = no_two_factor_client.post(
+            "/mfa/confirm", data={"totp_code": code_now(secret)},
+        )
+        assert confirmed.status_code == 200
+        response = no_two_factor_client.get("/dashboard")
+
+        assert response.status_code == 200
+        assert b"Two-factor authentication was enabled." in response.data
+        assert b"Your password was changed" not in response.data
 
 
 # --- Cross-user banner isolation ------------------------------------------
@@ -452,24 +478,16 @@ class TestBannerCrossUserIsolation:
         the dashboard for that user is banner-free even though
         seed_user's row carries an unacknowledged event.
         """
-        from app.utils.security_events import (  # pylint: disable=import-outside-toplevel
-            SecurityEventKind,
-            record_security_event,
-        )
         # Stamp ONLY the primary user's row.
         record_security_event(
             seed_user["user"], SecurityEventKind.PASSWORD_CHANGED,
         )
         db.session.commit()
 
-        # Fresh test_client, fresh cookie jar.
-        client = app.test_client()
-        login_resp = client.post("/login", data={
-            "email": "other@shekel.local",
-            "password": "otherpass",
-        })
-        assert login_resp.status_code == 302, (
-            f"second-user login failed; got status {login_resp.status_code}"
+        # Fresh test_client, fresh cookie jar, signed in through the shared
+        # sign-in (it asserts its own redirect).
+        client = sign_in_from_a_trusted_browser(
+            app.test_client(), SECOND_USER_EMAIL, SECOND_USER_PASSWORD, OWNERS_PAGE,
         )
 
         response = client.get("/dashboard")

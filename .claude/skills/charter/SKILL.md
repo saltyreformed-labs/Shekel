@@ -2,16 +2,16 @@
 name: charter
 description: >
   Josh's standing work brief for executing a task or plan step: resume from the
-  card, trace before claiming, verify the plan against the code, file the
-  pieces as the card's tasks and work from them, decompose across sessions, and
-  run a neutral adversarial review before any commit. Invoke at the start of
-  any implementation work.
+  card, trace before claiming, verify the plan against the code and its fix
+  against the root cause before any task, file the pieces as the card's tasks
+  and work from them, decompose across sessions, and run a neutral adversarial
+  review before any commit. Invoke at the start of any implementation work.
 ---
 
 # The work charter
 
-CLAUDE.md's Rules, Design doctrine and Multi-session operation sections govern this task; re-read
-them now if this session has not. Then hold the work to this brief:
+CLAUDE.md's Rules and How work lands sections govern this task; re-read them now if this session
+has not. Then hold the work to this brief:
 
 0. **Resume from the card.** A fresh session whose prompt is `Resume plan#T`, the line `/handoff`
    leaves, starts here. `python -m tools.quill.quill show plan#T` prints T and the stop's newest
@@ -26,12 +26,27 @@ them now if this session has not. Then hold the work to this brief:
    said it is in progress; at the card itself, its pull request is what is left (item 6).
 1. **Trace before you build.** Read and trace every code path you will change. Do NOT guess and do
    NOT assume: if you cannot cite the file and line, you cannot claim it.
-2. **Trust but verify the plan.** Check the step's specification against the code as committed
+2. **Verify the plan, then its fix.** Check the step's specification against the code as committed
    before building it; planning documents lag the code. If the plan and the code disagree, stop and
-   report the disagreement rather than building either version.
+   report the disagreement rather than building either version. Then, before any task is filed,
+   check the card's fix against the root cause: a card's fix is a proposal, and the root cause
+   decides (ruling plan#3643). State the card's problem in one sentence without its fix, trace its
+   root cause in the code, and write the fix you would build if nothing existed. Hand a fresh
+   subagent the problem statement and the code, never the card's fix, and have it do the same. If
+   the best fix differs from the card's, even when it is bigger than the card or outside it, that
+   is a STOP: ask Josh in the `/design-forks` shape before filing any task. If the card's fix is
+   the root-cause fix, tell Josh so in one line naming the root cause it reaches, then file the
+   tasks.
 3. **Improve or surface.** Where the work exposes a chance to make the code more DRY, SOLID,
    normalized, robust, maintainable, future-proof, or financially correct: take it if in scope,
-   report it as an opportunity if not. Name the fences the right design would delete.
+   and file it as a card if not. A fix that reaches the root cause of the card's own problem is
+   never one of these: it is item 2's question, asked before the card's fix is built. Name the
+   fences the right design would delete. A finding fixed inside a step's pull request ships in it
+   (plan#1777): the step owns it, its one blocked-by link, and writes its done file `plan/ships/F`
+   in the commit that fixes it (`quill finding-file plan#F`), or hands it to the step that fixes
+   it (`quill hand plan#F --to plan#S`); a revert of the step's merge reopens each finding it
+   marked. A finding's owner is always a step a branch builds, never one split into smaller steps
+   (plan#1784).
 4. **The card's tasks are the plan; decompose** (rulings plan#1868, plan#1872). After the claim
    and before any code, file the build pieces as tasks in build order:
    `python -m tools.quill.quill file task --parent plan#N --title NAME --body-file PIECE` puts each
@@ -49,9 +64,13 @@ them now if this session has not. Then hold the work to this brief:
    finishing tasks where they are missing, files its remaining pieces, and starts the next before
    its next commit; CI holds only its commits made after (plan#1861, items 5 and 12). A commit CI
    refuses is put right by rewording it, which rewrites the branch from it on, so its push is
-   forced with a lease (CI's refusal says how). A multi-leaf step spans sessions: stop at a
-   piece's end rather than pushing on degraded, and run `/handoff`. Suggest a decomposition
-   whenever it would help.
+   forced with a lease (CI's refusal says how). A piece that lands by a pull request of its own is
+   a leaf step instead, with its own claim. A `credit_card` card that moves money owns its pull
+   request: nothing else rides in it. A `recurrence` or `pay_calendar` step is a leaf boundary: one
+   card and its one pull request, its own tests green, independently revertible by reverting its
+   merge; a `recurrence` step states its behaviour change by measurement, not a hedge. A
+   multi-leaf step spans sessions: stop at a piece's end rather than pushing on degraded, and run
+   `/handoff`. Suggest a decomposition whenever it would help.
 5. **Adversarial review before commit.** A neutral fresh subagent reviews the design and the diff;
    it grades the fix's own claims about itself hardest. Findings are fixed or reported, never waved
    through. A card's spec is its body in the tracker, and an edit to it counts the moment it is
@@ -67,11 +86,16 @@ them now if this session has not. Then hold the work to this brief:
    `gh pr merge <number> --merge` queues it. Run the full suite before you start "Full suite and
    pull request" (ruling plan#1981): a failure it finds is a fix, filed as a task then, which
    `quill file task` places above it; start the suite's task once the suite is green. A failure CI
-   finds once the pull request is open is a task filed then. The queue tests the pull request on
-   top of `dev`, and a classifier refusal of the enqueue is a question, never a detour (CLAUDE.md,
-   Multi-session operation). Pushing a branch to back up work is fine. Suite runs need no slot --
-   each gets its own cluster -- but the wrapper names any peer run it can see, and a gating run of
-   yours slows theirs.
+   finds once the pull request is open is a task filed then. CI's `landing` job
+   (`tools/quill/landing.py`) judges the plan's records on the merge that lands: it refuses the
+   pull request while a task under N that was not dropped lacks its file, while a work commit made
+   on a tree holding the commit hook names no task under N, or while N or a step above it owns an
+   open finding neither marked fixed nor handed on, and it refuses a change to what production
+   runs, beyond its pinned versions, that writes no card's done file. Its module docstring states
+   every rule. The queue tests the pull request on top of `dev`, and a classifier refusal of the
+   enqueue is a question, never a detour (CLAUDE.md, How work lands). Pushing a branch to back up
+   work is fine. Suite runs need no slot -- each gets its own cluster -- but the wrapper names any
+   peer run it can see, and a gating run of yours slows theirs.
 7. **Ask.** An unanswered design question is a STOP, not a fork to take unilaterally. Ask questions
    if anything is unclear.
 8. **Read and answer Josh's comments.** He leaves a comment on a card for the session working it;

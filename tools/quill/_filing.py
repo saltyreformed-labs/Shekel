@@ -186,7 +186,8 @@ class _Filing:
     ruling converted from a question, that question as read.  ``milestone``: for a leaf,
     the milestone it is filed in, which its split step gives up (:func:`_leaf_milestone`).
     ``top``: whether a card going on the board at the top level goes at its top, not its
-    bottom: a card the update's waits file (ruling plan#3620, ``_waits``).
+    bottom: a card ``_waits``'s pass files, for the update's waits and the image scan's
+    findings (ruling plan#3620, ``_waits``, ``_scan``).
     """
 
     draft: Draft

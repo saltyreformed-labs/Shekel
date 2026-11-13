@@ -168,13 +168,14 @@ _LAST_PAGE = {"hasNextPage": False, "endCursor": None}
 
 
 class FakeGitHub:
-    """The client ``quill sync``'s pass over the update's waits reads through (``_waits``), in
-    memory: every card's text, as :func:`_waits.every_text` lists it, from the tracker's own
-    cards, so a card the pass filed holds its markers at the next pass; and the code
-    repository's open pull requests and issues, which a test puts in :attr:`pulls` and
-    :attr:`issues` as GraphQL answers each node, a pull request's comments one page whole
-    (paging is graded in ``test__waits.py``).  Any other query is a read the tool must never
-    send, so it fails loudly; each query it answers is logged in :attr:`queries`."""
+    """The client ``quill sync``'s pass over the update's waits reads through (``_waits``),
+    and ``quill scan``'s filing (``_scan``), in memory: every card's text, as
+    :func:`_waits.every_text` lists it, from the tracker's own cards, so a card the pass filed
+    holds its markers at the next pass; and the code repository's open pull requests and
+    issues, which a test puts in :attr:`pulls` and :attr:`issues` as GraphQL answers each
+    node, a pull request's comments one page whole (paging is graded in ``test__waits.py``).
+    Any other query is a read the tool must never send, so it fails loudly; each query it
+    answers is logged in :attr:`queries`."""
 
     def __init__(self, tracker):
         """No pull request and no issue open, the cards ``tracker``'s."""
@@ -717,3 +718,16 @@ def ruling_filing(tmp_path, owner):
 def run(tracker, root, *argv):
     """Run one command against ``tracker`` and ``root``; its exit status."""
     return quill.main(list(argv), connect=lambda: tracker, root=root)
+
+
+def assert_filed_high(tracker, number, title):
+    """``tracker``'s writes are those of one card, ``number``, filed by ``_waits``'s pass as
+    ``title`` and nothing else: created marked, a step in the tooling arc, put on the board at
+    its top and unmarked last (R-BAL202); and it holds Priority High and no Effort, open (ruling
+    plan#3620)."""
+    assert tracker.writes == [
+        ("create", number, "step", title, ("filing", "tooling"), "tooling"),
+        ("board_add", number), ("board_place", number, None), ("unmark", number)]
+    card = tracker.cards_by_number[number]
+    assert (card.priority, card.effort, card.labels, card.is_open) == (
+        "High", None, ("tooling",), True)

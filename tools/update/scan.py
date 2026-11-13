@@ -1,7 +1,8 @@
 """The daily scan of the image production is running (plan#2444; rulings plan#3786, plan#3820,
 plan#3822, plan#3825), and its judge (ruling plan#3720).  Its findings stay off GitHub: no
 issue, log or artifact there holds them, as an open security finding is never public (ruling
-plan#3785).  ``quill scan`` runs it (:func:`scanned`) and says what it found.
+plan#3785).  ``quill scan`` runs it (:func:`scanned`), says what it found, and files it into the
+private tracker (``tools/quill/_scan.py``, ruling plan#3787).
 
 **The scan reads production and writes nothing there** (ruling plan#3822).  Production's app
 container runs on the system daemon (:data:`PRODUCTION`), under the name the deploy script
@@ -240,6 +241,16 @@ class Counted:
         same whatever version is installed or fixes it, so a CVE still unfixed the next day
         is the same thing found again."""
         return marker(f"scan {self.vulnerability} {self.kind} {self.package}")
+
+    @property
+    def line(self) -> str:
+        """The match as one line, as ``quill scan`` prints it and a card it files lists it: its
+        CVE, its rating, whether it is known exploited, the package it is in and each version
+        Grype names its fix in, or that Grype knows no fix."""
+        return (f"{self.vulnerability}, rated {RATINGS[self.rating]}"
+                f"{', known exploited' if self.exploited else ''}: {self.kind} {self.package} "
+                f"{self.installed}, "
+                + (f"fixed in {', '.join(self.fixes)}" if self.fixes else "no fix known"))
 
 
 @dataclass(frozen=True)

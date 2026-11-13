@@ -13,7 +13,7 @@ from __future__ import annotations
 import pytest
 
 from tools.quill import _waits
-from tools.quill._fake import FakeTracker, run
+from tools.quill._fake import FakeTracker, assert_filed_high, run
 from tools.quill._tracker import Comment
 from tools.quill.setup_tracker import FILING
 from tools.update import app
@@ -134,12 +134,7 @@ def test_a_comment_no_card_holds_is_filed_once_high_at_the_top(code, capsys):
     assert not tracker.writes
     assert run(tracker, code, "sync") == 0
     assert capsys.readouterr().out == _filed_lines(2, title, "PR 669", "2026-11-06T20:05:54Z")
-    assert tracker.writes == [
-        ("create", 2, "step", title, ("filing", "tooling"), "tooling"),
-        ("board_add", 2), ("board_place", 2, None), ("unmark", 2)]
-    card = tracker.cards_by_number[2]
-    assert (card.priority, card.effort, card.labels, card.is_open) == (
-        "High", None, ("tooling",), True)
+    assert_filed_high(tracker, 2, title)
     assert tracker.board.items == [2, 1]
     words = _TWO.split("\n\n<!--", maxsplit=1)[0]
     assert tracker.bodies[2] == "\n".join([

@@ -53,13 +53,21 @@ card and before every other; it holds no Effort, as no session estimated one, an
 claims it sets one (``quill effort``).  It passes :func:`check.violations` first, as every card
 quill files does, and is filed by ``quill file``'s own writes (:func:`_filing._write`): born
 marked, its mark removed last (R-BAL202).  A card holding a told thing's lines whose filing
-has not finished is finished, found by them (R-BAL186), and none is filed beside it.  Its text,
-and each comment putting a later thing on it, names where the thing was told in a code span,
+has not finished is finished, found by the place they name (R-BAL186), and none is filed beside
+it; what it does not hold of the thing told there is put on it too.  Its text, and each
+comment putting a later thing on it, names where the thing was told in a code span,
 which links nothing, so that the private tracker writes no reference into the public
 repository's timeline, as a link there might (unmeasured: the reason, not a measured cost).
 It quotes the title there and the told words in a code block, which mentions no one: the
 queue's comments mentioned the developer until plan#3627, and a title can hold a mention as
 words can, which copied into a card would reach its person from the tracker.
+
+**The pass is the daily image scan's too** (``_scan``, ruling plan#3787): what the scan found
+in each component of the image, or its failure, is an :class:`Item` as each thing the update
+told is, filed by the one loop (:func:`file_told`) over what the cards hold, read once
+(:func:`holdings`), and printed as whoever told it (:class:`Teller`).  So a card holds what the
+scan found in the form this pass reads, and one rule says when a thing is filed, put on an open
+card, or held already.
 
 Its own module: the command module stands within ten lines of the 1,000 ``too-many-lines``
 allows, and the tracker's within two.
@@ -67,7 +75,7 @@ allows, and the tracker's within two.
 from __future__ import annotations
 
 import re
-from collections.abc import Iterable
+from collections.abc import Collection, Iterable
 from dataclasses import dataclass
 from functools import partial
 
@@ -159,16 +167,86 @@ class Told:
     when: str
     marks: tuple[str, ...]
 
+
+@dataclass(frozen=True)
+class Item:
+    """One thing the pass files (:func:`file_told`), as it files it: ``where`` it was told, as
+    each line holding it names that place (:func:`told_line`); ``when``, as the lines the pass
+    prints say it; ``marks``, each marker it holds, in its order; ``card``, the card filed for
+    it where none is open for ``where``; and ``later``, the comment putting it on the card open
+    there."""
+
+    where: str
+    when: str
+    marks: tuple[str, ...]
+    card: Draft
+    later: str
+
     @property
     def things(self) -> frozenset[Thing]:
-        """Each thing it told, as a card holds it (:func:`holds`)."""
+        """Each thing it holds, as a card holds it (:func:`holds`)."""
         return frozenset((self.where, mark) for mark in self.marks)
+
+
+@dataclass(frozen=True)
+class Teller:
+    """Who told what the pass files, as the lines it prints name it: ``whose``
+    (``the update's``), how it came to tell, its ``verb`` (``told``), and the rulings a card is
+    ``filed`` under and a later thing ``carried`` onto the card open for its place under."""
+
+    whose: str
+    verb: str
+    filed: str
+    carried: str
+
+    def what(self, item: Item) -> str:
+        """``item`` as the pass's lines name it: ``the update's PR 669, told at <when>``."""
+        return f"{self.whose} {item.where}, {self.verb} at {item.when}"
+
+
+#: The weekly update, whose waits are filed under ruling plan#3619, each later one put on the
+#: card open for where it was told under ruling plan#3722.
+UPDATE = Teller("the update's", "told", "plan#3619", "plan#3722")
+
+
+@dataclass(frozen=True)
+class Holdings:
+    """What the cards hold, read once for a pass (:func:`holdings`): ``held``, each card whose
+    text holds a thing told, open or closed, with each it holds; ``cards``, each of those
+    holding one told at a place the pass reads, read by its number; and ``carried``, each
+    thing quill's comments on each of ``cards`` hold."""
+
+    held: dict[int, frozenset[Thing]]
+    cards: dict[int, Card]
+    carried: dict[int, frozenset[Thing]]
+
+    def mine(self, where: str) -> dict[int, Card]:
+        """Each card of :attr:`cards` whose text holds a thing told at ``where``."""
+        return {number: card for number, card in self.cards.items()
+                if where in {place for place, _ in self.held[number]}}
+
+    def standing(self, where: str) -> set[Thing]:
+        """Each thing told that a card for ``where`` whose filing is not unfinished holds
+        (:func:`_standing`), so nothing is filed or put over it again."""
+        return _standing(self.mine(where), self.held, self.carried)
+
+    def open_alone(self) -> Holdings:
+        """These holdings with each closed card left out, so that a card holds a thing only
+        while it is open: what the image scan's failure is held by (``_scan``)."""
+        return Holdings(self.held, {number: card for number, card in self.cards.items()
+                                    if card.is_open}, self.carried)
 
 
 def told_line(where: str, mark: str) -> str:
     """The line holding the thing told on ``where`` (``PR 669``, ``issue 680``) that ``mark``,
     the queue's marker, names: the one form :func:`holds` reads."""
     return _TOLD.format(where, mark)
+
+
+def told_lines(where: str, marks: Iterable[str]) -> list[str]:
+    """The line holding each thing told on ``where`` that ``marks`` name, in their order
+    (:func:`told_line`)."""
+    return [told_line(where, mark) for mark in marks]
 
 
 def holds(text: str) -> frozenset[Thing]:
@@ -263,33 +341,45 @@ def _carried(tracker: Tracker, numbers: Iterable[int]) -> dict[int, frozenset[Th
             for number, comments in tracker.comments_of(numbers).items()}
 
 
-def _title(item: Told) -> str:
-    """The card's title: where ``item`` was told and that one's title, at most
-    :data:`check.TITLE_CAP` characters: one longer is cut at the last word of that title that
-    fits, or inside its first word where none does, three dots marking the cut."""
-    head = f"Shekel {item.where}: "
-    if len(title := head + item.title.strip()) <= TITLE_CAP:
-        return title
+def capped(head: str, title: str) -> str:
+    """A card's title: ``head``, then ``title``, at most :data:`check.TITLE_CAP` characters:
+    one longer is cut at the last word of ``title`` that fits, or inside its first word where
+    none does, three dots marking the cut."""
+    if len(whole := head + title.strip()) <= TITLE_CAP:
+        return whole
     room = TITLE_CAP - len(head) - len("...")
-    fits = item.title.strip()[:room + 1]
+    fits = title.strip()[:room + 1]
     kept = fits.rsplit(" ", 1)[0] if " " in fits else fits[:room]
     return head + kept.rstrip() + "..."
 
 
-def _quoted(item: Told, *above: str) -> list[str]:
-    """``item``'s words but its markers, each line of ``above`` before them, as lines of a code
-    block, which mentions no one, fenced by more backticks than any run in them."""
-    words = item.said
-    for mark in item.marks:
-        words = words.replace(mark, "")
-    words = "\n".join(line.rstrip() for line in "\n".join([*above, words.strip()]).splitlines())
+def _title(item: Told) -> str:
+    """The card's title: where ``item`` was told and that one's title, cut to the cap
+    (:func:`capped`)."""
+    return capped(f"Shekel {item.where}: ", item.title)
+
+
+def block(words: str) -> list[str]:
+    """``words`` as the lines of a code block, which mentions no one and in which no line holds
+    a thing told (:func:`holds`), fenced by more backticks than any run in them, each line's
+    trailing space dropped."""
+    words = "\n".join(line.rstrip() for line in words.splitlines())
     fence = "`" * max(3, 1 + max((len(run) for run in re.findall("`+", words)), default=0))
     return [f"{fence}text", words, fence]
 
 
+def _quoted(item: Told, *above: str) -> list[str]:
+    """``item``'s words but its markers, each line of ``above`` before them, as lines of a code
+    block (:func:`block`)."""
+    words = item.said
+    for mark in item.marks:
+        words = words.replace(mark, "")
+    return block("\n".join([*above, words.strip()]))
+
+
 def _lines(item: Told) -> list[str]:
-    """The lines holding each thing ``item`` told (:func:`told_line`), in its markers' order."""
-    return [told_line(item.where, mark) for mark in item.marks]
+    """The lines holding each thing ``item`` told (:func:`told_lines`), in its markers' order."""
+    return told_lines(item.where, item.marks)
 
 
 def _body(item: Told) -> str:
@@ -314,19 +404,32 @@ def _later(item: Told) -> str:
         "another (ruling plan#3722).", "", *_lines(item)])
 
 
+def step(title: str, body: str) -> Draft:
+    """A card the pass files, ``title`` holding ``body``: a step at the top level, in
+    :data:`ARC`, holding Priority High and no Effort (ruling plan#3620; the module says
+    why)."""
+    return Draft("step", title, body, (), ARC, priority=HIGH)
+
+
 def card_draft(item: Told) -> Draft:
-    """The card filed for ``item``: a step at the top level, in :data:`ARC`, holding Priority
-    High and no Effort (ruling plan#3620; the module says why)."""
-    return Draft("step", _title(item), _body(item), (), ARC, priority=HIGH)
+    """The card filed for ``item`` (:func:`step`)."""
+    return step(_title(item), _body(item))
 
 
-def _unfinished(item: Told, held: dict[int, frozenset[Thing]],
-                mine: dict[int, Card]) -> Card | None:
-    """The card an earlier pass began filing for ``item`` and did not finish (R-BAL186): the
-    lowest numbered of ``mine`` still being filed (:func:`_state.filing_unfinished`) whose
-    text holds ``item``'s things alone; None for none."""
-    return next((card for number, card in sorted(mine.items())
-                 if filing_unfinished(card) and held[number] == item.things), None)
+def _item(told_there: Told) -> Item:
+    """``told_there`` as the pass files it: its card (:func:`card_draft`) and its comment
+    putting it on the card open for where it was told (:func:`_later`)."""
+    return Item(told_there.where, told_there.when, told_there.marks, card_draft(told_there),
+                _later(told_there))
+
+
+def _unfinished(mine: dict[int, Card]) -> Card | None:
+    """The card an earlier pass began filing for where a thing was told and did not finish
+    (R-BAL186): the lowest numbered of ``mine``, the cards for that place, still being filed
+    (:func:`_state.filing_unfinished`), whatever things it holds, as there is one card for each
+    place (rulings plan#3722, plan#3787) and what the scan finds there can change before the
+    next pass; None for none."""
+    return next((card for _, card in sorted(mine.items()) if filing_unfinished(card)), None)
 
 
 def _standing(mine: dict[int, Card], held: dict[int, frozenset[Thing]],
@@ -345,84 +448,99 @@ def _open(mine: dict[int, Card]) -> Card | None:
                  if card.is_open and not filing_unfinished(card)), None)
 
 
-def _holding(items: Iterable[Told], held: dict[int, frozenset[Thing]]) -> set[int]:
-    """Each card of ``held`` holding a thing told where one of ``items`` was: every card for a
-    pull request or issue the pass read something told on."""
-    places = {item.where for item in items}
-    return {number for number, things in held.items() if places & {where for where, _ in things}}
+def holdings(tracker: Tracker, places: Collection[str]) -> Holdings:
+    """What the cards hold (:class:`Holdings`) for a pass over things told at ``places``: every
+    card's text (:func:`_held`), then each card holding a thing told at one of ``places`` read
+    by its number, for whether it is open and its filing finished, as a listing may lag a
+    write, and quill's comments on each (:func:`_carried`)."""
+    held = _held(tracker.github, tracker.place)
+    cards = tracker.cards({number for number, things in held.items()
+                           if set(places) & {where for where, _ in things}})
+    return Holdings(held, cards, _carried(tracker, cards))
 
 
-def _file(tracker: Tracker, item: Told, draft: Draft, earlier: Card | None,
+def _file(tracker: Tracker, item: Item, teller: Teller, earlier: Card | None,
           dry_run: bool) -> int | None:
-    """``item``'s card filed from ``draft``, or ``earlier``, the one an earlier pass began for
-    it, finished, each write printed as it lands; under ``dry_run`` printed as what would be
-    written and not made.  The card's number, None under ``dry_run``."""
+    """``item``'s card filed, or ``earlier``, the one an earlier pass began for it, finished,
+    each write printed as it lands, ``teller`` naming who told it; under ``dry_run`` printed as
+    what would be written and not made.  The card's number, None under ``dry_run``."""
     verb = "would " if dry_run else ""
-    print(f"{verb}file the update's {item.where}, told at {item.when}, which no card holds "
-          f"(ruling plan#3619): {draft.title!r}" if earlier is None else
-          f"{verb}finish the filing of plan#{earlier.number}, which holds the update's "
-          f"{item.where}, told at {item.when}")
+    print(f"{verb}file {teller.what(item)}, which no card holds (ruling {teller.filed}): "
+          f"{item.card.title!r}" if earlier is None else
+          f"{verb}finish the filing of plan#{earlier.number}, which holds {teller.what(item)}")
     if dry_run:
         return None
-    return _write(tracker, _Filing(draft, None, {}, _NOTHING_READ, None, _NO_MILESTONE,
+    return _write(tracker, _Filing(item.card, None, {}, _NOTHING_READ, None, _NO_MILESTONE,
                                    top=True), earlier, None).number
 
 
-def _carry(tracker: Tracker, item: Told, number: int | None, dry_run: bool) -> None:
+def _carry(tracker: Tracker, item: Item, teller: Teller, number: int | None,
+           dry_run: bool) -> None:
     """``item`` put on card ``number``, the one open for where it was told, in a comment of
-    quill's (:func:`_later`, ruling plan#3722), printed as it lands; under ``dry_run`` printed
-    as what would be written and not made, ``number`` None for the card the same dry run
-    would file for it."""
+    quill's (:attr:`Item.later`, ruling plan#3722), printed as it lands, ``teller`` naming who
+    told it; under ``dry_run`` printed as what would be written and not made, ``number`` None
+    for the card the same dry run would file for it."""
     if number is None:
-        print(f"would put the update's {item.where}, told at {item.when}, on the card this "
-              "pass would file for it above (ruling plan#3722)")
+        print(f"would put {teller.what(item)}, on the card this pass would file for it above "
+              f"(ruling {teller.carried})")
         return
-    print(f"{'would ' if dry_run else ''}put the update's {item.where}, told at {item.when}, "
-          f"on plan#{number}, the card open for it (ruling plan#3722)")
+    print(f"{'would ' if dry_run else ''}put {teller.what(item)}, on plan#{number}, the card "
+          f"open for it (ruling {teller.carried})")
     if not dry_run:
-        tracker.comment(number, _later(item))
+        tracker.comment(number, item.later)
 
 
-def file_waits(tracker: Tracker, dry_run: bool) -> int:
-    """The pass (the module says what it reads and files): for each thing the update told,
-    oldest first, nothing where a card whose filing is not unfinished holds it; else put on
-    the card open for where it was told (:func:`_carry`), or, with none open, its card filed,
-    or one an earlier pass began finished (:func:`_file`).  Each card for where a thing was
-    told is read by its number, for whether it is open and its filing finished, as a listing
-    may lag a write, and its comments with it.  The number of REPORT lines, each a card
-    :func:`check.violations` refuses, which makes ``sync`` exit 1.  A pass finishing a filing
-    an earlier one began leaves ``sync`` exiting 1 too: its own REPORT of that card, unfinished
-    as it read it, is printed before the pass runs, and the next ``sync``, reading it
-    finished, makes none.
+def file_told(tracker: Tracker, items: Iterable[Item], have: Holdings, teller: Teller,
+              dry_run: bool) -> int:
+    """The pass over ``items``, in their order, ``teller`` naming who told them and ``have``
+    what the cards hold (:func:`holdings`): nothing for one whose every thing a card for its
+    place holds (:meth:`Holdings.standing`) or this pass filed or put already; else put on the
+    card open for its place (:func:`_carry`), or, with none open, its card filed, or the one
+    an earlier pass began for its place finished (:func:`_file`, :func:`_unfinished`) and the
+    item put on it too where that card does not hold all it holds.  The number of REPORT
+    lines, each a card :func:`check.violations` refuses.
 
     Raises:
-        GitHubError, requests.RequestException, TrackerError: as the reads and the writes
-            raise them (a card filed but not read back, :func:`_filing._created`); a pass cut
-            short leaves what the next finishes, its card found by its lines.
+        GitHubError, requests.RequestException, TrackerError: as the writes raise them (a card
+            filed but not read back, :func:`_filing._created`); a pass cut short leaves what
+            the next finishes, its card found by its lines.
     """
-    items = told(tracker.github)
-    if not items:
-        return 0
-    held = _held(tracker.github, tracker.place)
-    cards = tracker.cards(_holding(items, held))
-    carried = _carried(tracker, cards)
     reports, done, open_for = 0, set(), {}
     for item in items:
-        mine = {number: card for number, card in cards.items()
-                if item.where in {where for where, _ in held[number]}}
-        if item.things <= _standing(mine, held, carried) | done:
+        mine = have.mine(item.where)
+        if item.things <= _standing(mine, have.held, have.carried) | done:
             continue
         if item.where not in open_for and (card := _open(mine)) is not None:
             open_for[item.where] = card.number
         if item.where in open_for:
-            _carry(tracker, item, open_for[item.where], dry_run)
-        elif problems := violations(draft := card_draft(item)):
-            print(f"REPORT: the update's {item.where}, told at {item.when}, is filed no card: "
-                  + "; ".join(problems))
+            _carry(tracker, item, teller, open_for[item.where], dry_run)
+        elif problems := violations(item.card):
+            print(f"REPORT: {teller.what(item)}, is filed no card: " + "; ".join(problems))
             reports += 1
             continue
         else:
-            open_for[item.where] = _file(tracker, item, draft, _unfinished(item, held, mine),
+            open_for[item.where] = _file(tracker, item, teller, earlier := _unfinished(mine),
                                          dry_run)
+            if earlier is not None and not item.things <= have.held[earlier.number]:
+                _carry(tracker, item, teller, earlier.number, dry_run)
         done |= item.things
     return reports
+
+
+def file_waits(tracker: Tracker, dry_run: bool) -> int:
+    """The pass over the update's waits (the module says what it reads and files): each thing
+    the update told, oldest first, filed by :func:`file_told` over what the cards hold of each
+    pull request or issue it was told on (:func:`holdings`).  The number of REPORT lines, which
+    makes ``sync`` exit 1.  A pass finishing a filing an earlier one began leaves ``sync``
+    exiting 1 too: its own REPORT of that card, unfinished as it read it, is printed before
+    the pass runs, and the next ``sync``, reading it finished, makes none.
+
+    Raises:
+        GitHubError, requests.RequestException, TrackerError: as the reads and the writes
+            raise them; a pass cut short leaves what the next finishes.
+    """
+    items = told(tracker.github)
+    if not items:
+        return 0
+    return file_told(tracker, [_item(each) for each in items],
+                     holdings(tracker, {each.where for each in items}), UPDATE, dry_run)

@@ -55,8 +55,9 @@ unfinished prerequisites just ahead of it, never one On hold (rulings plan#1830,
 plan#1832; :mod:`_next`).  ``watch`` runs every minute from the same clone, never beside
 ``sync`` (``shekel-plan-watch.timer``): the same producer over each card whose branch moved
 since its last pass, so the board shows a push within a minute (rulings plan#1871, plan#1874,
-:mod:`_watch`).  ``scan`` scans the image production is running, daily from this host, and
-says what it found (rulings plan#3820, plan#3825, :mod:`_scan`).  ``answer`` answers the
+:mod:`_watch`).  ``scan`` scans the image production is running, daily from this host, says
+what it found, and files a card for each component it finds a CVE in and for its failure
+(rulings plan#3787, plan#3788, plan#3820, plan#3825, :mod:`_scan`).  ``answer`` answers the
 developer's comments on a card, and ``next`` names each claimed card, and each task under
 one, holding one no answer has followed (plan#1822, ruling plan#1924, :mod:`_comments`).
 ``note`` posts a stop's note on the task a claimed card's next session starts and prints its
@@ -107,7 +108,7 @@ Usage, from the repository root (``plan#N`` or ``N`` names a card)::
     python -m tools.quill.quill drop plan#N --why REASON
     python -m tools.quill.quill sync [--dry-run]
     python -m tools.quill.quill watch [--dry-run]
-    python -m tools.quill.quill scan
+    python -m tools.quill.quill scan [--dry-run]
     python -m tools.quill.quill pr plan#N --title TITLE --body-file TEXT
     python -m tools.quill.quill spec-history plan#N [--since BRANCH_OR_DATE]
     python -m tools.quill.quill spec-revert plan#N --to EDIT_ID
@@ -887,7 +888,8 @@ def parser() -> argparse.ArgumentParser:
                                       "the last pass, from git").add_argument(
         "--dry-run", action="store_true")
     commands.add_parser("scan", help="scan the image production is running for CVEs, from "
-                                     "this host")
+                                     "this host, and file what it finds").add_argument(
+        "--dry-run", action="store_true")
     history = commands.add_parser("spec-history", help="a card's body edits")
     history.add_argument("card", type=card_number)
     history.add_argument("--since", help="an ISO date or time, or a branch (from its start)")
@@ -915,7 +917,8 @@ COMMANDS: dict[str, Callable[..., int]] = {
 #: The commands handed how to reach the tracker, ``connect``, in place of a tracker: each
 #: connects only once it has something to read or write there.  ``watch`` runs every minute,
 #: and most minutes ask git alone (:mod:`_watch`); ``pr`` writes the code repository and reads
-#: nothing of the tracker (:mod:`_pr`); ``scan`` writes nothing there yet (:mod:`_scan`).
+#: nothing of the tracker (:mod:`_pr`); ``scan`` only once it has something to file
+#: (:mod:`_scan`).
 CONNECTS_LATE: dict[str, Callable[..., int]] = {"watch": _watch.cmd_watch, "pr": _pr.cmd_pr,
                                                 "scan": _scan.cmd_scan}
 

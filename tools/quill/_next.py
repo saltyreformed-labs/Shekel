@@ -93,8 +93,9 @@ def ranked(card: BareCard, cards: Mapping[int, BareCard]) -> bool:
     (:func:`_state.at_and_above`, the walk :func:`_rank` reads), On hold among them.  The one
     spelling of it: no leaf is filed under a step it does not hold for (ruling plan#3229,
     ``_filing._refuse_unranked``), no clear that would leave a piece without one is taken
-    (``_arc_label._unranked_refusal``), and ``quill next`` names each piece on the board without
-    one (:func:`unranked_lines`; ruling plan#3304)."""
+    (``_arc_label._unranked_refusal``), ``quill next`` names each piece on the board without
+    one (:func:`unranked_lines`; ruling plan#3304), and the regroup moves no card without one
+    (:func:`_regroup.movable`, ruling plan#4017)."""
     return any(step.priority is not None for step in at_and_above(card, cards))
 
 
@@ -135,8 +136,9 @@ def _rank(card: Card, cards: Mapping[int, Card]) -> int:
 
 
 def turn(number: int, cards: Mapping[int, Card], places: Mapping[int, int]) -> Turn:
-    """Card ``number``'s turn, the one key ``quill next`` takes cards in (ruling plan#4016): its
-    group (:func:`_rank`); then its row on the board, ``places`` mapping each card on it to its
+    """Card ``number``'s turn, the one key ``quill next`` takes cards in (ruling plan#4016) and
+    the regroup sorts the board by (:mod:`_regroup`, ruling plan#4011): its group
+    (:func:`_rank`); then its row on the board, ``places`` mapping each card on it to its
     row, top first, and a card off it coming after every row; then its number, which orders the
     cards off the board.  ``cards`` holds the card and every step above it."""
     return Turn(_rank(cards[number], cards), places.get(number, len(places)), number)

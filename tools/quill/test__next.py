@@ -1,6 +1,6 @@
-"""``quill next``'s order (plan#1820, rulings plan#1830, plan#1831, plan#1832), over hand-built
-cards and claims: marks first, then the board's order; a blocked step's turn hands out what it
-needs; a step needing one On hold waits, by name.  ``cmd_next``'s lines are
+"""``quill next``'s order (plan#1820, rulings plan#1830, plan#1831, plan#1832, plan#4016), over
+hand-built cards and claims: a mark's group first, then the board's order; a blocked step's turn
+hands out what it needs; a step needing one On hold waits, by name.  ``cmd_next``'s lines are
 ``test_quill_on_hold.py``'s.
 """
 from __future__ import annotations
@@ -10,7 +10,7 @@ from dataclasses import replace
 import pytest
 
 from tools.quill._git import Claim
-from tools.quill._next import next_step
+from tools.quill._next import Turn, next_step, turn
 from tools.quill._tracker import Card, Child
 from tools.quill.setup_tracker import FILING
 
@@ -83,12 +83,34 @@ def test_the_rulings_example_with_c_marked_high():
 
 # -- marks ---------------------------------------------------------------------------------
 
-def test_urgent_then_high_then_the_rest_in_the_boards_order():
-    """Ruling plan#1831: Medium and Low count as unmarked; the board decides among equals."""
+def test_urgent_then_high_then_medium_then_low_then_the_rest():
+    """Ruling plan#4016, amending plan#1831, under which this board handed out 5, 7, 3, 6, 1, 2,
+    4, Medium and Low counting as unmarked: each mark is a group of its own now, and the board
+    decides among equals."""
     cards = _cards(_card(1, priority="Low"), _card(2), _card(3, priority="High"),
                    _card(4, priority="Medium"), _card(5, priority="Urgent"),
                    _card(6, priority="High"), _card(7, priority="Urgent"))
-    assert _handed_out([1, 2, 3, 4, 5, 6, 7], cards) == [5, 7, 3, 6, 1, 2, 4]
+    assert _handed_out([1, 2, 3, 4, 5, 6, 7], cards) == [5, 7, 3, 6, 4, 1, 2]
+
+
+def test_medium_low_and_unmarked_each_keep_the_boards_order():
+    """Ruling plan#4016: "Medium above Low above no Priority", each group in the order the
+    developer dragged it, however the three are interleaved on the board."""
+    cards = _cards(_card(1), _card(2, priority="Low"), _card(3, priority="Medium"), _card(4),
+                   _card(5, priority="Low"), _card(6, priority="Medium"))
+    assert _handed_out([1, 2, 3, 4, 5, 6], cards) == [3, 6, 2, 5, 1, 4]
+
+
+def test_a_cards_turn_is_its_group_then_its_row_then_its_number():
+    """The key ``quill next`` takes cards in (ruling plan#4016): the groups in Urgent, High,
+    Medium, Low order, with no mark and On hold past them all, and a card off the board after
+    every row of its group."""
+    cards = _cards(*(_card(number, priority=mark) for number, mark in enumerate(
+        ("Urgent", "High", "Medium", "Low", None, "On hold"), start=1)), _card(7, board_item=None))
+    places = {6: 0, 5: 1, 4: 2, 3: 3, 2: 4, 1: 5}
+    assert [turn(number, cards, places) for number in range(1, 8)] == [
+        Turn(0, 5, 1), Turn(1, 4, 2), Turn(2, 3, 3), Turn(3, 2, 4), Turn(4, 1, 5), Turn(4, 0, 6),
+        Turn(4, 6, 7)]
 
 
 def test_a_prerequisite_goes_first_whatever_its_own_mark():
@@ -108,6 +130,15 @@ def test_a_split_steps_mark_reaches_its_leaves_and_the_highest_holds():
     assert _handed_out([6, 3, 7, 4, 5], cards) == [7, 4, 5, 3, 6]
 
 
+def test_a_leaf_ranks_medium_through_its_split_step():
+    """Ruling plan#4016's groups reach a leaf as Urgent and High do: plan#3 holds no mark and
+    plan#2 a Low of its own, and both rank Medium through plan#1, ahead of the Low plan#4 and
+    the unmarked plan#5 above them on the board."""
+    cards = _cards(_split(1, 2, 3, priority="Medium"), _card(2, parent=1, priority="Low"),
+                   _card(3, parent=1), _card(4, priority="Low"), _card(5))
+    assert _handed_out([5, 4, 3, 2], cards) == [3, 2, 4, 5]
+
+
 # -- what a blocked step needs -------------------------------------------------------------
 
 def test_the_walk_goes_on_down_to_a_step_that_can_start():
@@ -124,6 +155,15 @@ def test_of_several_needs_the_best_turn_goes_first():
     assert next_step([1, 3, 2], plain, set(), {}).card.number == 3
     marked = _cards(_card(1, blocked_by=(2, 3)), _card(3), _card(2, priority="High"))
     assert next_step([1, 3, 2], marked, set(), {}).card.number == 2
+
+
+def test_a_blocked_steps_needs_go_medium_then_low_then_unmarked():
+    """Ruling plan#4016 orders the needs as it orders the steps' own turns: the High step's
+    turn comes first and hands out what it needs, Medium, then Low, then the unmarked, against
+    the board's order of them, which decided alone before."""
+    cards = _cards(_card(1, priority="High", blocked_by=(2, 3, 4)), _card(2),
+                   _card(3, priority="Low"), _card(4, priority="Medium"))
+    assert _handed_out([1, 2, 3, 4], cards) == [4, 3, 2, 1]
 
 
 def test_a_claimed_prerequisite_is_passed_over_for_what_else_is_needed():

@@ -1,11 +1,12 @@
 """A card's Priority and Effort, two of the organization's issue fields
 (``setup_tracker.ISSUE_FIELDS``), which quill writes and ``quill show`` prints (plan#2491): the
-part of a card holding each and the one pairing of each part with its field (:data:`FIELDS`);
-and the one read of the option a card holds in any single select of them, from a GraphQL read
-of its values (:func:`value_of`) and from GitHub's answer to a REST write of one
-(:func:`answered_value`), which :mod:`_arcs` names for the Arc.  Which kinds of card hold
-each is a rule of the plan's, so :mod:`check` holds it; which kinds take a suggested Priority
-(:data:`SUGGESTED_KINDS`) is here, as the board's Inbox view filters on them too.
+part of a card holding each and the one pairing of each part with its field (:data:`FIELDS`); the
+Priorities that rank a step, the highest first (:data:`RANKS`); and the one read of the option a
+card holds in any single select of them, from a GraphQL read of its values (:func:`value_of`) and
+from GitHub's answer to a REST write of one (:func:`answered_value`), which :mod:`_arcs` names for
+the Arc.  Which kinds of card hold each is a rule of the plan's, so :mod:`check` holds it; which
+kinds take a suggested Priority (:data:`SUGGESTED_KINDS`) is here, as the board's Inbox view
+filters on them too.
 
 A leaf: it imports no module of quill's, so :mod:`_arcs` and :mod:`setup_tracker`, which every
 other module imports, can import it.
@@ -17,15 +18,21 @@ from collections.abc import Iterable
 #: The issue field saying how urgent a card's work is, a single select of
 #: ``setup_tracker.ISSUE_FIELDS``' options.
 PRIORITY_FIELD = "Priority"
-#: Priority's options the plan reads: what hands a step out ahead of the board's order (ruling
-#: plan#1831), and what pauses it (ruling plan#1832).
-URGENT, HIGH, ON_HOLD = "Urgent", "High", "On hold"
+#: Priority's options, each by name: four that rank a step, and one that pauses it (ruling
+#: plan#1832).
+URGENT, HIGH, MEDIUM, LOW, ON_HOLD = "Urgent", "High", "Medium", "Low", "On hold"
+#: The Priorities that rank a step, the highest first, each a group of its own: ``quill next``
+#: hands out Urgent, then High, then Medium, then Low, then the steps holding none, each group
+#: in the board's order (ruling plan#4016, amending plan#1831; ``_next.turn``).  The one list
+#: of them, which Priority's options and a filing's suggestions are spelled from.
+RANKS = (URGENT, HIGH, MEDIUM, LOW)
 #: Priority's options, as the developer set them on the web (On hold on 2026-11-04, read by
-#: GraphQL at 07:49 EST, in this order).  Medium and Low hand a step out as a step holding none.
-PRIORITY_OPTIONS = (URGENT, HIGH, "Medium", "Low", ON_HOLD)
-#: The Priorities a filing may suggest for a card (``_draft.Suggestion``): each of Priority's
-#: options but On hold, as plan#2798's spec names them, Urgent, High, Medium or Low.
-SUGGESTED_OPTIONS = tuple(option for option in PRIORITY_OPTIONS if option != ON_HOLD)
+#: GraphQL at 07:49 EST, in this order): the ranks, then On hold.
+PRIORITY_OPTIONS = (*RANKS, ON_HOLD)
+#: The Priorities a filing may suggest for a card (``_draft.Suggestion``): the ranks, as
+#: plan#2798's spec names them, Urgent, High, Medium or Low, and never On hold, a pause being
+#: the developer's act alone (``docs/plans/priority.md``).
+SUGGESTED_OPTIONS = RANKS
 #: The kinds of card that take a suggested Priority (``check.takes_suggestion``): a step, at the
 #: top level alone, and a question, which the board's Inbox lists while they are on the board
 #: and hold no Priority (``_board_views.INBOX``, ruling plan#3231): a step split into smaller

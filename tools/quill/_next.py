@@ -1,14 +1,15 @@
 """``quill next``'s answer, decided from the cards, the board, the claims and git, as
 :mod:`_state`'s decisions are: the step it hands out, and the steps that wait on a pause
-(plan#1820, rulings plan#1830, plan#1831, plan#1832).
+(plan#1820, rulings plan#1830, plan#1831, plan#1832, plan#4016).
 
-**A step's turn.**  The board's drag order is the build order (R-BAL177), and a mark moves a step
-ahead of it: Urgent, then High, then every other step in the board's order; Medium, Low and no
-mark are alike (:func:`_rank`).  A leaf holds the highest mark of itself and the steps above it,
-as it inherits their waits (R-BAL182), so a mark outlives its step's split and nothing is copied.
-Only a step that :func:`_state.has_turn` takes one.  A step a session has claimed keeps its turn,
-since a step's prerequisites go just ahead of it whoever holds it: it is never handed out itself,
-but what it needs is, and it is named while it waits on a pause.
+**A step's turn** (:func:`turn`).  A step's mark, its Priority, decides its group, and the board's
+drag order its place in the group (R-BAL177): Urgent, then High, then Medium, then Low, then the
+steps holding none (:data:`_fields.RANKS`, ruling plan#4016, amending plan#1831, under which
+Medium, Low and no mark were alike).  A leaf holds the highest mark of itself and the steps above
+it (:func:`_rank`), as it inherits their waits (R-BAL182), so a mark outlives its step's split and
+nothing is copied.  Only a step that :func:`_state.has_turn` takes one.  A step a session has
+claimed keeps its turn, since a step's prerequisites go just ahead of it whoever holds it: it is
+never handed out itself, but what it needs is, and it is named while it waits on a pause.
 
 **A blocked step's turn hands out what it needs**: the first unfinished step it needs, and so on
 down, whatever that step's own mark (:func:`_needed`).  So the board A #1, B #2, C #3, D #20 where
@@ -36,9 +37,11 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Iterator, Mapping
 from dataclasses import dataclass
+from functools import partial
+from typing import NamedTuple
 
 from tools.quill._command import _label
-from tools.quill._fields import HIGH, URGENT
+from tools.quill._fields import RANKS
 from tools.quill._git import Claim
 from tools.quill._state import (
     SHIPPABLE,
@@ -56,9 +59,14 @@ from tools.quill._state import (
 )
 from tools.quill._tracker import BareCard, Card
 
-#: The marks that move a step ahead of the board's order, the first of them first (ruling
-#: plan#1831).
-_AHEAD = (URGENT, HIGH)
+
+class Turn(NamedTuple):
+    """Where a card's turn falls (:func:`turn`), compared as a tuple: its ``group``, its
+    ``place`` on the board, then its ``number``."""
+
+    group: int
+    place: int
+    number: int
 
 
 @dataclass(frozen=True)
@@ -119,10 +127,19 @@ def unranked_lines(order: Iterable[int], cards: Mapping[int, Card],
 
 
 def _rank(card: Card, cards: Mapping[int, Card]) -> int:
-    """Where ``card``'s mark puts it among :data:`_AHEAD`: the highest of its own and each step
-    above it (:func:`_state.at_and_above`), and past them all with neither."""
+    """``card``'s group, where its mark puts it among :data:`_fields.RANKS`: the highest of its
+    own and each step above it (:func:`_state.at_and_above`), and past them all with none (On
+    hold ranks nothing; it pauses)."""
     marks = {step.priority for step in at_and_above(card, cards)}
-    return next((rank for rank, mark in enumerate(_AHEAD) if mark in marks), len(_AHEAD))
+    return next((rank for rank, mark in enumerate(RANKS) if mark in marks), len(RANKS))
+
+
+def turn(number: int, cards: Mapping[int, Card], places: Mapping[int, int]) -> Turn:
+    """Card ``number``'s turn, the one key ``quill next`` takes cards in (ruling plan#4016): its
+    group (:func:`_rank`); then its row on the board, ``places`` mapping each card on it to its
+    row, top first, and a card off it coming after every row; then its number, which orders the
+    cards off the board.  ``cards`` holds the card and every step above it."""
+    return Turn(_rank(cards[number], cards), places.get(number, len(places)), number)
 
 
 def _needs(card: Card, cards: Mapping[int, Card], shipped: set[int]) -> set[int]:
@@ -135,9 +152,10 @@ def _needs(card: Card, cards: Mapping[int, Card], shipped: set[int]) -> set[int]
 
 
 def _needed(start: Card, cards: Mapping[int, Card], shipped: set[int],
-            turn: Callable[[int], tuple]) -> Iterator[Card]:
+            key: Callable[[int], Turn]) -> Iterator[Card]:
     """``start``, then every unfinished card it needs, depth first, each once however many need
-    it (so two cards blocking each other end the walk), the needs of each in ``turn``'s order.
+    it (so two cards blocking each other end the walk), the needs of each in ``key``'s order,
+    each card's :func:`turn`.
 
     The walk stops at a card no work can start on (:func:`_state.never_offered`, On hold among
     them), and at any card that is neither a step nor a finding.  A finding is walked: the one
@@ -152,7 +170,7 @@ def _needed(start: Card, cards: Mapping[int, Card], shipped: set[int],
         seen.add(card.number)
         yield card
         if card.kind in SHIPPABLE and never_offered(card, cards, shipped) is None:
-            wanted += [cards[number] for number in sorted(_needs(card, cards, shipped), key=turn,
+            wanted += [cards[number] for number in sorted(_needs(card, cards, shipped), key=key,
                                                           reverse=True)]
 
 
@@ -173,9 +191,7 @@ def next_step(order: Iterable[int], cards: Mapping[int, Card], shipped: Iterable
     """
     shipped = set(shipped)
     places = {number: place for place, number in enumerate(order)}
-
-    def turn(number: int) -> tuple[int, int, int]:
-        return _rank(cards[number], cards), places.get(number, len(places)), number
+    key = partial(turn, cards=cards, places=places)
 
     def in_arc(card: Card) -> bool:
         return arc is None or card.arc == arc
@@ -184,10 +200,10 @@ def next_step(order: Iterable[int], cards: Mapping[int, Card], shipped: Iterable
         return workable(card, cards, shipped, claims) and in_arc(card)
 
     first, waiting = None, []
-    for number in sorted((number for number in places if number in cards), key=turn):
+    for number in sorted((number for number in places if number in cards), key=key):
         if not has_turn(cards[number], cards, shipped):
             continue
-        needed = list(_needed(cards[number], cards, shipped, turn))
+        needed = list(_needed(cards[number], cards, shipped, key))
         if held := _held(needed, cards):
             if in_arc(cards[number]):
                 waiting.append(Waiting(cards[number], held))

@@ -50,13 +50,13 @@ step's Effort too, which ``effort`` refuses to set on a split step (ruling plan#
 ``sync`` runs every three hours on this host (``shekel-plan-sync.timer``, its units' sources in
 ``/opt/docker/scripts``) from its own clone ``~/projects/shekel-plan-sync`` at dev's tip; a run
 that fails, or exits 1 on a REPORT, pushes its last fifteen log lines (plan#1809), and ``next``
-says when sync is behind.  ``next`` hands out Urgent, then High, then the board's order, a step's
-unfinished prerequisites just ahead of it, never one On hold (rulings plan#1830, plan#1831,
-plan#1832; :mod:`_next`).  ``watch`` runs every minute from the same clone, never beside
-``sync`` (``shekel-plan-watch.timer``): the same producer over each card whose branch moved
-since its last pass, so the board shows a push within a minute (rulings plan#1871, plan#1874,
-:mod:`_watch`).  ``answer`` answers the developer's comments on a card, and ``next``
-names each claimed card, and each task under one, holding one no answer has followed
+says when sync is behind.  ``next`` hands out Urgent, then High, Medium, Low and the rest, each in
+the board's order, a step's unfinished prerequisites just ahead of it, never one On hold (rulings
+plan#1830, plan#1831, plan#1832, plan#4016; :mod:`_next`).  ``watch`` runs every minute from the
+same clone, never beside ``sync`` (``shekel-plan-watch.timer``): the same producer over each card
+whose branch moved since its last pass, so the board shows a push within a minute (rulings
+plan#1871, plan#1874, :mod:`_watch`).  ``answer`` answers the developer's comments on a card, and
+``next`` names each claimed card, and each task under one, holding one no answer has followed
 (plan#1822, ruling plan#1924, :mod:`_comments`).  ``note`` posts a stop's note on the task a
 claimed card's next session starts and prints its prompt (rulings plan#1921, plan#1922,
 :mod:`_notes`).
@@ -223,12 +223,12 @@ CONNECT = partial(Tracker.connect, PLAN)
 # -- next, claim, release -----------------------------------------------------
 
 def cmd_next(args, tracker: Tracker, root: Path) -> int:
-    """The step :func:`_next.next_step` hands out, Urgent, then High, then the board's order, each
-    step's unfinished prerequisites just ahead of it, and never one On hold; then how far ``sync``
-    is behind (:func:`_sync.behind`), what it cannot offer that a person must act on, each step
-    waiting on one On hold, by name (ruling plan#1830, plan#1820's spec), each piece of a split
-    step on the board that no Priority ranks (:func:`_next.unranked_lines`, ruling plan#3304),
-    whether a release is due
+    """The step :func:`_next.next_step` hands out, Urgent, then High, Medium, Low and the rest,
+    each in the board's order (ruling plan#4016), each step's unfinished prerequisites just ahead
+    of it, and never one On hold; then how far ``sync`` is behind (:func:`_sync.behind`), what it
+    cannot offer that a person must act on, each step waiting on one On hold, by name (ruling
+    plan#1830, plan#1820's spec), each piece of a split step on the board that no Priority ranks
+    (:func:`_next.unranked_lines`, ruling plan#3304), whether a release is due
     for a version (:func:`_versions.due_line`, ruling plan#2829), and last,
     after every line no further read can cost, each claimed card, and each task under one,
     holding a comment of the developer's that no answer of quill's has followed (plan#1822,

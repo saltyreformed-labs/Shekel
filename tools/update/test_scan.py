@@ -428,9 +428,10 @@ _TREE = ["tree", "--frozen", "--offline", "--python", "cpython", "--python-platf
 
 def _command(arguments: list[str]) -> str:
     """The name of the docker command ``arguments`` runs: its first, but a compose run's
-    service, ``probe`` or ``scan``, and an image's removal, ``rm``."""
+    service, ``probe`` or ``scan``, the compose project's teardown, ``down``, and an image's
+    removal, ``rm``."""
     if arguments[0] == "compose":
-        return arguments[arguments.index("--no-TTY") + 1]
+        return "down" if arguments[3] == "down" else arguments[arguments.index("--no-TTY") + 1]
     return "rm" if arguments[:2] == ["image", "rm"] else arguments[0]
 
 
@@ -447,8 +448,8 @@ class _Docker:
         """A stand-in whose inspect answers ``image`` and whose ``failing`` commands fail;
         ``answers`` replace, by name, what it answers otherwise: ``load``, that it loaded
         ``image``; ``probe``, :data:`_REPORTED`; ``rm``, that it deleted ``image``; ``scan``, a
-        labelled copy of the recorded scan; and ``catalog``, what the scanner writes, the
-        recorded catalog."""
+        labelled copy of the recorded scan; ``down``, nothing, as compose's teardown writes on
+        its standard output; and ``catalog``, what the scanner writes, the recorded catalog."""
         self.calls: list[tuple[str, list[str], dict[str, str], int]] = []
         self.image = image
         self.failing = failing
@@ -456,7 +457,7 @@ class _Docker:
                         "probe": json.dumps(_REPORTED).encode(),
                         "rm": f"Deleted: {image}\n".encode(),
                         "scan": json.dumps(_labelled({scan.REVISION: _BUILT_FROM})).encode(),
-                        "catalog": CATALOGUED.read_bytes(), **answers}
+                        "down": b"", "catalog": CATALOGUED.read_bytes(), **answers}
         self.modes: tuple[int, ...] | None = None
 
     def __call__(self, daemon, arguments, added, seconds) -> bytes:
@@ -517,12 +518,16 @@ def _saved(docker: _Docker) -> Path:
 
 #: The compose run each service of the scanner's file is run by.
 _RUN = ["compose", "--file", str(REPO / scan.COMPOSE), "run", "--rm", "--no-TTY"]
+#: The teardown of the scanner's compose project (plan#3864).
+_DOWN = ["compose", "--file", str(REPO / scan.COMPOSE), "down"]
 
 
-def _added(docker: _Docker) -> dict[str, str]:
-    """The variables the stand-in's scanner was run with."""
-    scanner, = (added for _, arguments, added, _ in docker.calls if arguments == [*_RUN, "scan"])
-    return scanner
+def _handed(docker: _Docker) -> dict[str, str]:
+    """The variables each compose command of the stand-in's scan is handed: the file its save
+    wrote, the catalog's file beside it, and the image the probe runs."""
+    saved = _saved(docker)
+    return {"SCAN_IMAGE": str(saved), "SCAN_CATALOG": str(saved.with_name("catalog.json")),
+            "SCAN_PROBE": _IMAGE}
 
 
 @pytest.mark.usefixtures("rootless")
@@ -533,13 +538,13 @@ def test_a_scan_reads_production_on_its_daemon_and_scans_the_saved_file_on_the_r
     and writes its catalog to a file made for it to write (ruling plan#3875), each run handed
     every variable the compose file names; the commit is the scanned image's label; uv works
     out the lock's set from that commit's lock, for the groups its Dockerfile installs and the
-    platform the image's python reported (rulings plan#3877, plan#3884); and the files are
-    gone once the scan ends (ruling plan#3822)."""
+    platform the image's python reported (rulings plan#3877, plan#3884); the scanner's compose
+    project is taken down, handed the same variables, so the network compose made for the
+    scanner goes too (plan#3864); and the files are gone once the scan ends (ruling
+    plan#3822)."""
     docker, uv = _Docker(), _Uv()
     assert scan.scanned(REPO, docker, uv) == scan.Scanned(_IMAGE, _BUILT_FROM, (_CRITICAL,))
-    saved = str(_saved(docker))
-    added = {"SCAN_IMAGE": saved, "SCAN_CATALOG": str(Path(saved).with_name("catalog.json")),
-             "SCAN_PROBE": _IMAGE}
+    saved, added = str(_saved(docker)), _handed(docker)
     assert docker.calls == [
         (scan.PRODUCTION, ["inspect", "--format", "{{.Image}}", "shekel-prod-app"], {},
          scan.DOCKER_SECONDS),
@@ -547,7 +552,8 @@ def test_a_scan_reads_production_on_its_daemon_and_scans_the_saved_file_on_the_r
         (_ROOTLESS, ["load", "--input", saved], {}, scan.DOCKER_SECONDS),
         (_ROOTLESS, [*_RUN, "probe", scan.REPORT], added, scan.DOCKER_SECONDS),
         (_ROOTLESS, ["image", "rm", _IMAGE], {}, scan.DOCKER_SECONDS),
-        (_ROOTLESS, [*_RUN, "scan"], added, scan.SCAN_SECONDS)]
+        (_ROOTLESS, [*_RUN, "scan"], added, scan.SCAN_SECONDS),
+        (_ROOTLESS, _DOWN, added, scan.DOCKER_SECONDS)]
     assert docker.modes == (0o644, 0o666)
     assert not Path(saved).parent.exists()
     assert uv.calls == [(_TREE, scan.UV_SECONDS)]
@@ -619,7 +625,8 @@ def test_the_loaded_image_is_removed_before_the_scanner_runs_however_the_probe_e
     with pytest.raises(scan.ScanFailed, match=f"^docker {failing} failed$"):
         scan.scanned(REPO, docker, _Uv())
     commands = [_command(arguments) for _, arguments, _, _ in docker.calls]
-    assert commands[2:] == ["load", "probe", "rm", *(["scan"] if failing == "scan" else [])]
+    assert commands[2:] == ["load", "probe", "rm", *(["scan"] if failing == "scan" else []),
+                            "down"]
 
 
 @pytest.mark.usefixtures("rootless")
@@ -642,7 +649,42 @@ def test_a_load_that_names_another_image_runs_no_probe():
     docker = _Docker(load=b"Loaded image: shekel:latest\n")
     with pytest.raises(scan.ScanFailed, match=f"loaded no image {_IMAGE}, production's"):
         scan.scanned(REPO, docker, _Uv())
-    assert [_command(arguments) for _, arguments, _, _ in docker.calls][2:] == ["load", "rm"]
+    assert [_command(arguments) for _, arguments, _, _ in docker.calls][2:] == ["load", "rm",
+                                                                                "down"]
+
+
+@pytest.mark.usefixtures("rootless")
+@pytest.mark.parametrize("failing", ["load", "probe", "scan"])
+def test_the_compose_project_is_taken_down_however_its_runs_end(failing):
+    """A load, a probe or a scanner that fails: the scanner's compose project is taken down all
+    the same, last, on the rootless daemon, handed the variables the runs are, and the failure
+    is the one that ended the runs (plan#3864)."""
+    docker = _Docker(failing=frozenset({failing}))
+    with pytest.raises(scan.ScanFailed, match=f"^docker {failing} failed$"):
+        scan.scanned(REPO, docker, _Uv())
+    assert docker.calls[-1] == (_ROOTLESS, _DOWN, _handed(docker), scan.DOCKER_SECONDS)
+    assert [_command(arguments) for _, arguments, _, _ in docker.calls].count("down") == 1
+
+
+@pytest.mark.usefixtures("rootless")
+@pytest.mark.parametrize(("failing", "answers", "after"), [
+    (frozenset(), {}, ""),
+    (frozenset({"scan"}), {}, ", after this failure: docker scan failed"),
+    (frozenset(), {"probe": b"Traceback"},
+     ", after this failure: the image's python's report: it is no JSON: Expecting value: line 1 "
+     "column 1 (char 0)"),
+], ids=["clean_scan", "scanner_failed", "scan_refused"])
+def test_a_teardown_that_fails_is_reported_never_read_as_a_clean_scan(failing, answers, after):
+    """A compose project left standing fails the scan, a scan that was clean among them, and no
+    lock's set is worked out; the failure says so, and names what ended the runs where the
+    teardown followed a failure or a refusal; the files are gone all the same."""
+    docker, uv = _Docker(failing=failing | {"down"}, **answers), _Uv()
+    said = (f"the scanner's compose project on {_ROOTLESS} was not taken down: docker down "
+            f"failed{after}")
+    with pytest.raises(scan.ScanFailed, match=f"^{re.escape(said)}$"):
+        scan.scanned(REPO, docker, uv)
+    assert not uv.calls
+    assert not _saved(docker).parent.exists()
 
 
 @pytest.mark.usefixtures("rootless")
@@ -740,7 +782,7 @@ def test_production_s_container_is_the_one_the_deploy_script_names_once(lines, c
 #: A stand-in ``docker`` on the path: what each command does is the script's, which records
 #: the daemon it was handed, and the variable naming the saved file, for each command it runs;
 #: the probe and the scanner are told apart by the service compose is to run, its seventh
-#: argument.
+#: argument, and the project's teardown, which has none, answers nothing, as compose's does.
 _FAKE_DOCKER = """#!/bin/sh
 printf '%s %s %s\\n' "$1" "$DOCKER_HOST" "$SCAN_IMAGE" >> "$SCAN_TEST_LOG"
 case "$1" in
@@ -780,16 +822,16 @@ def _on_path(tmp_path: Path, monkeypatch, inspect: str) -> Path:
 @pytest.mark.usefixtures("rootless")
 def test_each_docker_command_runs_on_the_daemon_the_scan_names(tmp_path, monkeypatch):
     """The real docker runner: each command is handed its own daemon whatever ``DOCKER_HOST``
-    this process holds, and only the compose runs, the probe's and the scanner's, the saved
-    file's path."""
+    this process holds, and only the compose commands, the probe's and the scanner's runs and
+    the project's teardown, the saved file's path."""
     log = _on_path(tmp_path, monkeypatch, f"echo {_IMAGE}")
     done = scan.scanned(REPO, uv=_Uv())
     assert (done.image, done.revision, done.found) == (_IMAGE, _BUILT_FROM, (_CRITICAL,))
-    inspect, save, load, probe, remove, run = log.read_text(encoding="utf-8").splitlines()
+    inspect, save, load, probe, remove, run, down = log.read_text(encoding="utf-8").splitlines()
     assert inspect == save.replace("save", "inspect", 1) == (
         f"inspect {scan.PRODUCTION} /an/inherited/file")
     assert load == remove.replace("image", "load", 1) == f"load {_ROOTLESS} /an/inherited/file"
-    assert probe == run and run.startswith(f"compose {_ROOTLESS} /")
+    assert probe == run == down and run.startswith(f"compose {_ROOTLESS} /")
     assert run.endswith("/image.tar")
 
 

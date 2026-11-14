@@ -14,8 +14,10 @@ the developer's rootless daemon, once that daemon says it is rootless
 nothing the scan starts, no container, network or scanner image, lands on production's
 daemon; and the scanner holds that file and the one it writes its catalog to alone, no socket
 (rulings plan#3706, plan#3875).  The image's own python runs on that daemon too, in a copy of
-the file loaded there and removed however the scan ends (ruling plan#3876).  The commit the
-image was built from is read from the scanner's own record of the file it scanned
+the file loaded there and removed however the scan ends (ruling plan#3876).  The scanner's own
+compose project is taken down there however the scan's runs in it end, so the network compose
+makes for the scanner, which ``run --rm`` leaves standing, goes with it (plan#3864).  The
+commit the image was built from is read from the scanner's own record of the file it scanned
 (:func:`revision`), so the commit and the findings are one read of the same bytes.  Measured
 2026-11-13 on production's image: the save, a 98 MB archive, in 0.8 s; the load in 2 s and
 the image's python's run in 2 s; and the scan, its database downloaded fresh, in 42 s.
@@ -213,9 +215,9 @@ class NotAScan(ValueError):
 
 class ScanFailed(RuntimeError):
     """The scan could not run: a docker or uv command failed or did not finish, the deploy
-    script names no container, the daemon the scanner would run on is not rootless, or the image
-    it loaded is not production's or was not removed; the message says which, and what docker
-    or uv said."""
+    script names no container, the daemon the scanner would run on is not rootless, the image
+    it loaded is not production's or was not removed, or the scanner's compose project was not
+    taken down; the message says which, and what docker or uv said."""
 
 
 @dataclass(frozen=True)
@@ -786,19 +788,18 @@ def _rootless() -> str:
     return daemon
 
 
-def _removed(docker: Docker, daemon: str, image: str, after: Exception | None) -> None:
-    """Remove ``image``, the copy of production's image the scan loaded onto ``daemon``.
+def _undone(undo: Callable[[], bytes], left: str, after: Exception | None) -> None:
+    """Undo what the scan made on the scanner's daemon: ``undo``, the docker command that does.
 
     Raises:
-        ScanFailed: the removal failed, saying so, and ``after``, the failure the removal
-            followed, when there was one.
+        ScanFailed: the command failed, saying ``left``, what it leaves there, then what docker
+            said, and ``after``, the failure it followed, when there was one.
     """
     try:
-        docker(daemon, ["image", "rm", image], {}, DOCKER_SECONDS)
+        undo()
     except (ScanFailed, OSError) as error:
         followed = f", after this failure: {after}" if after else ""
-        raise ScanFailed(f"the copy of production's image loaded onto {daemon} was not removed: "
-                         f"{error}{followed}") from error
+        raise ScanFailed(f"{left}: {error}{followed}") from error
 
 
 def _probed(docker: Docker, daemon: str, run: Sequence[str], added: Mapping[str, str]) -> bytes:
@@ -823,7 +824,8 @@ def _probed(docker: Docker, daemon: str, run: Sequence[str], added: Mapping[str,
         failure = error
         raise
     finally:
-        _removed(docker, daemon, image, failure)
+        _undone(lambda: docker(daemon, ["image", "rm", image], {}, DOCKER_SECONDS),
+                f"the copy of production's image loaded onto {daemon} was not removed", failure)
 
 
 def _read(root: Path, docker: Docker, scanner: str,
@@ -831,12 +833,13 @@ def _read(root: Path, docker: Docker, scanner: str,
     """What the scan reads of ``image``, production's, on ``scanner``, the rootless daemon, from
     the checkout at ``root``: the image saved off production's daemon to a file of the scan's
     own; the image's own python run there (:func:`_probed`), its report; and the file scanned
-    there, the scanner's answer and the catalog it writes to a second file.  The files are
-    deleted with their directory however the read ends.
+    there, the scanner's answer and the catalog it writes to a second file.  The scanner's
+    compose project is taken down once those runs end, however they end; the files are deleted
+    with their directory however the read ends.
 
     Raises:
-        ScanFailed: a docker command failed or did not finish, or the probe's image was not
-            loaded or not removed (:func:`_probed`).
+        ScanFailed: a docker command failed or did not finish, the probe's image was not loaded
+            or not removed (:func:`_probed`), or the compose project was not taken down.
         NotAScan: the image's python's report or the catalog is not as written
             (:func:`reported`, :func:`catalogued`).
         OSError: as making the files or running docker raises it.
@@ -856,9 +859,26 @@ def _read(root: Path, docker: Docker, scanner: str,
         # Compose reads every variable the file names for whichever service it runs (measured
         # 2026-11-13: the probe alone, run without the scanner's, refused), so both get all.
         added = {"SCAN_IMAGE": str(saved), "SCAN_CATALOG": str(written), "SCAN_PROBE": image}
-        run = ["compose", "--file", str(root / COMPOSE), "run", "--rm", "--no-TTY"]
-        interpreter = reported(_probed(docker, scanner, run, added))
-        answer = docker(scanner, [*run, "scan"], added, SCAN_SECONDS)
+        compose = ["compose", "--file", str(root / COMPOSE)]
+        run = [*compose, "run", "--rm", "--no-TTY"]
+        failure: Exception | None = None
+        try:
+            interpreter = reported(_probed(docker, scanner, run, added))
+            answer = docker(scanner, [*run, "scan"], added, SCAN_SECONDS)
+        except (ScanFailed, NotAScan, OSError) as error:
+            failure = error
+            raise
+        finally:
+            # ``run --rm`` removes the run's container and leaves the network compose made for
+            # the scanner, its project's default; ``down`` removes it, handed the same
+            # variables, without which compose refuses to read the file, and does nothing
+            # where nothing stands, as after a probe that failed.  It leaves a network a
+            # container is still on, exiting 0: a scan run beside this one, whose own ``down``
+            # then removes it, or one killed mid-scan, whose container the daemon removes once
+            # its command ends (``--rm`` is the daemon's AutoRemove), the network then going
+            # with the next run's (each measured 2026-11-13, compose 5.7.1).
+            _undone(lambda: docker(scanner, [*compose, "down"], added, DOCKER_SECONDS),
+                    f"the scanner's compose project on {scanner} was not taken down", failure)
         return interpreter, answer, catalogued(written.read_bytes())
 
 

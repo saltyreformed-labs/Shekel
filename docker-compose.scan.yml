@@ -17,6 +17,12 @@
 #       SCAN_PROBE=sha256:<the loaded image's id> \
 #       docker compose -f docker-compose.scan.yml run --rm --no-TTY scan
 #
+# and then takes the project down, handed the same variables, as the network compose makes for
+# the scanner outlives `run --rm` (plan#3864):
+#
+#   SCAN_IMAGE=... SCAN_CATALOG=... SCAN_PROBE=... \
+#       docker compose -f docker-compose.scan.yml down
+#
 # THE PIN (ruling plan#3706).  The service's image line is the one home of
 # Grype's version and bytes: the tag says which release, the digest (its
 # multi-arch index's) pins what runs, so a tag moved or a download swapped

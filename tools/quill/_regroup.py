@@ -48,12 +48,20 @@ another group.  Only the card the weekly update files, which holds High, is plac
 the sort, which would put it last among the High cards: first in the High group, just under the
 Urgent cards (:func:`goes_after`; ruling plan#4014, amending plan#3620).
 
+**A place a person picks** (``quill move``, ruling plan#4011, :func:`crossing`) is refused when it
+puts its card outside its group: when the nearest row above it the regroup may move is in a later
+group, or the nearest below it in an earlier one (:func:`around`), out of the group order a pass
+sorts the board into.  On a board a pass has grouped, that is exactly a place the next pass would
+undo.  A place between two groups is in either, so a card opening or closing its group is placed
+there.  A paused card is placed anywhere, since the regroup never moves one (ruling plan#4015).
+
 A task nests under its step on the board, in no place of this order (ruling plan#1814), and is no
 row of it (:meth:`_tracker.Board.order`).
 """
 from __future__ import annotations
 
-from collections.abc import Iterator, Mapping, Sequence
+from collections.abc import Iterable, Iterator, Mapping, Sequence
+from functools import partial
 from itertools import takewhile
 from operator import itemgetter
 from typing import NamedTuple
@@ -74,6 +82,9 @@ _AFTER_HIGH = RANKS.index(HIGH) + 1
 #: plan#4016, plan#4096): ``quill next``'s ranks (:data:`_fields.RANKS`) with :data:`_WAITING`
 #: just after High, then None, every other card no Priority ranks.
 _GROUPS = (*RANKS[:_AFTER_HIGH], _WAITING, *RANKS[_AFTER_HIGH:], None)
+#: The name a refusal gives each group of the cards no Priority ranks (:func:`_name`); a
+#: Priority's group is named by it.
+_NAMES = {_WAITING: "suggested Urgent or High", None: "no Priority"}
 
 
 class Move(NamedTuple):
@@ -102,13 +113,14 @@ def movable(card: Card, cards: Mapping[int, Card]) -> bool:
     return card.is_open and held_at(card, cards) is None
 
 
-def undecided(order: Sequence[tuple[int, str]], cards: Mapping[int, Card]) -> list[int]:
-    """The rows of ``order``, the board's order (``(card number, board item)``, top first), whose
-    group quill's pending suggestion on them decides (:func:`_group`): each the regroup may move
-    (:func:`movable`) that no Priority ranks (:func:`_next.ranked`), in the board's order.  A
-    caller reads the suggestion of each, and of no other card, for :func:`moves`.  ``cards``
-    holds every open card in ``order`` and every step above each."""
-    return [number for number, _ in order if number in cards
+def undecided(numbers: Iterable[int], cards: Mapping[int, Card]) -> list[int]:
+    """The cards of ``numbers`` whose group quill's pending suggestion on them decides
+    (:func:`_group`): each the regroup may move (:func:`movable`) that no Priority ranks
+    (:func:`_next.ranked`), in the order given.  A caller reads the suggestion of each, and of no
+    other card: for :func:`moves`, of the board's rows, and for :func:`crossing`, of the card
+    placed and the rows :func:`around` names.  ``cards`` holds every open card of ``numbers`` and
+    every step above each."""
+    return [number for number in numbers if number in cards
             and movable(cards[number], cards) and not ranked(cards[number], cards)]
 
 
@@ -122,6 +134,13 @@ def _group(number: int, cards: Mapping[int, Card], places: Mapping[int, int],
     if rank < len(RANKS):
         return _GROUPS.index(RANKS[rank])
     return _GROUPS.index(_WAITING if suggested.get(number) in _WAITS else None)
+
+
+def _name(group: int) -> str:
+    """The name of ``group``, an index in :data:`_GROUPS`, as a refusal says it: the Priority's
+    own, or for the cards no Priority ranks, :data:`_NAMES`'."""
+    value = _GROUPS[group]
+    return _NAMES.get(value, value)
 
 
 def _spots(order: Sequence[tuple[int, str]],
@@ -221,6 +240,55 @@ def moves(order: Sequence[tuple[int, str]], cards: Mapping[int, Card],
     what quill's pending suggestion on each of :func:`undecided`'s cards suggests, a card holding
     none absent."""
     return _plan(order, cards, suggested).moves
+
+
+class Crossing(NamedTuple):
+    """A place outside its card's group (:func:`crossing`): the card's ``group``, and the rows
+    :func:`around` names, ``above`` and ``below``, each a card number and its group, or None for
+    a side holding none; each group by its name (:func:`_name`)."""
+
+    group: str
+    above: tuple[int, str] | None
+    below: tuple[int, str] | None
+
+
+def around(order: Sequence[tuple[int, str]], cards: Mapping[int, Card], number: int,
+           after: int | None) -> tuple[int | None, int | None]:
+    """The rows the regroup may move (:func:`movable`) nearest above and below card ``number``
+    placed just after row ``after`` of ``order``, the board's order (``(card number, board
+    item)``, top first), or at the top when None; None for a side holding none.  The card is
+    no row of either side, wherever it sits now, so ``after`` naming the card itself keeps it in
+    its row.  ``cards`` holds every open card in ``order`` and every step above each."""
+    rows = [row for row, _ in order]
+    cut = 0 if after is None else rows.index(after) + 1
+
+    def nearest(side: Iterable[int]) -> int | None:
+        return next((row for row in side if row != number and row in cards
+                     and movable(cards[row], cards)), None)
+
+    return nearest(reversed(rows[:cut])), nearest(rows[cut:])
+
+
+def crossing(order: Sequence[tuple[int, str]], cards: Mapping[int, Card],
+             suggested: Mapping[int, str], number: int,
+             near: tuple[int | None, int | None]) -> Crossing | None:
+    """How card ``number``, placed between ``near``, the rows :func:`around` names over
+    ``order``, sits outside its group (ruling plan#4011): the row above it in a later group or the
+    one below it in an earlier one (:func:`_group`), out of the group order a pass sorts the board
+    into; None when it sits in its group, or when the regroup never moves it, a paused card
+    (:func:`movable`, ruling plan#4015).  ``cards`` holds the card, every open card in ``order``
+    and every step above each, and ``suggested`` what quill's pending suggestion on each of them
+    :func:`undecided` names suggests, a card holding none absent."""
+    if not movable(cards[number], cards):
+        return None
+    places = {row: place for place, (row, _) in enumerate(order)}
+    group = partial(_group, cards=cards, places=places, suggested=suggested)
+    above, below = near
+    mine = group(number)
+    if (above is None or group(above) <= mine) and (below is None or mine <= group(below)):
+        return None
+    return Crossing(_name(mine),
+                    *(None if row is None else (row, _name(group(row))) for row in near))
 
 
 def goes_after(order: Sequence[tuple[int, str]], cards: Mapping[int, Card],

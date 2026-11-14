@@ -54,7 +54,8 @@ says when sync is behind.  ``next`` hands out Urgent, then High, Medium, Low and
 the board's order, a step's unfinished prerequisites just ahead of it, never one On hold (rulings
 plan#1830, plan#1831, plan#1832, plan#4016; :mod:`_next`), and ``sync`` and ``priority`` keep
 the board in those groups, the developer's order kept inside each (the regroup, rulings
-plan#4011, plan#4012, :mod:`_regroup_pass`).  ``watch`` runs every minute from the
+plan#4011, plan#4012, :mod:`_regroup_pass`), and ``move`` refuses a place in another group
+(:mod:`_move`).  ``watch`` runs every minute from the
 same clone, never beside ``sync`` (``shekel-plan-watch.timer``): the same producer over each card
 whose branch moved since its last pass, so the board shows a push within a minute (rulings
 plan#1871, plan#1874, :mod:`_watch`).  ``answer`` answers the developer's comments on a card, and
@@ -174,6 +175,7 @@ from tools.quill._export import cmd_export
 from tools.quill._fields import ON_HOLD
 from tools.quill._filing import cmd_file
 from tools.quill._github import CredentialsError, GitHubError
+from tools.quill._move import cmd_move
 from tools.quill._next import next_step, unranked_lines
 from tools.quill._show import cmd_show
 from tools.quill._spec_history import cmd_spec_history, cmd_spec_revert
@@ -213,7 +215,6 @@ from tools.quill.check import (
 )
 from tools.quill.setup_tracker import (
     FILING,
-    IN_ORDER,
     PLAN,
     TASK,
 )
@@ -482,7 +483,7 @@ def cmd_comment(args, tracker: Tracker, _root: Path) -> int:
     return 0
 
 
-# -- block, move, drop ----------------------------------------------------------
+# -- block, drop ----------------------------------------------------------------
 
 def cmd_block(args, tracker: Tracker, root: Path) -> int:
     """Record (or with ``--remove``, delete) that one card is blocked by another; for an open
@@ -501,54 +502,6 @@ def cmd_block(args, tracker: Tracker, root: Path) -> int:
     else:
         tracker.block(card.number, blocker)
         print(f"plan#{card.number} is blocked by plan#{blocker.number}")
-    return 0
-
-
-def _not_in_order(card: Card) -> str:
-    """Why nothing is moved after ``card``, which the board's order read does not list: a step
-    or question off the board, or on it but not yet listed by a read that lags a write
-    (``_tracker``'s doctrine); any other kind, a task among them, is in no place of it."""
-    if card.kind not in IN_ORDER:
-        return (f"plan#{card.number} is not in the board's order, its steps and questions "
-                "(R-BAL177)")
-    if card.board_item is None:
-        return (f"{_label(card)} is not on the board, so nothing is placed after it: put it "
-                f"on first (`quill move plan#{card.number} --top`, `--bottom` or `--after`)")
-    return (f"{_label(card)} is on the board, but the board's order read does not list it yet: "
-            "the board lags a write; run this again")
-
-
-def cmd_move(args, tracker: Tracker, root: Path) -> int:
-    """Put a step or question at a place in the board's order."""
-    card = _one(tracker, args.card)
-    shipped = _git.read(root).shipped.cards
-    cards = with_closure(tracker, {card.number: card})
-    if card.kind not in IN_ORDER or not card.is_open or is_container(card, cards, shipped):
-        raise Refused(f"the board's order holds open steps and questions only (a task nests "
-                      f"under its step in no order, ruling plan#1814), and no step split into "
-                      f"leaves (R-BAL177, R-BAL179): {_label(card)}")
-    if filing_unfinished(card) and card.kind == "step":
-        raise Refused(f"{_label(card)}'s filing has not finished (R-BAL202): finish it first.  "
-                      "If it is a leaf -- one whose link has not landed reads as a top-level "
-                      "step -- its `quill file` command moves it again after this move")
-    order = tracker.board.order()
-    items = dict(order)
-    if args.after is not None:
-        if args.after not in items:
-            raise Refused(_not_in_order(_one(tracker, args.after)))
-        after = items[args.after]
-    elif args.bottom:
-        rest = [item for number, item in order if number != card.number]
-        after = rest[-1] if rest else None
-    else:
-        after = None
-    item = items.get(card.number)
-    if item is None:
-        item = tracker.board.add(card)
-        print(f"  board: added {_label(card)} at the bottom")
-    shown = tracker.board.place(item, after)
-    print(f"moved {_label(card)}" + ("" if shown else
-                                     " -- the board has not shown it yet; re-read it later"))
     return 0
 
 

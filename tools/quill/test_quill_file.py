@@ -354,12 +354,14 @@ def test_a_question_becomes_a_ruling_only_in_its_own_arc(code, tmp_path, capsys)
 
 
 def test_a_placement_the_board_has_not_shown_yet_is_said(code, tmp_path, capsys):
-    """Review M3: the fake showed every placement at once, so this was never run."""
+    """Review M3: the fake showed every placement at once, so this was never run.  plan#2 holds
+    plan#1's Priority, so its move to the top stays inside its group: `quill move` refuses a
+    place in another (ruling plan#4011)."""
     spec = tmp_path / "spec.md"
     spec.write_text("Half.")
     tracker = FakeTracker()
     tracker.add(1, priority="Medium")
-    tracker.add(2)
+    tracker.add(2, priority="Medium")
     tracker.board.lagging = True
     assert run(tracker, code, "move", "plan#2", "--top") == 0
     assert "the board has not shown it yet" in capsys.readouterr().out

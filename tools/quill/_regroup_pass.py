@@ -26,11 +26,13 @@ for the order's 590 rows and the 40 steps above them, where every open card and 
 decision over them reads (``quill next``'s read) took 72 s for 1,167 cards; the two gave the same
 group to every card and the same 10 moves.  The board's order read before it took 15 s.
 
-**What every pass reads besides** (:func:`_suggested`): quill's pending suggestion on each card
-the plan takes its group from one (``_regroup.undecided``: open, unpaused and ranked by no
-Priority), read card by card (:meth:`_suggestion.Suggestions.pending`), and on no other card, so
-a pass costs a read for each card waiting on the developer's decision and none for the rest.
+**What every pass reads besides** (:func:`pending_suggestions`): quill's pending suggestion on
+each card the plan takes its group from one (``_regroup.undecided``: open, unpaused and ranked by
+no Priority), read card by card (:meth:`_suggestion.Suggestions.pending`), and on no other card,
+so a pass costs a read for each card waiting on the developer's decision and none for the rest.
 Measured 2026-11-14 12:12 UTC on the tracker: 104 such cards read in 30 s, about 0.29 s each.
+``quill move``'s refusal of a place in another group reads the same, of the card and the two rows
+it would sit between alone (:mod:`_move`).
 
 **A card filed** (ruling plan#4096): the regroup's like every card, a step or question added at
 the bottom, where GitHub adds it, and a leaf in its split step's place (R-BAL179); the plan
@@ -69,13 +71,13 @@ def board_cards(tracker: Tracker, numbers: Iterable[int]) -> dict[int, Card]:
     return cards
 
 
-def _suggested(tracker: Tracker, order: Sequence[tuple[int, str]],
-               cards: Mapping[int, Card]) -> dict[int, str]:
-    """What quill's pending suggestion on each card of ``order`` whose group it decides
+def pending_suggestions(tracker: Tracker, numbers: Iterable[int],
+                        cards: Mapping[int, Card]) -> dict[int, str]:
+    """What quill's pending suggestion on each card of ``numbers`` whose group it decides
     (:func:`_regroup.undecided`) suggests, each read by itself
     (:meth:`_suggestion.Suggestions.pending`; this module's docstring), a card holding none
-    absent.  ``cards`` holds every open card of ``order`` and every step above each."""
-    return {number: pending.suggestion.priority for number in undecided(order, cards)
+    absent.  ``cards`` holds every open card of ``numbers`` and every step above each."""
+    return {number: pending.suggestion.priority for number in undecided(numbers, cards)
             if (pending := tracker.suggestions.pending(cards[number])) is not None}
 
 
@@ -110,14 +112,15 @@ def sync_pass(tracker: Tracker, cards: Mapping[int, Card], changes: SyncPlan,
     board's order read now, ``cards`` holding each card ``sync`` read, every open one and every
     step above each, with each its state writes (``changes``) closed or reopened read as they
     leave it, so no card it has just closed is moved, and the suggestions read now
-    (:func:`_suggested`); under ``dry_run``, printed as what would be written and none sent
-    (:func:`_send`)."""
+    (:func:`pending_suggestions`); under ``dry_run``, printed as what would be written and none
+    sent (:func:`_send`)."""
     states = {**dict.fromkeys(changes.reopen, True),
               **dict.fromkeys((*changes.close, *changes.drop), False)}
     shown = {number: replace(card, is_open=states[number]) if number in states else card
              for number, card in cards.items()}
     order = tracker.board.order()
-    _send(tracker, _planned(order, shown, _suggested(tracker, order, shown)), shown, dry_run)
+    held = pending_suggestions(tracker, (number for number, _ in order), shown)
+    _send(tracker, _planned(order, shown, held), shown, dry_run)
 
 
 def _placing(order: Sequence[tuple[int, str]], cards: Mapping[int, Card],
@@ -140,29 +143,30 @@ def _placing(order: Sequence[tuple[int, str]], cards: Mapping[int, Card],
 def priority_pass(tracker: Tracker, card: Card, priority: str | None) -> None:
     """``quill priority``'s regroup once ``card`` holds ``priority`` (None for none; ruling
     plan#4012), over the board's order, its cards (:func:`board_cards`) and the suggestions
-    (:func:`_suggested`) read now, ``card`` read as holding it whatever a read just after its
-    write shows.  A clear is a drop like any other (``_regroup``'s docstring)."""
+    (:func:`pending_suggestions`) read now, ``card`` read as holding it whatever a read just after
+    its write shows.  A clear is a drop like any other (``_regroup``'s docstring)."""
     order = tracker.board.order()
     cards = board_cards(tracker, [*(number for number, _ in order), card.number])
     cards[card.number] = replace(cards[card.number], priority=priority)
-    _send(tracker, _planned(order, cards, _suggested(tracker, order, cards)), cards, False)
+    held = pending_suggestions(tracker, (number for number, _ in order), cards)
+    _send(tracker, _planned(order, cards, held), cards, False)
 
 
 def filing_pass(tracker: Tracker, card: Card, item: str, first: bool, added: bool) -> None:
     """``quill file``'s regroup (ruling plan#4012) once ``card``, a step or question it files, is
     on the board as ``item``, over the board's order, its cards (:func:`board_cards`) and the
-    suggestions (:func:`_suggested`) read now, each line indented under the filing's.  With
-    ``added``, this run put it on the board, at the bottom, so an order read that does not list
-    it yet lags that add and is planned with it there (this module's docstring); a leaf placed
-    in its split step's place, or a card an earlier run put on the board, is planned where the
-    read lists it.  With ``first``, the weekly update's card, ``card`` goes first in the High
+    suggestions (:func:`pending_suggestions`) read now, each line indented under the filing's.
+    With ``added``, this run put it on the board, at the bottom, so an order read that does not
+    list it yet lags that add and is planned with it there (this module's docstring); a leaf
+    placed in its split step's place, or a card an earlier run put on the board, is planned where
+    the read lists it.  With ``first``, the weekly update's card, ``card`` goes first in the High
     group, placed after the moves over the rest of the board (:func:`_placing`, ruling
     plan#4014); any other is the regroup's like every card."""
     order = tracker.board.order()
     if added and card.number not in dict(order):
         order.append((card.number, item))
     cards = board_cards(tracker, [number for number, _ in order])
-    suggested = _suggested(tracker, order, cards)
-    sent = (_placing(order, cards, suggested, card.number, item) if first
-            else _planned(order, cards, suggested))
+    held = pending_suggestions(tracker, (number for number, _ in order), cards)
+    sent = (_placing(order, cards, held, card.number, item) if first
+            else _planned(order, cards, held))
     _send(tracker, sent, cards, False, "  ")

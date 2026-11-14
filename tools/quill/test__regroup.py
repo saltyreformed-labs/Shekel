@@ -6,6 +6,8 @@ A drop lands first in its new group and a raise last (plan#4013), a leaf ranks t
 step, a card no Priority ranks waits under the High cards when quill suggested Urgent or High
 and sits last otherwise (plan#4017, plan#4096), the rows left alone at the end of a group stay
 there, and :func:`_regroup.goes_after` names where the weekly update's card goes (plan#4014).
+A place ``quill move`` refuses (:func:`_regroup.crossing`) is exactly one the next pass would
+undo, and a paused card's never is (ruling plan#4011).
 
 The random boards are checked against an oracle of the rulings written here, apart from
 ``_regroup`` and ``_next``: a card's group is the highest Priority at it or at a step above it,
@@ -19,7 +21,7 @@ from functools import partial
 
 from tools.quill._fake import FakeBoard
 from tools.quill._fields import HIGH, LOW, MEDIUM, ON_HOLD, RANKS, URGENT
-from tools.quill._regroup import Move, goes_after, moves, undecided
+from tools.quill._regroup import Move, around, crossing, goes_after, moves, undecided
 from tools.quill._tracker import Card, Child
 
 #: How many random boards each property is checked over.
@@ -218,8 +220,46 @@ def test_a_pass_reads_the_suggestion_of_each_open_unpaused_card_no_priority_rank
     decides by the oracle: open, not paused and ranked by no Priority, and no other, so a pass
     reads a suggestion for those cards alone."""
     for seed, board, cards, _, _, _ in _draws():
-        assert undecided(board.order(), cards) == [
+        assert undecided((number for number, _ in board.order()), cards) == [
             number for number in board.items if _unranked(number, cards)], f"seed {seed}"
+
+
+def test_a_place_quill_move_refuses_is_one_the_next_pass_would_undo():
+    """``quill move``'s refusal (:func:`_regroup.crossing`, ruling plan#4011) reads the regroup's
+    own group order: on each random board a pass has grouped, an open card placed at the top or
+    just after another row sits outside its group exactly when the next pass over the board it
+    leaves moves a row, and a paused card is never refused, since no pass moves one (ruling
+    plan#4015).  The draws reach every outcome: refused, taken, and taken for a paused card."""
+    rng = random.Random(4023)
+    seen = dict.fromkeys(("refused", "taken", "paused"), 0)
+    for seed, board, cards, suggested, _, _ in _draws():
+        order = board.order()
+        rows = [number for number, _ in order]
+        for number in rng.sample(rows, min(len(rows), 6)):
+            if number not in cards or not cards[number].is_open:
+                continue
+            after = rng.choice([None, *(row for row in rows if row != number)])
+            cross = crossing(order, cards, suggested, number,
+                             around(order, cards, number, after))
+            placed = FakeBoard([], board.cards)
+            placed.items = list(board.items)
+            placed.place(f"PVTI_{number}", None if after is None else f"PVTI_{after}")
+            undone = bool(moves(placed.order(), cards, suggested))
+            assert (cross is not None) == undone, f"seed {seed}: plan#{number} after {after}"
+            paused = _group(number, cards, suggested) is None
+            seen["paused" if paused else "refused" if undone else "taken"] += 1
+    assert all(seen.values()), seen
+
+
+def test_a_card_placed_just_after_itself_is_read_in_its_row():
+    """:func:`_regroup.around` reads a card placed just after itself where it sits: between the
+    rows the regroup may move above and below it, so Low plan#2 between High plan#1 and Medium
+    plan#3 is outside its group there."""
+    rows = [_card(1, HIGH), _card(2, LOW), _card(3, MEDIUM)]
+    cards = {card.number: card for card in rows}
+    order = _board(rows).order()
+    assert around(order, cards, 2, 2) == (1, 3)
+    assert crossing(order, cards, {}, 2, (1, 3)) == (LOW, (1, HIGH), (3, MEDIUM))
 
 
 # -- a Priority changed (ruling plan#4013) and a drag across groups (ruling plan#4011) ------------

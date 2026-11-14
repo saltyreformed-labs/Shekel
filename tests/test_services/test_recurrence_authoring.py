@@ -47,6 +47,7 @@ from app.models.recurrence_rule import RecurrenceRule
 from app.models.ref import FilingStatus
 from app.services import pay_period_admin
 from app.services.pay_calendar import calendar_for
+from app.utils.dates import display_today
 from tests._stub_period import stub_period_on
 from tests.oracles.recurrence_baseline import (
     BASELINE_CADENCES,
@@ -901,22 +902,37 @@ class TestSalaryProfileWriter:
     """``salary.create_profile`` -- one of the five production writers."""
 
     def test_a_created_profile_carries_a_resolved_every_period_rule(
-        self, auth_client, seed_user, db, seed_periods,
+        self, auth_client, seed_user, db, seed_periods_today,
     ):
-        """The salary template's rule resolves to every-paycheck from period 0.
+        """The salary template's rule resolves to every-paycheck from TODAY's paycheck.
 
-        ``seed_periods`` opens the schedule on 2026-01-02, and the rule names
-        no start period, so its first occurrence is that opening payday.
+        The create door states no start of its owner's, so the rule's first
+        occurrence is the day the profile is created (ruling plan#4132), which
+        the cadence resolves to the payday of the paycheck containing it:
+        ``seed_periods_today``'s fifth.  It was the schedule's OPENING payday
+        until plan step R7f, which wrote a paycheck into every period the owner
+        had, closed ones included.  The first pay entry is stated on that same
+        payday, the current one, which is what the create form offers.
         """
         filing_status = db.session.query(FilingStatus).filter_by(
             name="single",
         ).one()
+        # The paycheck containing the app's civil today: the last one whose
+        # payday is on or before it.
+        todays_payday = [
+            period.start_date for period in seed_periods_today
+            if period.start_date <= display_today()
+        ][-1]
+        assert todays_payday > seed_periods_today[0].start_date, (
+            "the case tells today's paycheck from the opening one only while "
+            "the schedule opens before today"
+        )
 
         resp = auth_client.post("/salary", data={
             "name": "Day Job",
             "pay_amount": "4000.00",  # $104,000.00 a year / 26
-            "pay_payday": seed_periods[0].start_date.isoformat(),
-            **stub_period_on(seed_periods[0].start_date.isoformat()),
+            "pay_payday": todays_payday.isoformat(),
+            **stub_period_on(todays_payday.isoformat()),
             "filing_status_id": str(filing_status.id),
             # A state the law lists: since plan step salary:X-at-3 the create
             # door refuses any other (it posted "PA" until then).
@@ -931,7 +947,7 @@ class TestSalaryProfileWriter:
         assert_resolves_completely(rule)
         assert_reauthoring_changes_nothing(rule)
         resolved = resolved_for(rule)
-        assert resolved.starts_on == seed_periods[0].start_date
+        assert resolved.starts_on == todays_payday
         assert resolved.unit is RecurrenceUnitEnum.PERIOD
         assert resolved.interval_n == 1
 

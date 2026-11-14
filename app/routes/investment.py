@@ -27,6 +27,7 @@ from app.models.account import Account
 from app.models.investment_params import InvestmentParams
 from app.models.ref import EmployerContributionType
 from app.models.salary_profile import SalaryProfile
+from app.routes._recurrence_form_render import new_definition_starts_on
 from app.routes._redirect_target import RedirectTarget
 from app.routes._transfer_creation_helpers import (
     build_recurring_transfer_template,
@@ -216,7 +217,8 @@ def create_contribution_transfer(account_id):
 
     Creates a RecurrenceRule (every-period pattern), a TransferTemplate
     (from the selected source to the investment account), and generates
-    Transfer records for existing pay periods.
+    its Transfer records from the paycheck containing today on (ruling
+    plan#4132): none in a pay period that ended before the day it is created.
 
     The amount defaults to a suggested per-period contribution based on
     the annual limit and remaining periods.  The user may override it.
@@ -254,8 +256,11 @@ def create_contribution_transfer(account_id):
     # ONE schedule read for the whole request: the suggested amount spreads
     # the annual limit over the owner's paychecks, and the recurrence rule
     # below is anchored against the same calendar.  Two loads would be two
-    # answers to one question (plan step R7a-2a).
+    # answers to one question (plan step R7a-2a).  The owner's civil day is
+    # read once for the same reason: the rule starts on it and the amount's
+    # price series opens on it, and two reads could straddle midnight.
     calendar = calendar_for(current_user.id)
+    today = display_today()
 
     # Determine transfer amount: user override or suggested default.
     if "amount" in data and data["amount"] is not None:
@@ -298,23 +303,22 @@ def create_contribution_transfer(account_id):
             transfer_amount = _DEFAULT_SUGGESTED_AMOUNT
 
     # State the every-period cadence (one occurrence per paycheck), starting
-    # at the OPENING of the owner's schedule.  WRITTEN below, once the template
-    # that owns it exists (plan step R-F6).
+    # on the day it is created, which the cadence resolves to the paycheck
+    # containing it (ruling plan#4132).  WRITTEN below, once the template that
+    # owns it exists (plan step R-F6).
     #
-    # That is what this route has always done and it is stated rather than
-    # implied since plan step R7c-b made ``starts_on`` required: the spec
-    # carried no opening bound before, and an absent bound resolved to
-    # ``PayCalendar.opening_bound()`` -- so the contribution fans out across
-    # every pay period the owner has, INCLUDING ones that have already closed.
-    # The recurrence FORM defaults its own control to the current paycheck for
-    # exactly that reason (``create_form_default_starts_on``, which measured
-    # $10,000.00 of backdated rent).  Whether these two programmatic routes
-    # should do the same is plan ledger row **D34**, opened rather than decided
-    # here: changing it MOVES MONEY and is nothing this step was asked to do.
+    # It started at the OPENING of the owner's schedule until plan step R7f
+    # (finding plan#1388, ledger row D34): the value an absent opening bound
+    # resolved to before plan step R7c-b, so a new contribution wrote a row
+    # into every pay period the owner had, closed ones included, and the
+    # projection lands every unpaid past row on tomorrow.  The start is the
+    # recurrence form's own answer for a definition whose author states none
+    # (``new_definition_starts_on``), so a contribution made here starts
+    # where the same transfer made through the form starts.
     contribution_cadence = RecurrenceSpec(
         user_id=current_user.id,
         unit=RecurrenceUnitEnum.PERIOD,
-        starts_on=calendar.opening_bound(),
+        starts_on=new_definition_starts_on(today),
     )
 
     # Create transfer template via the shared builder (a contribution gets
@@ -338,7 +342,7 @@ def create_contribution_transfer(account_id):
     # recomputes it, so from creation on it behaves as a price the owner
     # accepted.
     template_amount_service.set_amount(
-        template, transfer_amount, effective_on=display_today(),
+        template, transfer_amount, effective_on=today,
     )
 
     namedup_redirect = flush_template_or_namedup_redirect(

@@ -24,6 +24,12 @@ three questions the two template forms render a control for:
   the described stop the row DISPLAYS when it is locked because the app
   derives it.
 
+**One answer here is read by doors with no form**, and it stays here because
+the create form is where it was first ruled and measured:
+:func:`new_definition_starts_on`, what a new definition starts on when its
+author states no start, which the investment page's recurring contribution and
+a new salary profile's paycheck start their rules on too (ruling plan#4132).
+
 **Each bound's row carries its own lock, since plan step R7d-f.**  Both rows
 lock on ONE identity -- the definition's bounds are the loan's
 (:func:`~app.routes._recurrence_form_refusals.bounds_are_the_loans`): it is
@@ -279,13 +285,39 @@ class RecurrenceFormState:
     starts_on_max: date = EFFECTIVE_DATE_MAX
 
 
-def create_form_default_starts_on() -> date:
-    """Return the "Starts on" date a CREATE form opens with.
+def new_definition_starts_on(created_on: date) -> date:
+    """Return the first occurrence of a definition created on *created_on* with no start stated.
 
-    **TODAY, on the app's own civil clock**, and it is TOTAL -- which is what
-    plan step R7c-b needed of it.  ``starts_on`` is the rule's first occurrence
-    and the column is ``NOT NULL``, so a create form has to open on a real date
-    rather than on an empty box the user might leave empty.
+    **The day it is created** (ruling plan#4132), and it is TOTAL -- which is
+    what plan step R7c-b needed of it.  ``starts_on`` is the rule's first
+    occurrence and the column is ``NOT NULL``, so every door that creates a
+    recurring transaction or transfer definition needs a real date for it
+    rather than an empty value.  These doors ask, and this is the one answer
+    they share:
+
+    * a CREATE form's "Starts on" box opens on it
+      (:func:`create_form_recurrence_state`), as does an edit form's for a
+      definition that does not repeat yet (:func:`edit_form_starts_on`);
+    * the two create routes that author a rule with NO form -- the investment
+      page's recurring contribution
+      (``investment.create_contribution_transfer``) and a new salary profile's
+      paycheck (``salary.profiles._paycheck_template``) -- start their rule on
+      it, so a definition one of them makes starts where the same definition
+      made through the form starts.  They seated theirs at the schedule's
+      OPENING payday until plan step R7f, the value an absent opening bound
+      resolved to before R7c-b, and so wrote a row into every pay period the
+      owner had, closed ones included (finding plan#1388, ledger row **D34**).
+
+    **The caller reads the day**, not this function: each create route reads
+    the owner's civil day once and dates everything the request writes from
+    it -- the rule's start here, and beside it a contribution's price series or
+    a salary profile's first pay entry -- so one request cannot answer "today"
+    twice.  The policy is still stated once, here, rather than as a bare
+    ``starts_on=today`` at each door, two spellings that would agree only until
+    one of them changed.  A payroll line is not one of these doors: a blank
+    start there means the owner's opening payday (ruling **R-SAL30**,
+    ``payroll_line_cadence.first_occurrence``), because its rule writes no rows
+    of its own and only selects which paychecks it prices.
 
     **Defaulting it at all is a money fix**, and the measurement is worth
     keeping (adversarial review of plan step R7b-4).  The control this replaced
@@ -308,12 +340,20 @@ def create_form_default_starts_on() -> date:
     It also removes the ``None`` the payday version had to answer for an owner
     whose schedule does not cover today.  That state left the box empty, which
     is now a submission the schema refuses -- so a user in it could not create a
-    recurring definition at all.
+    recurring definition at all.  The two create routes' opening payday was
+    ``date | None`` for the same reason, its ``None`` reaching
+    :class:`~app.services.recurrence.RecurrenceSpec`'s "states no starts_on"
+    refusal, a sentence written for a form; this answers a date for every day.
+
+    Args:
+        created_on: The owner's civil day the definition is created on
+            (:func:`app.utils.dates.display_today`, read once by the caller).
 
     Returns:
-        The app's civil today (:func:`app.utils.dates.display_today`).
+        *created_on*: a pay-period cadence's ``resolve`` normalises it onto the
+        paycheck that hosts it, a calendar-space cadence fires on it.
     """
-    return display_today()
+    return created_on
 
 
 def create_form_recurrence_state() -> RecurrenceFormState:
@@ -321,7 +361,7 @@ def create_form_recurrence_state() -> RecurrenceFormState:
 
     No cadence selected, neither bound locked, the unbounded CLOSING shape,
     and a "Starts on" row that is DEFAULTED rather than empty -- see
-    :func:`create_form_default_starts_on` for why that difference is a money
+    :func:`new_definition_starts_on` for why that difference is a money
     decision rather than a convenience.  Nothing is resolved here because
     there is no definition yet to resolve: a create form takes no read pass,
     and the loan-destination locks it applies as the user picks an account
@@ -340,7 +380,7 @@ def create_form_recurrence_state() -> RecurrenceFormState:
         picker=picker_model(authorable_cadences()),
         selected_cadence=None,
         selected_start=RecurrenceStart(
-            starts_on=create_form_default_starts_on(),
+            starts_on=new_definition_starts_on(display_today()),
         ),
         selected_end=RecurrenceEnd(selected=NEVER_ENDS),
     )
@@ -502,7 +542,7 @@ def edit_form_starts_on(template: Any, *, locked: bool) -> RecurrenceStart:
         The stored :class:`RecurrenceStart`, or the CREATE default when the
         definition has no rule -- a template that does not repeat opens its
         "Starts on" row the way a create form does, for the same reason
-        :func:`create_form_default_starts_on` gives.
+        :func:`new_definition_starts_on` gives.
     """
     rule = template.recurrence_rule
     if rule is None:
@@ -511,7 +551,9 @@ def edit_form_starts_on(template: Any, *, locked: bool) -> RecurrenceStart:
         # alone.  The script shows the control the moment a cadence that fires
         # on a day of the month is picked.  Never locked: a definition with no
         # rule is nobody's standing payment.
-        return RecurrenceStart(starts_on=create_form_default_starts_on())
+        return RecurrenceStart(
+            starts_on=new_definition_starts_on(display_today()),
+        )
     # ``modelled_unit`` rather than a raising reader: this function's whole
     # contract is that it cannot fail on a rule the cadence controls could not
     # display (see the docstring), and a ``ref`` id the enum does not name is
@@ -662,10 +704,10 @@ __all__ = [
     "RecurrenceEnd",
     "RecurrenceFormState",
     "RecurrenceStart",
-    "create_form_default_starts_on",
     "create_form_recurrence_state",
     "edit_form_cadence",
     "edit_form_end",
     "edit_form_recurrence_state",
     "edit_form_starts_on",
+    "new_definition_starts_on",
 ]

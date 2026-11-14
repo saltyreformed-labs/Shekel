@@ -7,7 +7,8 @@ from flask import Response
 from app.enums import RecurrenceUnitEnum
 from app.extensions import db
 from app.services.recurrence import RecurrenceSpec
-from app.routes._recurrence_form_render import create_form_default_starts_on
+from app.routes._recurrence_form_render import new_definition_starts_on
+from app.utils.dates import display_today
 from tests._test_helpers import derived_span, validated_cadence
 from tests.test_routes._recurrence_submission import submission_from
 
@@ -135,7 +136,7 @@ class TestBuildRecurrenceRuleFromForm:
 
             assert isinstance(result, RecurrenceSpec)
             assert not isinstance(result, Response)
-            assert result.starts_on == create_form_default_starts_on()
+            assert result.starts_on == new_definition_starts_on(display_today())
             assert data == {}
             db.session.rollback()
 

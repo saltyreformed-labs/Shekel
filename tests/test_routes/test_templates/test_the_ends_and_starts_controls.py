@@ -509,7 +509,7 @@ class TestACreateDoesNotBackfillClosedPayPeriods:
         that for a MONTH or YEAR cadence.  Neither can backdate -- today is
         inside the current pay period, so the earliest row either produces is
         this one -- which is what the class as a whole is about.  See
-        ``_recurrence_form_render.create_form_default_starts_on``.
+        ``_recurrence_form_render.new_definition_starts_on``.
         """
         with app.app_context():
             resp = auth_client.get("/templates/new")

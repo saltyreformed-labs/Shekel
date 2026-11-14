@@ -79,8 +79,9 @@ def validated_cadence(
     # Pylint: ``import-outside-toplevel`` is the point, not an oversight.
     # pylint: disable=import-outside-toplevel
     from app.enums import PeriodPlacementEnum, RecurrenceUnitEnum
-    from app.routes._recurrence_form_render import create_form_default_starts_on
+    from app.routes._recurrence_form_render import new_definition_starts_on
     from app.services.recurrence import MonthReading
+    from app.utils.dates import display_today
 
     payload = {
         "recurrence_unit": (
@@ -95,7 +96,7 @@ def validated_cadence(
     if states_a_start:
         payload["starts_on"] = (
             starts_on if starts_on is not None
-            else create_form_default_starts_on()
+            else new_definition_starts_on(display_today())
         )
     if nominal_day is not None:
         payload["repeats_on"] = MonthReading(nominal_day=nominal_day)

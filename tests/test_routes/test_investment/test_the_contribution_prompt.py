@@ -8,6 +8,7 @@ from decimal import Decimal
 
 from app.models.transfer import Transfer
 from app.models.transfer_template import TransferTemplate
+from app.utils.dates import display_today
 from tests._test_helpers import transfer_amount
 from tests._test_helpers import create_account_of_type, create_loan_account
 
@@ -197,21 +198,21 @@ class TestContributionPrompt:
         # second fetch by id would re-assert what the line above says.
         assert tpl.recurrence_rule.transfer_template_id == tpl.id
 
-    def test_create_transfer_generates_a_transfer_in_every_period(
+    def test_create_transfer_generates_a_transfer_from_todays_paycheck_on(
         self, auth_client, seed_user, db, seed_periods_today,
     ):
-        """After creation: a live transfer INTO the account in every pay period.
+        """After creation: a transfer INTO the account in today's paycheck and each later one.
 
         The route fans its new definition out across the owner's pay periods
         (``generate_transfers_for_all_periods``), so the money it plans
-        arrives on the investment account as transfers whose to-side it is:
-        one in each period, each from the savings account the case posts
-        from, at the $269.23 it posts.  The source is a second account the
-        case creates, not the seeded checking, so the read tells the account
-        posted from the owner's checking.  It was chosen when the seed's owner
-        and its checking were both id 1, so a from-side written as the owner's
-        id read as checking and passed; since ruling R-BAL356 each non-ref
-        table's ids start in a range of their own, and the two differ.
+        arrives on the investment account as transfers whose to-side it is,
+        each from the savings account the case posts from, at the $269.23 it
+        posts.  The source is a second account the case creates, not the
+        seeded checking, so the read tells the account posted from the
+        owner's checking.  It was chosen when the seed's owner and its
+        checking were both id 1, so a from-side written as the owner's id read
+        as checking and passed; since ruling R-BAL356 each non-ref table's ids
+        start in a range of their own, and the two differ.
 
         **Re-expressed onto the TRANSFER at plan step balance:X-bi-6-4d-2**
         (ruling **R-BAL167** class 1).  It counted the live income SHADOW
@@ -220,20 +221,19 @@ class TestContributionPrompt:
         since that step (ruling **R-BAL258**), so none can be stored: the
         income side is the transfer's to-side, read off ``budget.transfers``.
 
-        **The fan-out's WINDOW is pinned as today's behaviour, not as a
-        ruling that it is right.**  The route starts its every-period cadence
-        at the opening of the owner's schedule (``PayCalendar.opening_bound``,
-        the first payday), so it writes into EVERY period the owner has,
-        closed ones included: all ten here, because ``seed_periods_today``
-        resets the owner's schedule to exactly those.  Whether it should
-        start at the current paycheck instead is open ledger row
-        **recurrence:D34**, and a change here MOVES MONEY: started at today
-        it wrote six of the ten (measured 2026-10-19), so the four earlier
-        periods' 4 x $269.23 = $1,076.92 of planned contributions went.  That
-        is the developer's decision, not a test edit (CLAUDE.md rule 5).  The
-        read is the sorted LIST of periods, not their number or their set: a
-        count says how many periods were written and not which, and a set
-        cannot see two transfers in one period.
+        **The fan-out STARTS at the paycheck containing today** (ruling
+        plan#4132, plan step R7f): the rule's first occurrence is the day it is
+        created, the recurrence form's own answer for a definition whose
+        author states none, and the cadence resolves it to that paycheck's
+        payday.  ``seed_periods_today`` puts today in the fifth of its ten
+        periods, so the route writes six of the ten and none of the four that
+        ended before today.  Until R7f the rule started at the schedule's
+        opening and wrote all ten, closed ones included: 4 x $269.23 =
+        $1,076.92 of planned contributions in paychecks already paid, which
+        the projection landed on tomorrow.  The read is the sorted LIST of
+        periods, not their number or their set: a count says how many periods
+        were written and not which, and a set cannot see two transfers in one
+        period.
         """
         acct = _create_investment_account(
             seed_user, db.session, type_name="Roth IRA",
@@ -259,28 +259,37 @@ class TestContributionPrompt:
             },
         )
 
+        # The paycheck containing the app's civil today: the last one whose
+        # payday is on or before it (the fixture's fifth, by construction).
+        todays = [
+            period for period in seed_periods_today
+            if period.start_date <= display_today()
+        ][-1]
+        from_today_on = [
+            period.id for period in seed_periods_today
+            if period.start_date >= todays.start_date
+        ]
+        assert len(from_today_on) == 6, (
+            "seed_periods_today puts today in the fifth of ten periods"
+        )
         template = (
             db.session.query(TransferTemplate)
             .filter_by(to_account_id=acct.id, user_id=seed_user["user"].id)
             .one()
         )
+        assert template.recurrence_rule.starts_on == todays.start_date
         written = (
             db.session.query(Transfer)
             .filter(Transfer.transfer_template_id == template.id)
             .all()
         )
-        assert sorted(xfer.pay_period_id for xfer in written) == sorted(
-            period.id for period in seed_periods_today
-        ), (
+        assert sorted(xfer.pay_period_id for xfer in written) == from_today_on, (
             "the contribution route wrote into pay periods "
             f"{sorted(xfer.pay_period_id for xfer in written)}; it writes one "
-            "transfer into every period of the owner's schedule from its first "
-            "payday on, closed ones included "
-            f"({sorted(period.id for period in seed_periods_today)}).  Where "
-            "that window STARTS is open ledger row recurrence:D34: a changed "
-            "start MOVES MONEY and is the developer's decision, not a test "
-            "edit (CLAUDE.md rule 5).  A period missing or doubled at or after "
-            "the start is a cadence or generation regression, not that row"
+            "transfer into the paycheck containing today and each later one "
+            f"({from_today_on}), none into a period that ended before today "
+            "(ruling plan#4132).  A period missing or doubled from today on is "
+            "a cadence or generation regression"
         )
         assert {
             (

@@ -6,6 +6,7 @@ the auto-linked income transaction template created with each profile.
 """
 
 import logging
+from datetime import date
 
 from flask import abort, flash, redirect, render_template, request, url_for
 from flask_login import current_user
@@ -49,6 +50,7 @@ from app.routes._commit_helpers import (
     handle_db_error,
     regenerate_commit_or_report,
 )
+from app.routes._recurrence_form_render import new_definition_starts_on
 from app.routes._redirect_target import RedirectTarget
 from app.routes.salary._bp import salary_bp
 from app.routes.salary._helpers import (
@@ -164,6 +166,7 @@ def _salary_category(user_id: int) -> Category:
 
 def _paycheck_template(
     data: dict, *, account_id: int, category_id: int, calendar,
+    created_on: date,
 ) -> TransactionTemplate:
     """Create and flush the every-paycheck template a salary profile files through.
 
@@ -171,11 +174,16 @@ def _paycheck_template(
     recurs every pay period by definition, so nothing chooses a cadence and
     nothing links the two afterwards.
 
-    **The rule starts at the OPENING of the owner's schedule.**  Stated rather
-    than implied since plan step R7c-b made ``starts_on`` required, and it is
-    the same value an absent opening bound resolved to before -- so a new
-    salary profile fans its paychecks across every pay period the owner has,
-    closed ones included.  Plan ledger row **D34** carries whether it should.
+    **The rule starts on the day the profile is created**, which the cadence
+    resolves to the paycheck containing it (ruling plan#4132): the recurrence
+    form's own answer for a definition whose author states no start
+    (:func:`~app.routes._recurrence_form_render.new_definition_starts_on`).
+    It started at the OPENING of the owner's schedule until plan step R7f
+    (finding plan#1388, ledger row **D34**), the value an absent opening bound
+    resolved to before plan step R7c-b, so a new profile wrote a paycheck into
+    every pay period the owner had, closed ones included: paychecks already
+    received, each landed by the projection on tomorrow as income still to
+    come.
 
     **The template states no price** (plan step X-bp, rulings R-IY and
     R-BAL16): the paycheck calculator prices each of its rows live, and a
@@ -198,7 +206,10 @@ def _paycheck_template(
             loan nor a credit card (the picker in :func:`create_profile`).
         category_id: This owner's ``Income: Salary`` category.
         calendar: The owner's :class:`~app.services.pay_calendar.PayCalendar`,
-            read for the schedule's opening payday.
+            the schedule the rule is resolved against.
+        created_on: The owner's civil day the profile is created on, read
+            once by :func:`create_profile` and the day its first pay entry is
+            checked against too.
 
     Returns:
         The flushed :class:`~app.models.transaction_template.TransactionTemplate`,
@@ -221,7 +232,7 @@ def _paycheck_template(
         RecurrenceSpec(
             user_id=current_user.id,
             unit=RecurrenceUnitEnum.PERIOD,
-            starts_on=calendar.opening_bound(),
+            starts_on=new_definition_starts_on(created_on),
         ),
         calendar,
         template,
@@ -290,10 +301,14 @@ def create_profile():
     # session (PendingRollbackError) rather than yield the id.
     user_id = current_user.id
 
-    # The template's opening bound, the first pay entry's payday check and the
+    # The template's rule, the first pay entry's payday check and the
     # generate pass all read the pass's own derivation of it (pay-calendar
     # plan step C2-f3c; plan step R7d-c-1 moved it onto the pass).
     calendar = ctx.calendar()
+    # The owner's civil day, read ONCE (ledger row SAL-572's rule): the first
+    # pay entry's payday is checked against it and the paycheck rule starts on
+    # it (ruling plan#4132), so the two cannot name different days.
+    today = display_today()
 
     try:
         # The job's pay periods from one stub's two dates (plan#3048, ruling
@@ -327,8 +342,7 @@ def create_profile():
         # The payday rule is the stub door's, and so is its "today": the
         # owner's civil day, as the stub route hands it (ruling R-SAL90).
         pay_list_service.start_pay_list(
-            profile, ctx, data["pay_amount"], data["pay_payday"],
-            display_today(),
+            profile, ctx, data["pay_amount"], data["pay_payday"], today,
         )
 
         template = _paycheck_template(
@@ -336,6 +350,7 @@ def create_profile():
             account_id=account.id,
             category_id=salary_category.id,
             calendar=calendar,
+            created_on=today,
         )
         profile.template = template
         db.session.flush()

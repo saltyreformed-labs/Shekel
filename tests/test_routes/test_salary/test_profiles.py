@@ -32,6 +32,7 @@ from tests._test_helpers import (
 
 from ._helpers import _create_profile, _create_other_user_profile, _respace_paydays
 from app.services.balance_at import BalanceContext
+from app.utils.dates import display_today
 from app.services.obligations_aggregator import todays_price
 
 
@@ -288,6 +289,56 @@ class TestProfileCreate:
             ]
             assert profile.template is not None
             assert profile.template.is_active is True
+
+    def test_create_profile_writes_paychecks_from_todays_on(
+        self, app, auth_client, seed_user, seed_periods,
+    ):
+        """The new profile's paychecks start at the paycheck containing today.
+
+        Today is frozen at 2026-03-20 (this package's conftest), inside the
+        paycheck of 2026-03-13 in ``seed_periods`` (paydays every 14 days from
+        2026-01-02 through 2026-05-08).  The paycheck rule starts on the day
+        the profile is created (ruling plan#4132), which the cadence resolves
+        to that payday, so the profile writes one paycheck into each of the
+        five periods from Mar 13 to May 8 and none into the five that ended
+        before today (Jan 2, Jan 16, Jan 30, Feb 13, Feb 27).  Until plan step
+        R7f the rule started at the schedule's opening and wrote all ten: five
+        paychecks already received, each landed by the projection on tomorrow
+        as income still to come.
+        """
+        with app.app_context():
+            assert display_today() == date(2026, 3, 20)
+            filing_status = db.session.query(FilingStatus).filter_by(name="single").one()
+
+            response = auth_client.post("/salary", data={
+                "name": "Day Job",
+                "pay_amount": "2884.62",  # $75,000.00 a year / 26
+                "pay_payday": "2026-03-13",  # today's paycheck's payday
+                **stub_period_on("2026-03-13"),
+                "filing_status_id": filing_status.id,
+                "state_code": "NC",
+            })
+            assert response.status_code == 302
+
+            profile = (
+                db.session.query(SalaryProfile)
+                .filter_by(user_id=seed_user["user"].id, name="Day Job")
+                .one()
+            )
+            assert profile.template.recurrence_rule.starts_on == date(2026, 3, 13)
+            written = (
+                db.session.query(Transaction)
+                .filter_by(template_id=profile.template_id, is_deleted=False)
+                .all()
+            )
+            assert sorted(
+                (row.occurs_on, row.account_id) for row in written
+            ) == [
+                (payday, seed_user["account"].id) for payday in (
+                    date(2026, 3, 13), date(2026, 3, 27), date(2026, 4, 10),
+                    date(2026, 4, 24), date(2026, 5, 8),
+                )
+            ]
 
     def test_create_profile_yearly_pay_follows_the_cadence(
         self, app, auth_client, seed_user, seed_periods, tax_law,

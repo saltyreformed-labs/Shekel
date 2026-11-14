@@ -119,7 +119,6 @@ def _due_day_objects(session):
 
 
 @pytest.mark.usefixtures("seed_periods")
-@pytest.mark.xdist_group("recurrence_rules_ddl")
 class TestTheDDL:
     """The revision's own DDL, run: restore, refuse, drop."""
 

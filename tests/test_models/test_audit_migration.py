@@ -5,30 +5,26 @@ Covers:
   * Idempotency of :func:`app.audit_infrastructure.apply_audit_infrastructure`.
   * Round-trip of apply + remove + apply that simulates ``flask db
     upgrade`` -> ``flask db downgrade`` -> ``flask db upgrade``.
-  * Provisioning of the ``shekel_app`` least-privilege role and the
-    GRANT block inside the migration -- exercised by creating the
-    role within the test, asserting the role can DML but not DDL,
-    then dropping it.
+  * The ``shekel_app`` least-privilege role and the GRANT block inside the
+    migration: the role is in the cluster from its start, and granted its
+    runtime posture in a test's own clone it can DML but not DDL.
   * The ``app.current_user_id`` session-variable capture path.
   * The trigger count the deploy's check asks for
     (``app.audit_infrastructure.require_audit_triggers``, entrypoint step 3).
 
-The tests lean on the ``shekel_user`` test role being a PostgreSQL
-superuser (which it is on this project's local dev/test config) so
-the role-provisioning paths can run without a separate fixture
-container.  Tests that need that capability assert it up front via
-``ROLE_PROVISIONING_AVAILABLE`` so a future hardened test
-environment skips them cleanly instead of failing.
+The role is the CLUSTER's, never a test's (plan#3636).
+``scripts/build_test_db_image.py`` creates it in the baked image before the
+template is built, as the entrypoint creates it before it migrates, so no test
+creates or drops it.  A test's grants to it live in that test's clone, which
+the next test's setup drops with them.  The tests reach the role by ``SET
+ROLE``, which the suite's connecting role may do as the image's superuser.
 """
 # pylint: disable=redefined-outer-name  -- pytest fixture pattern
 from __future__ import annotations
 
-import os
-import time
 from datetime import date
 from decimal import Decimal
 
-import psycopg
 import pytest
 from sqlalchemy.exc import ProgrammingError
 
@@ -52,140 +48,6 @@ from tests._test_helpers import (
     make_balanced_entry,
     one_off_row_of,
 )
-
-
-# Module-level xdist_group marker pins every test in this module to
-# a single pytest-xdist worker (under ``--dist=loadgroup``, set in
-# ``pytest.ini``).  Pinning is required because the cluster-scoped
-# ``shekel_app`` PostgreSQL role created by the
-# :func:`shekel_app_role` fixture cannot be safely concurrent with
-# tests in OTHER classes of this same file -- specifically
-# ``TestApplyIdempotent`` and ``TestRoundTrip`` invoke
-# :func:`apply_audit_infrastructure`, whose ``_GRANT_APP_ROLE_SQL``
-# block conditionally ``GRANT``s privileges to ``shekel_app`` WHEN
-# the role exists.  If those tests ran on a different worker while
-# ``TestLeastPrivilegeRole`` had the role alive, the GRANTs would
-# leak into the OTHER worker's per-session database; the
-# ``shekel_app_role`` fixture's teardown ``DROP OWNED BY`` only
-# affects its own database, so the cross-database grants would
-# block ``DROP ROLE`` with ``DependentObjectsStillExist`` errors.
-# Pinning the entire module sidesteps that race; other test files
-# continue to fan out across workers normally.
-pytestmark = pytest.mark.xdist_group("shekel_app_role")
-
-#: Where ``conftest`` connects to create and drop each worker's database,
-#: and therefore the one place every test process on this postmaster
-#: shares.  Same default and same environment variable, so the lock cannot
-#: end up in a different cluster from the databases it is guarding.
-_DEFAULT_ADMIN_URL = "postgresql:///postgres"
-
-
-#: The advisory-lock key that serialises the ``shekel_app`` role ACROSS
-#: PROCESSES.  Any 64-bit constant works; this one is arbitrary and stable.
-#:
-#: **``xdist_group`` above is not enough, and the gap is a whole class of
-#: shared state the project's isolation knobs could not reach** (measured
-#: 2026-08-22).  That marker pins this module to one worker WITHIN a run.  A
-#: PostgreSQL role is a CLUSTER object, so it is shared by every database on the
-#: postmaster -- and the per-checkout prefix that was how two checkouts isolated
-#: themselves renamed DATABASES.  Two suites running side by side therefore
-#: tore this role out from under each other whatever prefix they used.
-#:
-#: **Since ``balance:X-br-4`` the lock guards a state the SANCTIONED DOOR can no
-#: longer reach.**  ``scripts/test.sh`` gives every run a private cluster, so two
-#: suites no longer share a postmaster and the role is per-run by construction;
-#: CI runs one suite on its own throwaway service.  Only a bare ``pytest``
-#: against some shared cluster still reaches the hazard.
-#:
-#: **It is kept on COST, and the distinction matters because the same step
-#: DELETED a fence on the opposite reasoning.**  ``TEST_DB_PREFIX`` went
-#: precisely because only a bare ``pytest`` could still want it, so "a bare
-#: pytest could still hit this" cannot by itself be why the lock stays.  What
-#: separates them is price: the prefix cost a live environment read in three
-#: files that had to agree, while this lock is one advisory acquisition on a
-#: connection the fixture opens anyway, and it fails with a sentence naming the
-#: cause instead of a bare per-test timeout.  Deleting it is a reasonable
-#: follow-up; do not read its presence as evidence the hazard is live.
-#:
-#: Reproduced deterministically: two prefixed runs of this one module in
-#: parallel produce 2-4 setup ERRORS on each side, every one an
-#: ``@shekel_app_role`` fixture.  In a full-suite run it surfaces as a single
-#: unexplained ``ERROR`` that passes on re-run alone -- which reads exactly like
-#: a code regression and cost a session an hour.  It reproduces identically on
-#: commits either side of plan step X-az, so it is not that step's.
-#:
-#: **The role may not simply be renamed per process**, and that is why the lock
-#: is the fix rather than a suffix: ``app.posting_infrastructure`` names
-#: ``shekel_app`` as a LITERAL in the GRANT / REVOKE SQL the fixture itself runs
-#: (``apply_ledger_append_only_privileges``), so a renamed role would make the
-#: app's own posture SQL a silent no-op and every privilege assertion below
-#: would grade nothing.  The resource is cluster-scoped, so the mutex has to be.
-_ROLE_LOCK_KEY = 782_301_559_004_115
-
-
-def _take_the_role_lock(timeout_seconds: int = 30):
-    """Take the cross-process lock guarding the ``shekel_app`` role.
-
-    **On the ADMIN database, and that is the whole mechanism** (measured
-    2026-08-22, twice).  Two earlier shapes did not work and each was wrong in
-    an instructive way:
-
-    * a lock taken through ``db.session`` is lost at the fixture's first
-      ``commit()``, because a session-level advisory lock is held by a
-      CONNECTION and the session returns its connection to the pool there;
-    * a lock taken on the test's OWN database excludes nobody, because
-      **PostgreSQL advisory locks are namespaced per DATABASE**.  Two suites
-      sitting in differently-named databases on one postmaster -- which is what
-      the per-checkout prefix produced -- take the same key in two different
-      lock spaces and both win.
-
-    The role is a CLUSTER object, so the mutex has to live somewhere every
-    process on the postmaster shares.  ``TEST_ADMIN_DATABASE_URL`` is that
-    place -- it is the connection ``conftest`` already uses to create and drop
-    each worker's database, so it is guaranteed reachable wherever the suite
-    runs.  A dedicated connection held for the fixture's whole span makes the
-    create-use-drop sequence atomic; closing it releases the lock, so no unlock
-    statement can be skipped by an exception.
-
-    **It polls with a deadline rather than blocking**, so a peer that holds the
-    lock produces a sentence naming the cause instead of the suite's per-test
-    timeout naming nothing.
-
-    Args:
-        timeout_seconds: How long to wait before giving up.
-
-    Returns:
-        The open ``psycopg`` connection holding the lock.  The caller MUST
-        close it.
-
-    Raises:
-        RuntimeError: When another process on this postmaster still holds it.
-    """
-    connection = psycopg.connect(
-        os.environ.get("TEST_ADMIN_DATABASE_URL", _DEFAULT_ADMIN_URL),
-    )
-    connection.autocommit = True
-    deadline = time.monotonic() + timeout_seconds
-    while True:
-        with connection.cursor() as cursor:
-            cursor.execute(
-                "SELECT pg_try_advisory_lock(%s)", (_ROLE_LOCK_KEY,),
-            )
-            if cursor.fetchone()[0]:
-                return connection
-        if time.monotonic() >= deadline:
-            connection.close()
-            raise RuntimeError(
-                "another test process on this postmaster holds the "
-                "cluster-wide 'shekel_app' role. A PostgreSQL role is a "
-                "CLUSTER object, so naming the DATABASES apart cannot isolate "
-                "it and two suites on one postmaster drop it out from under "
-                "each other. ./scripts/test.sh gives every run a private "
-                "cluster, so reaching this means something shares a "
-                "postmaster with you -- a bare pytest, most likely. Wait for "
-                "the peer run to finish, or run this module alone."
-            )
-        time.sleep(0.2)
 
 
 # ---------------------------------------------------------------------------
@@ -226,15 +88,6 @@ def _audit_function_exists(session) -> bool:
         "    AND p.proname = 'audit_trigger_func'"
         ")"
     )).scalar()
-
-
-def _is_superuser(session) -> bool:
-    """Whether the connected role can run CREATE ROLE / GRANT."""
-    row = session.execute(db.text(
-        "SELECT rolsuper OR rolcreaterole AS can_provision "
-        "FROM pg_roles WHERE rolname = current_user"
-    )).first()
-    return bool(row.can_provision) if row else False
 
 
 @pytest.fixture
@@ -305,10 +158,9 @@ class TestRoundTrip:
     Mirrors ``flask db upgrade`` -> ``flask db downgrade`` ->
     ``flask db upgrade`` for the rebuild migration.  The test wraps
     its work in a try/finally that re-applies the infrastructure on
-    failure so a partial run does not leave subsequent tests without
-    triggers.  conftest's ``db`` fixture does not re-create the
-    audit infrastructure between tests (it is session-scoped) so the
-    cleanup matters.
+    failure.  No later test needs that: conftest's ``db`` fixture
+    gives every test its own clone of the template, so a partial run
+    leaves only its own clone without triggers.
     """
 
     def test_remove_drops_table_function_and_triggers(
@@ -456,42 +308,25 @@ class TestUserIdCapture:
 
 @pytest.fixture
 def shekel_app_role(db):
-    """Create + configure the ``shekel_app`` role for the duration of one test.
+    """Grant the cluster's ``shekel_app`` role its runtime posture in this test's clone.
 
-    Skips the test on a non-superuser test role.  Wraps creation in
-    a try/finally so the role drops even when the inner assertions
-    fail; matching ``DROP OWNED BY`` removes any per-test grants
-    that would otherwise survive across tests.
+    The role is the cluster's from its start (the module docstring), so this
+    neither creates nor drops it.  It gives the role, in this test's own
+    database, the grants ``scripts/init_db_role.sql`` gives it on every
+    container start on the schemas these tests exercise, and re-closes the
+    ledger through the shared SQL that file mirrors.  It copies those grants
+    rather than running the file, so it carries none of the file's
+    ``ALTER DEFAULT PRIVILEGES``; plan#3771 is the step that runs the file.
+    Nothing is revoked afterwards: the grants live in the clone, which the next
+    test's setup drops with them.
+
+    Returns:
+        The role's name, for ``SET ROLE`` and the privilege functions.
     """
-    if not _is_superuser(db.session):
-        pytest.skip(
-            "Test requires CREATEROLE/SUPERUSER on the test database "
-            "user.  Skipped automatically on hardened CI environments."
-        )
-
-    # CLUSTER-WIDE, so the mutex is too (see :data:`_ROLE_LOCK_KEY`).  Taken
-    # before the DROP below, which is the statement that takes a peer's role
-    # away mid-test, and released only after this fixture's own DROP.
-    lock_connection = _take_the_role_lock()
-
     role_name = "shekel_app"
-    password = "test-shekel-app-password"
-    db.session.execute(db.text(
-        f"DO $$ "
-        f"BEGIN "
-        f"  IF EXISTS (SELECT FROM pg_roles WHERE rolname = '{role_name}') THEN "
-        f"    EXECUTE format('DROP OWNED BY {role_name} CASCADE'); "
-        f"    EXECUTE 'DROP ROLE {role_name}'; "
-        f"  END IF; "
-        f"END$$"
-    ))
-    db.session.execute(db.text(
-        f"CREATE ROLE {role_name} WITH LOGIN PASSWORD '{password}'"
-    ))
-    # Mirror init_db_role.sql for the schemas the test exercises.
-    # tax DB or shekel_test DB -- the GRANT CONNECT must reference
-    # the live database name.  current_database() avoids hard-coding
-    # which DB the test container happens to be connected to.
+    # Mirror init_db_role.sql for the schemas the test exercises.  The GRANT
+    # CONNECT must name the live database; current_database() avoids
+    # hard-coding which clone this test is connected to.
     current_db = db.session.execute(
         db.text("SELECT current_database()")
     ).scalar()
@@ -529,52 +364,45 @@ def shekel_app_role(db):
         lambda statement: db.session.execute(db.text(statement))
     )
     db.session.commit()
+    return role_name
 
-    try:
-        yield role_name
-    finally:
-        db.session.rollback()
-        db.session.execute(db.text(
-            f"REVOKE ALL PRIVILEGES ON ALL TABLES IN SCHEMA "
-            f"auth, budget, salary, ref, system FROM {role_name}"
-        ))
-        db.session.execute(db.text(
-            f"REVOKE ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA "
-            f"auth, budget, salary, ref, system FROM {role_name}"
-        ))
-        db.session.execute(db.text(
-            f"REVOKE USAGE ON SCHEMA auth, budget, salary, ref, system "
-            f"FROM {role_name}"
-        ))
-        db.session.execute(db.text(
-            f'REVOKE CONNECT ON DATABASE "{current_db}" FROM {role_name}'
-        ))
-        db.session.execute(db.text(f"DROP OWNED BY {role_name} CASCADE"))
-        db.session.execute(db.text(f"DROP ROLE IF EXISTS {role_name}"))
-        db.session.commit()
-        # LAST, and after the commit: the lock is what makes the whole
-        # create-use-drop span atomic against another process, so releasing it
-        # before the role is actually gone would reopen the window it closes.
-        # Closing releases it, which is why there is no unlock statement to
-        # skip if anything above raises.
-        lock_connection.close()
+
+class TestTheRoleIsTheClustersFromItsStart:
+    """The baked cluster held ``shekel_app`` before its template was built (plan#3636).
+
+    Production creates the role at entrypoint step 2b, before step 3 migrates,
+    so every migration and re-applied grant there takes its role-present
+    branch.  The bake does the same, which is what this grades.
+    """
+
+    def test_a_fresh_clone_already_grants_the_audit_log_to_the_role(self, db):
+        """Before any fixture grants, the role holds the audit log's grants.
+
+        Only the role-present branch of ``_GRANT_APP_ROLE_SQL`` writes them,
+        and nothing runs it in a clone before a test starts, so a fresh clone
+        holding them was cloned from a template built while the role existed.
+        A role created after the template build leaves all four ``False``;
+        no role at all fails the query (``role "shekel_app" does not exist``).
+        """
+        row = db.session.execute(db.text(
+            "SELECT has_schema_privilege(:r, 'system', 'USAGE'), "
+            "  has_table_privilege(:r, 'system.audit_log', 'SELECT'), "
+            "  has_table_privilege(:r, 'system.audit_log', 'INSERT'), "
+            "  has_sequence_privilege(:r, 'system.audit_log_id_seq', 'USAGE')"
+        ), {"r": "shekel_app"}).one()
+        assert tuple(row) == (True, True, True, True)
 
 
 class TestLeastPrivilegeRole:
     """Verify the GRANT block inside the migration is correctly scoped.
 
-    The role tests exercise a separately-created ``shekel_app`` role
-    (the canonical role provisioned by ``scripts/init_db_role.sql``
-    in production) so the DML/DDL boundary asserted here matches the
-    runtime posture exactly.  ``SET ROLE`` switches the current
-    transaction's privilege check to the named role -- requires the
-    test runner to be either a superuser or a member of the role.
-
-    Cluster-level serialisation is handled at module scope via
-    ``pytestmark`` so this class and the sibling classes that call
-    :func:`apply_audit_infrastructure` are all pinned to the same
-    pytest-xdist worker.  See the module-level comment above
-    ``pytestmark`` for the full reasoning.
+    The role tests exercise the cluster's ``shekel_app`` role (the
+    canonical role ``scripts/init_db_role.sql`` provisions in
+    production), granted its runtime posture by :func:`shekel_app_role`,
+    so the DML/DDL boundary asserted here matches the runtime posture
+    exactly.  ``SET ROLE`` switches the current transaction's privilege
+    check to the named role -- requires the test runner to be either a
+    superuser or a member of the role.
     """
 
     def test_app_role_can_select_audit_log(
@@ -732,7 +560,7 @@ class TestLedgerAppendOnlyPrivileges:
     ``init_db_role.sql`` on every container start).
 
     These tests exercise the posture through the :func:`shekel_app_role`
-    fixture, which provisions the role exactly as ``init_db_role.sql`` does
+    fixture, which grants the role exactly as ``init_db_role.sql`` does
     (blanket DML grant, then the targeted ledger revoke) -- so what is
     asserted here is the runtime posture, not a test-local approximation.
     The two disposal tests are load-bearing: PostgreSQL executes referential

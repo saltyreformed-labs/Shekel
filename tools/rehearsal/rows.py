@@ -146,9 +146,9 @@ CENT = Decimal("0.01")
 NOT_COMPARED = (
     "not compared: the audit log's id and db_user, the schema (tables, columns, "
     "constraints, indexes), privileges (the dump is "
-    "restored without them and no shekel_app role exists, so the deploy's grants do nothing "
-    "and the rollback's boot connects as the owner, where production's app connects as "
-    "shekel_app), "
+    "restored without them, so the shekel_app role the image holds has no grant on its "
+    "tables but what the deploy itself makes, and the rollback's boot connects as the owner, "
+    "where production's app connects as shekel_app), "
     "sequences, entrypoint step 2 (the role), and the rows after a first page load (K1c); "
     f"and a stamp later than the line reads as {DEPLOY!r} whatever wrote it, so two such "
     "values a deploy wrote by anything but its own clock (now() + interval) read alike")

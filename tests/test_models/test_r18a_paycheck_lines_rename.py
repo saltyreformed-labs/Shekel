@@ -172,7 +172,6 @@ def _seed_line(seed_user, name="Dental", amount="40.00"):
     return line.id
 
 
-@pytest.mark.xdist_group("recurrence_rules_ddl")
 class TestHeadCarriesTheNewNamesOnly:
     """The template is at head: every artifact under its new name, none under the old."""
 
@@ -271,7 +270,6 @@ class TestHeadCarriesTheNewNamesOnly:
             )).scalar() == EXPECTED_TRIGGER_COUNT
 
 
-@pytest.mark.xdist_group("recurrence_rules_ddl")
 class TestTheRoundTrip:
     """Down restores every old name; up restores the whole catalogue; the row rides through."""
 

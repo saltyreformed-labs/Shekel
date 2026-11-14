@@ -1,4 +1,6 @@
-"""A loan's anchors on the worked-out read: the opening, each true-up, and the paycheck each files in."""
+"""A loan's anchors on the worked-out read: the opening, each true-up, and the paycheck each
+files in.
+"""
 
 from __future__ import annotations
 
@@ -203,7 +205,7 @@ class TestTheAnchorsBookTheOwedBalance:
           trueup (owed_before 250000, the origination balance carried to the
             trueup date): own 250000 - 100000 = +150000.00.
         Own net -250000 + 150000 = -100000.00 -- exactly -(the $100,000 the
-        user verified), the opening + trueup reproducing the resolver's anchor.
+        user verified), the opening + trueup reproducing the latest assertion.
         """
         with app.app_context():
             scenario_id = seed_user["scenario"].id
@@ -242,18 +244,21 @@ class TestTheAnchorsBookTheOwedBalance:
                 loan, scenario_id, PostingSourceEnum.LOAN_TRUEUP,
             ) == []
 
-    def test_opening_payments_trueup_reproduce_resolver_balance(
+    def test_opening_payments_trueup_net_to_the_hand_worked_balance(
         self, app, db, seed_user, seed_periods,
     ):
-        """Opening + payment splits + true-up net to -(resolver balance).
+        """Opening + payment splits + true-up net to -(the hand-worked balance).
 
         Three post-trueup $1,000 payments split to principal 500.00 + 502.50 +
         505.01 = 1507.51 (the running-balance walk from the $100,000 trueup),
-        so the resolver's balance is 100000 - 1507.51 = 98492.49.  With the
-        opening (-250000) and true-up (+150000) added, the loan's own net is
-        (1507.51 payment nets) - 100000 = -98492.49 -- exactly -(the resolver
-        balance), proving the from-origination sum of lines reproduces the
-        resolver on a trued-up loan.
+        so the loan owes 100000 - 1507.51 = 98492.49.  With the opening
+        (-250000) and true-up (+150000) added, the loan's own net is
+        (1507.51 payment nets) - 100000 = -98492.49 -- exactly -(that
+        balance), the from-origination sum of lines landing on it on a
+        trued-up loan.  *It was
+        ``test_opening_payments_trueup_reproduce_resolver_balance`` until plan
+        task plan#3736, and never read the resolver, which has carried no
+        balance since plan step D2a.*
         """
         with app.app_context():
             scenario_id = seed_user["scenario"].id
@@ -328,11 +333,12 @@ class TestTheAnchorsBookTheOwedBalance:
         (period 1, due 2026-02-01 at payment_day=1) is split on the $250,000
         origination balance BEFORE the 2026-02-01 trueup resets to $100,000:
         interest round(250000 * 0.005) = 1250.00 lands in the interest line, but
-        its principal is wiped by the reset -- the reader ends at the verified
-        $100,000, exactly as the resolver (which does not replay P1).  A SWAPPED
-        tie-break (reset first) would instead give interest 500.00 and a balance of
-        99500.00, so this pins the ordering the whole trued-up-balance design rests
-        on (no other fixture places a due date on an anchor date).
+        its principal is wiped by the reset -- the loan's own line ends at the
+        verified $100,000.  A SWAPPED tie-break (reset first) would instead give
+        interest 500.00 and a balance of 99500.00, so this pins the ordering the
+        whole trued-up-balance design rests on, on the loan's lines; the confirmed
+        view's rows have theirs pinned by ``test_the_row_economics.py``'s
+        ``test_trueup_dated_on_a_due_date_applies_after_that_days_payment``.
         """
         with app.app_context():
             scenario_id = seed_user["scenario"].id

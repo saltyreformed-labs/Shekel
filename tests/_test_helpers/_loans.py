@@ -60,10 +60,11 @@ def insert_origination_rate(loan_params, interest_rate):
         ``db.session.add()``'d but not committed.  The caller's existing
         ``db.session.commit()`` carries the row into the same transaction.
     """
-    # pylint: disable=import-outside-toplevel  -- avoid module-load
-    # circular deps via models package; tests/_test_helpers loads
-    # early enough that an unconditional top-level import would
-    # snowball into ref_cache / Flask app bootstrapping.
+    # Pylint: ``import-outside-toplevel`` -- avoid module-load circular deps
+    # via the models package; tests/_test_helpers loads early enough that an
+    # unconditional top-level import would snowball into ref_cache / Flask
+    # app bootstrapping.
+    # pylint: disable=import-outside-toplevel
     from app.extensions import db
     from app.models.loan_features import RateHistory
 
@@ -83,13 +84,17 @@ def insert_trueup_event(loan_params, anchor_balance, anchor_date=None):
     Mirrors the production balance-trueup path
     (:func:`app.services.loan_anchor_service.apply_loan_anchor_true_up`,
     E-18 / Commit 16): the operator asserts a new dated balance and every
-    loan surface walks the loan from this latest event.  Under the
-    contractual-schedule balance model, a cash overpayment does NOT
-    auto-reduce the balance, so a fixture that needs a loan in a known
-    state -- in particular paid off (``anchor_balance`` of
-    ``Decimal("0.00")``) -- records it as the explicit operator action
-    it now is: a balance true-up, exactly as the user does after making
-    an extra or lump-sum payment.
+    loan surface walks the loan from this latest event.  A fixture that
+    needs a loan in a known state -- in particular paid off
+    (``anchor_balance`` of ``Decimal("0.00")``) -- states it with this
+    assertion rather than settling the payments that would reach it.  An
+    extra or lump-sum payment needs none: the walk splits a payment's actual
+    cash, interest and escrow first and the rest principal up to what is
+    owed, so the fold books the excess (``test_the_row_economics.py``'s
+    ``test_extra_payment_row_shows_the_actual_split_and_extra``).  *It said
+    that "under the contractual-schedule balance model" a cash overpayment
+    did not reduce the balance and a true-up recorded it, until plan task
+    plan#3736 measured the fold booking it.*
 
     Like production, the event row is the whole of the act:
     ``apply_loan_anchor_true_up`` appends it
@@ -112,8 +117,9 @@ def insert_trueup_event(loan_params, anchor_balance, anchor_date=None):
     Returns:
         The newly added :class:`LoanAnchorEvent`, flushed and not committed.
     """
-    # pylint: disable=import-outside-toplevel  -- same circular-dep
-    # avoidance as insert_origination_rate above.
+    # Pylint: ``import-outside-toplevel`` -- same circular-dep avoidance as
+    # insert_origination_rate above.
+    # pylint: disable=import-outside-toplevel
     from datetime import timedelta
     from app import ref_cache
     from app.enums import LoanAnchorSourceEnum
@@ -165,8 +171,9 @@ def insert_tracking_start_event(loan_params, anchor_balance, anchor_date):
     Returns:
         The newly added :class:`LoanAnchorEvent`, flushed and not committed.
     """
-    # pylint: disable=import-outside-toplevel  -- same circular-dep
-    # avoidance as insert_trueup_event above.
+    # Pylint: ``import-outside-toplevel`` -- same circular-dep avoidance as
+    # insert_trueup_event above.
+    # pylint: disable=import-outside-toplevel
     from app import ref_cache
     from app.enums import LoanAnchorSourceEnum
     from app.extensions import db
@@ -291,9 +298,10 @@ def create_loan_account(
         ValueError: When exactly one of *tracked_balance* / *tracked_from* is
             given, or *tracked_from* is not after *origination_date*.
     """
-    # pylint: disable=import-outside-toplevel  -- same circular-dep
-    # avoidance as the loan helpers above; these pull the models/services
-    # package, which must not load at tests/_test_helpers import time.
+    # Pylint: ``import-outside-toplevel`` -- same circular-dep avoidance as
+    # the loan helpers above; these pull the models/services package, which
+    # must not load at tests/_test_helpers import time.
+    # pylint: disable=import-outside-toplevel
     from app import ref_cache
     from app.enums import AcctTypeEnum, InterestAccrualConventionEnum
     from app.models.loan_params import LoanParams
@@ -397,8 +405,9 @@ def loan_params_for(db_session, account_id):
         NoResultFound: If the account has no ``LoanParams`` (not a configured
             loan) -- a fixture bug, surfaced rather than papered over with None.
     """
-    # pylint: disable=import-outside-toplevel  -- same lazy-app-import
-    # convention every helper in this module follows.
+    # Pylint: ``import-outside-toplevel`` -- same lazy-app-import convention
+    # every helper in this module follows.
+    # pylint: disable=import-outside-toplevel
     from app.models.loan_params import LoanParams
 
     return db_session.query(LoanParams).filter_by(account_id=account_id).one()
@@ -433,8 +442,9 @@ def add_escrow_line(
         ``line`` relationship carries the parent line), so a caller can mutate
         ``annual_amount`` to exercise a live escrow change.
     """
-    # pylint: disable=import-outside-toplevel  -- same lazy-app-import
-    # convention every helper in this module follows.
+    # Pylint: ``import-outside-toplevel`` -- same lazy-app-import convention
+    # every helper in this module follows.
+    # pylint: disable=import-outside-toplevel
     from app.models.escrow_line import EscrowComponentVersion, EscrowLine
     from app.models.loan_params import LoanParams
 

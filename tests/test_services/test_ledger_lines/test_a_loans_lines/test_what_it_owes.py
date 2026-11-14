@@ -136,13 +136,17 @@ class TestPostedLoanBalanceSums:
     ):
         """An off-schedule extra payment lowers the read balance -- no true-up.
 
-        This is the arc's headline.  A $1,500 payment on the $100,000 balance
-        splits to interest round(100000 * 0.005) = 500.00 and principal
-        1500 - 500 = 1000.00, so the reader reports 100000 - 1000 = 99000.00.  The
-        resolver's contractual replay would book only the scheduled ~$500
-        principal and need a balance true-up to reconcile the extra $500; the
-        ledger captures the real principal from the actual cash, so the reader
-        already reflects it with no anchor edit.
+        A $1,500 payment on the $100,000 balance splits to interest
+        round(100000 * 0.005) = 500.00 and principal 1500 - 500 = 1000.00, so
+        the reader reports 100000 - 1000 = 99000.00: the $500 of cash above
+        the $1,000 payment of
+        ``test_reads_the_balance_after_a_single_confirmed_payment`` (99500.00)
+        reaches the balance in full, because the walk splits the actual cash,
+        and no anchor edit is needed.  *It was the arc's headline against the
+        resolver's contractual replay, which advanced one scheduled step per
+        payment and discarded the cash, so that an extra payment needed a
+        true-up, until plan step recurrence:R16-e deleted the replay (task
+        plan#3385).*
         """
         with app.app_context():
             scenario_id = seed_user["scenario"].id
@@ -157,17 +161,20 @@ class TestPostedLoanBalanceSums:
                 loan.id, scenario_id, _AS_OF,
             ) == Decimal("99000.00")
 
-    def test_running_balance_reproduces_the_resolver_balance(
+    def test_running_balance_reads_the_hand_worked_balance(
         self, app, db, seed_user, seed_periods,
     ):
-        """Three $1,000 payments read back the resolver's balance, 98492.49.
+        """Three $1,000 payments read back the hand-worked balance, 98492.49.
 
         The running-balance walk (interest 500.00 / 497.50 / 494.99 on the
         shrinking real balance; principal 500.00 / 502.50 / 505.01) leaves
-        100000 - 1507.51 = 98492.49 -- the resolver's confirmed balance
-        (``test_opening_payments_trueup_reproduce_resolver_balance`` proves the
-        equality against ``account_net``); the reader negates the same
-        linked net to the same figure.
+        100000 - 1507.51 = 98492.49.  ``test_its_anchors.py``'s
+        ``test_opening_payments_trueup_net_to_the_hand_worked_balance`` asserts
+        the same literal, negated, on the loan's own line net; this window
+        negates the net of the same lines, bounded by date.  *It was
+        ``test_running_balance_reproduces_the_resolver_balance`` until plan
+        task plan#3736, and never read the resolver, which has carried no
+        balance since plan step D2a.*
         """
         with app.app_context():
             scenario_id = seed_user["scenario"].id

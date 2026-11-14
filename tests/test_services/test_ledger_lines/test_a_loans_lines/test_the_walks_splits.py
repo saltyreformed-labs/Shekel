@@ -1,4 +1,6 @@
-"""``loan_ledger.compute_loan_payment_splits``: each payment's split, hand-computed, and the clock it never reads."""
+"""``loan_ledger.compute_loan_payment_splits``: each payment's split, hand-computed, and the
+clock it never reads.
+"""
 
 from __future__ import annotations
 
@@ -90,9 +92,10 @@ class TestComputeLoanPaymentSplits:
     ):
         """A $1,500 payment pays $1,000 principal -- the extra is captured.
 
-        Arithmetic: interest 500.00; principal = 1500 - 500 - 0 = 1000.00.  The
-        resolver's contractual replay would book only the scheduled principal
-        and need a true-up; the ledger captures the extra automatically.
+        Arithmetic: interest 500.00; principal = 1500 - 500 - 0 = 1000.00, the
+        extra captured with no true-up.  *The resolver's contractual replay
+        booked only the scheduled principal here and needed one, until plan
+        step recurrence:R16-e deleted it (task plan#3385).*
         """
         with app.app_context():
             loan = _make_loan(seed_user)
@@ -424,7 +427,7 @@ class TestComputeLoanPaymentSplits:
             )
             assert splits == []
 
-    def test_no_loan_params_returns_empty(self, app, db, seed_user):
+    def test_no_loan_params_returns_empty(self, app, seed_user):
         """An account with no LoanParams is not yet resolvable -- no splits."""
         with app.app_context():
             checking = seed_user["account"]  # a plain Checking, no LoanParams
@@ -565,4 +568,3 @@ class TestWalkReadsNoClock:
             freeze_today(monkeypatch, date(2026, 5, 7))
 
             assert account_net(_db.session, loan.id, scenario_id) == linked_after_first
-

@@ -17,6 +17,12 @@ own value object -- an expectation computed with ``PayCadence`` would move with
 a derivation bug instead of catching it.  Real ORM templates run against the
 test DB so the relationship-driven attribute access and ``ref_cache`` lookups
 are exercised end to end.
+
+``app.services.recurrence._reading`` is imported as a MODULE, so the cases
+that patch the read door (``_reading.resolve``,
+``_reading.occurrence_placements``) replace the names its own functions look
+up when they run.  Patching a name a test imports would leave the composition
+calling the real one.
 """
 
 import logging
@@ -65,9 +71,6 @@ from app.services.recurrence import (
     recurrence_spec,
 )
 from app.services.recurrence import rule_occurrences
-# Imported as a MODULE so the firing controls below patch the names the
-# read door resolves at CALL time.  Patching this file's own imported
-# names would leave the composition calling the real ones.
 from app.services.recurrence import _reading
 from app.services.recurrence import compute_due_date
 
@@ -1301,9 +1304,10 @@ class TestAnAbsentCadenceIsRefused:
     refused a calendar built with ``cadence_days=None``.  The first rewrite
     made it assert that such a calendar cannot be BUILT and that
     ``calendar_for`` refuses -- two claims that touch this module not at all,
-    already graded in ``test_pay_calendar_derivation.py`` and
-    ``test_pay_calendar_loader.py``, sitting in a file about ``recurring_view``
-    inside a class named for a property of it.  A duplicate in the wrong file
+    already graded by ``TestTheCadenceIsRequired`` in
+    ``test_pay_calendar_derivation/test_what_the_derivation_refuses.py`` and
+    by ``test_pay_calendar_loader.py``, sitting in a file about
+    ``recurring_view`` inside a class named for a property of it.  A duplicate in the wrong file
     is a test that goes stale where nobody looks for it.
 
     **No coverage was lost.**  The extra subject that case carried -- a

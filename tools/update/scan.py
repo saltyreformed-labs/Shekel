@@ -25,14 +25,18 @@ commit the image was built from is read from the scanner's own record of the fil
 2026-11-13 on production's image: the save, a 98 MB archive, in 0.8 s; the load in 2 s and
 the image's python's run in 2 s; and the scan, its database downloaded fresh, in 42 s.
 
-**What it saw** (rulings plan#3788, plan#3875, plan#3876).  Grype's JSON lists only what it
-matched, so an interpreter with no CVE leaves no trace there.  So the scanner's one run writes
-too its catalog of every package it read (:func:`catalogued`), and the image's own python
-reports its version, the file it runs from, its venv and its platform (:func:`reported`).
-:func:`seen` refuses the scan unless every package a match names is one the catalog lists, so
-the findings are of that catalog, and unless the catalog lists the interpreter at that version,
-found at that file: Grype finds the interpreter by its binary alone, and a scan that stopped
-finding it would read clean without having looked.  :func:`held` refuses it unless the Python
+**What it saw** (rulings plan#3788, plan#3875, plan#3876, plan#4063).  Grype's JSON lists only
+what it matched, so an interpreter with no CVE leaves no trace there.  So the scanner's one run
+writes too its catalog of every package it read (:func:`catalogued`), and the image's own python
+reports its version, the file it runs from, its venv and its platform, the Debian release its
+os-release names and dpkg's status file (:func:`reported`).  :func:`seen` refuses the scan
+unless every package a match names is one the catalog lists, so the findings are of that
+catalog, and unless the catalog lists the interpreter at that version, found at that file:
+Grype finds the interpreter by its binary alone, and a scan that stopped finding it would read
+clean without having looked.  :func:`seen_debian` refuses it unless Grype names that release
+and the catalog's Debian packages are those dpkg lists as installed exactly, each at its
+installed version: a scan that stopped recognizing the release would match none of Debian's
+records and read clean too.  :func:`held` refuses it unless the Python
 packages the catalog lists in that venv are the lock's set for the image exactly, each at its
 locked version (ruling plan#3877): the set the developer's uv works out (:func:`locked`) from
 the lock at the commit the image was built from, for the groups that commit's Dockerfile
@@ -87,8 +91,9 @@ from pathlib import Path
 from scripts import private_cluster
 from tools.ci.gitcmd import MAIN, git, tracking
 from tools.update.app import marker
-from tools.update._scan_data import NotAScan, _listable, _value, parsed
-from tools.update.scan_seen import REPORT, Catalogued, Interpreter, catalogued, reported, seen
+from tools.update._scan_data import NotAScan, _apart, _listable, _value, parsed
+from tools.update.scan_seen import (REPORT, Catalogued, Interpreter, Reported, catalogued,
+                                    reported, seen, seen_debian)
 
 #: Grype's ratings, lowest first, as it reads each, ignoring case: ``ParseSeverity``, which reads
 #: any other spelling as unknown (``grype/vulnerability/severity.go``, read 2026-11-13 at
@@ -452,14 +457,11 @@ def held(catalog: Sequence[Catalogued], venv: str, lock: frozenset[tuple[str, st
                                  f"catalog lists in {venv}"))
         for item in catalog if item.kind == "python"
         and any(path.startswith(f"{venv}/") for path in item.paths))
-    said = [f"{heading}: {', '.join(f'{name} {version}' for name, version in sorted(packages))}"
-            for heading, packages in (("missing from it, as the lock holds them", lock - found),
-                                      ("in it, but not in the lock's set", found - lock))
-            if packages]
-    if said:
+    if said := _apart(lock, found, "missing from it, as the lock holds them",
+                      "in it, but not in the lock's set"):
         raise NotAScan(f"Grype's catalog of the venv {venv} is not the lock's set for the image, "
                        "so the scan did not see every locked package at its locked version: "
-                       + "; ".join(said))
+                       + said)
 
 
 def locked(answer: bytes) -> frozenset[tuple[str, str]]:
@@ -722,7 +724,7 @@ def _probed(docker: Docker, daemon: str, run: Sequence[str], added: Mapping[str,
 
 
 def _read(root: Path, docker: Docker, scanner: str,
-          image: str) -> tuple[Interpreter, bytes, tuple[Catalogued, ...]]:
+          image: str) -> tuple[Reported, bytes, tuple[Catalogued, ...]]:
     """What the scan reads of ``image``, production's, on ``scanner``, the rootless daemon, from
     the checkout at ``root``: the image saved off production's daemon to a file of the scan's
     own; the image's own python run there (:func:`_probed`), its report; and the file scanned
@@ -756,7 +758,7 @@ def _read(root: Path, docker: Docker, scanner: str,
         run = [*compose, "run", "--rm", "--no-TTY"]
         failure: Exception | None = None
         try:
-            interpreter = reported(_probed(docker, scanner, run, added))
+            report = reported(_probed(docker, scanner, run, added))
             answer = docker(scanner, [*run, "scan"], added, SCAN_SECONDS)
         except (ScanFailed, NotAScan, OSError) as error:
             failure = error
@@ -772,7 +774,7 @@ def _read(root: Path, docker: Docker, scanner: str,
             # with the next run's (each measured 2026-11-13, compose 5.7.1).
             _undone(lambda: docker(scanner, [*compose, "down"], added, DOCKER_SECONDS),
                     f"the scanner's compose project on {scanner} was not taken down", failure)
-        return interpreter, answer, catalogued(written.read_bytes())
+        return report, answer, catalogued(written.read_bytes())
 
 
 def _stopped(signum: int, _frame: object) -> None:
@@ -791,18 +793,19 @@ def scanned(root: Path, docker: Docker = _docker, uv: Uv = _uv) -> Scanned:
     first paragraphs): the rootless daemon asked first, so a scan it would refuse reads nothing
     of production; then production's container's image read, by its digest, and saved, probed
     and scanned (:func:`_read`); then judged, and refused unless it saw what the image runs
-    (:func:`seen`) and every package the lock installs there, at its locked version
-    (:func:`held`), the lock's set worked out by ``uv`` (:func:`_locks`).  SIGTERM, while it
-    runs, is an exit (:func:`_stopped`); the action before it is restored as it returns.
+    (:func:`seen`), the Debian release and packages it runs (:func:`seen_debian`) and every
+    package the lock installs there, at its locked version (:func:`held`), the lock's set worked
+    out by ``uv`` (:func:`_locks`).  SIGTERM, while it runs, is an exit (:func:`_stopped`); the
+    action before it is restored as it returns.
 
     Raises:
         SystemExit: SIGTERM stopped it, once each removal it owes ran.
         ScanFailed: the scan could not run (:class:`ScanFailed`).
         NotAScan: the scanner's answer is no scan, names no commit, or saw not what the image
-            runs, or its catalog, the image's python's report, uv's tree or the Dockerfile's
-            ``uv sync`` is not as written (:func:`judged`, :func:`revision`,
-            :func:`catalogued`, :func:`reported`, :func:`seen`, :func:`told`, :func:`chosen`,
-            :func:`locked`, :func:`held`).
+            runs, or its catalog, the image's python's report, its dpkg status file, uv's tree
+            or the Dockerfile's ``uv sync`` is not as written (:func:`judged`,
+            :func:`revision`, :func:`catalogued`, :func:`reported`, :func:`seen`,
+            :func:`seen_debian`, :func:`told`, :func:`chosen`, :func:`locked`, :func:`held`).
         GitError: git cannot read main's deploy script, or a file of the commit the image was
             built from.
         OSError: as making the files or running docker or uv raises it.
@@ -816,12 +819,13 @@ def scanned(root: Path, docker: Docker = _docker, uv: Uv = _uv) -> Scanned:
         if not _DIGEST.fullmatch(image):
             raise ScanFailed(f"production's container {name} runs {image!r}, which is no image "
                              "digest")
-        interpreter, answer, catalog = _read(root, docker, scanner, image)
+        report, answer, catalog = _read(root, docker, scanner, image)
         scan = parsed(answer)
         found = judged(scan)
-        seen(scan, catalog, interpreter)
+        seen(scan, catalog, report.interpreter)
+        seen_debian(scan, catalog, report.release)
         commit = revision(scan)
-        held(catalog, interpreter.prefix, _locks(root, commit, interpreter, uv))
+        held(catalog, report.interpreter.prefix, _locks(root, commit, report.interpreter, uv))
         return Scanned(image, commit, tuple(found))
     finally:
         signal.signal(signal.SIGTERM, before)

@@ -29,7 +29,7 @@ import pytest
 from scripts import private_cluster
 from tools.ci.arcs import REPO
 from tools.ci.gitcmd import GitError, git
-from tools.update import scan
+from tools.update import scan, scan_seen
 from tools.update.app import marker, markers
 
 #: The trimmed copy of a real scan.
@@ -38,6 +38,9 @@ RECORDED = Path(__file__).resolve().parent / "recorded" / "scan.json"
 CATALOGUED = RECORDED.with_name("catalog.json")
 #: The trimmed copy of a real ``uv tree``, the lock's set for the image (ruling plan#3877).
 TREE = RECORDED.with_name("tree.json")
+#: Real copies of an image's os-release and of its dpkg status file, trimmed to the stanzas of
+#: the four Debian packages the recorded catalog lists (``test_scan_debian.py``).
+RELEASED, STATUS = RECORDED.with_name("os-release"), RECORDED.with_name("status")
 #: The one match of the recorded scan that counts: the interpreter's CRITICAL CVE.
 _CRITICAL = scan.Counted("CVE-2026-1999903", "binary", "python", "3.14.8",
                          ("3.11.18", "3.12.16", "3.13.18", "3.14.10", "3.15.2", "3.16.0"),
@@ -416,10 +419,12 @@ def _labelled(labels: object) -> dict:
 
 #: What the stand-in's image's python reports of itself: the interpreter the recorded catalog
 #: lists (``recorded/catalog.json``), at its version and file, the venv it lists the lock's
-#: packages in, and production's platform.
+#: packages in, production's platform, the release the recorded scan names and the recorded
+#: status file, which lists installed the Debian packages the catalog lists.
 _REPORTED = {"version": "3.14.8", "executable": "/usr/local/bin/python3.14", "prefix": "/opt/venv",
              "implementation": "cpython", "platform": "linux", "machine": "x86_64",
-             "libc": "glibc"}
+             "libc": "glibc", "release": {"ID": "debian", "VERSION_ID": "13"},
+             "dpkg": STATUS.read_text(encoding="utf-8")}
 #: What the stand-in's uv is run with: the lock's set for that image and the groups the
 #: Dockerfile installs (ruling plan#3884).
 _TREE = ["tree", "--frozen", "--offline", "--python", "cpython", "--python-platform",
@@ -566,14 +571,27 @@ def test_a_scan_reads_production_on_its_daemon_and_scans_the_saved_file_on_the_r
     assert uv.directory is not None and not uv.directory.exists()
 
 
+#: The probe's script, its fourth argument, run with its reads of os-release, which
+#: ``platform`` opens first at ``/etc/os-release``, and of the file its third names, dpkg's
+#: status file, pointed at the copies its first and second name, as this host need hold neither.
+_POINTED = ("import builtins, sys; real = builtins.open; "
+            "paths = {'/etc/os-release': sys.argv[1], sys.argv[3]: sys.argv[2]}; "
+            "builtins.open = lambda file, *more, **named: real(paths.get(file, file), *more, "
+            "**named); exec(sys.argv[4])")
+
+
 def test_the_probe_s_script_reports_this_interpreter_as_the_scan_reads_it():
-    """The script the probe runs, run by this interpreter: its report reads as this one's
-    version, the real path of the file it runs from, its venv and its platform."""
-    done = subprocess.run([sys.executable, "-I", "-c", scan.REPORT], capture_output=True,
-                          check=True)
-    assert scan.reported(done.stdout) == scan.Interpreter(
+    """The script the probe runs, run by this interpreter, its reads of the image's files
+    pointed at the recorded copies: its report reads as this one's version, the real path of
+    the file it runs from, its venv and its platform, and holds the copies' release and text."""
+    done = subprocess.run([sys.executable, "-I", "-c", _POINTED, str(RELEASED), str(STATUS),
+                           scan_seen.STATUS, scan.REPORT], capture_output=True, check=True)
+    assert scan.reported(done.stdout).interpreter == scan.Interpreter(
         ".".join(map(str, sys.version_info[:3])), os.path.realpath(sys.executable), sys.prefix,
         sys.implementation.name, sys.platform, platform.machine(), platform.libc_ver()[0])
+    written = json.loads(done.stdout)
+    assert (written["release"], written["dpkg"]) == ({"ID": "debian", "VERSION_ID": "13"},
+                                                     STATUS.read_text(encoding="utf-8"))
 
 
 @pytest.mark.usefixtures("rootless")
@@ -865,7 +883,7 @@ case "$1" in
   image) echo 'Deleted: {image}' ;;
   compose)
     case "$7" in
-      probe) echo '{report}' ;;
+      probe) cat "$SCAN_TEST_REPORT" ;;
       scan) cat "$SCAN_TEST_CATALOG" > "$SCAN_CATALOG"; cat "$SCAN_TEST_ANSWER" ;;
     esac ;;
 esac
@@ -878,11 +896,13 @@ def _on_path(tmp_path: Path, monkeypatch, inspect: str) -> Path:
     scanner writes the recorded catalog and answers a labelled copy of the recorded scan."""
     binary = tmp_path / "bin" / "docker"
     binary.parent.mkdir()
-    binary.write_text(_FAKE_DOCKER.replace("{inspect}", inspect).replace("{image}", _IMAGE)
-                      .replace("{report}", json.dumps(_REPORTED)), encoding="utf-8")
+    binary.write_text(_FAKE_DOCKER.replace("{inspect}", inspect).replace("{image}", _IMAGE),
+                      encoding="utf-8")
     binary.chmod(0o755)
-    answer = tmp_path / "answer.json"
+    answer, report = tmp_path / "answer.json", tmp_path / "report.json"
     answer.write_text(json.dumps(_labelled({scan.REVISION: _BUILT_FROM})), encoding="utf-8")
+    report.write_text(json.dumps(_REPORTED), encoding="utf-8")
+    monkeypatch.setenv("SCAN_TEST_REPORT", str(report))
     monkeypatch.setenv("PATH", f"{binary.parent}{os.pathsep}{os.environ['PATH']}")
     monkeypatch.setenv("SCAN_TEST_ANSWER", str(answer))
     monkeypatch.setenv("SCAN_TEST_CATALOG", str(CATALOGUED))

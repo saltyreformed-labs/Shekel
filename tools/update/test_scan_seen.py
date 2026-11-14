@@ -25,10 +25,12 @@ CATALOGUED = RECORDED.with_name("catalog.json")
 #: Linux with glibc on x86_64).
 _RUNS = scan.Interpreter("3.14.8", "/usr/local/bin/python3.14", "/opt/venv", "cpython", "linux",
                          "x86_64", "glibc")
-#: That report as the probe's script writes it.
+#: That report as the probe's script writes it, with the release the recorded scan names and
+#: the recorded status file (``test_scan_debian.py``).
 _REPORT = {"version": "3.14.8", "executable": "/usr/local/bin/python3.14", "prefix": "/opt/venv",
            "implementation": "cpython", "platform": "linux", "machine": "x86_64",
-           "libc": "glibc"}
+           "libc": "glibc", "release": {"ID": "debian", "VERSION_ID": "13"},
+           "dpkg": RECORDED.with_name("status").read_text(encoding="utf-8")}
 
 
 def _catalog() -> dict:
@@ -167,13 +169,14 @@ def test_a_catalog_that_is_no_json_is_refused():
 
 def test_the_image_s_report_reads_as_its_version_file_venv_and_platform():
     """The report the probe's script writes, one line of JSON."""
-    assert scan.reported(json.dumps(_REPORT).encode() + b"\n") == _RUNS
+    assert scan.reported(json.dumps(_REPORT).encode() + b"\n").interpreter == _RUNS
 
 
 def test_a_c_library_the_image_names_none_of_is_read_as_an_empty_one():
     """``platform.libc_ver`` names none where it finds none (a musl image's, say), which is
     read as it stands, for the platform uv is told to refuse (``test_scan_lock.py``)."""
-    assert scan.reported(json.dumps({**_REPORT, "libc": ""}).encode()) == replace(_RUNS, libc="")
+    assert scan.reported(json.dumps({**_REPORT, "libc": ""}).encode()).interpreter == replace(
+        _RUNS, libc="")
 
 
 def _without(key: str) -> bytes:

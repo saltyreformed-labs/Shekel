@@ -1,7 +1,8 @@
 """The daily image scan's inputs read as data (:mod:`tools.update.scan`, its paragraph
 read as data): the refusal of one not as Grype, the image's python or uv writes it
-(:class:`NotAScan`), and the readers each part of the scan shares.  It imports the standard
-library alone (ruling plan#3825)."""
+(:class:`NotAScan`), the readers each part of the scan shares, and the one spelling of how two
+sets of packages differ (:func:`_apart`).  It imports the standard library alone (ruling
+plan#3825)."""
 from __future__ import annotations
 
 import json
@@ -18,10 +19,11 @@ class NotAScan(ValueError):
     """The scanner's answer is no scan as Grype writes one, read from a database missing a
     source the scan relies on or holding one captured too long before it, holds what a counted
     match cannot name, or names no commit the scanned image was built from; its catalog, the
-    image's python's report, ``uv tree``'s answer or the Dockerfile's ``uv sync`` is not as
-    written, or names a platform uv cannot be told; or the scan did not see what the image runs
-    (:func:`tools.update.scan_seen.seen`, :func:`tools.update.scan.held`); the message says what
-    and where."""
+    image's python's report, the dpkg status file it holds, ``uv tree``'s answer or the
+    Dockerfile's ``uv sync`` is not as written, or names a platform uv cannot be told; or the
+    scan did not see what the image runs (:func:`tools.update.scan_seen.seen`,
+    :func:`tools.update.scan_seen.seen_debian`, :func:`tools.update.scan.held`); the message
+    says what and where."""
 
 
 def _value(node: object, key: str, kind: type, where: str):
@@ -38,6 +40,17 @@ def _listable(value: object, where: str) -> str:
     if not isinstance(value, str) or not _LISTABLE.fullmatch(value):
         raise NotAScan(f"{where} is {value!r}, which cannot be listed")
     return value
+
+
+def _apart(wanted: frozenset[tuple[str, str]], found: frozenset[tuple[str, str]],
+           missing: str, extra: str) -> str:
+    """How ``found`` differs from ``wanted``, two sets of packages by name and version: each
+    package of ``wanted`` it lacks, after ``missing``, then each it holds that ``wanted`` does
+    not, after ``extra``, each heading's packages sorted and the two joined by ``; ``; empty
+    where the two are one set."""
+    return "; ".join(
+        f"{heading}: {', '.join(f'{name} {version}' for name, version in sorted(packages))}"
+        for heading, packages in ((missing, wanted - found), (extra, found - wanted)) if packages)
 
 
 def parsed(answer: bytes) -> object:

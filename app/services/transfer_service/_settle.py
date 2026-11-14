@@ -214,8 +214,9 @@ def settle(
             the reconcile tick's statement day on the ``asserted`` basis, the
             matcher's bank day on ``observed``, each for the side on the
             statement's account.  A settle entering the band admits every
-            stated day.  Empty derives both: each side borrows the owner's
-            today, as a Paid press does.
+            stated day.  Empty derives both: each side borrows the writer's
+            fallback day (``_status._fallback_day``: the owner's today, or a
+            due date), as a Paid press does.
         press: The save's press, or ``None`` when its door named nothing:
             a ``$0.00`` figure takes each leg's kept payment off
             the books, and the act asks (ruling **R-CC127**;

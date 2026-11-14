@@ -675,7 +675,8 @@ def settle_transfer(
             each side the caller knows -- the reconcile tick's statement day
             on ``asserted``, the matcher's bank day on ``observed``, for the
             leg on the statement's account; the other side borrows it.  Empty
-            on a Paid press: both sides borrow the owner's today.
+            on a Paid press: both sides borrow the writer's fallback day
+            (``_status._fallback_day``: the owner's today, or a due date).
         press: The save's press, or ``None`` when its door named nothing: a
             ``$0.00`` settle takes each leg's kept payment off
             (:func:`update_transfer`).

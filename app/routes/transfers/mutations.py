@@ -474,8 +474,10 @@ def mark_done(xfer_id):
         #
         # NO explicit settle day, and its absence is finding N-178's fix.
         # The day is still recorded -- with none stated, both sides borrow the
-        # user's today (ruling **R-BAL142**; F-048 / C-22's requirement, met
-        # by ``transfer_service`` rather than by this call site).
+        # service's fallback day, the user's today or a payment repeating on a
+        # card's due dates its due date (ruling **R-BAL142**, ruling
+        # plan#2889; F-048 / C-22's requirement, met by ``transfer_service``
+        # rather than by this call site).
         # Passing one HERE defeated that: the explicit-day branch wrote both
         # shadows verbatim AFTER the seam had preserved, and ``done -> done``
         # is a legal transition this route does not gate -- so a replayed or

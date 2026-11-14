@@ -150,9 +150,12 @@ class SettledDayBasisEnum(enum.Enum):
                      item's own date so (plan#2958): the day is the owner's,
                      and the link names the statement that showed it.
         borrowed  -- NO evidence of its own: one side of a TRANSFER whose day
-                     is its other side's, or the day Paid was pressed when
-                     neither side has one (plan step ``balance:X-bi-6-4c-3``,
-                     rulings **R-BAL142** and **R-BAL143**).  A guess, which
+                     is its other side's, or when neither side has one the
+                     writer's fallback day, the day Paid was pressed or a
+                     scheduled card payment's due date
+                     (``transfer_service._status._fallback_day``; plan step
+                     ``balance:X-bi-6-4c-3``, rulings **R-BAL142**,
+                     **R-BAL143** and **plan#2889**).  A guess, which
                      follows its lender when the lender's day is corrected.
 
     **The partition is over EVIDENCE, which is what makes it exhaustive.**  A

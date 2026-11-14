@@ -64,6 +64,7 @@ from app.models.transfer import Transfer
 from app.services import status_seam
 from app.services.match_press import Press
 from app.services.planned_rows_books import reject_revert_below_the_books
+from app.services.recurrence import cadence_of, follows_card_due_dates
 from app.services.settle_day import recorded_settle_day
 from app.services.state_machine import verify_transition
 from app.services.transfer_legs import TransferLeg, side_legs, transfer_sides
@@ -124,20 +125,43 @@ def _resolved_days(
 def _fallback_day(transfer: Transfer) -> date:
     """Return the day a pair with no day on either side borrows.
 
-    The day Paid was pressed -- the owner's today -- for a pair entering the
-    band.  **A pair ALREADY settled with no day on either side is a ``$0.00``
-    close** (ruling **R-BAL90**: it stores no day), and a later figure
-    correction with no typed day dates it by the transfer's DUE DATE (ruling
-    **R-BAL169**, the rule ruling **R-BAL139** gives a ``$0.00`` loan
-    payment): the same answer whenever the correction is made -- **but never
-    a day after today** (ruling **R-BAL231**, amending R-BAL169: a transfer
-    already Paid whose due date is still ahead is dated today, where the
-    future day was refused with the advice to leave it Projected, which is
-    wrong for a transfer already Paid).  A transfer with no due date falls
-    back to today; a due date the account's books no longer reach is refused
-    by the arm's books grade, naming the day, so the owner types one.  Read
-    before the act writes the transfer's status, so "already settled" is the
-    status the act is leaving.
+    **The one derivation every door that states no day reaches** -- the
+    grid's Paid, which the popover's Paid, the keyboard and the palette post,
+    the phone's Mark Paid, the popover's Status dropdown -- for a pair
+    entering the band: the day Paid was pressed, the owner's today, save for
+    the two below, each its transfer's DUE DATE but **never a day after
+    today** (ruling R-EJ: a day ahead is refused):
+
+    * **A transfer repeating on each statement's due date** (task plan#4044,
+      ruling **plan#2889**: "Marking it Paid records the scheduled date by
+      default; a later real day goes under 'Money moved on', and a day after
+      the due date means interest").  The card company takes it on that day,
+      so a press after it does not move it: the $800.00 statement payment due
+      Jan 27, pressed Feb 2, is paid Jan 27 and the card owes nothing from
+      then; dated Feb 2, the card read it owed $800.00 for six more days.
+      Pressed before the date, it is today.  Decided under ruling **R-BAL207**,
+      revisitable: the card's worked-out scheduled payment and a fixed one set
+      up as a plain recurring transfer alike (:func:`_repeats_on_due_dates`),
+      while a payoff row each payday keeps the click day, being sent by hand.
+      No door shows the day before the press: the popover's day boxes render
+      for a settled transfer alone.
+    * **A pair ALREADY settled with no day on either side is a ``$0.00``
+      close** (ruling **R-BAL90**: it stores no day), and a later figure
+      correction with no typed day dates it by its due date (ruling
+      **R-BAL169**, the rule ruling **R-BAL139** gives a ``$0.00`` loan
+      payment): the same answer whenever the correction is made, today where
+      that date is still ahead (ruling **R-BAL231**, amending R-BAL169: the
+      future day was refused with the advice to leave it Projected, which is
+      wrong for a transfer already Paid).
+
+    A transfer with no due date falls back to today.  A due date the
+    account's books no longer reach is refused by the arm's books grade,
+    naming the day and the books' opening, so the owner restates the date or
+    the opening.  A repeating row's own dates start above its accounts' books
+    (ruling **R-PC85**); a date typed on a moved one has no such floor yet
+    (finding plan#3037), and Paid on it is refused so.  Read before the act
+    writes the transfer's status, so "already settled" is the status the act
+    is leaving.
 
     **It reads the due date the transfer HAS when the act begins.**  An act
     that moves a ``$0.00`` pair's due date AND corrects its figure would date
@@ -157,9 +181,38 @@ def _fallback_day(transfer: Transfer) -> date:
         The fallback day.
     """
     today = display_today()
-    if transfer.status_id in settled_status_ids() and transfer.due_date:
+    if transfer.due_date is not None and (
+        transfer.status_id in settled_status_ids()
+        or _repeats_on_due_dates(transfer)
+    ):
         return min(transfer.due_date, today)
     return today
+
+
+def _repeats_on_due_dates(transfer: Transfer) -> bool:
+    """Return whether *transfer*'s definition repeats on each statement's due date.
+
+    Asked of the stored rule's unit through the one statement of which unit
+    a card's terms date (``recurrence.follows_card_due_dates``).  A transfer
+    with no rule -- a one-time transfer, or a cleared cadence's survivor --
+    answers ``False``.
+
+    Args:
+        transfer: The transfer being written, its definition loaded or
+            loadable.
+
+    Returns:
+        ``True`` for a transfer repeating on its card's due dates.
+
+    Raises:
+        RecurrenceResolutionError: When the stored rule names a unit this
+            application does not model (``recurrence.cadence_of``).
+    """
+    if not transfer.recurs:
+        return False
+    return follows_card_due_dates(
+        cadence_of(transfer.template.recurrence_rule).unit,
+    )
 
 
 def reject_stated_days_without_settle(status_id: int, stated: PairDays) -> None:

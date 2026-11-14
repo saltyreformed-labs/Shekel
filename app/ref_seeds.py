@@ -320,7 +320,8 @@ _REF_TABLE_SEEDS = (
     # asserted a BALANCE for -- an UPPER BOUND on the true posting day, not a
     # point -- ``entered`` is the owner's own word with no bank document behind
     # it, and ``borrowed`` (plan step X-bi-6-4c-3) is a transfer side's day with
-    # no evidence of its own: its other side's, or the day Paid was pressed.
+    # no evidence of its own: its other side's, or the writer's fallback day
+    # (``transfer_service._status._fallback_day``).
     # Migration ``d3b8f5a1c7e2`` inline-seeds that fourth row the same way.
     # A row that carries no settle day carries no basis, so there is
     # deliberately no ``not_settled`` row here; each table's pairing CHECK is a

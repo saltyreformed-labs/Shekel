@@ -8,10 +8,12 @@ A side with evidence of its own -- the bank showed it (``observed``), a balance
 was asserted over it (``asserted``), or the owner typed it (``entered``) --
 keeps that day.  A side with none BORROWS its other side's day, so it follows
 when that day is corrected (``borrowed``); when neither side has one, both
-borrow the day Paid was pressed.
+borrow the writer's fallback day (``_status._fallback_day``): the day Paid was
+pressed, or for a transfer repeating on each statement's due date its due date
+(ruling plan#2889).
 
 This leaf is the whole derivation, and it is PURE: values in, values out, no
-session, no clock (the writer reads ``display_today()`` once and passes it).
+session, no clock (the writer derives its fallback day once and passes it).
 Three names carry the three rules, so each has ONE home:
 
 * :func:`~app.services.settle_day.is_evidence` -- whether a day is the side's
@@ -110,7 +112,8 @@ def borrowed_day(lender: SettleDay | None, fallback: date) -> SettleDay:
 
     **The ONE derivation of a borrowed day** (the REC-552 study's seam S6):
     the other side's day when that side has one of its own, else *fallback* --
-    the day the pair already shares, or the day Paid was pressed.  Every writer
+    the day the pair already shares, or the writer's fallback day
+    (``_status._fallback_day``).  Every writer
     that (re)derives a borrowed day reaches it through
     :func:`resolve_pair_days`, so a rule that later clamps a borrowed day (the
     study's loan-side answers) has one place to go.
@@ -130,22 +133,25 @@ def borrowed_day(lender: SettleDay | None, fallback: date) -> SettleDay:
 
 
 def pair_fallback_day(
-    recorded_expense_first: Iterable[SettleDay | None], today: date,
+    recorded_expense_first: Iterable[SettleDay | None], fallback: date,
 ) -> date:
     """Return the day a pair with no evidence on either side shares.
 
     The first day either side records, the expense side's before the income
-    side's, and otherwise *today*.  So a mark-paid borrows today, a re-derivation
-    never invents a day when either side records one, and two borrowed sides
-    share one day.  (The order put a twin still in the settled band before
-    one that had drifted out of it until plan step ``balance:X-bi-6-4d-2``:
-    a transfer has one status, so there is no drift left to order.)
+    side's, and otherwise *fallback*.  So a mark-paid borrows the writer's
+    fallback day, a re-derivation never invents a day when either side records
+    one, and two borrowed sides share one day.  (The order put a twin still in
+    the settled band before one that had drifted out of it until plan step
+    ``balance:X-bi-6-4d-2``: a transfer has one status, so there is no drift
+    left to order.)
 
     Args:
         recorded_expense_first: Each side's recorded day, expense then
             income.
-        today: The fallback when neither records one -- the writer's own
-            (``_status._fallback_day``).
+        fallback: The day when neither records one -- the writer's own
+            (``_status._fallback_day``: the day Paid was pressed, or a due
+            date), or the owner's today for the endpoint move, which reaches
+            it only when a side records a day.
 
     Returns:
         The day to share.
@@ -153,7 +159,7 @@ def pair_fallback_day(
     for recorded in recorded_expense_first:
         if recorded is not None:
             return recorded.day
-    return today
+    return fallback
 
 
 def stated_by_side(

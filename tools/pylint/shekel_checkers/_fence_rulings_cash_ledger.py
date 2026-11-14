@@ -154,6 +154,13 @@ CASH_LEDGER_NON_PRODUCERS = frozenset({
     # reads one relationship and answers a bool.
     "definition_cash",
     "is_loan_payment_definition",
+    # Their TRANSACTION twins (plan step pay_calendar:C9, task plan#3940):
+    # what an occurrence of a transaction template no row answers yet would
+    # resolve to, rule 2 or rule 3 by the arms a written row takes, and the
+    # salary refinement the row classifier and that estimate both ask.  A
+    # ROW amount and a bool, non-producers on the ground of the two above.
+    "transaction_definition_cash",
+    "is_paycheck_definition",
     # Rule 3's series arm, public for a reader pricing a DEFINITION on a day
     # rather than a row (plan step X-bp, ruling plan#2693: the Recurring and
     # savings pages price a definition as of the read pass's day).  One

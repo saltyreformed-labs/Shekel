@@ -192,10 +192,34 @@ def _rule_within_definition(txn) -> AmountRule:
         :attr:`AmountRule.SALARY` or :attr:`AmountRule.TEMPLATE`.
     """
     return (
-        AmountRule.SALARY
-        if txn.template is not None
-        and template_amount_service.is_salary_linked_template(txn.template)
+        AmountRule.SALARY if is_paycheck_definition(txn.template)
         else AmountRule.TEMPLATE
+    )
+
+
+def is_paycheck_definition(template) -> bool:
+    """Return whether *template* is a paycheck definition, priced by rule 2.
+
+    The template half of :func:`_rule_within_definition`, and the ONE
+    reading of the salary refinement (plan step ``pay_calendar:C9``, task
+    plan#3940), the twin of :func:`is_loan_payment_definition`: the row
+    classifier asks it of its template, and the balance seam's estimate asks
+    it of a definition whose row does not exist yet
+    (:func:`._definition_cash.transaction_definition_cash`), so the two
+    decide rule 2 the same way by construction.
+
+    Args:
+        template: A transaction template, or ``None`` for a row whose
+            definition was deleted in this session (see
+            :func:`_rule_within_definition`).
+
+    Returns:
+        ``True`` when an active salary profile drives the definition's
+        amounts.
+    """
+    return (
+        template is not None
+        and template_amount_service.is_salary_linked_template(template)
     )
 
 

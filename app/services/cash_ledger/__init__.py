@@ -47,6 +47,10 @@ payday and its destination -- and :mod:`._definition_cash` states both arms
 over those VALUES; :mod:`._amount_source` delegates a written row to them,
 and the balance seam's ESTIMATED loan tier prices an occurrence no row answers
 yet through the same two, so a row and its estimate cannot part.
+A transaction template's occurrence is priced there too (plan step
+``pay_calendar:C9``, task plan#3940): rule 2 on the saved or projected
+paycheck its row would live in, rule 3 on its due date, by the arms a written
+transaction takes.
 
 **The LOAN PRICING pair is in this package, and plan step X-au-g-2a is what
 put it there.**  Amount rule 4 -- a loan payment's transfer is worth what the
@@ -226,7 +230,13 @@ from ._amount_rule import (
     is_loan_payment_definition,
     transfer_amount_rule,
 )
-from ._definition_cash import DefinitionRow, definition_cash, stated_price
+from ._definition_cash import (
+    DefinitionRow,
+    TransactionDefinitionRow,
+    definition_cash,
+    stated_price,
+    transaction_definition_cash,
+)
 from ._amount_source import (
     amounts_by_key,
     resolve_amount,
@@ -300,6 +310,7 @@ __all__ = [
     "AmountBasis",
     "AmountRule",
     "DefinitionRow",
+    "TransactionDefinitionRow",
     "AnchorPoint",
     "LoanPricing",
     "governing_account_opening",
@@ -366,5 +377,6 @@ __all__ = [
     "stated_price",
     "statement_coverage",
     "sum_projected",
+    "transaction_definition_cash",
     "walk_cash_ledger",
 ]

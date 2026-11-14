@@ -778,7 +778,36 @@ class SalaryPricing:
         period = paychecks.calendar.period_by_id(pay_period_id)
         if period is None:
             return None
-        return self.paycheck_on(template_id, period).earnings.net_pay
+        return self.net_on(template_id, period)
+
+    def net_on(self, template_id: int, period) -> Decimal | None:
+        """Return the NET the profile driving *template_id* pays on *period*.
+
+        **The one net of a paycheck, its row written or not** (plan step
+        ``pay_calendar:C9``, task plan#3940): :meth:`net_for` ends here once
+        it has found a written row's saved period by id, and
+        :func:`salary_net_on` prices an occurrence no row answers yet here,
+        on the saved or projected period its row would live in.  So a
+        paycheck estimated past the last saved payday and the row a later
+        generate pass writes for it read one figure.
+
+        Args:
+            template_id: The recurring definition.
+            period: The :class:`~app.services.pay_calendar.DerivedPeriod` to
+                price, saved or projected.
+
+        Returns:
+            The paycheck's ``earnings.net_pay``, or ``None`` when no ACTIVE
+            profile in this scenario names that template.
+
+        Raises:
+            UnsupportedStateError: The profile is in a state the tax law does
+                not list (:meth:`paycheck_on`; plan step salary:X-at-3).
+        """
+        paycheck = self.paycheck_on(template_id, period)
+        if paycheck is None:
+            return None
+        return paycheck.earnings.net_pay
 
     def _profile_by_template(self) -> "dict[int, SalaryProfile]":
         """Return ``{template_id: profile}`` for this owner and scenario.
@@ -897,6 +926,63 @@ def salary_net_for(txn, pricing: SalaryPricing) -> Decimal | None:
         UnsupportedStateError: The profile is in a state the tax law does not
             list (:meth:`SalaryPricing.net_for`; plan step salary:X-at-3).
     """
-    if not txn.is_income or txn.template_id is None:
+    if not _states_a_net(txn.is_income, txn.template_id):
         return None
     return pricing.net_for(txn.template_id, txn.pay_period_id)
+
+
+def salary_net_on(
+    template_id: int, period, pricing: SalaryPricing, *, is_income: bool,
+) -> Decimal | None:
+    """Return what the salary profile pays for an occurrence no row answers yet.
+
+    Amount rule 2 for a paycheck generation has NOT written (plan step
+    ``pay_calendar:C9``, task plan#3940; ruling plan#3930, "priced the way
+    its real row would be"): :func:`salary_net_for` again, over the values
+    the row would carry instead of a row.  Both doors ask
+    :func:`_states_a_net` and end in :meth:`SalaryPricing.net_on`, so the
+    estimate and the row a later pass writes cannot part.  The one step
+    they do not share is how the period is found: a written row names a
+    saved period by id, and an occurrence is handed the saved or projected
+    period its row would live in, which no id can name past the horizon.
+
+    Args:
+        template_id: The recurring definition the row would be generated
+            from.
+        period: The :class:`~app.services.pay_calendar.DerivedPeriod` the
+            row would live in, saved or projected.
+        pricing: The read pass's :class:`SalaryPricing`.
+        is_income: Whether the row would be an income row: its definition's
+            type, which generation copies onto the row.
+
+    Returns:
+        The net pay for that period, or ``None`` when no active profile in
+        this scenario names the template, or when the row would not be
+        income.
+
+    Raises:
+        UnsupportedStateError: The profile is in a state the tax law does not
+            list (:meth:`SalaryPricing.net_on`; plan step salary:X-at-3).
+    """
+    if not _states_a_net(is_income, template_id):
+        return None
+    return pricing.net_on(template_id, period)
+
+
+def _states_a_net(is_income: bool, template_id: "int | None") -> bool:
+    """Return whether a salary profile can state this row's figure at all.
+
+    The test both salary doors ask first (:func:`salary_net_for`,
+    :func:`salary_net_on`), stated once.  A profile states a NET PAY, so an
+    expense row has no figure to find there (the template edit door refuses
+    turning a paycheck definition into an expense, finding N-253); a row
+    with no definition has no profile to ask.
+
+    Args:
+        is_income: Whether the row is, or would be, an income row.
+        template_id: Its definition, or ``None`` for a row with none.
+
+    Returns:
+        ``True`` when a profile may price it.
+    """
+    return is_income and template_id is not None

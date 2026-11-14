@@ -37,6 +37,16 @@ Rule 1 -- a figure the owner typed onto the row -- has no analogue for a row
 that does not exist, which is exactly why a written row's own figure always
 wins over the estimate once it is there.
 
+**A TRANSACTION template's occurrence is priced here too** (plan step
+``pay_calendar:C9``, task plan#3940; ruling plan#3930: past the last saved
+paycheck, money comes from the recurring items, priced as their rows would
+be).  :func:`transaction_definition_cash` takes the arms
+:func:`._amount_rule.amount_rule` decides between for a written transaction:
+rule 2, a paycheck, through the salary profile on the saved or projected
+period its row would live in (``income_service.salary_net_on``, the written
+row's door's twin), and rule 3, any other definition, through
+:func:`_stated_amount`.
+
 Boundary discipline: no Flask, no session of its own, no clock; every money
 value is :class:`~decimal.Decimal`.
 """
@@ -46,14 +56,21 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
+from typing import TYPE_CHECKING
 
+from app import ref_cache
+from app.enums import TxnTypeEnum
 from app.exceptions import AmountUnresolvable
 from app.services import template_amount_service
 from app.services.recurring_transfer_query import loan_payment_config
 from app.utils.money import round_money
 
 from ._amount_basis import AmountBasis
-from ._amount_rule import is_loan_payment_definition
+from ._amount_rule import is_loan_payment_definition, is_paycheck_definition
+
+if TYPE_CHECKING:  # pragma: no cover - typing only
+    from app.models.transaction_template import TransactionTemplate
+    from app.services.pay_calendar import DerivedPeriod
 
 
 @dataclass(frozen=True)
@@ -299,6 +316,126 @@ def definition_cash(
     return _stated_amount(row.template, row.due_date, subject)
 
 
+@dataclass(frozen=True)
+class TransactionDefinitionRow:
+    """The values a TRANSACTION generation has not written yet would carry that price it.
+
+    The transaction twin of :class:`DefinitionRow` (plan step
+    ``pay_calendar:C9``, task plan#3940), for an occurrence of a transaction
+    template that no row answers yet.  Rule 3 is a function of the
+    definition and the due date, rule 2 of the definition and the paycheck,
+    and these are the three.
+
+    **The paycheck is the PERIOD itself, not an id.**  A written row names a
+    saved ``budget.pay_periods`` row, which :meth:`~app.services
+    .income_service.SalaryPricing.net_for` looks up; past the last saved
+    payday the paycheck an occurrence lives in is projected and has no id,
+    and the pricer prices either (:meth:`~app.services.income_service
+    .SalaryPricing.net_on`).
+
+    **The row's TYPE is not a value here**, because it is not the row's to
+    choose: generation copies the definition's ``transaction_type_id`` onto
+    every row it writes (``recurrence_engine._amounts._derive_row_fields``),
+    so the type the row would carry is the definition's.
+
+    Attributes:
+        template: The recurring transaction definition.
+        due_date: The date the row would carry
+            (:func:`app.services.recurrence.compute_due_date`), the day rule 3
+            reads the definition's price series on.
+        period: The saved or projected paycheck the row would live in, the
+            one rule 2 prices.
+    """
+
+    template: TransactionTemplate
+    due_date: date
+    period: DerivedPeriod
+
+
+def transaction_definition_cash(
+    row: TransactionDefinitionRow, basis: AmountBasis, *, subject: str,
+) -> Decimal:
+    """Return what an occurrence of a transaction template no row answers would be worth.
+
+    **The estimate is the row's own rule** (plan step ``pay_calendar:C9``,
+    task plan#3940; ruling plan#3930: priced the way its real row would be),
+    the transaction twin of :func:`definition_cash`.  Which rule prices it is
+    decided the way :func:`._amount_rule.amount_rule` decides it for a
+    written row that declares its definition, by the one salary refinement
+    (:func:`._amount_rule.is_paycheck_definition`):
+
+    * **rule 2**, a paycheck: what the salary profile pays on the paycheck
+      the row would live in, saved or projected
+      (``income_service.salary_net_on``).  The written row's door,
+      ``income_service.salary_net_for``, asks the same income test and ends
+      in the same :meth:`~app.services.income_service.SalaryPricing.net_on`;
+      it differs only in finding its saved period by id.
+    * **rule 3**, any other definition: its stated series on the row's due
+      date (:func:`_stated_amount`, the arm the written row's
+      ``_template_answer`` takes).
+
+    So an occurrence estimated past the last saved paycheck and the row a
+    later generate pass writes for it cannot part.  Rule 1, the owner's own
+    figure, has no analogue for a row that does not exist.
+
+    **It is the row's AMOUNT**, and for a projected occurrence that is also
+    what it is worth: a row not written holds no purchase, so an envelope's
+    reservation (``_amounts._entry_aware_amount``) is its whole amount.
+
+    **The scenario is the basis's.**  A written row is refused against
+    another scenario's basis from its own ``scenario_id`` column
+    (``resolve_transaction_amount``); an occurrence has no such column, so
+    nothing here can check it, and the caller hands the basis of the read
+    pass that walked the definition.
+
+    Args:
+        row: The occurrence as the :class:`TransactionDefinitionRow` its row
+            would be.
+        basis: The amount basis of the read pass whose scenario the
+            occurrence was walked in; rule 2 reads its ``salary``
+            derivation.
+        subject: What is being priced, for the refusal messages: the
+            template and the occurrence, since there is no row to name.
+
+    Returns:
+        The occurrence's amount, exactly what the generated row would resolve
+        to.
+
+    Raises:
+        AmountUnresolvable: A paycheck no active profile in this scenario
+            prices, or one whose definition is not income; see
+            :func:`_stated_amount` for rule 3's.
+        UnsupportedStateError: The paycheck's profile is in a state the tax
+            law does not list (plan step salary:X-at-3), from the pricer.
+    """
+    if not is_paycheck_definition(row.template):
+        return _stated_amount(row.template, row.due_date, subject)
+    # Pylint: ``import-outside-toplevel`` -- the paycheck / tax stack stays off
+    # this module's load path (finding N-267), as at
+    # ``_amount_source._salary_answer``.
+    # pylint: disable=import-outside-toplevel
+    from app.services.income_service import salary_net_on
+    net = salary_net_on(
+        row.template.id, row.period, basis.salary,
+        is_income=(
+            row.template.transaction_type_id
+            == ref_cache.txn_type_id(TxnTypeEnum.INCOME)
+        ),
+    )
+    if net is None:
+        raise AmountUnresolvable(
+            f"{subject} is a paycheck of template {row.template.id}, priced "
+            "by a salary profile, and the profile had no answer for the "
+            f"paycheck of {row.period.start_date.isoformat()}. Either no "
+            "ACTIVE profile in this scenario names the template (one in "
+            "another scenario makes it salary-linked but cannot price this "
+            "scenario's paycheck), or the template is not an income "
+            "definition. Its price series is dormant while it is "
+            "salary-linked, so there is no stated figure to fall back to."
+        )
+    return net
+
+
 def stated_price(template, on_date: date, *, subject: str) -> Decimal:
     """Rule 3 for a reader above this package: what *template* states for ``on_date``.
 
@@ -329,4 +466,10 @@ def stated_price(template, on_date: date, *, subject: str) -> Decimal:
     return _stated_amount(template, on_date, subject)
 
 
-__all__ = ["DefinitionRow", "definition_cash", "stated_price"]
+__all__ = [
+    "DefinitionRow",
+    "TransactionDefinitionRow",
+    "definition_cash",
+    "stated_price",
+    "transaction_definition_cash",
+]

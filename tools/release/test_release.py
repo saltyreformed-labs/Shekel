@@ -3,6 +3,7 @@ exit status, and ``census``'s listing.  The dev database listing is injected, so
 calls docker."""
 from __future__ import annotations
 
+import subprocess
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -11,8 +12,22 @@ from tools.ci.scratch import run
 from tools.quill.door import FakeTracker, GitHubError
 from tools.release import release
 from tools.release._census import COMPOSE, MANIFEST
+from tools.release._plan import Readers
+from tools.release._scans import READ
 from tools.release._updates import WORKFLOW
-from tools.release.conftest import MONEY, Runs, daily, lock, migration, monday, pull_request, ship
+from tools.release.conftest import (
+    MONEY,
+    Runs,
+    answering,
+    daily,
+    fresh,
+    lock,
+    migration,
+    monday,
+    pull_request,
+    scan_ended,
+    ship,
+)
 
 COMPOSED = ("services:\n  db:\n    container_name: dev-db\n    environment:\n"
             "      POSTGRES_USER: someone\n      POSTGRES_DB: budget\n")
@@ -31,10 +46,13 @@ def _two_movers(repo):
 
 
 def test_plan_prints_what_refuses_the_release_and_the_cut_to_offer_and_exits_1(repo, capsys):
-    """The report names each carried step, the rule, the cut offered, and the verdict."""
+    """The report names each carried step, the image scan it read, the rule, the cut
+    offered, and the verdict."""
     base, first, second, tracker = _two_movers(repo)
+    ran = (datetime.now(UTC) - timedelta(hours=1)).replace(second=0, microsecond=0)
     assert release.main(["plan", "--base", base, "--cut", second], root=repo.root,
-                        connect=lambda: tracker) == 1
+                        readers=Readers(connect=lambda: tracker,
+                                        journal=answering(scan_ended(ran)))) == 1
     out = capsys.readouterr().out.splitlines()
     assert out[0] == f"release plan: base {base}"
     assert out[1] == f"cut {second} 'Merge pull request'"
@@ -43,6 +61,7 @@ def test_plan_prints_what_refuses_the_release_and_the_cut_to_offer_and_exits_1(r
     assert out[4].startswith("  plan#41  moves money: yes  (claimed at ")
     assert out[5:] == [
         "migrations (0):",
+        f"image scan: newest run ended {ran:%Y-%m-%d %H:%M} UTC, done",
         "REFUSED -- it carries 2 steps that move money (plan#40, plan#41); a release "
         "carries one at most",
         f"newest earlier cut that passes: {first} 'Merge pull request' (carries plan#40 "
@@ -55,7 +74,7 @@ def test_plan_exits_0_on_a_clean_release(repo, capsys):
     """One mover alone: clean, no offer printed."""
     base, first, _, tracker = _two_movers(repo)
     assert release.main(["plan", "--base", base, "--cut", first], root=repo.root,
-                        connect=lambda: tracker) == 0
+                        readers=Readers(connect=lambda: tracker, journal=fresh)) == 0
     assert capsys.readouterr().out.splitlines()[-1] == "verdict: clean (exit 0)"
 
 
@@ -67,7 +86,7 @@ def test_plan_prints_what_the_approval_question_must_name_and_exits_3(repo, caps
         "migrations/versions/a1_first.py": migration("a1", None),
         "migrations/versions/b2_second.py": migration("b2", "a1")})
     assert release.main(["plan", "--base", base, "--cut", cut], root=repo.root,
-                        connect=FakeTracker) == 3
+                        readers=Readers(connect=FakeTracker, journal=fresh)) == 3
     assert capsys.readouterr().out.splitlines()[-3:] == [
         "APPROVAL MUST NAME -- it adds 2 migrations: a1 (migrations/versions/a1_first.py), "
         "b2 (migrations/versions/b2_second.py)",
@@ -80,7 +99,7 @@ def test_plan_exits_2_and_judges_nothing_on_a_name_that_names_nothing(repo, caps
     """A mistyped unrehearsed name is a stop, never a release read as rehearsed."""
     base, first, _, tracker = _two_movers(repo)
     assert release.main(["plan", "--base", base, "--cut", first, "--unrehearsed", "typo"],
-                        root=repo.root, connect=lambda: tracker) == 2
+                        root=repo.root, readers=Readers(connect=lambda: tracker)) == 2
     captured = capsys.readouterr()
     assert captured.out == ""
     assert captured.err.startswith("release plan: nothing was judged: unrehearsed typo")
@@ -90,7 +109,7 @@ def test_plan_exits_2_on_a_cut_git_does_not_have(repo, capsys):
     """An unknown commit is an error, never an empty release."""
     base, _, _, tracker = _two_movers(repo)
     assert release.main(["plan", "--base", base, "--cut", "0" * 40], root=repo.root,
-                        connect=lambda: tracker) == 2
+                        readers=Readers(connect=lambda: tracker)) == 2
     assert "nothing was judged" in capsys.readouterr().err
 
 
@@ -111,7 +130,8 @@ def test_plan_refuses_a_release_whose_monday_update_stopped_and_offers_no_cut(re
     runs = Runs(daily(2, datetime.now(UTC) - timedelta(days=1)),
                 monday(1, datetime.now(UTC) - timedelta(days=9)))
     assert release.main(["plan", "--base", base, "--cut", cut], root=repo.root,
-                        connect=lambda: tracker, actions=runs.actions) == 1
+                        readers=Readers(connect=lambda: tracker, actions=runs.actions,
+                                        journal=fresh)) == 1
     out = capsys.readouterr().out.splitlines()
     assert out[-2].startswith("REFUSED -- no Monday update published from main in the 8 days")
     assert out[-1] == "verdict: refused (exit 1)"
@@ -120,15 +140,18 @@ def test_plan_refuses_a_release_whose_monday_update_stopped_and_offers_no_cut(re
 
 def test_plan_names_when_the_monday_update_s_lock_was_refreshed(repo, capsys):
     """A Monday run's publish succeeded, its refresh started two days ago: that start and the
-    run's page are printed, and the release is clean."""
+    run's page are printed, then the image scan's newest run, and the release is clean."""
     base, cut, tracker = _one_mover_on_the_workflow(repo)
     started = (datetime.now(UTC) - timedelta(days=2)).replace(second=0, microsecond=0)
+    ran = (datetime.now(UTC) - timedelta(hours=1)).replace(second=0, microsecond=0)
     runs = Runs(daily(2, datetime.now(UTC) - timedelta(days=1)), monday(1, started))
     assert release.main(["plan", "--base", base, "--cut", cut], root=repo.root,
-                        connect=lambda: tracker, actions=runs.actions) == 0
-    assert capsys.readouterr().out.splitlines()[-2:] == [
+                        readers=Readers(connect=lambda: tracker, actions=runs.actions,
+                                        journal=answering(scan_ended(ran)))) == 0
+    assert capsys.readouterr().out.splitlines()[-3:] == [
         f"monday update: lock refreshed {started:%Y-%m-%d %H:%M} UTC, "
         "published by https://github.com/o/n/actions/runs/1",
+        f"image scan: newest run ended {ran:%Y-%m-%d %H:%M} UTC, done",
         "verdict: clean (exit 0)"]
 
 
@@ -144,11 +167,54 @@ def test_plan_exits_2_and_judges_nothing_when_the_runs_cannot_be_read(repo, caps
             raise GitHubError(404, f"{method} {path} -> 404 Not Found")
 
     assert release.main(["plan", "--base", base, "--cut", cut], root=repo.root,
-                        connect=lambda: tracker, actions=Refusing().actions) == 2
+                        readers=Readers(connect=lambda: tracker, actions=Refusing().actions)) == 2
     captured = capsys.readouterr()
     assert captured.out == ""
     assert captured.err.startswith("release plan: nothing was judged: ")
     assert "the update workflow's runs on main, page 1" in captured.err
+
+
+def test_plan_refuses_a_release_whose_image_scan_failed_and_offers_no_cut(repo, capsys):
+    """The newest scan failed an hour ago: refused whatever the cut, so no earlier cut is
+    offered, and no line of the scan's beside the refusal."""
+    base, first, _, tracker = _two_movers(repo)
+    failed = answering(scan_ended(datetime.now(UTC) - timedelta(hours=1), "failed"))
+    assert release.main(["plan", "--base", base, "--cut", first], root=repo.root,
+                        readers=Readers(connect=lambda: tracker, journal=failed)) == 1
+    out = capsys.readouterr().out.splitlines()
+    assert out[-2].startswith("REFUSED -- the newest image scan, ended ")
+    assert ", failed: read why with `journalctl _SYSTEMD_INVOCATION_ID=" in out[-2]
+    assert out[-1] == "verdict: refused (exit 1)"
+    assert not [line for line in out if line.startswith(("newest earlier cut", "image scan"))]
+
+
+def test_plan_given_no_way_to_read_the_journal_exits_2(repo, capsys):
+    """Only the command line reads this host's journal; a caller giving no reader judges
+    nothing, never a release read as freshly scanned."""
+    base, first, _, tracker = _two_movers(repo)
+    assert release.main(["plan", "--base", base, "--cut", first], root=repo.root,
+                        readers=Readers(connect=lambda: tracker)) == 2
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err == ("release plan: nothing was judged: a release reads the image "
+                            "scan's runs from this host's journal (ruling plan#4027), and no "
+                            "way to read it was given\n")
+
+
+def test_plan_exits_2_when_journalctl_fails(repo, capsys):
+    """journalctl exiting non-zero judges nothing; it never reads as no run, or as a fresh
+    one."""
+    base, first, _, tracker = _two_movers(repo)
+
+    def failing() -> str:
+        raise subprocess.CalledProcessError(1, list(READ))
+
+    assert release.main(["plan", "--base", base, "--cut", first], root=repo.root,
+                        readers=Readers(connect=lambda: tracker, journal=failing)) == 2
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err.startswith("release plan: nothing was judged: Command "
+                                   "'['journalctl'")
 
 
 # -- production ------------------------------------------------------------------------------

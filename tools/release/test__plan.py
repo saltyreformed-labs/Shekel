@@ -7,7 +7,7 @@ import pytest
 
 from tools.quill.door import FakeTracker
 from tools.release._model import ReleaseError
-from tools.release._plan import CLEAN, NEEDS_APPROVAL, REFUSED, Inputs, Judge
+from tools.release._plan import CLEAN, NEEDS_APPROVAL, REFUSED, Inputs, Judge, Readers
 from tools.release.conftest import MONEY, judge, migration, pull_request, ship
 
 
@@ -224,8 +224,8 @@ def test_an_earlier_cut_adding_a_migration_the_cut_does_not_is_refused(repo):
     judged = judge(repo, base, cut, tracker, ["plan#40"])
     assert judged.verdict.refusals == ("plan#40 moves money and has no rehearsal kit",)
     assert judged.passing is None
-    candidate = Judge(repo.root, base, cut, Inputs(connect=lambda: tracker)).verdict(
-        first, "add aa")
+    readers = Readers(connect=lambda: tracker)
+    candidate = Judge(repo.root, base, cut, Inputs(readers=readers)).verdict(first, "add aa")
     assert (candidate.status, candidate.refusals) == (REFUSED, (_AA_DELETED,))
 
 

@@ -13,8 +13,9 @@ The rules are card ``plan#9``'s and the developer's (rulings ``balance:R-BAL279`
   Whether a kit exists is the skill's judgment, so it is an input.  A migration needs no
   kit: the skill's row comparison rehearses every one at the cut it settles on (ruling
   plan#2873).  And, whatever the cut, a Monday update that has stopped (ruling plan#2351,
-  :mod:`tools.release._updates`): the release's refusal, never the cut's, so no earlier
-  cut is offered for it.
+  :mod:`tools.release._updates`), and an image scan whose newest run failed or is stale
+  (rulings plan#3792, plan#4027, plan#4028, :mod:`tools.release._scans`): the release's
+  refusals, never the cut's, so no earlier cut is offered for them.
 - **Needs the approval question to name it** (exit 3): two or more added migrations; and
   every migration already on ``main`` that the release edits or deletes.
 - Otherwise clean (exit 0).
@@ -50,7 +51,7 @@ from pathlib import Path
 
 from tools.ci.gitcmd import git
 from tools.quill.door import Tracker
-from tools.release import _cards, _updates
+from tools.release import _cards, _scans, _updates
 from tools.release._migrations import ADDED, Migration, migrations
 from tools.release._model import Carried, Group, ReleaseError, first_parent_line
 
@@ -91,41 +92,55 @@ def _added(changed: tuple[Migration, ...]) -> tuple[Migration, ...]:
 class Plan:
     """A release judged: its base, its cut's verdict, the newest earlier cut that passes
     (None unless the cut is refused, or when none does), the newest earlier passing cut
-    adding at most one migration (None unless the cut adds two or more, or when none does)
-    and the Monday update as the release read it."""
+    adding at most one migration (None unless the cut adds two or more, or when none does),
+    and the Monday update and the image scan as the release read them."""
 
     base: str
     verdict: Verdict
     passing: Verdict | None
     one_migration: Verdict | None
     update: _updates.Update
+    scan: _scans.Scan
 
     @property
     def refusals(self) -> tuple[str, ...]:
-        """Why the release is refused: its cut's reasons, then the Monday update's."""
-        return self.verdict.refusals + self.update.refusals
+        """Why the release is refused: its cut's reasons, then the Monday update's, then
+        the image scan's."""
+        return self.verdict.refusals + self.update.refusals + self.scan.refusals
 
     @property
     def status(self) -> int:
-        """:data:`REFUSED` when the Monday update refuses the release, else its cut's
-        verdict's status."""
-        return REFUSED if self.update.refusals else self.verdict.status
+        """:data:`REFUSED` when the Monday update or the image scan refuses the release,
+        else its cut's verdict's status."""
+        return REFUSED if self.update.refusals or self.scan.refusals else self.verdict.status
+
+
+@dataclass(frozen=True)
+class Readers:
+    """What a judgment reads beyond git: the tracker (``connect``), which every judgment
+    reads; the update workflow's runs (``actions``), which a judgment reads once production's
+    tree holds the workflow (:func:`tools.release._updates.read`); and this host's journal of
+    the image scan's runs (``journal``), which every judgment reads
+    (:func:`tools.release._scans.read`).  Nothing is read unless a way is given, and a
+    judgment that must read and was given no way judges nothing: only the command line, run
+    as ``python -m``, gives the live ones, quill's App (:data:`tools.quill.quill.CONNECT`),
+    the anonymous read of the runs (:func:`tools.release._updates.anonymous`) and journalctl
+    (:func:`tools.release._scans.journal`), so no other caller, a test above all, reaches the
+    live tracker, GitHub or this host's journal unless it says so."""
+
+    connect: Callable[[], Tracker] | None = None
+    actions: Callable[[], _updates.Actions] | None = None
+    journal: Callable[[], str] | None = None
 
 
 @dataclass(frozen=True)
 class Inputs:
     """What the skill gives a judgment: each money mover it found no rehearsal kit for (a
-    migration needs none, ruling plan#2873); how to reach the tracker, which every judgment
-    reads; how to read
-    the update workflow's runs, which a judgment reads once production's tree holds the
-    workflow (:func:`tools.release._updates.read`); and the clock the update's age is read
-    by.  No connection is made unless one is given: only the command line, run as
-    ``python -m``, gives quill's App (:data:`tools.quill.quill.CONNECT`) and the anonymous
-    read of the runs (:func:`tools.release._updates.anonymous`)."""
+    migration needs none, ruling plan#2873); what it reads beyond git (:class:`Readers`); and
+    the clock the update's and the scan's ages are read by, read once for both."""
 
     unrehearsed: Collection[str] = ()
-    connect: Callable[[], Tracker] | None = None
-    actions: Callable[[], _updates.Actions] | None = None
+    readers: Readers = Readers()
     now: Callable[[], datetime] = partial(datetime.now, UTC)
 
 
@@ -209,10 +224,10 @@ class Judge:
         self.base = git(root, "rev-parse", "--verify", f"{base}^{{commit}}").strip()
         self.cut = git(root, "rev-parse", "--verify", f"{cut}^{{commit}}").strip()
         self.unrehearsed = frozenset(inputs.unrehearsed)
-        if inputs.connect is None:
+        if inputs.readers.connect is None:
             raise ReleaseError(f"{self.cut[:12]}'s work is the tracker's cards, and no way to "
                                "reach the tracker was given")
-        self._known = _cards.read(root, self.base, self.cut, inputs.connect())
+        self._known = _cards.read(root, self.base, self.cut, inputs.readers.connect())
         self._cut_adds = frozenset(m.revision for m in _added(migrations(root, self.base,
                                                                          self.cut)))
 
@@ -246,11 +261,14 @@ def plan(root: Path, base: str, cut: str, inputs: Inputs = Inputs()) -> Plan:
         ReleaseError: when the range holds no commit; when an unrehearsed name is not a
             money mover the cut carries; when ``inputs`` gives
             no way to reach the tracker; when the cards cannot be read
-            (:func:`tools.release._cards.read`); or when the update workflow's runs must
-            be read and cannot be reached (:func:`tools.release._updates.read`).
+            (:func:`tools.release._cards.read`); when the update workflow's runs must
+            be read and cannot be reached (:func:`tools.release._updates.read`); or when
+            no way to read the image scan's journal was given, or a record of it is refused
+            (:func:`tools.release._scans.read`).
         tools.quill.door.TrackerError, tools.quill.door.GitHubError,
             requests.RequestException, OSError: when the tracker or the update workflow's
-            runs cannot be read.
+            runs cannot be read, or journalctl cannot be run.
+        subprocess.CalledProcessError: when journalctl fails.
         tools.ci.gitcmd.GitError: when git cannot read the range.
     """
     if not git(root, "rev-list", "--max-count=1", f"{base}..{cut}").strip():
@@ -262,8 +280,10 @@ def plan(root: Path, base: str, cut: str, inputs: Inputs = Inputs()) -> Plan:
     if unknown:
         raise ReleaseError(f"unrehearsed {', '.join(unknown)}: names no money mover this "
                            "cut carries, and a migration needs no kit (ruling plan#2873)")
+    now = inputs.now()
     return Plan(judge.base, verdict, *_offers(judge, verdict, line[1:]),
-                _updates.read(root, judge.base, inputs.now(), inputs.actions))
+                _updates.read(root, judge.base, now, inputs.readers.actions),
+                _scans.read(now, inputs.readers.journal))
 
 
 def _offers(judge: Judge, verdict: Verdict,

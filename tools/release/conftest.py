@@ -1,12 +1,16 @@
 """The fixture the release tool's tests share: a throwaway repository whose commits carry
 files (migrations, ship markers, locks), built with :mod:`tools.ci.scratch`'s isolated git;
-and the histories the card reader's tests build on it (a cut after the cutover, a pull
-request merged as ``dev`` takes one writing ship markers, a deploy-together group in
-quill's own fake)."""
+the histories the card reader's tests build on it (a cut after the cutover, a pull request
+merged as ``dev`` takes one writing ship markers, a deploy-together group in quill's own
+fake); the update workflow's runs as GitHub lists them; and the journal of the image scan's
+runs as journalctl answers it (:func:`fresh`, a scan that refuses nothing, which every
+judgment reads)."""
 from __future__ import annotations
 
+import json
 import shutil
-from datetime import datetime
+from collections.abc import Callable
+from datetime import UTC, datetime, timedelta
 from itertools import count
 from pathlib import Path
 
@@ -16,7 +20,8 @@ from tools.ci import scratch
 from tools.ci.scratch import run
 from tools.quill.door import MARKERS, FakeTracker
 from tools.quill.setup_tracker import DEPLOY_TOGETHER_LABEL, MOVES_MONEY_LABEL
-from tools.release._plan import Inputs, plan
+from tools.release._plan import Inputs, Readers, plan
+from tools.release._scans import DONE, UNIT
 from tools.release._updates import JOB, PAGE, REFRESH, Actions
 
 
@@ -137,8 +142,10 @@ def release_after(repo, shipped, carried):
 
 
 def judge(repo, base, cut, tracker, unrehearsed=()):
-    """``plan`` over ``<base>..<cut>``, reaching ``tracker``."""
-    return plan(repo.root, base, cut, Inputs(unrehearsed, lambda: tracker))
+    """``plan`` over ``<base>..<cut>``, reaching ``tracker``, the image scan fresh
+    (:func:`fresh`)."""
+    return plan(repo.root, base, cut,
+                Inputs(unrehearsed, Readers(connect=lambda: tracker, journal=fresh)))
 
 
 def deploy_group(tracker, container=50, leaves=(51, 52)):
@@ -236,3 +243,36 @@ class Runs:
     def actions(self) -> Actions:
         """The runs read from the repository ``o/n``, as ``Inputs.actions`` hands them."""
         return Actions(self, "o/n")
+
+
+# -- the image scan's journal ----------------------------------------------------------------
+
+_EPOCH = datetime(1970, 1, 1, tzinfo=UTC)
+
+
+def scan_started(at: datetime, invocation: int) -> dict[str, str]:
+    """The journal's record of the start of run ``invocation`` of the image scan's unit at
+    ``at``, as PID 1 writes it: no result."""
+    return {"__REALTIME_TIMESTAMP": str((at - _EPOCH) // timedelta(microseconds=1)),
+            "_PID": "1", "UNIT": UNIT, "JOB_TYPE": "start", "INVOCATION_ID": f"{invocation:032x}",
+            "MESSAGE": "Starting Shekel production image CVE scan, daily (quill scan)..."}
+
+
+def scan_ended(at: datetime, result: str = DONE, invocation: int = 1) -> dict[str, str]:
+    """The journal's record of the end of run ``invocation``'s start job at ``at``, ending
+    ``result``, as PID 1 writes it."""
+    return {**scan_started(at, invocation), "JOB_RESULT": result,
+            "MESSAGE": "Finished Shekel production image CVE scan, daily (quill scan)."}
+
+
+def answering(*records: dict[str, str]) -> Callable[[], str]:
+    """The journal answering ``tools.release._scans.READ`` with ``records``, one JSON object
+    a line, as journalctl writes them."""
+    text = "".join(json.dumps(record) + "\n" for record in records)
+    return lambda: text
+
+
+def fresh() -> str:
+    """The journal holding one run of the image scan, done an hour ago: one no release is
+    refused for."""
+    return answering(scan_ended(datetime.now(UTC) - timedelta(hours=1)))()

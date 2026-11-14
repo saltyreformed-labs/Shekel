@@ -12,10 +12,11 @@ from tools.quill.door import FakeTracker, GitHubError
 from tools.quill.quill import CONNECT
 from tools.release import _cards, release
 from tools.release._model import ReleaseError
-from tools.release._plan import CLEAN, REFUSED, Inputs, plan
+from tools.release._plan import CLEAN, REFUSED, Inputs, Readers, plan
 from tools.release.conftest import (
     MONEY,
     after_cutover,
+    fresh,
     judge,
     pull_request,
     released_group,
@@ -74,7 +75,7 @@ def test_two_money_cards_refuse_and_the_cut_with_one_is_offered(repo):
     tracker.add(40, labels=MONEY)
     tracker.add(41, labels=MONEY)
     reached = Reached(tracker)
-    judged = plan(repo.root, base, cut, Inputs(connect=reached))
+    judged = plan(repo.root, base, cut, Inputs(readers=Readers(connect=reached, journal=fresh)))
     assert judged.verdict.refusals == (
         "it carries 2 steps that move money (plan#40, plan#41); a release carries one at most",)
     assert judged.passing.cut == first
@@ -192,7 +193,7 @@ def test_an_offered_cut_carries_a_card_the_cut_shipped_and_undid(repo):
     for number in (40, 41, 42):
         tracker.add(number, labels=MONEY)
     reached = Reached(tracker)
-    judged = plan(repo.root, base, cut, Inputs(connect=reached))
+    judged = plan(repo.root, base, cut, Inputs(readers=Readers(connect=reached, journal=fresh)))
     assert [s.key for s in judged.verdict.carried.steps] == ["plan#41", "plan#42"]
     assert judged.verdict.status == REFUSED
     assert judged.passing.cut == first
@@ -248,7 +249,8 @@ def test_an_earlier_cut_conflicting_on_a_marker_is_refused_and_the_release_judge
     tracker = FakeTracker()
     for number in (40, 41, 42, 43, 44):
         tracker.add(number, labels=MONEY)
-    judged = plan(repo.root, base, cut, Inputs(connect=lambda: tracker))
+    judged = plan(repo.root, base, cut, Inputs(readers=Readers(connect=lambda: tracker,
+                                                                 journal=fresh)))
     assert judged.verdict.status == REFUSED
     assert judged.passing.cut == first
     assert [s.key for s in judged.passing.carried.steps] == ["plan#42"]
@@ -269,7 +271,7 @@ def test_a_marker_conflicting_in_the_merge_of_base_and_cut_judges_nothing(repo, 
     tracker = FakeTracker()
     tracker.add(40)
     assert release.main(["plan", "--base", base, "--cut", cut], root=repo.root,
-                        connect=lambda: tracker) == 2
+                        readers=Readers(connect=lambda: tracker)) == 2
     assert "merge with a conflict on plan/ships/40" in capsys.readouterr().err
 
 
@@ -411,7 +413,7 @@ def test_plan_prints_an_undone_card(repo, capsys):
     tracker = FakeTracker()
     tracker.add(40)
     assert release.main(["plan", "--base", base, "--cut", cut], root=repo.root,
-                        connect=lambda: tracker) == CLEAN
+                        readers=Readers(connect=lambda: tracker, journal=fresh)) == CLEAN
     out = capsys.readouterr().out.splitlines()
     assert out[3].startswith("  plan#40  moves money: no  UNDONE: its marker deleted  "
                              "(deleted at ")
@@ -435,7 +437,7 @@ def test_plan_exits_2_when_the_tracker_cannot_be_read(repo, capsys):
         raise GitHubError(401, "GET /app -> 401")
 
     assert release.main(["plan", "--base", base, "--cut", cut], root=repo.root,
-                        connect=refused) == 2
+                        readers=Readers(connect=refused)) == 2
     captured = capsys.readouterr()
     assert captured.out == ""
     assert captured.err.startswith("release plan: nothing was judged: ")
@@ -454,7 +456,7 @@ def test_plan_prints_a_failed_read_as_one_line_naming_the_read(repo, capsys):
         raise error
 
     assert release.main(["plan", "--base", base, "--cut", cut], root=repo.root,
-                        connect=cut_off) == 2
+                        readers=Readers(connect=cut_off)) == 2
     assert capsys.readouterr().err == (
         "release plan: nothing was judged: POST https://api.github.com/graphql -> 504 after 3 "
         "re-sends: <html> </html>; while reading the open cards, page 1\n")
@@ -468,7 +470,7 @@ def test_plan_exits_2_when_the_apps_key_cannot_be_used(repo, capsys, monkeypatch
     monkeypatch.setattr("tools.quill._tracker.app_credentials",
                         lambda: ("Iv23client", b"not a pem"))
     assert release.main(["plan", "--base", base, "--cut", cut], root=repo.root,
-                        connect=CONNECT) == 2
+                        readers=Readers(connect=CONNECT)) == 2
     captured = capsys.readouterr()
     assert captured.out == ""
     assert captured.err.startswith("release plan: nothing was judged: the App's private key "

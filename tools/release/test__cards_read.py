@@ -13,7 +13,7 @@ import pytest
 
 from tools.quill.door import OWNED, FakeTracker, above
 from tools.release import _cards, release
-from tools.release._plan import CLEAN
+from tools.release._plan import CLEAN, Readers
 from tools.release.conftest import deploy_group, judge, release_after, replan, ship, undo
 
 
@@ -22,7 +22,7 @@ from tools.release.conftest import deploy_group, judge, release_after, replan, s
 def _unread(repo, base, cut, tracker, capsys):
     """``release plan`` over ``<base>..<cut>``: it exits 2, nothing judged, and says why."""
     assert release.main(["plan", "--base", base, "--cut", cut], root=repo.root,
-                        connect=lambda: tracker) == 2
+                        readers=Readers(connect=lambda: tracker)) == 2
     captured = capsys.readouterr()
     assert captured.out == ""
     return captured.err.strip().removeprefix("release plan: nothing was judged: ")

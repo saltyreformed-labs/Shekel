@@ -11,11 +11,12 @@ import pytest
 from tools.quill.door import FakeTracker, OutsideLink
 from tools.quill.setup_tracker import DEPLOY_TOGETHER_LABEL, FILING
 from tools.release import release
-from tools.release._plan import CLEAN, REFUSED
+from tools.release._plan import CLEAN, REFUSED, Readers
 from tools.release.conftest import (
     MONEY,
     after_cutover,
     deploy_group,
+    fresh,
     judge,
     pull_request,
     released_group,
@@ -842,7 +843,7 @@ def test_plan_prints_each_card_named_under_a_group_that_is_no_leaf_of_it(repo, c
     tracker.add(55, kind="finding")
     tracker.block(55, tracker.cards_by_number[51])
     assert release.main(["plan", "--base", base, "--cut", cut], root=repo.root,
-                        connect=lambda: tracker) == CLEAN
+                        readers=Readers(connect=lambda: tracker, journal=fresh)) == CLEAN
     assert ("group plan#50: carried none; released none; missing plan#51, plan#52; named "
             "under it plan#55 owned by plan#51") in capsys.readouterr().out.splitlines()
 
@@ -854,6 +855,6 @@ def test_plan_prints_each_member_the_plan_will_never_ship(repo, capsys):
     cut = pull_request(repo, base, undo(51))
     replanned_and_dropped(tracker)
     assert release.main(["plan", "--base", base, "--cut", cut], root=repo.root,
-                        connect=lambda: tracker) == REFUSED
+                        readers=Readers(connect=lambda: tracker, journal=fresh)) == REFUSED
     assert ("group plan#50: carried none; released plan#52; missing none; undone plan#51; "
             "the plan will never ship plan#51") in capsys.readouterr().out.splitlines()

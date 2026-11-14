@@ -190,6 +190,11 @@ Then, line by line:
   before the run refuses the release whatever the cut (ruling plan#2351), so no earlier cut
   answers it. Before `main` holds the workflow there is no such line and no such refusal: GitHub
   runs it only from `main`.
+- `plan` reads this host's journal of the daily image scan's runs at every release (its unit
+  `shekel-image-scan.service`, ruling plan#4027) and prints `image scan: newest run ended <date>
+  UTC, done`. A newest run that failed, one that ended more than 2 days before the run, or none on
+  record refuses the release whatever the cut (rulings plan#3792, plan#4028), so no earlier cut
+  answers it; a journal that cannot be read judges nothing (exit 2).
 
 Re-run with every flag at once until nothing more changes; the last run is `plan.txt`.
 
@@ -202,6 +207,12 @@ The answer moves the cut, so this comes before any rehearsal.
   update has not finished a run in 8 days, with the page the line names. The release resumes at
   step 2 once a run has published: fixing what stopped it is a card's work, and then
   `gh workflow run updates.yml --ref main` starts a run.
+- **The image scan failed or stopped** (`REFUSED -- the newest image scan ...` or `REFUSED -- no
+  run of the image scan ...`): STOP before anything else, whatever else `plan` printed. Tell Josh in
+  plain words that the daily scan of production's image for CVEs failed, or has not run in 2 days,
+  with the command the line names to read why. The release resumes at step 2 once a run is done:
+  fixing what failed is a card's work (a failed scan files one, ruling plan#3788), and Josh starts a
+  run with `sudo systemctl start shekel-image-scan.service`.
 - **Refused (exit 1):** name the rule and the cards in plain words, then offer the line
   `newest earlier cut that passes`: "Release up to <its subject> (<its cards>); <the rest> goes in
   the next release", or "Stop". When that line says `none`, say no earlier cut passes and the one

@@ -10,7 +10,9 @@ import shutil
 
 from tests._repo_root import REPO_ROOT
 
-from ._helpers import _DEPLOY_SCRIPT, _OLD, _NEW, _said, _NO_MIGRATIONS, _BUILT_BY
+from ._helpers import (
+    _DEPLOY_PARTS, _DEPLOY_SCRIPT, _OLD, _NEW, _said, _NO_MIGRATIONS, _BUILT_BY,
+)
 
 
 class TestTheHarnessInheritsNoTarget:
@@ -244,10 +246,12 @@ class TestTheRunningCheckIsReadFromTheScriptsCheckout:
         assert stack.pin == _OLD, _said(result, calls)
 
     def test_a_copy_that_carries_the_helper_deploys(self, stack, tmp_path):
-        """The control: the same copy, with the helper laid out beside it."""
+        """The control: the same copy, with its parts and the helper laid out beside it."""
         copy = tmp_path / "carried" / "deploy" / "shekel-deploy.sh"
         copy.parent.mkdir(parents=True)
         shutil.copy2(_DEPLOY_SCRIPT, copy)
+        for part in _DEPLOY_PARTS:
+            shutil.copy2(part, copy.parent / part.name)
         helper = copy.parents[1] / "scripts" / "_container_lib.sh"
         helper.parent.mkdir()
         shutil.copy2(REPO_ROOT / "scripts" / "_container_lib.sh", helper)

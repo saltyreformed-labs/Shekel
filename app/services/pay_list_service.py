@@ -32,6 +32,12 @@ entry but the only one (ruling **R-SAL68**, "Remove, except the last one").
 * a Remove of a profile's only entry: every paycheck is priced from the pay
   list, so a profile holds at least one entry (**R-SAL68**).
 
+A door that offers a write before it is asked -- the Pay Stub page's button,
+plan step salary:X-av-4 -- asks these refusals through :func:`record_refusal`
+and the payday's entry through :func:`entry_on`, the functions the doors read
+themselves, so it never shows a button its door refuses and never spells a
+rule a second time.  What an amount from a payday reprices is :func:`reach_of`.
+
 The amount's bounds are the schema's (``SalaryPayEntryRecordSchema`` and the
 Fix schema built on it, ``SalaryProfileCreateSchema``; one home,
 ``schemas.validation._helpers``).  Every write prices the paychecks the entry
@@ -65,6 +71,11 @@ from app.services.salary_paydays import payday_refusal_for_door
 if TYPE_CHECKING:
     from app.services.balance_at import BalanceContext
 
+#: What the pay list's doors take, as their payday refusal words it (ruling
+#: **R-SAL93**, "Each door names its own"): "Pay can be recorded up to your
+#: next payday, ...".
+_RECORD_DOOR_WORDS = "Pay can be recorded"
+
 
 @dataclass(frozen=True)
 class PayRow:
@@ -87,6 +98,55 @@ class PayRow:
     entry: SalaryPayEntry
     paychecks_a_year: int
     yearly: Decimal
+
+
+@dataclass(frozen=True)
+class PayReach:
+    """The paychecks a pay amount from one payday prices (ruling **R-SAL59**).
+
+    An amount prices its own paycheck and every one after it up to the next
+    amount's, and, as the first, every paycheck before it too ("Paychecks
+    before the first entry use it"): the pay in force on each day is the
+    latest amount whose paycheck opens on or before it, else the first
+    (:meth:`~app.services.payroll_basis.PayrollBasis.pay_rate_on`).  So a Fix
+    moves these paychecks, and a Record of a new amount moves those it would
+    reach.  Made-up: amounts from 01-02 and 06-05; one recorded from 03-13
+    reaches 03-13 up to 06-05, and one from 2025-12-19 reaches every paycheck
+    before 01-02, since it becomes the first.
+
+    Attributes:
+        payday: The payday the amount is from.
+        and_before: Whether it prices every paycheck before *payday* too:
+            no other amount starts before it.
+        until: The payday the next amount starts on, the first paycheck it
+            does not price; ``None`` when none follows.
+    """
+
+    payday: date
+    and_before: bool
+    until: date | None
+
+
+def reach_of(profile: SalaryProfile, payday: date) -> PayReach:
+    """Return the paychecks an amount from *payday* prices on *profile*'s pay list.
+
+    The same answer for the amount *payday* holds (a Fix) and for one a
+    Record would add there: every other amount is read, never one on
+    *payday* itself.
+
+    Args:
+        profile: The profile, its pay list loaded.
+        payday: The payday the amount is from.
+
+    Returns:
+        The :class:`PayReach`.
+    """
+    others = [entry.payday for entry in profile.pay_entries if entry.payday != payday]
+    return PayReach(
+        payday=payday,
+        and_before=all(other > payday for other in others),
+        until=min((other for other in others if other > payday), default=None),
+    )
 
 
 def pay_rows(basis: PayrollBasis) -> list[PayRow]:
@@ -126,7 +186,7 @@ def _refuse_payday(ctx: "BalanceContext", payday: date, today: date) -> None:
             (ruling **R-SAL93**).
     """
     refusal = payday_refusal_for_door(
-        ctx, payday, today, door_words="Pay can be recorded",
+        ctx, payday, today, door_words=_RECORD_DOOR_WORDS,
     )
     if refusal is not None:
         raise ValidationError(refusal)
@@ -155,6 +215,27 @@ def held_payday_refusal(payday: date) -> str:
     )
 
 
+def entry_on(profile_id: int, payday: date) -> SalaryPayEntry | None:
+    """Return the pay entry that starts on *payday*, or ``None``.
+
+    **The one read of "the entry a payday holds"**: the held-payday refusal
+    (:func:`_refuse_held_payday`) and the Pay Stub page's offer, which fixes
+    that entry where a Record would be refused (ruling **plan#3962**), both
+    ask it.  At most one, by ``uq_pay_entries_profile_payday``.
+
+    Args:
+        profile_id: The pay list's profile.
+        payday: The payday asked about.
+
+    Returns:
+        The entry, or ``None`` when no entry starts on *payday*.
+    """
+    return db.session.query(SalaryPayEntry).filter(
+        SalaryPayEntry.salary_profile_id == profile_id,
+        SalaryPayEntry.payday == payday,
+    ).one_or_none()
+
+
 def _refuse_held_payday(
     profile_id: int, payday: date, moving_entry_id: int | None,
 ) -> None:
@@ -172,14 +253,39 @@ def _refuse_held_payday(
     Raises:
         ValidationError: Another entry holds *payday*.
     """
-    query = db.session.query(SalaryPayEntry.id).filter(
-        SalaryPayEntry.salary_profile_id == profile_id,
-        SalaryPayEntry.payday == payday,
-    )
-    if moving_entry_id is not None:
-        query = query.filter(SalaryPayEntry.id != moving_entry_id)
-    if query.first() is not None:
+    held = entry_on(profile_id, payday)
+    if held is not None and held.id != moving_entry_id:
         raise ValidationError(held_payday_refusal(payday))
+
+
+def record_refusal(
+    profile: SalaryProfile, ctx: "BalanceContext", payday: date, today: date,
+) -> str | None:
+    """Return why a Record from *payday* would be refused, or ``None`` when it would not.
+
+    **The Record door's refusals, as one answer** (:func:`record_entry`
+    raises from it): a day that is not a payday or is later than the owner's
+    next one, then a payday another entry holds.  The Pay Stub page asks it
+    before it offers a Record (plan step salary:X-av-4), so the page never
+    shows a button the door refuses and never spells the rules again.
+
+    Args:
+        profile: The profile, its ownership checked by the caller.
+        ctx: The route's pass (its owner's calendar).
+        payday: The payday the amount would be from.
+        today: The owner's civil today.
+
+    Returns:
+        The refusal in the door's words, or ``None``.
+    """
+    refusal = payday_refusal_for_door(
+        ctx, payday, today, door_words=_RECORD_DOOR_WORDS,
+    )
+    if refusal is not None:
+        return refusal
+    if entry_on(profile.id, payday) is not None:
+        return held_payday_refusal(payday)
+    return None
 
 
 def record_entry(
@@ -216,8 +322,9 @@ def record_entry(
         ValidationError: *payday* is not a payday, is later than the owner's
             next one, or another of the profile's entries holds it.
     """
-    _refuse_payday(ctx, payday, today)
-    _refuse_held_payday(profile.id, payday, None)
+    refusal = record_refusal(profile, ctx, payday, today)
+    if refusal is not None:
+        raise ValidationError(refusal)
     entry = SalaryPayEntry(payday=payday, amount=amount)
     # Through the relationship, so the profile's loaded pay list holds the
     # entry before the door prices it in the same unit of work.
@@ -325,6 +432,7 @@ def remove_entry(entry: SalaryPayEntry) -> None:
 
 
 __all__ = [
-    "PayRow", "fix_entry", "held_payday_refusal", "pay_rows", "record_entry",
-    "remove_entry", "start_pay_list",
+    "PayReach", "PayRow", "entry_on", "fix_entry", "held_payday_refusal",
+    "pay_rows", "reach_of", "record_entry", "record_refusal", "remove_entry",
+    "start_pay_list",
 ]

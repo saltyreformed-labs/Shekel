@@ -227,14 +227,15 @@ request CONTEXT that was never dispatched, which is not a pedantic distinction:
 from collections.abc import Iterator
 from contextlib import contextmanager
 
-from flask import Flask, g, has_app_context, request, request_started
+from flask import Flask, Response, g, has_app_context, request, request_started
 from sqlalchemy import event
 from sqlalchemy.orm import Session
 
 from app.audit_infrastructure import bind_audit_actor
-from app.extensions import db
+from app.extensions import db, login_manager
 from app.models.user import User
 from app.services.user_write_lock import take_owner_write_lock
+from app.utils.session_helpers import sign_in_is_live
 
 # HTTP's safe methods, as this application serves them.  ``OPTIONS`` is left
 # out, and the reason first given here was measurably WRONG: it said Flask
@@ -660,8 +661,8 @@ def bind_request_actor(user_id: int, owner_id: "int | None") -> None:
     setattr(g, _PENDING_OWNER_KEY, owner_id)
 
 
-def _take_the_request_owner_s_lock() -> None:
-    """Take the signed-in request's owner lock, once the refusal checks have passed.
+def _take_the_request_owner_s_lock() -> Response | None:
+    """Take the signed-in request's owner lock, then ask for its sign-in again under it.
 
     A before-request hook, registered by :func:`register_transaction_boundary`,
     which :func:`app._bind_extensions` calls AFTER ``csrf.init_app`` and
@@ -670,15 +671,48 @@ def _take_the_request_owner_s_lock() -> None:
     for the lock or holds it (ruling **R-CC122**).  A route's OWN limit
     (``@limiter.limit``) is checked inside the view's wrapper, after every
     before-request hook, so a request that one refuses still waits here.
+    Nothing to do for an anonymous request or ``/health``, where
+    :func:`bind_request_actor` was never called and no owner is pending.
 
-    Returns ``None`` so Flask carries on to the next hook.  Nothing to do for
-    an anonymous request or ``/health``, where :func:`bind_request_actor` was
-    never called and no owner is pending.
+    **Once the lock is held, the request's sign-in is asked for again** (ruling
+    plan#4070).  ``load_user`` asked before the lock, as it must, since the
+    lock's key is the signed-in user's owner; but the lock can be waited on,
+    and a save queued behind a sign-out of its own sign-in (a copy of the
+    browser's cookie pressing Save as the browser signs out, or "Log out all
+    other sessions" pressed meanwhile) found its record live and would save
+    once after it.  Every sign-out a request makes takes this lock, so under
+    it the record is either still there, its sign-out not begun, or gone.  A
+    request whose sign-in is gone is answered as a signed-out request is
+    (:meth:`~flask_login.LoginManager.unauthorized`): neither the login gate
+    nor the view runs, and its transaction, holding the lock, ends at the
+    request's teardown with nothing written.  The user's row, read before the
+    lock too, is read again through its expiry instead
+    (:func:`_lock_the_open_transaction`), and the gate turns away a user
+    deactivated during the wait.
+
+    **Asked only when the lock was taken on the transaction open now**, which
+    is every signed-in command whose user has an owner: asking for the record
+    began that transaction.  A query takes no lock and asks once, as its
+    transaction is one snapshot and a second ask could only repeat the first.
+    A render's write block (the grid's and the dashboard's rolling top-up,
+    ``/mfa/setup``'s pending key) takes the lock later, in a transaction of
+    its own, and is not asked again: the top-up appends what the owner's next
+    render would append, and a pending key does nothing until a confirmation,
+    which is a command and is asked.  ``scripts/rotate_sessions.py`` takes no
+    lock (:mod:`app.services.user_write_lock` names it), so its delete can
+    land after the second ask, as it could after the first.
+
+    Returns:
+        ``None`` so Flask carries on to the next hook, or the sign-in page's
+        redirect for a request whose sign-in ended while it waited.
     """
     if not has_app_context() or not hasattr(g, _PENDING_OWNER_KEY):
-        return
+        return None
     owner_id = g.pop(_PENDING_OWNER_KEY)
-    _lock_the_open_transaction(g.get(_ACTOR_KEY), owner_id)
+    user_id = g.get(_ACTOR_KEY)
+    if _lock_the_open_transaction(user_id, owner_id) and not sign_in_is_live(user_id):
+        return login_manager.unauthorized()
+    return None
 
 
 def bind_sign_in_owner(user_id: int, owner_id: "int | None") -> None:
@@ -717,7 +751,7 @@ def bind_sign_in_owner(user_id: int, owner_id: "int | None") -> None:
     _lock_the_open_transaction(user_id, owner_id)
 
 
-def _lock_the_open_transaction(user_id: "int | None", owner_id: "int | None") -> None:
+def _lock_the_open_transaction(user_id: "int | None", owner_id: "int | None") -> bool:
     """Take *owner_id*'s lock on the command transaction open now, and arm every later one.
 
     The half :func:`_bind_transaction_mode` cannot do: the transaction open now
@@ -733,8 +767,8 @@ def _lock_the_open_transaction(user_id: "int | None", owner_id: "int | None") ->
     wherever the session names a user, whether its sign-in record is live,
     asked through ``load_user`` as one EXISTS
     (:func:`app.services.sign_in_service.is_live`), so no record is loaded
-    (ruling plan#4068); at ``/login``, also which users the browser's cookies name known records
-    of, read as user ids alone
+    (ruling plan#4068); at ``/login``, also which users the browser's cookies
+    name known records of, read as user ids alone
     (:func:`app.services.known_device_service.known_to`), so no record is
     loaded; and on a signed-in request, for the rate limits, which record the
     browser's cookie names, read as its id alone
@@ -742,29 +776,38 @@ def _lock_the_open_transaction(user_id: "int | None", owner_id: "int | None") ->
     loaded there either.  A sign-in whose check committed holds no open transaction
     here, so the lock is the next one's first act and nothing precedes it.
     The password, MFA and settings doors write the user's row, so it is
-    EXPIRED once the lock is held, and its next use reloads it under the lock:
-    nothing a write decides on was read before it.  The role row is a
-    reference row no request writes.  Only that row, and only if it is loaded (looked up
-    in the identity map, so no statement is issued to find it): under the test
-    client this session is also the test body's, whose other loaded state is
-    not this request's to discard.
+    EXPIRED once the lock is held, and its next use reloads it under the lock.
+    Only that row, and only if it is loaded (looked up in the identity map, so
+    no statement is issued to find it): under the test client this session is
+    also the test body's, whose other loaded state is not this request's to
+    discard.  The role row is a reference row no request writes.  And a
+    signed-in request asks for its sign-in's record again once the lock is
+    held (:func:`_take_the_request_owner_s_lock`, ruling plan#4070).  So
+    nothing a write decides on was read before the lock.
 
     A query binds nothing, for the reason :func:`bind_request_actor` gives.
 
     Args:
         user_id: The user whose row was read before the lock, or ``None``.
         owner_id: The owner to lock; ``None`` takes no lock and arms nothing.
+
+    Returns:
+        Whether the lock was taken on the transaction open now: ``False`` for
+        no owner, for a query and for no open transaction, whose lock is the
+        next transaction's first act.
     """
     if owner_id is None:
-        return
+        return False
     session = db.session()
-    if not _is_query_request() and session.in_transaction():
+    took_it_now = not _is_query_request() and session.in_transaction()
+    if took_it_now:
         take_owner_write_lock(session.connection(), owner_id)
         if user_id is not None:
             loaded = session.identity_map.get(session.identity_key(User, user_id))
             if loaded is not None:
                 session.expire(loaded)
     setattr(g, _OWNER_KEY, owner_id)
+    return took_it_now
 
 
 @contextmanager

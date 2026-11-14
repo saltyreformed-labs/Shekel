@@ -1,7 +1,7 @@
 """Plan step balance:X-bn -- where a request's owner lock is taken, and where it ends.
 
 The owner's write lock is taken where each command transaction a signed-in
-request opens begins (:mod:`app.db_transaction`).  Three rulings and one rule-5
+request opens begins (:mod:`app.db_transaction`).  Four rulings and one rule-5
 approval decide the edges of that, and each is graded here with the arm that
 proves it fires:
 
@@ -36,6 +36,10 @@ proves it fires:
   is turned away, because taking the lock expires the signed-in user's row and
   the gate reads ``is_active`` again after the wait.  The control is the same
   wait with the companion left active, which saves.
+* **Ruling plan#4070**: a save whose sign-in a sign-out ends while it waits
+  for the owner's lock is turned away, because the lock's hook asks for the
+  sign-in's record again once the lock is held.  The control is the
+  deactivation arm's.
 
 The seed owner is made with two-factor (plan#3600), so its password step owes
 the code; a backup-code case gives the owner's row known codes
@@ -55,7 +59,9 @@ from app.enums import StatusEnum
 from app.extensions import db
 from app.models.transaction import Transaction
 from app.services.user_write_lock import _USER_WRITE_LOCK_NAMESPACE
+from app.utils.bearer_tokens import token_hash
 from tests._guess_records import count_of
+from tests._session_copies import token_of
 from tests._sign_in import browser_count, make_known
 from tests._test_helpers import (
     HeldOwnerKey,
@@ -460,19 +466,19 @@ class TestTheCheckReadsWhatTheLockProtects:
         assert count_of(SEED_USER_EMAIL) == 0
 
 
+def _companion_visible_bill(seed_user, period):
+    """A companion-visible Projected bill, and its id and status."""
+    template = make_expense_template(
+        db.session, seed_user, amount="120.00", name="Hotel",
+        category_key="Rent", companion_visible=True,
+    )
+    row = generate_row_of(template, period)
+    db.session.commit()
+    return row.id, row.status_id
+
+
 class TestADeactivatedCompanionIsTurnedAwayAfterTheWait:
     """The rule-5 approval: the lock before the gate re-reads ``is_active``."""
-
-    @staticmethod
-    def _companion_visible_bill(seed_user, period):
-        """A companion-visible Projected bill, and its id and status."""
-        template = make_expense_template(
-            db.session, seed_user, amount="120.00", name="Hotel",
-            category_key="Rent", companion_visible=True,
-        )
-        row = generate_row_of(template, period)
-        db.session.commit()
-        return row.id, row.status_id
 
     def test_a_companion_deactivated_during_the_wait_is_turned_away(
         self, app, seed_user, seed_companion, seed_periods_today, companion_client,
@@ -482,7 +488,7 @@ class TestADeactivatedCompanionIsTurnedAwayAfterTheWait:
         The gate answers the sign-in redirect and the row stays Projected: the
         save never reached its view.
         """
-        txn_id, before = self._companion_visible_bill(
+        txn_id, before = _companion_visible_bill(
             seed_user, seed_periods_today[4],
         )
         assert before == ref_cache.status_id(StatusEnum.PROJECTED)
@@ -511,7 +517,7 @@ class TestADeactivatedCompanionIsTurnedAwayAfterTheWait:
         So the refusal above is the deactivation read after the wait, not
         something the wait itself does to the request.
         """
-        txn_id, _before = self._companion_visible_bill(
+        txn_id, _before = _companion_visible_bill(
             seed_user, seed_periods_today[4],
         )
 
@@ -526,3 +532,47 @@ class TestADeactivatedCompanionIsTurnedAwayAfterTheWait:
         assert db.session.get(Transaction, txn_id).status_id == ref_cache.status_id(
             StatusEnum.DONE,
         )
+
+
+class TestASaveWhoseSignInEndedInTheWaitIsTurnedAway:
+    """Ruling plan#4070: once the lock is held, the save's sign-in is asked for again.
+
+    ``load_user`` asks for the session's sign-in record before the lock, as it
+    must, since the lock's key is the signed-in user's owner, and a sign-out
+    can end the record while the save waits.  The control is the class
+    above's: the same wait with nothing changed saves.
+    """
+
+    def test_a_save_whose_sign_in_ended_during_the_wait_is_turned_away(
+        self, app, seed_user, seed_periods_today, companion_client,
+    ):
+        """The save waits, a sign-out deletes its sign-in's record, the save is refused.
+
+        The holder deletes the companion's record, as ``/logout`` on a copy of
+        her cookie would, and commits only once the save waits: so the save
+        found the record before the lock (one that did not would finish
+        without waiting, which :func:`_run_behind` reports).  The sign-in
+        page answers and the row stays Projected: the save never reached its
+        view.
+        """
+        txn_id, before = _companion_visible_bill(
+            seed_user, seed_periods_today[4],
+        )
+        assert before == ref_cache.status_id(StatusEnum.PROJECTED)
+        record = token_hash(token_of(companion_client))
+
+        with HeldOwnerKey(seed_user["user"].id) as held:
+            deleted = held.connection.execute(
+                text("DELETE FROM auth.sign_ins WHERE token_hash = :hash"),
+                {"hash": record},
+            ).rowcount
+            assert deleted == 1, "the companion's sign-in had no record to end"
+            response = _run_behind(
+                held, app,
+                lambda: companion_client.post(f"/transactions/{txn_id}/mark-done"),
+            )
+
+        assert response.status_code in (302, 303), response.status_code
+        assert urlsplit(response.headers["Location"]).path == "/login"
+        db.session.expire_all()
+        assert db.session.get(Transaction, txn_id).status_id == before

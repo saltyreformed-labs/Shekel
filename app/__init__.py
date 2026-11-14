@@ -154,7 +154,10 @@ def create_app(config_name=None, *, init_ref_cache=True):
         # sign-in's record (ruling plan#3925): reject the session once a
         # sign-out deleted it, or its sign-in is ``KNOWN_LIFETIME`` old,
         # however active (ruling plan#3069).  Asked last, as the one check
-        # that reads the database for the session itself.
+        # that reads the database for the session itself.  A save asks it
+        # again once it holds its owner's write lock, so one whose sign-in
+        # ended during the wait is turned away too (app.db_transaction,
+        # ruling plan#4070).
         if not _idle_session_is_fresh() or not sign_in_is_live(user.id):
             return None
         return user

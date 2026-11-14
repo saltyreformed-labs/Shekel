@@ -209,10 +209,13 @@ def session_token() -> str | None:
 def sign_in_is_live(user_id: int) -> bool:
     """Return True while this session's token names a live sign-in of *user_id*.
 
-    The ONE door ``load_user`` reads the session's sign-in through, and the
-    one rule for whether a session is signed in (rulings plan#3925,
-    plan#3927): the server's record answers, never the cookie, so a session
-    whose record a sign-out deleted is refused however good its cookie looks.
+    The ONE door the session's sign-in is read through, and the one rule for
+    whether a session is signed in (rulings plan#3925, plan#3927): the
+    server's record answers, never the cookie, so a session whose record a
+    sign-out deleted is refused however good its cookie looks.  ``load_user``
+    asks it, and a signed-in request asks it again once it holds its owner's
+    write lock, since a sign-out can end the record while the request waits
+    (:mod:`app.db_transaction`, ruling plan#4070).
     The record is live for :data:`~app.utils.sign_in_lifetimes.KNOWN_LIFETIME`
     after its sign-in, however active (ruling plan#3069), at the boundary the
     browser's record keeps: a sign-in thirty days old to the second is too old

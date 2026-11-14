@@ -414,8 +414,9 @@ class TestEditCompanion:
     ):
         """Changing the password stamps session_invalidated_at.
 
-        This forces any active companion sessions to re-login on
-        their next request, matching the owner's change_password flow.
+        The one act (ruling plan#3927) writes it, which ends every trust
+        of hers; what it does to her sessions is graded in
+        ``tests/test_adversarial/test_every_sign_out_everywhere.py``.
         """
         comp_id = seed_companion["user"].id
         assert seed_companion["user"].session_invalidated_at is None
@@ -620,9 +621,10 @@ class TestReactivateCompanion:
     ):
         """Reactivation does NOT clear session_invalidated_at.
 
-        Old sessions from before deactivation must stay invalid --
-        the companion should log in fresh, not rehydrate a stale
-        session.
+        Trusts from before deactivation must stay ended -- the companion
+        types her code at her next sign-in.  Her old sessions' records
+        are gone, which reactivation does not restore
+        (``tests/test_adversarial/test_every_sign_out_everywhere.py``).
         """
         comp_id = seed_companion["user"].id
 

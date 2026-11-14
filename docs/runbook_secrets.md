@@ -222,9 +222,10 @@ If file-backed secrets cause an issue and you need to revert:
 Rotating `SECRET_KEY` makes every previously-issued session cookie unverifiable on the new key.
 However, any cookie an attacker captured before the rotation can still be reused by anyone who
 learns the *old* key (for example, anyone with read access to git history that contains a
-previously-leaked key). The defense-in-depth control is to bump `users.session_invalidated_at` for
-every row, which causes the `load_user` callback in `app/__init__.py` to reject any session older
-than the bump time -- regardless of which key it was signed with.
+previously-leaked key). The defense-in-depth control is to delete every sign-in's record in
+`auth.sign_ins`: the `load_user` callback in `app/__init__.py` refuses any session whose record is
+gone, regardless of which key it was signed with, and a cookie forged with the old key names no
+record either.
 
 Run after every `SECRET_KEY` rotation, and after any git history rewrite that excises a
 historically-leaked key:
@@ -233,9 +234,11 @@ historically-leaked key:
 docker exec shekel-prod-app python scripts/rotate_sessions.py --confirm
 ```
 
-The script bumps `session_invalidated_at` to `now()` for every row in `auth.users`. It is idempotent
-(repeated runs simply move the timestamp forward) and emits a structured log event
-`sessions_invalidated_global` at WARNING level so the audit log captures the operation.
+The script signs every user out of every browser through the app's one sign-out-everywhere act: it
+deletes every row of `auth.sign_ins` and moves every user's `session_invalidated_at` to one instant,
+which ends every trusted device's trust. It is idempotent (a repeated run deletes nothing more and
+moves the timestamp forward) and emits a structured log event `sessions_invalidated_global` at
+WARNING level so the audit log captures the operation.
 
 The `--confirm` flag is mandatory; running without it prints a usage hint and exits with code 1.
 

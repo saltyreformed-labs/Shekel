@@ -43,7 +43,7 @@ from app.schemas.validation import (
     MfaConfirmSchema,
     MfaVerifySchema,
 )
-from app.services import auth_service, mfa_service
+from app.services import auth_service, mfa_service, sign_in_service
 from app.rate_limits import limiter
 from app.routes.auth._bp import auth_bp
 from app.routes.auth._helpers import (
@@ -67,13 +67,13 @@ from app.utils.log_events import (
     EVT_MFA_ENABLED,
     EVT_LOGIN_FAILED,
     EVT_MFA_LOGIN_SUCCESS,
+    EVT_OTHER_SESSIONS_INVALIDATED,
     log_event,
 )
 from app.utils.security_events import (
     SecurityEventKind,
     record_security_event,
 )
-from app.utils.session_helpers import invalidate_other_sessions
 
 logger = logging.getLogger(__name__)
 
@@ -308,38 +308,38 @@ def mfa_verify():  # pylint: disable=too-many-return-statements
         flash("Invalid verification code.", "danger")
         return _render_verify_form()
 
+    trust = verify_data["trust_device"] and not used_backup_code
+    if used_backup_code:
+        # Backup-code consumption is the canonical "I lost my
+        # authenticator" signal -- the credential the user just spent
+        # exists precisely because the original device is unavailable
+        # or compromised.  Every other session of this user ends, so an
+        # attacker who has the same password+device can no longer ride
+        # along (F-003), and every trust of theirs ends with them, by the
+        # one act (ruling plan#3927).  It runs BEFORE the completion, so
+        # the sign-in this code finishes is recorded after it and never
+        # among the ones it ends.  So it never trusts this browser, which
+        # stays known all the same (ruling plan#2997): it is about to
+        # finish a sign-in.
+        sign_in_service.sign_out_everywhere(
+            user, keeping=None, now=datetime.now(timezone.utc),
+        )
     # Login completion -- both password and TOTP/backup code are verified.
     # The pending ``next`` is read here, before the completion clears the
     # pending state, and validated again there (defense in depth -- it was
     # also validated at storage time in the login route).  The completion
-    # stamps every lifecycle key from one instant.  The backup-code branch
-    # below ALSO calls ``invalidate_other_sessions``, which writes its own
-    # internal ``now`` to BOTH ``_session_created_at`` and the user's
-    # ``session_invalidated_at``.  The two are equal, and the load_user check
-    # is strict less-than, so this session survives while every earlier one
-    # is refused.
-    trust = verify_data["trust_device"] and not used_backup_code
+    # records the sign-in and stamps every lifecycle key from one instant.
     response = _complete_sign_in(
         user, flask_session.get(_MFA_PENDING_NEXT_KEY),
         checked=reading.held, trust=trust,
     )
 
     if used_backup_code:
-        # Backup-code consumption is the canonical "I lost my
-        # authenticator" signal -- the credential the user just spent
-        # exists precisely because the original device is unavailable
-        # or compromised.  Force every other live session for this
-        # user to re-authenticate so an attacker who has the same
-        # password+device can no longer ride along.  F-003.
-        #
-        # Called after login_user / _session_created_at so the helper
-        # refreshes the cookie (with its single ``now``) AFTER
-        # Flask-Login has populated the session, ensuring the
-        # current request survives the bump.
-        # It also forgets every trust of the user (the bump outdates them),
-        # so it never trusts this browser, which stays known all the same
-        # (ruling plan#2997): it has just finished a sign-in.
-        invalidate_other_sessions(user, "backup_code_consumed")
+        log_event(
+            logger, logging.INFO, EVT_OTHER_SESSIONS_INVALIDATED, AUTH,
+            "Other sessions invalidated",
+            user_id=user.id, reason="backup_code_consumed",
+        )
         _flash_backup_codes_left(mfa_config)
     elif trust:
         log_event(logger, logging.INFO, EVT_DEVICE_TRUSTED, AUTH,

@@ -19,11 +19,13 @@ the browser guesses wrong too many times in a row, which deletes the row
 (plan#2173, ruling plan#2406).  What trust skips is the code, and only that.
 A device is trusted while :attr:`KnownDevice.trusted_at` is less than
 :data:`TRUST_LIFETIME` ago AND not before its user's
-``session_invalidated_at``, so every existing writer of that column (log out
-all sessions, a password change, the owner's companion password reset or
+``session_invalidated_at``, so the one act that writes that column
+(``app.services.sign_in_service.sign_out_everywhere``, ruling plan#3927) ends
+every trust with no write of its own, whichever door runs it: log out all
+other sessions, a password change, the owner's companion password reset or
 deactivation, a reset of two-factor (the emergency ``scripts/reset_mfa.py``
-or the owner's Reset of a companion's), a backup-code sign-in,
-``scripts/rotate_sessions.py``) ends every trust with no write of its own.
+or the owner's Reset of a companion's), a backup-code sign-in, or
+``scripts/rotate_sessions.py``.
 
 **What the row does NOT store is the design.**  There is no expiry column, no
 revoked flag and no lock (CLAUDE.md rule 14): each standing is derived from

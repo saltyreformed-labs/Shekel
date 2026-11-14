@@ -12,22 +12,21 @@ copy of a browser's session cookie, as someone who copied it would:
   deletes it; a new sign-in on a browser replaces the record its old session
   named, and purges the user's records past thirty days.
 
-The copy shares the browser's address and User-Agent, as the test client's
-requests all do, so Flask-Login's strong protection passes it: what refuses
-it here is the server's record alone.  (Faking the address is nginx's half of
-the finding, plan#2169.)
+The copy shares the browser's address and User-Agent (``tests._session_copies``),
+so what refuses it here is the server's record alone.  (Faking the address is
+nginx's half of the finding, plan#2169.)
 """
 
 from datetime import datetime, timedelta, timezone
 
-import sqlalchemy
-
 from app.extensions import db
-from app.models.sign_in import SignIn
-from app.services import known_device_service, sign_in_service
+from app.services import sign_in_service
 from app.utils.bearer_tokens import token_hash
 from app.utils.session_helpers import SESSION_LAST_ACTIVITY_KEY, SESSION_TOKEN_KEY
 from tests._seed_owner_fixtures import log_in_seed_user
+from tests._session_copies import (
+    copy_of, is_signed_in, sign_ins_of, token_of, trusted_device_ids,
+)
 
 #: Ruling plan#3069's thirty days, spelled here as an oracle the model's
 #: constant cannot move silently.
@@ -37,58 +36,11 @@ _THIRTY_DAYS = timedelta(days=30)
 _IDLE_PAST_THE_WINDOW = timedelta(hours=13)
 
 
-def _copy_of(app, browser):
-    """Return a new browser holding a copy of *browser*'s session cookie, and nothing else.
-
-    Not its device cookie: a copy of the session cookie is what signs in.
-    """
-    name = app.config["SESSION_COOKIE_NAME"]
-    copy = app.test_client()
-    copy.set_cookie(name, browser.get_cookie(name).value)
-    return copy
-
-
-def _is_signed_in(browser):
-    """Return whether *browser*'s session still loads, by a signed-in page.
-
-    Refused, the login gate sends it to ``/login``; any other answer is a
-    failure of the probe rather than of the session.
-    """
-    response = browser.get("/dashboard")
-    if response.status_code == 200:
-        return True
-    location = response.headers.get("Location", "")
-    assert response.status_code == 302 and "/login" in location, (
-        f"The probe answered {response.status_code} ({location!r})"
-    )
-    return False
-
-
 def _sign_out(browser):
     """POST ``/logout`` from *browser*, asserting it lands on the sign-in page."""
     response = browser.post("/logout")
     assert response.status_code == 302
     assert "/login" in response.headers["Location"]
-
-
-def _token_of(browser):
-    """Return the sign-in token *browser*'s session carries."""
-    with browser.session_transaction() as sess:
-        return sess[SESSION_TOKEN_KEY]
-
-
-def _sign_ins_of(user_id):
-    """Return the hashes of *user_id*'s sign-in records, read fresh."""
-    db.session.expire_all()
-    return set(db.session.execute(
-        sqlalchemy.select(SignIn.token_hash).where(SignIn.user_id == user_id)
-    ).scalars())
-
-
-def _trusted_device_ids(user_id):
-    """Return the ids of *user_id*'s trusted devices, read fresh."""
-    db.session.expire_all()
-    return {device.id for device in known_device_service.list_trusted_devices(user_id)}
 
 
 class TestACopyDiesWithTheSignOut:
@@ -97,13 +49,13 @@ class TestACopyDiesWithTheSignOut:
     def test_a_copy_works_until_the_sign_out_and_never_after(self, app, seed_user):
         """The control is the same copy signed in a request before the sign-out."""
         browser = log_in_seed_user(app.test_client())
-        copy = _copy_of(app, browser)
-        assert _is_signed_in(copy)
+        copy = copy_of(app, browser)
+        assert is_signed_in(copy)
 
         _sign_out(browser)
 
-        assert not _is_signed_in(browser)
-        assert not _is_signed_in(copy)
+        assert not is_signed_in(browser)
+        assert not is_signed_in(copy)
 
     def test_the_users_other_browser_stays_signed_in_and_every_trust_stays(
         self, app, seed_user,
@@ -112,13 +64,13 @@ class TestACopyDiesWithTheSignOut:
         user_id = seed_user["user"].id
         browser = log_in_seed_user(app.test_client())
         other = log_in_seed_user(app.test_client())
-        trusted = _trusted_device_ids(user_id)
+        trusted = trusted_device_ids(user_id)
         assert len(trusted) == 2
 
         _sign_out(browser)
 
-        assert _is_signed_in(other)
-        assert _trusted_device_ids(user_id) == trusted
+        assert is_signed_in(other)
+        assert trusted_device_ids(user_id) == trusted
 
     def test_a_session_whose_record_is_gone_is_refused(self, app, seed_user):
         """However good its cookie: the record, not the cookie, answers.
@@ -126,12 +78,12 @@ class TestACopyDiesWithTheSignOut:
         The record is deleted as a sign-out on another copy would delete it.
         """
         browser = log_in_seed_user(app.test_client())
-        assert _is_signed_in(browser)
+        assert is_signed_in(browser)
 
-        sign_in_service.end_sign_in(_token_of(browser))
+        sign_in_service.end_sign_in(token_of(browser))
         db.session.commit()
 
-        assert not _is_signed_in(browser)
+        assert not is_signed_in(browser)
 
 
 class TestTheRecord:
@@ -143,11 +95,11 @@ class TestTheRecord:
         """The record holds the hash of the token the session carries."""
         user_id = seed_user["user"].id
         browser = log_in_seed_user(app.test_client())
-        assert _sign_ins_of(user_id) == {token_hash(_token_of(browser))}
+        assert sign_ins_of(user_id) == {token_hash(token_of(browser))}
 
         _sign_out(browser)
 
-        assert _sign_ins_of(user_id) == set()
+        assert sign_ins_of(user_id) == set()
         with browser.session_transaction() as sess:
             assert SESSION_TOKEN_KEY not in sess
 
@@ -162,21 +114,21 @@ class TestTheRecord:
         """
         user_id = seed_user["user"].id
         browser = log_in_seed_user(app.test_client())
-        old_token = _token_of(browser)
-        copy = _copy_of(app, browser)
+        old_token = token_of(browser)
+        copy = copy_of(app, browser)
         with browser.session_transaction() as sess:
             sess[SESSION_LAST_ACTIVITY_KEY] = (
                 datetime.now(timezone.utc) - _IDLE_PAST_THE_WINDOW
             ).isoformat()
-        assert not _is_signed_in(browser)
-        assert _is_signed_in(copy)
+        assert not is_signed_in(browser)
+        assert is_signed_in(copy)
 
         log_in_seed_user(browser)
 
-        assert _token_of(browser) != old_token
-        assert _sign_ins_of(user_id) == {token_hash(_token_of(browser))}
-        assert not _is_signed_in(copy)
-        assert _is_signed_in(browser)
+        assert token_of(browser) != old_token
+        assert sign_ins_of(user_id) == {token_hash(token_of(browser))}
+        assert not is_signed_in(copy)
+        assert is_signed_in(browser)
 
     def test_a_sign_in_purges_the_users_records_past_thirty_days(
         self, app, seed_user,
@@ -192,7 +144,7 @@ class TestTheRecord:
 
         browser = log_in_seed_user(app.test_client())
 
-        assert _sign_ins_of(user_id) == {
-            token_hash(young), token_hash(_token_of(browser)),
+        assert sign_ins_of(user_id) == {
+            token_hash(young), token_hash(token_of(browser)),
         }
-        assert token_hash(dead) not in _sign_ins_of(user_id)
+        assert token_hash(dead) not in sign_ins_of(user_id)

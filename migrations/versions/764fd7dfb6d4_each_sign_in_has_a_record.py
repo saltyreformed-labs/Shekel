@@ -18,9 +18,8 @@ row.
   ``ck_sign_ins_token_hash_sha256_hex`` refuses anything that is not 64 hex
   digits, so a writer that stored the raw token is refused here.
 * ``signed_in_at`` -- the sign-in's instant, the one its browser's record was
-  renewed at (ruling plan#3069).  The only time column: the row is never
-  updated.  A row is live while this is less than thirty days ago, derived at
-  read time.
+  renewed at (ruling plan#3069).  The only time column, and never updated.  A
+  row is live while this is less than thirty days ago, derived at read time.
 * **No ended-at column, no revoked flag and no expiry** (CLAUDE.md rule 14): a
   sign-in ends by its row being deleted, or by its age.
 

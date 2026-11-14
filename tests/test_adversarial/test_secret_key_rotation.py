@@ -8,12 +8,14 @@ replayed session cookies after a SECRET_KEY rotation:
    with the old SECRET_KEY fails signature verification under the new
    key, so the session is treated as empty and the user is treated as
    anonymous.
-2. **Per-user invalidation timestamp** (covered by ``load_user`` in
-   ``app/__init__.py``): even if an attacker preserves cookies that
-   *would* verify under the same key (for example, a downgrade attack
-   that re-uses the old key), bumping
-   ``users.session_invalidated_at`` rejects every session whose
-   ``_session_created_at`` predates the bump.
+2. **Every sign-in's record deleted** (``scripts/rotate_sessions.py``,
+   through the one sign-out-everywhere act, ruling plan#3927): even if an
+   attacker preserves cookies that *would* verify under the same key (for
+   example, a downgrade attack that re-uses the old key), ``load_user``
+   refuses a session whose sign-in's record is gone.  That every browser
+   and every copy of every user is refused is graded in
+   ``tests/test_adversarial/test_every_sign_out_everywhere.py``
+   (``TestTheScripts``); here, that a sign-in after the rotation is not.
 
 If either test starts failing, the post-rotation security posture
 described in ``docs/runbook_secrets.md`` is broken.
@@ -22,26 +24,10 @@ Related audit findings: F-001, F-016 (and the operational control
 shipped in ``scripts/rotate_sessions.py``).
 """
 
-from datetime import datetime, timedelta, timezone
-
 from app.extensions import db
-from app.models.user import User
-
-
-def _set_session_created_at(test_client, when: datetime) -> None:
-    """Force ``_session_created_at`` on the test client's session.
-
-    ``session_transaction`` opens the same SecureCookieSession that
-    Flask uses to read/write the signed cookie.  Setting the key
-    inside the context manager re-signs the cookie when the block
-    exits.
-
-    Args:
-        test_client: A Flask test client with an existing session.
-        when: The timestamp to record as the session's creation time.
-    """
-    with test_client.session_transaction() as sess:
-        sess["_session_created_at"] = when.isoformat()
+from scripts.rotate_sessions import execute_rotation
+from tests._seed_owner_fixtures import log_in_seed_user
+from tests._session_copies import is_signed_in
 
 
 class TestSecretKeyRotation:
@@ -90,69 +76,15 @@ class TestSecretKeyRotation:
         assert post.status_code == 302
         assert "/login" in post.headers["Location"]
 
-    def test_session_created_before_invalidation_timestamp_rejected(
-        self, app, auth_client, seed_user
-    ):
-        """A session whose ``_session_created_at`` predates
-        ``users.session_invalidated_at`` is rejected by ``load_user``.
+    def test_a_sign_in_after_the_rotation_is_accepted(self, app, auth_client):
+        """The complement of the rotation's refusal.
 
-        Setup: log the user in.  Action: forcibly set
-        ``_session_created_at`` to one hour ago, then bump
-        ``users.session_invalidated_at`` to ``now()``.  Verification:
-        ``GET /dashboard`` redirects to ``/login`` because ``load_user``
-        compares the two timestamps and returns ``None`` when the
-        session predates the invalidation.
-
-        This is the *signature-independent* protection -- it works
-        even if the attacker still has a valid signing key.  The
-        ``rotate_sessions`` script relies on this branch in
-        ``load_user`` to actually log everyone out.
+        A browser that signs in AFTER the rotation must be accepted --
+        otherwise ``load_user`` would lock everyone out forever after the
+        first rotation.  The control is the browser signed in before it,
+        refused.
         """
-        # Sanity: the auth_client has an active session.
-        pre = auth_client.get("/dashboard")
-        assert pre.status_code == 200, (
-            "Setup failed: auth_client should be logged in before "
-            f"timestamp manipulation; got {pre.status_code}"
-        )
+        execute_rotation(db.session)
+        assert not is_signed_in(auth_client)
 
-        # Force the session to look 1 hour old.
-        synthetic_creation = datetime.now(timezone.utc) - timedelta(hours=1)
-        _set_session_created_at(auth_client, synthetic_creation)
-
-        # Bump the user's invalidation timestamp to "now".  The
-        # comparison in load_user becomes:
-        #     synthetic_creation (-1h) < user.session_invalidated_at (now)
-        # which evaluates True and load_user returns None.
-        user = db.session.get(User, seed_user["user"].id)
-        user.session_invalidated_at = datetime.now(timezone.utc)
-        db.session.commit()
-
-        post = auth_client.get("/dashboard", follow_redirects=False)
-        assert post.status_code == 302
-        assert "/login" in post.headers["Location"]
-
-    def test_session_created_after_invalidation_timestamp_accepted(
-        self, app, auth_client, seed_user
-    ):
-        """The complement of the previous test.
-
-        A session created AFTER ``session_invalidated_at`` must still
-        be accepted -- otherwise ``load_user`` would lock everyone out
-        forever after the first rotation.  Lock down the boundary so
-        a buggy refactor of the comparison cannot break login.
-        """
-        # Bump invalidation to one hour ago.
-        user = db.session.get(User, seed_user["user"].id)
-        user.session_invalidated_at = (
-            datetime.now(timezone.utc) - timedelta(hours=1)
-        )
-        db.session.commit()
-
-        # Force the session to look brand new.
-        _set_session_created_at(auth_client, datetime.now(timezone.utc))
-
-        post = auth_client.get("/dashboard")
-        assert post.status_code == 200, (
-            "Sessions created after invalidation_at must be accepted; "
-            f"got {post.status_code}"
-        )
+        assert is_signed_in(log_in_seed_user(app.test_client()))

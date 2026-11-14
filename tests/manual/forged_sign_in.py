@@ -5,11 +5,11 @@ account it renders as, so it writes a signed-in session into a test client's
 cookie rather than posting the login form: the keys Flask-Login reads
 (``_user_id``, ``_fresh``, ``_id``) and the stamps a sign-in writes
 (:func:`~app.utils.session_helpers.login_session_stamps`), without which
-``load_user`` refuses the session (plan#2173).  One of those stamps is the
-token of the sign-in's record on the server, which ``load_user`` requires too
-(ruling plan#3925), so the forge records a sign-in of the account and commits
-it first: a row in ``auth.sign_ins`` of the copy it measures, as the app's own
-sign-in would write.  Its caller switches strong
+``load_user`` refuses the session.  One of those stamps is the token of the
+sign-in's record on the server, which ``load_user`` requires of every session
+(rulings plan#3925, plan#3927), so the forge records a sign-in of the account
+and commits it first: a row in ``auth.sign_ins`` of the copy it measures, as
+the app's own sign-in would write.  Its caller switches strong
 session protection off first, since strong protection refuses a session whose
 identifier was not minted inside a request.
 
@@ -80,7 +80,7 @@ def signed_in_client(app: Flask, user_id: int) -> FlaskClient:
         session["_user_id"] = str(user_id)
         session["_fresh"] = True
         session["_id"] = None
-        session.update(login_session_stamps(now, user_id, token))
+        session.update(login_session_stamps(now, token))
     answer = client.get(PROOF_PAGE)
     if answer.status_code == 200:
         return client

@@ -30,7 +30,6 @@ from app.utils.logging_config import setup_logging
 from app.utils.session_helpers import (
     SESSION_LAST_ACTIVITY_KEY,
     session_stamp,
-    sign_in_created_at,
     sign_in_is_live,
 )
 
@@ -113,30 +112,23 @@ def create_app(config_name=None, *, init_ref_cache=True):
         """Load a user by ID for Flask-Login session hydration.
 
         Returns None (forcing re-login) for any of:
-          * No sign-in of THIS user stamped the session: none at all, or
-            another user's, as a remember-cookie restore lands on
-            (plan#2173; ``sign_in_created_at`` in session_helpers), or its
-            ``_session_created_at`` is missing or cannot be read (not
-            ISO-8601, or naive), which no sign-in writes (plan#3157).
           * Unknown user ID.
           * Deactivated user (``is_active=False``).
-          * Session created before the most recent
-            ``session_invalidated_at`` bump (commit C-08 -- F-002,
-            F-003, F-032).
           * Session whose last activity is older than
             ``IDLE_TIMEOUT_MINUTES`` or absent (commit C-10 -- F-006).
-          * Session whose token names no live sign-in record of the user
-            (ruling plan#3925; ``sign_in_is_live`` in session_helpers): its
-            record was deleted by a sign-out, it carries no token, or its
-            sign-in is ``KNOWN_LIFETIME`` old or more, however active (ruling
-            plan#3069), so a browser that is signed in is a known one.
+          * Session whose token names no live sign-in record of THIS user
+            (``sign_in_is_live`` in session_helpers), the one rule for
+            whether a session is signed in (rulings plan#3925, plan#3927):
+            a sign-out deleted its record, this one or every one of the
+            user's; it carries no token; its token is another user's, as a
+            remember-cookie restore onto that user's session carries
+            (plan#2173); or its sign-in is ``KNOWN_LIFETIME`` old or more,
+            however active (ruling plan#3069), so a browser that is signed
+            in is a known one.
 
         A None return triggers Flask-Login's "logged out" flow on the
         next request, redirecting to the configured ``login_view``.
         """
-        session_created = sign_in_created_at(user_id)
-        if session_created is None:
-            return None
         user = db.session.get(User, int(user_id))
         if user is None:
             return None
@@ -152,14 +144,7 @@ def create_app(config_name=None, *, init_ref_cache=True):
         # balance:X-bn; pinned by tests/test_routes/test_xbn_sign_in_lock.py).
         if not user.is_active:
             return None
-        # Check whether this session was created before the most recent
-        # "log out all sessions" or password change event.  A creation stamp
-        # in the future passes, as any stamp at or after the bump does:
-        # forging one needs SECRET_KEY, with which any stamp can be minted.
-        invalidated_at = user.session_invalidated_at
-        if invalidated_at is not None and session_created < invalidated_at:
-            return None
-        # The two checks the session's own stamps answer, one refusal.
+        # The session's own stamp, then its record, one refusal.
         # Idle timeout (commit C-10 / F-006): reject the session if
         # ``_session_last_activity_at`` is older than
         # ``IDLE_TIMEOUT_MINUTES``.  See ``_idle_session_is_fresh``

@@ -8,12 +8,14 @@ C-08 of the 2026-04-15 security remediation plan:
     ``app/routes/auth/_helpers.py``.
 
   * F-003 (CWE-613): backup-code consumption does not invalidate
-    other sessions.  Closed by the ``invalidate_other_sessions``
-    call inside the backup-code branch of :func:`mfa_verify`.
+    other sessions.  Closed in the backup-code branch of
+    :func:`mfa_verify`, which runs the one sign-out-everywhere act
+    (``sign_in_service.sign_out_everywhere``, ruling plan#3927) before
+    the sign-in it finishes.
 
   * F-032 (CWE-613): MFA disable does not invalidate other sessions.
-    Closed by the ``invalidate_other_sessions`` call at the end of
-    ``mfa_disable_confirm``, then made unreachable: no account can turn
+    Closed by a call at the end of ``mfa_disable_confirm``, then made
+    unreachable: no account can turn
     two-factor off (ruling plan#3604), so its tests went with the route.
     The one reset act ends every session itself
     (``mfa_service.reset_two_factor``; ``tests/test_scripts/test_reset_mfa.py``).
@@ -26,11 +28,12 @@ which these tests detect by GETting a protected page from the
 compromised client and asserting a 302 to /login.
 
 Why adversarial, not unit:  the C-08 contract is a composition of
-``users.session_invalidated_at``, the cookie's
-``_session_created_at``, the helper, and ``app.load_user``.  A unit
-test can verify each piece in isolation (and ``test_session_helpers.py``
-does), but only an end-to-end multi-client test catches a regression
-where the pieces are correct individually but wired together wrong.
+the sign-in records, the cookie's token, the act, and ``app.load_user``.
+A unit test can verify each piece in isolation (and
+``test_session_helpers.py`` does), but only an end-to-end multi-client
+test catches a regression where the pieces are correct individually but
+wired together wrong.  What every such act does to copies and trusts is
+``test_every_sign_out_everywhere.py``'s.
 """
 
 from datetime import datetime, timedelta, timezone
@@ -583,9 +586,9 @@ class TestBackupCodeInvalidatesOtherSessions:
 
         Pairs with ``test_other_session_logged_out_after_backup_code_consume``
         above: A is logged out, B (the backup-code user) is NOT.  The
-        single-``now`` invariant in the helper (DB column equal to
-        cookie value, strict-less-than comparison in load_user) is
-        the load-bearing detail this test pins down.
+        act runs before the sign-in it finishes, so the sign-in's own
+        record is never one it ends: the load-bearing detail this test
+        pins down.
         """
         with app.app_context():
             _its_two_factor(seed_user["user"].id)
@@ -614,13 +617,10 @@ class TestBackupCodeInvalidatesOtherSessions:
 
 class TestExistingInvariantsPreserved:
     """C-08 must not regress the password-change and explicit-logout
-    paths that already implement the same invalidation pattern inline.
+    paths, which run the same one act (ruling plan#3927).
 
-    These tests are belt-and-braces:  the inline implementations in
-    change_password and invalidate_sessions were not refactored to
-    use the new helper (out of scope for C-08), but their semantics
-    are part of the same C-08 contract and a future refactor onto
-    the helper must preserve them.
+    These tests are belt-and-braces: each pins that its door still ends
+    every trust, by the time the act writes on the account.
     """
 
     def test_password_change_still_invalidates_sessions(
@@ -628,10 +628,9 @@ class TestExistingInvariantsPreserved:
     ):
         """``change_password`` continues to bump session_invalidated_at.
 
-        Locks down the existing pattern in
-        ``app/routes/auth/session_security.py:change_password`` so a future refactor
-        onto :func:`invalidate_other_sessions` cannot silently drop
-        the bump (e.g. by forgetting the helper call).
+        Locks down ``app/routes/auth/session_security.py:change_password``
+        so a future refactor cannot silently drop the act (e.g. by
+        forgetting its call).
         """
         with app.app_context():
             from app.models.user import User  # pylint: disable=import-outside-toplevel

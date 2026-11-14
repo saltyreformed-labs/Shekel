@@ -683,8 +683,8 @@ def bind_sign_in_owner(user_id: int, owner_id: "int | None") -> None:
 
     Sign-in is the one writer of a committed user's rows that no signed-in
     request covers: the code step (``backup_codes``, ``last_totp_timestep``,
-    ``session_invalidated_at``), a known browser's count on its record, and
-    the completion's records run before anyone is signed in, so
+    and a backup code's sign-out everywhere), a known browser's count on its
+    record, and the completion's records run before anyone is signed in, so
     :func:`bind_request_actor` never saw an owner.  Unlocked, a backup-code
     sign-in racing "Regenerate backup codes" wrote the old codes back over the
     new ones, one backup or authenticator code signed in two devices, and a

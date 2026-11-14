@@ -17,23 +17,18 @@ hashed is :mod:`app.utils.bearer_tokens`'s alone.
 :data:`~app.models.known_device.KNOWN_LIFETIME` ago, and :func:`_trusted`, a
 trust less than :data:`~app.models.known_device.TRUST_LIFETIME` old and not
 before its user's ``session_invalidated_at``.  Ending a trust is that comparison
-and nothing else: every writer of ``session_invalidated_at`` ends every trust of
-that user without a write here.  "Not before" is the session rule's own boundary
-(``app.utils.session_helpers``): a device trusted at the very instant of a bump
-survives it, as a session created at that instant does.  Being known reads no
-bump, by ruling plan#2997, so that none of those acts can leave the owner's
-browsers refused by a lock a stranger holds shut.
+and nothing else: the one sign-out-everywhere act
+(``app.services.sign_in_service.sign_out_everywhere``, ruling plan#3927), the
+column's one writer, ends every trust of that user without a write here.  A
+device trusted at the very instant of the act is not before it, and survives.
+Being known reads no such act, by ruling plan#2997, so that none of them can
+leave the owner's browsers refused by a lock a stranger holds shut.
 
 **The clock is the process's**, ``datetime.now(timezone.utc)``, read once per
-act: the same clock the sign-in stamps and most ``session_invalidated_at``
-writers use.  A finished sign-in's instant is its caller's, handed to
-:func:`record_sign_in`, because the session's sign-in stamp is written from
-the same instant (ruling plan#3069).  Two writers (the owner's companion password reset and
-deactivation, ``app/routes/settings.py``) use the database's ``now()``, which
-is the moment their transaction BEGAN, not the moment it commits: a device
-trusted while such a request runs is not before the bump and survives it, as a
-session started then does.  On one host the database's clock and the
-process's are one clock.
+act: the same clock the sign-in's record and every sign-out-everywhere act
+use.  A finished sign-in's instant is its caller's, handed to
+:func:`record_sign_in`, because the sign-in's own record is written from the
+same instant (ruling plan#3069).
 
 Architecture:
   - No Flask imports.  Takes plain ids and strings, returns rows or the token.

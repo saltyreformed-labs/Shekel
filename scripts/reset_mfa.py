@@ -11,9 +11,11 @@ even when ``is_enabled`` is already ``False`` but residual material
 lingers on the row.  An emergency reset must leave no decryptable
 secret at rest.
 
-The reset also bumps the user's ``session_invalidated_at``: it ends every
-session of the user and forgets every trusted device of theirs (plan#2173,
-ruling plan#2406, "turning 2FA off ... forgets them all").  No account can
+The reset also signs the user out everywhere, by the one sign-out act
+(``app.services.sign_in_service.sign_out_everywhere``, ruling plan#3927):
+it ends every session of the user and forgets every trusted device of
+theirs (plan#2173, ruling plan#2406, "turning 2FA off ... forgets them
+all").  No account can
 turn two-factor off in the app (ruling plan#3604), so this, and for a
 companion the owner's Reset, is how an account's two-factor is cleared.
 Every account must have two-factor (plan#3452), so the user's next sign-in
@@ -59,8 +61,8 @@ def reset_mfa(email: str | None) -> None:
     ``mfa_service.reset_two_factor``: it clears
     the encrypted TOTP secret, hashed backup codes, confirmation
     timestamp, replay-prevention step boundary, and any pending setup
-    ciphertext, and bumps the user's ``session_invalidated_at``, which
-    this commits together.  The clear also runs when
+    ciphertext, and signs the user out of every browser and every trust,
+    which this commits together.  The clear also runs when
     ``is_enabled`` is already ``False`` but residual material remains
     (an orphaned secret from a manual DB intervention, an interrupted
     disable flow, or an abandoned ``/mfa/setup`` whose encrypted

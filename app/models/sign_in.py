@@ -39,8 +39,11 @@ from app.utils.bearer_tokens import TOKEN_HASH_CHECK
 class SignIn(BrowserTokenMixin, db.Model):
     """One finished sign-in, live until it is deleted or ages out.
 
-    The row is never updated: a sign-in writes it and a sign-out deletes it,
-    so :attr:`signed_in_at` is also when the row was made.
+    A sign-in writes it and a sign-out deletes it.  The one update is of its
+    token, when the browser holding it presses "Log out all other sessions"
+    or changes its password (ruling plan#4010), so a copy of the old cookie
+    is refused; :attr:`signed_in_at` is never updated, so it is also when the
+    row was made.
     """
 
     __tablename__ = "sign_ins"

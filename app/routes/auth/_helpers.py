@@ -332,12 +332,13 @@ def _complete_sign_in(
     with a code, records the sign-in on the server from the same instant
     (ruling plan#3925), replacing the record this browser's previous session
     named, so a sign-out can end it and it ends when the browser stops being
-    known (ruling plan#3069), calls ``login_user``, stamps the user, the
-    sign-in's token and every lifecycle key from that instant, so the idle and
-    fresh-login checks start where the session did (commit C-10) and no other
-    user's id can be loaded on it (plan#2173), and chooses the landing page.
-    What differs per proof stays with its caller: the log event, and a backup
-    code's sign-out of every other session.
+    known (ruling plan#3069), calls ``login_user``, stamps the sign-in's token
+    and every lifecycle key from that instant, so the idle and fresh-login
+    checks start where the session did (commit C-10), and the record, which
+    holds its user, lets no other user's id be loaded on it (plan#2173), and
+    chooses the landing page.  What differs per proof stays with its caller:
+    the log event, and a backup code's sign-out of every other session, which
+    runs before this.
 
     A known browser's sign-in writes nothing to the account's count or lock,
     so it refills no stranger's guesses; the browser's own count clears in its
@@ -387,7 +388,7 @@ def _complete_sign_in(
     )
     db.session.commit()
     login_user(user)
-    stamp_login_session(now, user.id, sign_in_token)
+    stamp_login_session(now, sign_in_token)
     response = redirect(_landing_page(user, next_page))
     set_device_cookie(response, user.id, token)
     return response

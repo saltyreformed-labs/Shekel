@@ -6,6 +6,7 @@ Settings dashboard consolidating all configuration sections.
 """
 
 import logging
+from datetime import datetime, timezone
 
 from flask import (
     Blueprint, Response, abort, flash, redirect, render_template, request, url_for,
@@ -37,7 +38,7 @@ from app.services import (
     pay_period_locks,
     pay_schedule_service,
 )
-from app.services import mfa_service
+from app.services import mfa_service, sign_in_service
 from app.services.auth_service import hash_password
 from app.services.pay_calendar import calendar_at_schedule
 from app.utils.dates import display_today
@@ -699,9 +700,12 @@ def companion_edit(companion_id):
     new_password = data.get("password") or ""
     if new_password:
         companion.password_hash = hash_password(new_password)
-        # Invalidate any live companion session -- matches the behavior
-        # of change_password in auth.py for the owner's own sessions.
-        companion.session_invalidated_at = db.func.now()
+        # Every session of hers ends, and every trust, by the one act
+        # (ruling plan#3927): her own Change password ends the same, keeping
+        # only the browser that pressed it, and here none is hers.
+        sign_in_service.sign_out_everywhere(
+            companion, keeping=None, now=datetime.now(timezone.utc),
+        )
 
     db.session.commit()
 
@@ -720,7 +724,9 @@ def companion_deactivate(companion_id):
     The companion's entries, MFA config, and settings row are
     preserved.  Flask-Login's user_loader rejects any session whose
     user has is_active=False, so all live companion sessions become
-    invalid on their next request.
+    invalid on their next request.  Every sign-in of hers ends too, and
+    every trust, by the one act (ruling plan#3927), so a reactivation
+    restores none of them: she signs in fresh, and types her code.
     """
     companion = _load_companion_or_404(companion_id)
 
@@ -729,10 +735,9 @@ def companion_deactivate(companion_id):
         return redirect(url_for("settings.show", section="companions"))
 
     companion.is_active = False
-    # Belt-and-suspenders: stamp the invalidation time so session
-    # checks that look at session_invalidated_at also reject live
-    # sessions, not just the is_active flag.
-    companion.session_invalidated_at = db.func.now()
+    sign_in_service.sign_out_everywhere(
+        companion, keeping=None, now=datetime.now(timezone.utc),
+    )
     db.session.commit()
 
     flash(
@@ -751,10 +756,10 @@ def companion_deactivate(companion_id):
 def companion_reactivate(companion_id):
     """Restore access for a previously deactivated companion.
 
-    Only is_active is flipped back to True.  session_invalidated_at
-    is intentionally left at the deactivation timestamp so any stale
-    session cookies from before deactivation remain invalid -- the
-    companion must log in fresh.
+    Only is_active is flipped back to True.  Her deactivation ended every
+    sign-in and every trust of hers (:func:`companion_deactivate`), and
+    nothing here restores one, so any session cookie from before it stays
+    refused -- the companion must log in fresh.
     """
     companion = _load_companion_or_404(companion_id)
 

@@ -1,5 +1,5 @@
 """
-Shekel Budget App -- Card route package: the unpaid payments follow the terms.
+Shekel Budget App -- Card route package: the unpaid payments follow their dates.
 
 Plan step **credit_card:CC-6**, its task plan#2675 (ruling **plan#2671**: "When
 you change the card's terms, the unpaid payments move to the new dates.  If you
@@ -9,6 +9,15 @@ next read pass with nothing to keep in step
 (:mod:`app.services.balance_at._definition_due_dates`); what is left is the rows
 that walk already wrote.  Both terms doors, the save and the remove, call
 :func:`follow_the_terms_or_ask` with their write pending.
+
+**The payment's own door asks the same question** (task plan#2679): switching
+a card's payment between payoff rows and a payment scheduled with the card
+company rewrites its repeat, from each payday to each due date or back, and the
+rows it wrote follow the same way (:func:`follow_the_switch_or_ask`).  One
+helper serves both doors, because the question is the same one: a change took
+some payments' dates away, and the owner typed over some of those payments.
+The two differ only in which dates were taken (:class:`MovedDates`) and in the
+words the chooser page uses for where the payments go (:class:`_Framing`).
 
 **Every row moves through the maintain pass**
 (:func:`~app.services.transfer_recurrence.regenerate_for_template`), the one
@@ -42,13 +51,15 @@ is what the pass does with a held row at every door, the page says so, and the
 later worked-out amounts subtract a kept payment from the payment after it
 (ruling **R-CC22**).  A deleted row gets no decision at all: its date is not a
 due date any more, so the new date gets a payment either way, and a choice with
-one outcome would decide nothing (``accounts/card_terms_chooser.html``).
+one outcome would decide nothing (``accounts/card_payments_chooser.html``).
 
 Route-layer module (leading underscore = route-internal) because it consumes
 ``flash``, ``render_template`` and ``request``.
 """
 
+from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import date
 
 from flask import Response, flash, request, url_for
 
@@ -72,18 +83,56 @@ from app.routes._redirect_target import RedirectTarget
 from app.routes._transfer_creation_helpers import TRANSFER_TEMPLATE_KIND
 from app.services import card_terms
 from app.services.balance_at import BalanceContext
+from app.services.card_payoff import RepeatChange
 from app.services.card_statement import DueDateSchedule
 from app.services.generation_schedule import GenerationSchedule
+from app.services.recurrence import (
+    RecurrenceSpec,
+    follows_card_due_dates,
+    occurrences,
+)
 from app.services.recurrence_engine import definition_recurs
 from app.services.recurring_transfer_query import due_date_repeats_into
 from app.utils.dates import display_today
 
-#: The chooser page framing a change of terms.
-_TERMS_CHOOSER_PAGE = "accounts/card_terms_chooser.html"
+#: The chooser page framing a change of a card's payment dates, for both doors.
+_PAYMENTS_CHOOSER_PAGE = "accounts/card_payments_chooser.html"
 
 
 @dataclass(frozen=True)
-class TermsDoor:
+class _Framing:
+    """What the chooser page calls the change and the dates the payments go to.
+
+    Attributes:
+        page_title: The page's title.
+        new_dates: Where the payments go, in the plural ("the new due dates").
+        new_date: The one date a payment goes to ("the new due date").
+    """
+
+    page_title: str
+    new_dates: str
+    new_date: str
+
+
+#: A change of the card's terms.
+_TERMS_FRAMING = _Framing(
+    "Confirm change of card terms", "the new due dates", "the new due date",
+)
+
+#: A switch to a payment scheduled with the card company.
+_SCHEDULED_FRAMING = _Framing(
+    "Confirm change of card payment", "each statement's due date",
+    "the due date",
+)
+
+#: A switch back to payoff rows.
+_PAYOFF_FRAMING = _Framing(
+    "Confirm change of card payment", "each payday", "the payday",
+)
+
+
+@dataclass(frozen=True)
+class PaymentsDoor:
     """The door whose pending write the payments are following.
 
     Attributes:
@@ -100,31 +149,36 @@ class TermsDoor:
 
 
 @dataclass(frozen=True)
-class _MovedDates:
-    """A change of a card's terms, as the two sets of due dates it replaced.
+class MovedDates:
+    """A change of a payment's dates, as whether a day was a date either side.
 
     Attributes:
-        before: The due dates before the door's write.
-        after: The due dates with it pending.
+        before: Whether a day was one of the payment's dates before the
+            door's write: a due date under the old terms, or an occurrence of
+            the repeat a switch replaced.
+        after: Whether it is one with the write pending.
     """
 
-    before: DueDateSchedule
-    after: DueDateSchedule
+    before: Callable[[date], bool]
+    after: Callable[[date], bool]
 
     def moved(self, row: Transfer) -> bool:
-        """Return whether this change took the date *row* answers off the due dates.
+        """Return whether this change took the date *row* answers away.
 
         Args:
             row: A row a pass held back.  One answering no occurrence is on
                 no date, so nothing moved it.
 
         Returns:
-            ``True`` when its date was a due date before and is not now.
+            ``True`` when its date was one of the payment's dates before and
+            is not now.  A row an earlier "keep" left on a date that was
+            already no longer the payment's is not asked about again, and nor
+            is one on a date both sides name.
         """
         return (
             row.occurs_on is not None
-            and self.before.falls_due_on(row.occurs_on)
-            and not self.after.falls_due_on(row.occurs_on)
+            and self.before(row.occurs_on)
+            and not self.after(row.occurs_on)
         )
 
 
@@ -157,7 +211,7 @@ def _maintained(
 
 
 def _rows_on_moved_dates(
-    conflict: RecurrenceConflict, dates: _MovedDates,
+    conflict: RecurrenceConflict, dates: MovedDates,
 ) -> RecurrenceConflict:
     """Narrow what a pass held back to the rows this change's question is about.
 
@@ -212,15 +266,28 @@ def _apply_decisions(
     return _maintained(template, ctx)
 
 
+@dataclass(frozen=True)
+class _Change:
+    """A door's change of a payment's dates: which were taken, and in what words.
+
+    Attributes:
+        dates: Which dates the change took away (:class:`MovedDates`).
+        framing: What the chooser page calls the change (:class:`_Framing`).
+    """
+
+    dates: MovedDates
+    framing: _Framing
+
+
 def _maintain_every_repeat(
-    repeats: list[TransferTemplate], dates: _MovedDates, door: TermsDoor,
+    repeats: list[TransferTemplate], change: _Change, door: PaymentsDoor,
     ctx: BalanceContext,
 ) -> str | None:
     """Run each definition's pass, then ask, or apply the owner's answers.
 
     Args:
-        repeats: The definitions following the card's due dates.
-        dates: The change.
+        repeats: The definitions whose dates the door's write moved.
+        change: The change.
         door: The door whose write is pending.
         ctx: The read pass built with that write pending.
 
@@ -231,7 +298,7 @@ def _maintain_every_repeat(
     decisions = parse_conflict_decisions(request.form)
     held = {template.id: _maintained(template, ctx) for template in repeats}
     asked = {
-        template_id: _rows_on_moved_dates(conflict, dates)
+        template_id: _rows_on_moved_dates(conflict, change.dates)
         for template_id, conflict in held.items()
         if conflict is not None
     }
@@ -239,7 +306,7 @@ def _maintain_every_repeat(
         conflict.overridden or conflict.deleted for conflict in asked.values()
     ):
         page = render_chooser_page(
-            _TERMS_CHOOSER_PAGE,
+            _PAYMENTS_CHOOSER_PAGE,
             request.form,
             choices=sorted(
                 (
@@ -252,8 +319,11 @@ def _maintain_every_repeat(
                 key=lambda choice: choice.due_date,
             ),
             change_sentence=door.change_sentence,
-            # Every payment listed carries the page's one question, its due
-            # date; a card's terms change asks nothing about an account.
+            page_title=change.framing.page_title,
+            new_dates=change.framing.new_dates,
+            new_date=change.framing.new_date,
+            # Every payment listed carries the page's one question, its date;
+            # neither door asks anything about an account.
             asks_follow=True,
             action_url=door.action_url,
             cancel_url=url_for(door.back.endpoint, **door.back.kwargs),
@@ -274,8 +344,32 @@ def _maintain_every_repeat(
     return None
 
 
+def _follow_or_ask(
+    repeats: list[TransferTemplate], change: _Change, door: PaymentsDoor,
+    ctx: BalanceContext,
+) -> Response | str | None:
+    """Run :func:`_maintain_every_repeat`, refusing a row the pass cannot write.
+
+    Args:
+        repeats: The definitions whose dates the door's write moved.
+        change: The change.
+        door: The door whose write is pending.
+        ctx: The read pass, its baseline scenario present.
+
+    Returns:
+        The chooser page or a refusal's redirect, each with the write rolled
+        back; or ``None`` when the caller should commit.
+    """
+    try:
+        return _maintain_every_repeat(repeats, change, door, ctx)
+    except (NotFoundError, ShekelValidationError) as exc:
+        db.session.rollback()
+        flash(f"Could not move this card's payments: {exc}", "danger")
+        return door.back.to_response()
+
+
 def follow_the_terms_or_ask(
-    account: Account, before: DueDateSchedule | None, door: TermsDoor,
+    account: Account, before: DueDateSchedule | None, door: PaymentsDoor,
 ) -> Response | str | None:
     """Move the card's unpaid payments to the due dates the door's write leaves.
 
@@ -289,7 +383,7 @@ def follow_the_terms_or_ask(
             (:func:`app.services.card_terms.due_dates_of`); ``None`` for a
             dormant card, which no repeat can follow (its doors refuse one,
             plan#2788).
-        door: The door (:class:`TermsDoor`).
+        door: The door (:class:`PaymentsDoor`).
 
     Returns:
         The chooser page or a refusal's redirect, each with the write rolled
@@ -315,11 +409,74 @@ def follow_the_terms_or_ask(
     # No baseline scenario: no pass can run, as at every door that regenerates.
     if ctx.scenario is None:
         return None
-    try:
-        return _maintain_every_repeat(
-            repeats, _MovedDates(before, after), door, ctx,
-        )
-    except (NotFoundError, ShekelValidationError) as exc:
-        db.session.rollback()
-        flash(f"Could not move this card's payments: {exc}", "danger")
-        return door.back.to_response()
+    return _follow_or_ask(
+        repeats,
+        _Change(MovedDates(before.falls_due_on, after.falls_due_on), _TERMS_FRAMING),
+        door,
+        ctx,
+    )
+
+
+def _fires_on(
+    spec: RecurrenceSpec | None, template: TransferTemplate, ctx: BalanceContext,
+) -> Callable[[date], bool]:
+    """Return whether a day is an occurrence of *spec* on *template*.
+
+    Asked of the repeat's own walk (``recurrence.occurrences``) through the
+    day, resolved by the pass as generation resolves it, so "one of the
+    payment's dates" has the one spelling the rows were written from.
+
+    Args:
+        spec: The repeat, or ``None`` for none, which names no day.
+        template: The definition it belongs to, for its books and its card's
+            due dates.
+        ctx: The read pass.
+
+    Returns:
+        The test.  It names no day when the owner has no pay periods, as the
+        resolution then answers nothing.
+    """
+    resolved = None if spec is None else ctx.resolved_for(spec, template)
+    if resolved is None:
+        return lambda _day: False
+    calendar = ctx.calendar()
+    return lambda day: day in occurrences(resolved, calendar, through=day)
+
+
+def follow_the_switch_or_ask(
+    template: TransferTemplate, change: RepeatChange, door: PaymentsDoor,
+    ctx: BalanceContext,
+) -> Response | str | None:
+    """Move the card's unpaid payments onto the repeat a switch just wrote.
+
+    Called by the payment door (:mod:`app.routes.card.payment`) with
+    :func:`app.services.card_payoff.switch_payment`'s write made and
+    uncommitted, when it rewrote the repeat, so a refusal or a question rolls
+    the switch back with everything else.  The pass is the door's own, built
+    before its write: it memoizes a rule's resolution by what the rule says
+    (``switch_payment``'s docstring), so it walks the rewritten repeat.
+
+    Args:
+        template: The card's payment.
+        change: The repeats either side of the switch.
+        door: The door (:class:`PaymentsDoor`).
+        ctx: The door's read pass.
+
+    Returns:
+        The chooser page or a refusal's redirect, each with the write rolled
+        back; or ``None`` when the caller should commit.
+    """
+    # No baseline scenario: no pass can run, as at every door that
+    # regenerates; and a payment that does not recur (archived) has no rows
+    # for one to write, as at the terms door.
+    if ctx.scenario is None or not definition_recurs(template):
+        return None
+    framing = (
+        _SCHEDULED_FRAMING if follows_card_due_dates(change.after.unit)
+        else _PAYOFF_FRAMING
+    )
+    dates = MovedDates(
+        _fires_on(change.before, template, ctx),
+        _fires_on(change.after, template, ctx),
+    )
+    return _follow_or_ask([template], _Change(dates, framing), door, ctx)

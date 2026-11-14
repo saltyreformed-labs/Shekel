@@ -72,17 +72,15 @@ from app.routes.accounts.reconcile import (
     reconcile_context,
     reconcile_statement,
 )
+from app.routes.card import card_page_context
 from app.services import (
     balance_at,
-    card_apr,
     cash_ledger,
     home_equity_service,
     property_equity_chart,
 )
 from app.services.account_projection import is_revolving
 from app.services.balance_at import BalanceContext
-from app.services.card_statement import terms_in_effect
-from app.services.card_terms import load_card_term_versions
 from app.utils.account_validation import (
     _appreciation_params_schema,
     _interest_params_schema,
@@ -192,50 +190,6 @@ def _interest_params(account: Account) -> InterestParams:
             f"no-op."
         )
     return params
-
-
-def _card_context(
-    account: Account, ctx: BalanceContext, is_card: bool,
-) -> dict:
-    """The Card terms card's context: the terms and, once they exist, the APR.
-
-    Three states under one key shape.  A non-card carries the keys empty
-    (the partial is not included; the template's context has one shape).  A
-    dormant card carries its ``None`` terms and nothing else: the partial
-    renders the terms form blank and no APR section, so the APR series is
-    not read -- whatever rows the account holds are unread while it is
-    dormant, and the doors are gated the same way (plan step
-    credit_card:CC-3, developer ruling **R-CC28**).  A configured card
-    carries the terms and APR in force on the pass's own day (``ctx.as_of``)
-    and both dated series newest first (plan#2331, ruling **plan#2333**).
-
-    A card with no terms is the opposite disposition to
-    :func:`_interest_params`, and deliberately so (plan step credit_card:CC-2,
-    design 3.4): an interest-bearing account's params row is written by every
-    door that makes it interest-bearing, so a missing one is corrupt data and
-    the page refuses; a card's terms are written by the OWNER alone (the terms
-    door), so none is the ordinary state of a card not yet configured.
-
-    Args:
-        account: The account being rendered.
-        ctx: The page's read pass.
-        is_card: The ONE card predicate's answer for *account*, decided once
-            by the caller and also handed to the template.
-
-    Returns:
-        ``card_terms``, ``card_term_versions``, ``card_aprs``, ``card_apr_today``.
-    """
-    versions = load_card_term_versions(account.id) if is_card else []
-    if not versions:
-        return {"card_terms": None, "card_term_versions": [],
-                "card_aprs": [], "card_apr_today": None}
-    aprs = card_apr.load_card_aprs(account.id)
-    return {
-        "card_terms": terms_in_effect(versions, ctx.as_of),
-        "card_term_versions": versions[::-1],
-        "card_aprs": aprs,
-        "card_apr_today": card_apr.apr_in_effect(aprs, ctx.as_of),
-    }
 
 
 def _build_horizons(
@@ -599,13 +553,14 @@ def cash_detail(account_id):
         # also serves the BAND fragment, which re-renders on every
         # ``balanceChanged`` and carries neither card.
         books_difference=outstanding_context(account, ctx),
-        # The Card terms card (plan step credit_card:CC-2, ruling R-CC25),
-        # composed here for the reason the two above are: the band fragment
-        # ``_cash_detail_context`` also serves never renders it.  Gated by the
-        # ONE card predicate (CC-1); the terms are read only for a card, and
-        # ``None`` is the dormant state the partial renders blank.
+        # The Card terms and Payment cards (plan step credit_card:CC-2, ruling
+        # R-CC25; task plan#2679), composed here for the reason the two above
+        # are: the band fragment ``_cash_detail_context`` also serves never
+        # renders them.  Gated by the ONE card predicate (CC-1); the terms are
+        # read only for a card, and ``None`` is the dormant state the partial
+        # renders blank.
         is_card=is_card,
-        **_card_context(account, ctx, is_card),
+        **card_page_context(account, ctx, is_card),
         **_cash_detail_context(account, ctx),
     )
 

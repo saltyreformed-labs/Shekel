@@ -24,6 +24,10 @@ form percent (``"2.5"``) to its fraction (``"0.025"``) so the schema's
 
 **The APR.**  :class:`CardAprSchema` is the second form, two controls, for the
 set-by-date door (developer ruling **R-CC27**).
+
+**The payment.**  :class:`CardPaymentSchema` is the third, one control, for the
+door that switches the card's payment between payoff rows and a payment
+scheduled with the card company (plan step credit_card:CC-6, task plan#2679).
 """
 
 from decimal import Decimal
@@ -39,6 +43,7 @@ from app.schemas.validation._helpers import (
     _normalize_empty_inputs,
     _normalize_percent_fields,
 )
+from app.services.card_payoff import PAYMENT_CHOICES
 
 #: A stored dollar figure that must be a real amount: above zero, under the
 #: ceiling ``_NON_NEGATIVE_MONETARY`` states (read from it, so the two cannot
@@ -140,4 +145,19 @@ class CardAprSchema(BaseSchema):
     effective_date = fields.Date(required=True, validate=_EFFECTIVE_DATE_RANGE)
     interest_rate = fields.Decimal(
         required=True, places=5, as_string=True, validate=_RATE_FRACTION_RANGE,
+    )
+
+
+class CardPaymentSchema(BaseSchema):
+    """Validates the card's payment form: which of the four payments it has.
+
+    One radio group (task plan#2679): payoff rows, or the statement balance,
+    the minimum or everything on the card on each statement's due date.  Its
+    values are :data:`app.services.card_payoff.PAYMENT_CHOICES`' tokens, read
+    from there so the form and the door cannot part; the door looks the
+    token up there for the payment it names.
+    """
+
+    payment = fields.String(
+        required=True, validate=validate.OneOf(tuple(PAYMENT_CHOICES)),
     )

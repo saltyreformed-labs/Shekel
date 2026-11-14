@@ -43,6 +43,16 @@ into a card is paid from the current paycheck's payday when its books opened
 before that payday, as a payment set up by hand is, and from the next when they
 opened later.
 
+**It switches to a payment scheduled with the card company and back**
+(task plan#2679; rulings plan#2888, plan#2889): the same payment, its
+settings' mode changed and its repeat rewritten when the repeat's kind changes
+(:func:`switch_payment`), so the one-per-card key that held the payoff row's
+place holds the scheduled payment's.  A card has one of four payments
+(:data:`PAYMENT_CHOICES`): payoff rows, or the statement balance, the minimum
+or everything on the card on each statement's due date.  The rows follow
+through the maintain pass, which is the door's to run, because a row the
+owner typed over is asked about first.
+
 Boundary discipline: no Flask import; the caller owns the transaction.
 """
 
@@ -58,8 +68,15 @@ from app.models.transfer_template import TransferTemplate
 from app.services import transfer_recurrence
 from app.services.account_projection import is_revolving
 from app.services.balance_at import BalanceContext
+from app.services.card_terms import is_configured_card
 from app.services.generation_schedule import GenerationSchedule
-from app.services.recurrence import RecurrenceSpec, author_rule
+from app.services.recurrence import (
+    RecurrenceSpec,
+    author_rule,
+    follows_card_due_dates,
+    reauthor_rule,
+    recurrence_spec,
+)
 
 #: The payment's name: plain words with the card's own name in them, never an
 #: id (plan#2933).
@@ -93,6 +110,78 @@ PAYOFF_NAME_TAKEN = (
     "'{card}' pays off through a recurring transfer named '{name}', and one "
     "of that name already exists. Rename that transfer first."
 )
+
+#: The refusal of a scheduled payment on a card with no terms: its dates are
+#: the statements' due dates, which the terms decide.
+SCHEDULED_NEEDS_TERMS = (
+    "'{card}' has no terms yet, so it has no statement due dates for a "
+    "scheduled payment to fall on. Save the card's terms first."
+)
+
+#: The refusal of a change to an archived card's payment, archived with it
+#: (task plan#3697).
+ARCHIVED_CARD_PAYMENT = (
+    "'{card}' is archived, and its payment with it. Restore the card to "
+    "change its payment."
+)
+
+
+@dataclass(frozen=True)
+class PaymentShape:
+    """One payment a card can have: how much, and on which repeat.
+
+    Attributes:
+        mode: The amount the card works out.
+        unit: The repeat: each payday (``PERIOD``) or each statement's due
+            date (``DUE_DATE``), always every 1.
+    """
+
+    mode: CardPaymentModeEnum
+    unit: RecurrenceUnitEnum
+
+    @property
+    def is_scheduled(self) -> bool:
+        """Return whether this is a payment scheduled with the card company.
+
+        Returns:
+            ``True`` when it falls on each statement's due date.
+        """
+        return follows_card_due_dates(self.unit)
+
+
+#: Payoff rows: everything on the card, each payday (rulings plan#2888,
+#: plan#2910), the payment a card is made with.
+PAYOFF_ROWS = PaymentShape(CardPaymentModeEnum.CARD_BALANCE, RecurrenceUnitEnum.PERIOD)
+
+#: The four payments a card can have, by the token the card's page posts:
+#: payoff rows, or one of the three amounts on each statement's due date, as
+#: the owner scheduled it with the card company (rulings plan#2888,
+#: plan#2889).
+PAYMENT_CHOICES: dict[str, PaymentShape] = {
+    "payoff": PAYOFF_ROWS,
+    "statement": PaymentShape(
+        CardPaymentModeEnum.STATEMENT_BALANCE, RecurrenceUnitEnum.DUE_DATE,
+    ),
+    "minimum": PaymentShape(
+        CardPaymentModeEnum.MINIMUM_PAYMENT, RecurrenceUnitEnum.DUE_DATE,
+    ),
+    "everything": PaymentShape(
+        CardPaymentModeEnum.CARD_BALANCE, RecurrenceUnitEnum.DUE_DATE,
+    ),
+}
+
+
+@dataclass(frozen=True)
+class RepeatChange:
+    """A switch that rewrote the payment's repeat, as the repeats either side.
+
+    Attributes:
+        before: The repeat the payment had, or ``None`` when it had none.
+        after: The repeat it has now, as stored.
+    """
+
+    before: RecurrenceSpec | None
+    after: RecurrenceSpec
 
 
 @dataclass(frozen=True)
@@ -209,16 +298,12 @@ def make_payoff(
     )
     template.card_payment_settings = CardPaymentSettings(
         user_id=card.user_id,
-        mode_id=ref_cache.card_payment_mode_id(CardPaymentModeEnum.CARD_BALANCE),
+        mode_id=ref_cache.card_payment_mode_id(PAYOFF_ROWS.mode),
     )
     db.session.add(template)
     db.session.flush()
     author_rule(
-        RecurrenceSpec(
-            user_id=card.user_id,
-            unit=RecurrenceUnitEnum.PERIOD,
-            starts_on=ctx.as_of,
-        ),
+        _repeat_from_this_paycheck(card.user_id, PAYOFF_ROWS.unit, ctx),
         ctx.calendar(),
         template,
     )
@@ -226,3 +311,125 @@ def make_payoff(
         template, GenerationSchedule.for_pass(ctx), ctx.scenario_id,
     )
     return template
+
+
+def _repeat_from_this_paycheck(
+    user_id: int, unit: RecurrenceUnitEnum, ctx: BalanceContext,
+) -> RecurrenceSpec:
+    """Return a card payment's repeat, starting in the current paycheck.
+
+    Ruling plan#2669: a passed payday or due date in the paycheck holding the
+    pass's day is placed now.  A payday repeat states the day itself, which
+    the repeat normalises onto that paycheck's payday.  A due-date repeat's
+    first date is a bound, the first day it covers (``recurrence``'s
+    ``_resolution`` says why), so it states that paycheck's first day, and a
+    statement due earlier in the paycheck is paid now rather than a month
+    later.  A day in no paycheck (past the saved schedule) covers from the day
+    itself, as the payday repeat's own normalisation would find no paycheck
+    to move it onto either.
+
+    Args:
+        user_id: The payment's owner.
+        unit: Each payday or each statement's due date.
+        ctx: The read pass, its day and calendar the owner's.
+
+    Returns:
+        The :class:`RecurrenceSpec` to author, every 1 and never ending.
+    """
+    starts_on = ctx.as_of
+    if follows_card_due_dates(unit):
+        period = ctx.calendar().period_containing(ctx.as_of)
+        if period is not None:
+            starts_on = period.start_date
+    return RecurrenceSpec(user_id=user_id, unit=unit, starts_on=starts_on)
+
+
+def current_choice(settings: CardPaymentSettings) -> str | None:
+    """Return the :data:`PAYMENT_CHOICES` token of the payment *settings* names.
+
+    Its mode and its repeat's kind together; ``None`` for a payment whose
+    repeat is neither each payday nor each due date, or that has none.  No
+    door makes one: the card's page is the only door that sets the repeat of
+    a card's payment.
+
+    Args:
+        settings: The card's payment settings, its definition loaded.
+
+    Returns:
+        The token, or ``None``.
+    """
+    rule = settings.template.recurrence_rule
+    if rule is None:
+        return None
+    shape = PaymentShape(
+        ref_cache.card_payment_mode_member(settings.mode_id),
+        recurrence_spec(rule).unit,
+    )
+    return next(
+        (token for token, choice in PAYMENT_CHOICES.items() if choice == shape),
+        None,
+    )
+
+
+def switch_refusal(card: Account, shape: PaymentShape) -> str | None:
+    """Return why *card*'s payment cannot become *shape*, or ``None``.
+
+    Asked before :func:`switch_payment` writes anything, so a refusal is a
+    sentence rather than the database's.
+
+    Args:
+        card: The card, owner-checked and revolving.
+        shape: The payment the owner chose.
+
+    Returns:
+        :data:`ARCHIVED_CARD_PAYMENT` for an archived card, whose payment is
+        archived with it; :data:`SCHEDULED_NEEDS_TERMS` for a scheduled
+        payment on a dormant card (its dates are the terms' due dates, and its
+        statement and minimum amounts read the terms too); else ``None``.
+    """
+    if not card.is_active:
+        return ARCHIVED_CARD_PAYMENT.format(card=card.name)
+    if shape.is_scheduled and not is_configured_card(card):
+        return SCHEDULED_NEEDS_TERMS.format(card=card.name)
+    return None
+
+
+def switch_payment(
+    settings: CardPaymentSettings, shape: PaymentShape, ctx: BalanceContext,
+) -> RepeatChange | None:
+    """Make the card's payment *shape*: its mode, and its repeat when its kind changes.
+
+    The rows are not touched here: they follow through the maintain pass,
+    which the door runs so that rows the owner typed over can be asked about
+    first.  A change of amount alone moves no row, because no row stores a
+    worked-out figure (ruling plan#2667), so it needs no pass.
+
+    The repeat is re-authored in place (``recurrence.reauthor_rule``), so the
+    rule keeps its id and every row its lineage.  *ctx* may be the pass the
+    door goes on to regenerate with: it memoizes a rule's resolution by what
+    the rule says, never by its id
+    (``balance_at._recurrence_memos.resolved_recurrence_of``), so a pass built
+    before this write reads the rewritten repeat.
+
+    Args:
+        settings: The card's payment settings, its definition loaded.
+        shape: The payment the owner chose, which :func:`switch_refusal`
+            accepted.
+        ctx: The read pass for the card's owner.
+
+    Returns:
+        The :class:`RepeatChange` when the repeat was rewritten, or ``None``
+        when only the amount changed.
+    """
+    settings.mode_id = ref_cache.card_payment_mode_id(shape.mode)
+    template = settings.template
+    rule = template.recurrence_rule
+    before = None if rule is None else recurrence_spec(rule)
+    if before is not None and before.unit is shape.unit:
+        return None
+    spec = _repeat_from_this_paycheck(template.user_id, shape.unit, ctx)
+    if rule is None:
+        rule = author_rule(spec, ctx.calendar(), template)
+    else:
+        reauthor_rule(rule, spec, ctx.calendar())
+    return RepeatChange(before=before, after=recurrence_spec(rule))

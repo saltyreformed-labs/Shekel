@@ -36,7 +36,7 @@ from app.extensions import db
 from app.routes._form_errors import load_form_or_redirect
 from app.routes.card._bp import card_bp
 from app.routes.card._helpers import back_to_card, load_card_or_404
-from app.routes.card._payments_follow import TermsDoor, follow_the_terms_or_ask
+from app.routes.card._payments_follow import PaymentsDoor, follow_the_terms_or_ask
 from app.schemas.validation import CreditCardTermsSchema
 from app.services import card_terms
 from app.utils.auth_helpers import require_owner
@@ -82,7 +82,7 @@ def save_terms(account_id):
         card_terms.load_card_term_versions(account.id),
     )
     card_terms.set_terms(account.id, account.user_id, effective_date, data)
-    followed = follow_the_terms_or_ask(account, due_dates_before, TermsDoor(
+    followed = follow_the_terms_or_ask(account, due_dates_before, PaymentsDoor(
         f"You changed the terms of {account.name} from "
         f"{effective_date.strftime('%b %-d, %Y')}.",
         url_for("card.save_terms", account_id=account.id),
@@ -169,7 +169,7 @@ def remove_terms(account_id, row_id):
         return back.to_response()
     if not removed:
         abort(404)
-    followed = follow_the_terms_or_ask(account, due_dates_before, TermsDoor(
+    followed = follow_the_terms_or_ask(account, due_dates_before, PaymentsDoor(
         f"You removed a set of terms from {account.name}.",
         url_for("card.remove_terms", account_id=account.id, row_id=row_id),
         back,

@@ -1,0 +1,101 @@
+{# The card's payment (plan step credit_card:CC-6, task plan#2679; rulings
+   plan#2888 and plan#2889): the one payment every card is made with, and the
+   one door that switches it.  Below the Card terms card on the cash detail
+   page (developer ruling R-CC25: the page that hosts every card form until
+   CC-11's cockpit).
+
+   Every card is made with payoff rows: each payday, a payment from the
+   owner's primary account covering everything on the card.  The owner opts
+   into a payment scheduled with the card company only when they really set
+   one up there, and it takes the payoff rows' place: the statement balance,
+   the minimum, or everything on the card, on each statement's due date.  The
+   form is one radio group, so a submit names one of the four
+   (app.services.card_payoff.PAYMENT_CHOICES' tokens), and the door
+   (card.save_payment) switches the payment to it, asking first about any
+   payment the owner typed over on a date the switch takes away.
+
+   A scheduled payment falls on the statements' due dates, which the terms
+   decide, so while the card is dormant its three choices are shown but not
+   offered, with the reason; the door refuses them the same way.  An archived
+   card's payment is archived with it (task plan#3697), so the form is not
+   drawn; the door refuses it too.
+
+   Any other money sent into the card is an extra payment, which this
+   payment's worked-out amount subtracts (ruling R-CC22), and the card says so.
+
+   Context: account, card_terms (None while dormant), card_payment
+   (routes/card/_page.PaymentOnPage, or None for a card with no payment, which
+   no door makes). #}
+<div class="card acctd-params mt-3" id="card-payment">
+  <div class="card-header">
+    <h6 class="mb-0"><i class="bi bi-calendar-check"></i> Payment</h6>
+  </div>
+  <div class="card-body">
+    {% if card_payment is none %}
+    <p class="text-muted small mb-0">This card has no payment of its own.</p>
+    {% else %}
+    <p class="small mb-2" id="card-payment-now">
+      <span class="fw-semibold">{{ card_payment.name }}</span>, from {{ card_payment.payer }}:
+      {% if card_payment.choice == 'payoff' %}
+      everything on the card, each payday.
+      {% elif card_payment.choice == 'statement' %}
+      the statement balance, on each statement's due date, as you scheduled it with the card company.
+      {% elif card_payment.choice == 'minimum' %}
+      the minimum payment, on each statement's due date, as you scheduled it with the card company.
+      {% elif card_payment.choice == 'everything' %}
+      everything on the card, on each statement's due date, as you scheduled it with the card company.
+      {% else %}
+      its dates were set on its own form. Choose how it is paid below.
+      {% endif %}
+    </p>
+    {% if not account.is_active %}
+    <p class="text-muted small mb-0">This card is archived, and its payment with it.</p>
+    {% else %}
+    <form method="POST" action="{{ url_for('card.save_payment', account_id=account.id) }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <fieldset class="mb-3">
+        <legend class="form-label fs-6">How is this card paid?</legend>
+        <div class="form-check">
+          <input class="form-check-input" type="radio" name="payment" id="card-payment-payoff"
+                 value="payoff" aria-describedby="card-payment-payoff-help"
+                 {% if card_payment.choice == 'payoff' %}checked{% endif %}>
+          <label class="form-check-label" for="card-payment-payoff">Pay it off each payday</label>
+          <div class="form-text" id="card-payment-payoff-help">
+            Each payday, a payment from {{ card_payment.payer }} covers everything on the card.
+            Type over one to pay part of it, and the next payday covers the rest.
+          </div>
+        </div>
+        <p class="small mt-3 mb-1" id="card-payment-scheduled-help">
+          Or a payment you scheduled with the card company, on each statement's due date.
+          Choose one of these only if you set it up there: it takes the place of the payments each payday.
+        </p>
+        {% if card_terms is none %}
+        <p class="text-muted small mb-1" id="card-payment-needs-terms">
+          Save the card's terms first: a scheduled payment falls on each statement's due date, which the terms decide.
+        </p>
+        {% endif %}
+        {% for token, label in [('statement', 'The statement balance'),
+                                ('minimum', 'The minimum payment'),
+                                ('everything', 'Everything on the card')] %}
+        <div class="form-check">
+          <input class="form-check-input" type="radio" name="payment" id="card-payment-{{ token }}"
+                 value="{{ token }}"
+                 aria-describedby="card-payment-scheduled-help{% if card_terms is none %} card-payment-needs-terms{% endif %}"
+                 {% if card_payment.choice == token %}checked{% endif %}
+                 {% if card_terms is none %}disabled{% endif %}>
+          <label class="form-check-label" for="card-payment-{{ token }}">{{ label }}, on each due date</label>
+        </div>
+        {% endfor %}
+      </fieldset>
+      <button type="submit" class="btn btn-primary btn-sm">
+        <i class="bi bi-check-lg"></i> Save payment
+      </button>
+    </form>
+    <p class="text-muted small mt-3 mb-0" id="card-payment-extras">
+      Any other money you send this card, a one-time payment or a recurring transfer,
+      is an extra payment: this payment works out what is left after it, so nothing is paid twice.
+    </p>
+    {% endif %}
+    {% endif %}
+  </div>
+</div>

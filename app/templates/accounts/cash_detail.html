@@ -23,7 +23,8 @@
    reconcile panel already publishes ``account`` and ``panel_id`` and splatting
    a second builder's keys over it would re-root that panel's POST target.
    ``is_card`` and ``card_terms`` (plan step credit_card:CC-2) gate and fill
-   the Card terms card a revolving account shows in the Parameters slot. #}
+   the Card terms card a revolving account shows in the Parameters slot, and
+   ``card_payment`` (task plan#2679) its Payment card below it. #}
 
 {% block content %}
 <div class="d-flex justify-content-between align-items-center gap-2 mb-3 flex-wrap">
@@ -179,6 +180,10 @@
    renders.  The partial handles the no-row (dormant) state itself. #}
 {% if is_card %}
 {% include "accounts/_card_terms.html" %}
+{# The card's payment, below its terms (task plan#2679): payoff rows or a
+   payment scheduled with the card company, and the one door that switches
+   them.  The partial says why a dormant card offers payoff rows alone. #}
+{% include "accounts/_card_payment.html" %}
 {% endif %}
 {% endblock content %}
 

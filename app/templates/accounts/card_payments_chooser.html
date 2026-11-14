@@ -1,0 +1,73 @@
+{% extends "recurrence_conflict_chooser.html" %}
+
+{# The conflict chooser, asking about a change of a card payment's dates (plan
+   step credit_card:CC-6).  Two doors ask it.  A change of the card's terms
+   (ruling plan#2671: "When you change the card's terms, the unpaid payments
+   move to the new dates.  If you had typed over one of them, the app asks you
+   first.").  And a switch of the card's payment between payoff rows each
+   payday and a payment scheduled with the card company on each statement's
+   due date (task plan#2679), which moves the payments the same way.  Nothing
+   has been saved when this renders.
+
+   A DELETED payment gets no choice, only a sentence: its date is not one of
+   the payment's dates any more, so the new date gets a payment whichever way
+   it could be answered, and two buttons with one outcome would be a question
+   that decides nothing.  Apply and Cancel are the owner's answer to it.
+
+   Context (routes/card/_payments_follow): choices, change_sentence (the
+   change in the owner's terms: what they just did), page_title, new_dates
+   and new_date (where the payments go, in the plural and for one payment),
+   action_url, cancel_url, and the form's machinery from render_chooser_page. #}
+
+{% block page_title %}{{ page_title }}{% endblock page_title %}
+
+{% block chooser_heading %}Some payments you changed are on dates that are moving{% endblock chooser_heading %}
+
+{% block chooser_lead %}
+<p>
+  {{ change_sentence }} Your unpaid payments move to {{ new_dates }}. You
+  changed the ones below yourself, so nothing has been saved yet: look over
+  each one, then choose Apply or cancel.
+</p>
+{% endblock chooser_lead %}
+
+{% block bulk_actions %}
+{% if choices | rejectattr("is_deleted_conflict") | list %}{{ super() }}{% endif %}
+{% endblock bulk_actions %}
+
+{% block follow_all_label %}Move all to {{ new_dates }}{% endblock follow_all_label %}
+
+{% block choice_name %}<span class="small ms-1">{{ choice.name }}</span>{% endblock choice_name %}
+
+{% block choice_decision %}
+{% if choice.is_deleted_conflict %}
+<span class="text-muted small">Stays deleted</span>
+{% else %}
+{{ super() }}
+{% endif %}
+{% endblock choice_decision %}
+
+{% block follow_label %}Move to {{ new_date }}{% endblock follow_label %}
+
+{% block chooser_note %}
+<ul class="text-muted small">
+  {% if choices | rejectattr("is_deleted_conflict") | list %}
+  <li>
+    Keep: this payment stays on its date for the amount you typed, and
+    {{ new_date }} gets a payment of its own as well.
+  </li>
+  <li>
+    Move: the amount you typed is dropped, and the payment on
+    {{ new_date }} takes this one's place.
+  </li>
+  {% endif %}
+  {% if choices | selectattr("is_deleted_conflict") | list %}
+  <li>
+    A payment you deleted stays deleted, but {{ new_date }} still gets a
+    payment. If you do not want that one, delete it on the grid after you
+    apply.
+  </li>
+  {% endif %}
+  <li>Payments you have already paid never move.</li>
+</ul>
+{% endblock chooser_note %}

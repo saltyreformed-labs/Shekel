@@ -9,7 +9,7 @@ duplicate.  The /obligations URL is kept only as a redirect so old
 bookmarks land on the surface that replaced it.
 
 The monthly-equivalent arithmetic these tests used to assert now lives in
-``tests/test_services/test_recurring_view.py`` (producer) and
+``tests/test_services/test_recurring_view/test_the_money_figures.py`` (producer) and
 ``tests/test_routes/test_recurring_list.py`` (rendered surface).
 """
 

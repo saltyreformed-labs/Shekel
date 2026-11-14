@@ -11,7 +11,7 @@ The producer has exactly one monthly source of truth
 value is DERIVED from it by
 ``PayCadence.monthly_to_per_paycheck`` -- the OWNER's cadence since plan step
 R7a-2a, a hardcoded ``12 / 26`` before it.
-Every expectation below is a LITERAL hand-computed at the biweekly cadence
+Every expectation in this package is a LITERAL hand-computed at the biweekly cadence
 with its arithmetic in a comment, never a re-derivation through the producer's
 own value object -- an expectation computed with ``PayCadence`` would move with
 a derivation bug instead of catching it.  Real ORM templates run against the

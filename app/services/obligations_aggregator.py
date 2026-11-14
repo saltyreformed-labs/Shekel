@@ -205,7 +205,7 @@ class TodaysPrice:
         Read here, over the pass, rather than filled in when the price is
         read, because only a MONTHLY figure needs it: the Archived drawer
         reads the price and converts nothing, and must not read a cadence
-        (``test_recurring_view.TestAnAbsentCadenceIsRefused``).
+        (``test_recurring_view.test_what_the_surface_refuses.TestAnAbsentCadenceIsRefused``).
 
         Args:
             ctx: The read pass the price was read in.

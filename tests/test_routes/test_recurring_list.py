@@ -11,7 +11,7 @@ These route-level tests assert the rendered surface: all kinds present,
 subtotals in the HTML, the management surface shows one-time definitions the
 old /obligations page hid, the unit toggle swaps every figure and persists,
 and ownership isolation holds.  The producer's arithmetic is locked
-separately in ``tests/test_services/test_recurring_view.py``.
+separately in the ``tests/test_services/test_recurring_view/`` package.
 """
 
 from datetime import date

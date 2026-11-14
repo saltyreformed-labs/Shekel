@@ -331,6 +331,7 @@ class TestTheDestinationsStopReachesTheRow:
         get one -- so a loan payment cost two resolutions where every other
         row cost one.  The door now hands the resolver the value it already
         built.  Patched at the DEFINITION site (``_reading.resolve``) like
+        ``test_how_a_row_repeats.py``'s
         :meth:`TestTheRecurrenceDescription.test_each_rule_is_RESOLVED_exactly_once_per_build`,
         and the control is shown to fire before the count is read.
 

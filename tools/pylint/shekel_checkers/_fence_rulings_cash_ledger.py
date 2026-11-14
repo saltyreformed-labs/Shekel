@@ -148,12 +148,10 @@ CASH_LEDGER_NON_PRODUCERS = frozenset({
     # amount, nothing folded, dated, summed or anchored.
     "own_amount",
     # ``_carry`` (the same step): an envelope's UNSPENT BUDGET, its budget less
-    # its purchases floored at zero, one row's figure from its own two inputs;
-    # and the per-pass memo of what each row was carried, a sum of that figure
-    # over the sources linked into ONE row.  Neither reads an anchor, a date
-    # or an account: what a row's plan holds, never what a balance is.
+    # its purchases floored at zero, one row's figure from its own two inputs.
+    # It reads no anchor, date or account: what a row's plan holds, never what
+    # a balance is.
     "unspent_budget",
-    "carried_into",
     # The ONE branch on a plan item's PARENT table (ruling plan#1983): a
     # row's amount or a transfer's, by the two resolvers above.  A
     # non-producer on their ground: one parent's amount, nothing folded,

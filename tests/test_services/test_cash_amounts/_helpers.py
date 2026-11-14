@@ -209,6 +209,11 @@ class _FakeRow:  # pylint: disable=too-few-public-methods
         # is worth -- and the entries only for a row the status says has
         # settled, so a stand-in a valuation may see carries both.
         self.entries = []
+        # The envelopes a carry-forward rolled into the row
+        # (``Transaction.carried_from``, ruling plan#4052): a price adds each
+        # one's unspent budget, and a stand-in for a row nothing was carried
+        # into holds none.
+        self.carried_from = []
         self.is_deleted = False
         self.status = None
         # What the live-override seam reads before it answers "nothing

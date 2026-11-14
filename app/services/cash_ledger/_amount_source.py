@@ -165,6 +165,7 @@ from app.services.transfer_legs import PlanItem, PlanParent, cell_key, parent_of
 
 from ._amount_basis import AmountBasis
 from ._amount_rule import AmountRule, amount_rule, transfer_amount_rule
+from ._carry import unspent_budget
 from ._definition_cash import (
     DefinitionRow,
     _loan_payment_cash_from,
@@ -192,14 +193,24 @@ def resolve_transaction_amount(txn, basis: AmountBasis) -> Decimal:
     **A row's amount is a COMPOSITION since plan step balance:X-ax** (ruling
     **plan#3973**)::
 
-        amount(row) = own_amount(row) + carried_into(row)
+        amount(row) = own_amount(row)
+                      + sum(unspent_budget(amount(source), source.purchases)
+                            for each live source in row.carried_from)
 
     :func:`own_amount` is the rule dispatch, which this function was until that
-    step; the second term is the unspent budget of every settled envelope a
-    carry-forward linked into the row (:class:`._carry.Carries`, through
-    :func:`._carry.unspent_budget`), each of those budgets this same function's
-    answer for its source, so a chain composes.  A row nothing rolled into
-    answers its own amount exactly, as it did before the step.  Every reader of
+    step; the second term is the unspent budget (:func:`._carry.unspent_budget`)
+    of every settled envelope a carry-forward linked into the row, each of
+    those budgets this same function's answer for its source, so a chain
+    composes: a row carried into, settled and carried on passes forward what it
+    received and did not spend.  The sources are the row's own relation
+    (``Transaction.carried_from``, ruling **plan#4052**), loaded with its other
+    pricing inputs, so nothing here is cached and a link or purchase written in
+    memory reaches the next price.  A deleted source carries nothing: its
+    budget left the plan with it.  The recursion ends because a link needs a
+    settled source (``ck_transactions_carry_needs_settle_day``) and a carry
+    only lands in a row that has not settled, so no chain returns to a row in
+    it.  A row nothing rolled into answers its own amount exactly, as it did
+    before the step.  Every reader of
     a row's BUDGET, its WORTH to a balance or its plan in a report asks this;
     a reader that offers or writes the row's OWN figure (an amount box, the
     recurrence chooser's "your amount", a freeze that states a derived figure
@@ -221,7 +232,9 @@ def resolve_transaction_amount(txn, basis: AmountBasis) -> Decimal:
 
     **A caller resolving many rows should apply
     :func:`~app.utils.amount_relationships.pricing_load_options`**, re-exported
-    from this package so a caller asks the amount model for its own load.  It
+    from this package so a caller asks the amount model for its own load; it
+    loads the carried-from chain too, a statement per level of the deepest
+    chain, never per row.  It
     was a paragraph naming seven relationships that every routed loader had to
     remember; plan step X-au-g-2c-2 made it a function, because
     that step is what made the ``Transaction.transfer`` chain load-bearing --
@@ -283,8 +296,15 @@ def resolve_transaction_amount(txn, basis: AmountBasis) -> Decimal:
             (the usual case: a template whose rows fall in the saved
             calendar) until its state is one the law lists.
     """
-    return own_amount(txn, basis) + basis.carries.carried_into(
-        txn.id, lambda source: resolve_transaction_amount(source, basis),
+    return own_amount(txn, basis) + sum(
+        (
+            unspent_budget(
+                resolve_transaction_amount(source, basis), source.purchases,
+            )
+            for source in txn.carried_from
+            if not source.is_deleted
+        ),
+        Decimal("0"),
     )
 
 

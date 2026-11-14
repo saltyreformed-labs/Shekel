@@ -44,11 +44,11 @@ from tests._test_helpers import (
 _RENDER_DAY = date(2026, 2, 20)
 
 
-def _envelope(db_session, seed_user, amount):
+def _envelope(db_session, seed_user, amount, name="Spending Money"):
     """Return an every-paycheck envelope definition budgeting *amount*."""
     return make_expense_template(
         db_session, seed_user, amount,
-        name="Spending Money", category_key="Groceries", is_envelope=True,
+        name=name, category_key="Groceries", is_envelope=True,
     )
 
 
@@ -236,7 +236,7 @@ class TestTheCarriedAmount:
         )
 
 
-def _chain(db_session, seed_user, periods, *, links):
+def _chain(db_session, seed_user, periods, *, links, name="Spending Money"):
     """Build a `$100.00` envelope carried paycheck to paycheck; return its four rows.
 
     Three sources settle at `$30.00`, `$50.00` and `$20.00` spent, in the first
@@ -256,7 +256,7 @@ def _chain(db_session, seed_user, periods, *, links):
     Only the last linked: the third's budget is its own `$100.00`, unspent
     `$80.00`, and the fourth is `100 + 80 = $180.00`.
     """
-    template = _envelope(db_session, seed_user, "100.00")
+    template = _envelope(db_session, seed_user, "100.00", name)
     first = _settled(
         db_session, seed_user, template, periods[0], ("30.00", date(2026, 1, 5)),
     )
@@ -321,18 +321,56 @@ class TestTheChooserOffersTheOwnAmount:
         assert _TXN_TEMPLATE_KIND.resolve_amount(target) == Decimal("500.00")
 
 
-class TestTheCarriesCostOneBatch:
-    """More links, the same statements: the carries load once per pass, never per row."""
+def _three_into_the_fourth(db_session, seed_user, periods, *, links):
+    """Build three settled `$100.00` envelopes and the fourth paycheck's row; link *links* into it.
+
+    The same rows and statuses as :func:`_chain`, but each carry lands
+    DIRECTLY in the fourth row, so every link is one level deep: ``1`` links
+    only the third envelope, ``3`` all three.  Hand-worked::
+
+        one link:    100 + (100 - 20)                          = 180
+        three links: 100 + (100 - 30) + (100 - 50) + (100 - 20) = 300
+    """
+    template = _envelope(db_session, seed_user, "100.00")
+    sources = (
+        _settled(db_session, seed_user, template, periods[0],
+                 ("30.00", date(2026, 1, 5))),
+        _settled(db_session, seed_user, template, periods[1],
+                 ("50.00", date(2026, 1, 20))),
+        _settled(db_session, seed_user, template, periods[2],
+                 ("20.00", date(2026, 2, 2))),
+    )
+    fourth = generate_row_of(template, periods[3])
+    for source in sources[-links:]:
+        source.rolled_into = fourth
+    return (*sources, fourth)
+
+
+def _link_all_into_last(db_session, rows):
+    """Re-read *rows* and link every one but the last into the last."""
+    *sources, last = [db_session.get(Transaction, row.id) for row in rows]
+    for source in sources:
+        source.rolled_into = last
+
+
+class TestTheCarriesLoadPerLevel:
+    """More carries one level deep, the same statements: never a query per row.
+
+    The carried-from chain is loaded with the row's other pricing inputs
+    (ruling plan#4052), a statement per LEVEL of the deepest chain loaded.  So
+    three carries into one row cost what one does, and a second chain as deep
+    as the first costs nothing more.
+    """
 
     def test_the_balance_fold(self, app, db, seed_user, seed_periods, monkeypatch):
-        """One link, then three: the end balance falls `300 - 180 = $120.00`, same statements.
+        """One carry, then three: the end balance falls `300 - 180 = $120.00`, same statements.
 
         The rows and their statuses are identical in both reads; only the two
-        earlier links differ, so the fourth row's reservation is the only
-        figure that moves (worked in :func:`_chain`).
+        extra links differ, so the fourth row's reservation is the only figure
+        that moves (worked in :func:`_three_into_the_fourth`).
         """
         freeze_today(monkeypatch, _RENDER_DAY)
-        rows = _chain(db.session, seed_user, seed_periods, links=1)
+        rows = _three_into_the_fourth(db.session, seed_user, seed_periods, links=1)
         user_id = seed_user["user"].id
         account_id = seed_user["account"].id
         end = seed_periods[-1].start_date
@@ -347,51 +385,91 @@ class TestTheCarriesCostOneBatch:
         with app.app_context():
             _balance()  # warm the process caches a first read fills
             db.session.expire_all()
-            one_link, one_link_statements = capture_sql_statements(_balance)
+            one, one_statements = capture_sql_statements(_balance)
 
-            _link_chain(
-                [db.session.get(Transaction, row.id) for row in rows], 3,
-            )
+            _link_all_into_last(db.session, rows)
             db.session.commit()
             db.session.expire_all()
-            three_links, three_links_statements = capture_sql_statements(_balance)
+            three, three_statements = capture_sql_statements(_balance)
 
-        assert one_link - three_links == Decimal("120.00")
-        assert len(three_links_statements) == len(one_link_statements), (
-            [text for text, _ in three_links_statements]
+        assert one - three == Decimal("120.00")
+        assert len(three_statements) == len(one_statements), (
+            [text for text, _ in three_statements]
         )
 
     def test_the_grid(  # pylint: disable=too-many-arguments,too-many-positional-arguments
         self, app, auth_client, db, seed_user, seed_periods, monkeypatch,
     ):
-        """One link, then three: the grid shows `$180.00`, then `$300.00`, same statements.
+        """One carry, then three: the grid shows `$180.00`, then `$300.00`, same statements.
 
         Pylint: ``too-many-arguments``, ``too-many-positional-arguments`` (7/5)
         -- pytest fixtures are the parameters, each one this case reads.
         """
         freeze_today(monkeypatch, _RENDER_DAY)
-        rows = _chain(db.session, seed_user, seed_periods, links=1)
+        rows = _three_into_the_fourth(db.session, seed_user, seed_periods, links=1)
         db.session.commit()
 
         with app.app_context():
             auth_client.get("/grid?periods=3")  # warm the process caches
             db.session.expire_all()
-            one_link, one_link_statements = capture_sql_statements(
+            one, one_statements = capture_sql_statements(
                 lambda: auth_client.get("/grid?periods=3"),
             )
 
-            _link_chain(
-                [db.session.get(Transaction, row.id) for row in rows], 3,
+            _link_all_into_last(db.session, rows)
+            db.session.commit()
+            db.session.expire_all()
+            three, three_statements = capture_sql_statements(
+                lambda: auth_client.get("/grid?periods=3"),
+            )
+
+        assert one.status_code == three.status_code == 200
+        assert b"$180.00" in one.data
+        assert b"$300.00" in three.data
+        assert len(three_statements) == len(one_statements), (
+            [text for text, _ in three_statements]
+        )
+
+    def test_a_second_chain_as_deep_costs_nothing_more(  # pylint: disable=too-many-arguments,too-many-positional-arguments
+        self, app, auth_client, db, seed_user, seed_periods, monkeypatch,
+    ):
+        """A second three-carry chain adds no statement to the grid: per level, not per row.
+
+        One definition carried paycheck to paycheck (:func:`_chain`), read;
+        then a second definition's chain as deep, read again: its rows and
+        carries cost no statement, and its fourth row draws `$300.00` beside
+        the first's.  The control varies the ROWS: the grid prices every row
+        it loads, so a load per row would show as the second chain's twelve
+        rows, where varying only the links would not (each row is asked once
+        either way, which a probe measured on 2026-11-13).
+
+        Pylint: ``too-many-arguments``, ``too-many-positional-arguments`` (7/5)
+        -- pytest fixtures are the parameters, each one this case reads.
+        """
+        freeze_today(monkeypatch, _RENDER_DAY)
+        _chain(db.session, seed_user, seed_periods, links=3)
+        db.session.commit()
+
+        with app.app_context():
+            auth_client.get("/grid?periods=3")  # warm the process caches
+            db.session.expire_all()
+            one, one_statements = capture_sql_statements(
+                lambda: auth_client.get("/grid?periods=3"),
+            )
+
+            _chain(
+                db.session, seed_user, seed_periods, links=3, name="Kids' Money",
             )
             db.session.commit()
             db.session.expire_all()
-            three_links, three_links_statements = capture_sql_statements(
+            two, two_statements = capture_sql_statements(
                 lambda: auth_client.get("/grid?periods=3"),
             )
 
-        assert one_link.status_code == three_links.status_code == 200
-        assert b"$180.00" in one_link.data
-        assert b"$300.00" in three_links.data
-        assert len(three_links_statements) == len(one_link_statements), (
-            [text for text, _ in three_links_statements]
+        # One cell prints its figure in several places; the second chain's
+        # cell prints it as many times again.
+        assert one.data.count(b"$300.00") > 0
+        assert two.data.count(b"$300.00") == 2 * one.data.count(b"$300.00")
+        assert len(two_statements) == len(one_statements), (
+            [text for text, _ in two_statements]
         )

@@ -1,5 +1,5 @@
 """
-Shekel Budget App -- Cash ledger: an envelope's UNSPENT BUDGET, and where a carry put it.
+Shekel Budget App -- Cash ledger: an envelope's UNSPENT BUDGET.
 
 Carry Forward Unpaid splits one envelope's budget across two paychecks: the
 source settles at what it spent and the rest rolls into the next paycheck's row
@@ -9,34 +9,24 @@ plan#3985) and its amount is DERIVED from the source every time it is read,
 never stored, so a purchase added, removed or re-costed on the source later
 moves the target's figure with nothing to keep in step (``CLAUDE.md`` rule 14).
 
-Two things live here, and both are below :mod:`._amount_source`:
+**What lives here is the one statement of an envelope's unspent budget**
+(:func:`unspent_budget`).  It is what a still-projected envelope holds back from
+its account (:func:`._amounts._entry_aware_amount`) and what a settled one
+carries forward (:func:`._amount_source.resolve_transaction_amount`), one
+quantity read at two moments.  It was ``_amounts._entry_checking_impact`` and
+two copies in ``carry_forward_service`` (the execute path and the preview)
+until this task; three spellings that agreed are still three spellings.  It is
+a module of its own because :mod:`._amount_source` is the rule dispatch, near
+its line cap, and a carry is not a fifth rule but a composition over them.
 
-* :func:`unspent_budget`, the ONE statement of an envelope's unspent budget.
-  It is what a still-projected envelope holds back from its account
-  (:func:`._amounts._entry_aware_amount`) and what a settled one carries
-  forward (:class:`Carries`), one quantity read at two moments.  It was
-  ``_amounts._entry_checking_impact`` and two copies in
-  ``carry_forward_service`` (the execute path and the preview) until this
-  task; three spellings that agreed are still three spellings.
-* :class:`Carries`, the read pass's carry links, loaded once per
-  :class:`~._amount_basis.AmountBasis` and memoised per target, so a grid of
-  carried rows costs one batch rather than a query per row.
-
-**Why a module of its own rather than more of** :mod:`._amount_source`: that
-module is the rule dispatch, near its line cap, and a carry is not a fifth
-rule.  It is a COMPOSITION over the rules: a row's amount is its own amount, by
-whichever rule owns it, plus the unspent budget of every source rolled into it
-(:func:`._amount_source.resolve_transaction_amount`).  A row a carry landed in
-keeps its definition's price; the carry sits on top.
-
-**What the composition costs a pass, and when it can be stale.**  The first
-price a pass asks loads every live carry link of the basis's owner and
-scenario, with each source's purchases and pricing relations, in one batch
-(:meth:`Carries.carried_into`).  A pass that prices nothing loads nothing.  The
-memo is a snapshot as of that first ask: a door that writes a purchase on a
-carried source, a link, or a source's price, and THEN prices the source's
-target, builds its basis after the write.  The census of the doors that do is
-in the commit that wrote this module.
+**Where a carry's inputs come from is the row, not the pass** (ruling
+**plan#4052**).  The sources carried into a row are a relation of that row
+(``Transaction.carried_from``), loaded by
+:func:`~app.utils.amount_relationships.pricing_load_options` with its
+definition and price history, so the carried amount needs no per-request cache
+and no cache can disagree with a link or purchase written in the same request.
+A first build held the owner's links in a per-request snapshot on the
+:class:`~._amount_basis.AmountBasis`; the developer ruled it a fence.
 
 Boundary discipline (``CLAUDE.md`` Architecture / B6-01): plain data and ORM
 rows in, ``Decimal`` out; no Flask import, no writes.
@@ -44,13 +34,10 @@ rows in, ``Decimal`` out; no Flask import, no writes.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable
+from collections.abc import Iterable
 from decimal import Decimal
 
-from app.extensions import db
-from app.models.transaction import Transaction
 from app.services.row_valuation import purchases_total
-from app.utils.amount_relationships import valuation_load_options
 
 
 def unspent_budget(budget: Decimal, purchases: Iterable) -> Decimal:
@@ -64,10 +51,10 @@ def unspent_budget(budget: Decimal, purchases: Iterable) -> Decimal:
     envelope still holds back from its account
     (:func:`._amounts._entry_aware_amount`); once it has settled and a carry
     linked it forward, it is what rolls into the next paycheck's row
-    (:class:`Carries`).  Every purchase counts, debit or card, posted or not:
-    a purchase already recorded is not budget still to spend, whichever
-    account its money leaves through (ruling **R-BAL77**, plan step
-    ``balance:X-bi-4a``).
+    (:func:`._amount_source.resolve_transaction_amount`).  Every purchase
+    counts, debit or card, posted or not: a purchase already recorded is not
+    budget still to spend, whichever account its money leaves through (ruling
+    **R-BAL77**, plan step ``balance:X-bi-4a``).
 
     **The reservation was three buckets through plan step ``X-bi-3e``, and
     ruling R-BAL77 is what reduced it** (plan step ``balance:X-bi-4a``).  It
@@ -134,112 +121,3 @@ def unspent_budget(budget: Decimal, purchases: Iterable) -> Decimal:
         The unspent budget, never negative.
     """
     return max(budget - purchases_total(purchases), Decimal("0"))
-
-
-class Carries:
-    """One read pass's carry links, and what each target was carried, memoised.
-
-    Pinned to an owner and a scenario, as every derivation an
-    :class:`~._amount_basis.AmountBasis` holds is: a link joins rows of one
-    owner, definition and scenario (``fk_transactions_rolled_into``), so the
-    owner and scenario's links are every carry the basis can be asked about.
-
-    Lazy: nothing is loaded until :meth:`carried_into` is first asked, and then
-    everything is, once.  The memo holds what each TARGET was carried, never a
-    row's whole amount: the rules' own answers stay unmemoised, so a price
-    restated in a request reaches the next resolve as it always has.
-    """
-
-    def __init__(self, user_id: int, scenario_id: int) -> None:
-        """Hold the pins; load nothing until a price asks.
-
-        Args:
-            user_id: The owner whose carries these are.
-            scenario_id: The scenario they were carried in.
-        """
-        self._user_id = user_id
-        self._scenario_id = scenario_id
-        self._sources: "dict[int, tuple[Transaction, ...]] | None" = None
-        self._carried: dict[int, Decimal] = {}
-
-    def carried_into(
-        self, target_id: "int | None", budget_of: Callable[[Transaction], Decimal],
-    ) -> Decimal:
-        """Return the money carried into row *target_id*: its sources' unspent budgets.
-
-        ::
-
-            carried(target) = sum(unspent_budget(budget_of(source), source.purchases)
-                                  for each live source linked into target)
-
-        ``budget_of`` is :func:`._amount_source.resolve_transaction_amount`
-        over the same basis, handed in because that module composes this one
-        and so sits above it.  A source's budget is its resolved amount, carried
-        money included, so a CHAIN composes: a row carried into, settled and
-        carried on passes forward what it received and did not spend.  The
-        recursion ends because a link needs a settled source
-        (``ck_transactions_carry_needs_settle_day``) and the carry-forward only
-        rolls into a row that has not settled, so no chain returns to a row in
-        it.
-
-        **The source's budget is its CURRENT resolved amount**, decided under
-        ruling **R-BAL207** at this card's design: a price restated from before
-        the source's paycheck moves its carry, because freezing the budget at
-        the carry would be a stored copy of a derived value.  A `$500.00`
-        budget with `$57.96` spent carries `$442.04`; restated as `$450.00`, it
-        carries `$392.04`.
-
-        A deleted source carries nothing: its budget left the plan with it.  A
-        row with no id yet (an unflushed one) has no link naming it, so it is
-        carried nothing.
-
-        Args:
-            target_id: The id of the row being priced.
-            budget_of: The resolver for a source's budget, always the same one
-                for one :class:`Carries` (the memo assumes it).
-
-        Returns:
-            The carried amount, ``Decimal("0")`` for a row nothing rolled into.
-        """
-        if target_id not in self._carried:
-            self._carried[target_id] = sum(
-                (
-                    unspent_budget(budget_of(source), source.purchases)
-                    for source in self._sources_into(target_id)
-                ),
-                Decimal("0"),
-            )
-        return self._carried[target_id]
-
-    def _sources_into(self, target_id: "int | None") -> "tuple[Transaction, ...]":
-        """Return the live sources linked into *target_id*, loading every link once.
-
-        One statement for the links, plus the selectin loads of their sources'
-        purchases and pricing relations (``valuation_load_options``), whatever
-        the number of carries or the length of a chain: the sources of a chain
-        are themselves linked rows, so they are all in the one batch.
-
-        Args:
-            target_id: The id of the row being priced.
-
-        Returns:
-            Its live sources, empty when none rolled into it.
-        """
-        if self._sources is None:
-            sources: dict[int, list[Transaction]] = {}
-            for source in (
-                db.session.query(Transaction)
-                .filter(
-                    Transaction.user_id == self._user_id,
-                    Transaction.scenario_id == self._scenario_id,
-                    Transaction.rolled_into_id.isnot(None),
-                    Transaction.is_deleted.is_(False),
-                )
-                .options(*valuation_load_options())
-                .order_by(Transaction.id)
-            ):
-                sources.setdefault(source.rolled_into_id, []).append(source)
-            self._sources = {
-                target: tuple(rows) for target, rows in sources.items()
-            }
-        return self._sources.get(target_id, ())

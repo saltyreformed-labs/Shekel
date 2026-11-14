@@ -251,6 +251,17 @@ def pricing_load_options() -> tuple:
     uses costs one empty ``SELECT ... IN ()``-shaped query at most, where a
     missing one costs a query per row.
 
+    **The third chain is the money carried INTO a row** (plan step
+    balance:X-ax, ruling **plan#4052**): ``Transaction.carried_from``, the
+    settled envelopes a carry-forward linked into it, each with its purchases,
+    since a row's amount adds each one's unspent budget.  Self-referential and
+    loaded to its whole depth (``recursion_depth=-1``), because a source's
+    budget is its own amount plus what was carried into IT: a statement per
+    level of the deepest chain the set holds, never one per row.  A source is
+    a row of the same definition as its target
+    (``fk_transactions_rolled_into``), so its definition is one the set has
+    already loaded.
+
     Returns:
         A tuple of SQLAlchemy loader options, splatted into ``Query.options``.
     """
@@ -259,6 +270,9 @@ def pricing_load_options() -> tuple:
             *template_pricing_load_options(),
         ),
         period_load_option(),
+        selectinload(Transaction.carried_from, recursion_depth=-1).options(
+            selectinload(Transaction.entries),
+        ),
     )
 
 

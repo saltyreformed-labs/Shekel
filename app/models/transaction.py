@@ -551,14 +551,34 @@ class Transaction(
     # is the composite key's ``rolled_into_id = id`` element alone: ``user_id``,
     # ``template_id`` and ``scenario_id`` are columns the row owns, so naming
     # them as this relationship's foreign columns would have it write them on
-    # flush, and the key already refuses a disagreement.  Many-to-one only, so a
-    # target's delete has no ORM path that nulls its sources' links: the
-    # database's RESTRICT answers it, behind the delete door that is to release
-    # them first (plan#3993).
+    # flush, and the key already refuses a disagreement.
     # Being mapped is also what orders a flush that writes a new target and its
     # source's link together: the target's INSERT goes first.
     rolled_into = db.relationship(
         "Transaction", remote_side="Transaction.id", foreign_keys=[rolled_into_id],
+        back_populates="carried_from",
+    )
+    # The rows whose carries rolled into THIS one: the reverse of
+    # :attr:`rolled_into`, and an input of this row's price like its
+    # definition and its price history (ruling plan#4052): the amount model
+    # adds each live source's unspent budget to the row's own amount
+    # (``cash_ledger.resolve_transaction_amount``), and
+    # ``amount_relationships.pricing_load_options`` loads it with the row's
+    # other pricing inputs.  Paired with :attr:`rolled_into`, so a link set in
+    # memory is on its target's collection at once, with no flush and no
+    # re-read.  Soft-deleted sources stay in it; the amount model leaves them
+    # out.
+    #
+    # ``passive_deletes="all"``: deleting a target through the ORM neither
+    # loads this collection nor nulls its sources' links, so a hard delete of a
+    # row a carry names reaches the database's RESTRICT
+    # (``fk_transactions_rolled_into``), behind the delete door that is to
+    # release them first (plan#3993).  Without it the ORM would set each
+    # source's link to NULL and the carried money would vanish without a word,
+    # which is why this reverse side was left unmapped until the ruling.
+    carried_from = db.relationship(
+        "Transaction", foreign_keys=[rolled_into_id],
+        back_populates="rolled_into", passive_deletes="all",
     )
     # **A ROW'S DELETE NEVER TAKES ITS MOVEMENTS, at this layer or the
     # database's** (plan step ``credit_card:CC-5-4a-4``, rulings **R-CC54**

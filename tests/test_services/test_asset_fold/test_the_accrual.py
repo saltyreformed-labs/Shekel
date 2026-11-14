@@ -512,9 +512,9 @@ class TestTheCentCarry:
         the frequency was graded only against ``accrued_interest`` directly
         (``test_interest_projection.py``) and through a form round-trip
         (``test_hysa.py``).  A regression hardcoding DAILY in the replay's rate
-        resolver (:func:`._asset_fold._modelled_return`) would have passed the
+        resolver (:func:`._asset_return.modelled_return`) would have passed the
         whole suite -- and the developer's real Money Market compounds MONTHLY,
-        which ``_InterestAccrual`` records in its own docstring.
+        which ``InterestAccrual`` records in its own docstring.
 
         Hand-computed, and the divisor is the point.  MONTHLY is SIMPLE
         interest inside the month, so one day is

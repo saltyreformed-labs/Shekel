@@ -409,7 +409,7 @@ def resolve_observation_day(
     (``accounts._anchor_editor_error``) rather than swallowed.
 
     ``observed_on`` is USER-SUPPLIED and it is not merely a label: it opens the
-    modelled-return window (``balance_at._asset_fold._AccrualWindow``, which
+    modelled-return window (``balance_at._asset_return.AccrualWindow``, which
     materialises EVERY calendar day from it to the reader's horizon) and it is
     the first period a payroll contribution can be modelled into
     (``_asset_contributions``).  An unbounded value is therefore both a

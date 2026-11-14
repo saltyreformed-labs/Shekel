@@ -125,7 +125,7 @@ def earliest_recordable_day(user_id: int) -> date:
     * ``anchor_service.resolve_observation_day`` -- an anchor's ``observed_on``,
       for BOTH writers of ``AccountAnchorHistory`` (the account factory's
       origination assertion and the true-up door's).  An unbounded day opens the
-      modelled-return window (``balance_at._asset_fold._AccrualWindow``
+      modelled-return window (``balance_at._asset_return.AccrualWindow``
       materialises EVERY calendar day from it) and fabricates contribution
       history back to it (finding **N-133**).
     * ``status_seam.reject_settle_day_before_the_schedule`` -- a settle day

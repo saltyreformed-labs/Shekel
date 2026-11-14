@@ -126,7 +126,7 @@ as income -- opposite sign, different magnitude -- so no accrual row reconciles
 them.  Ruling D4 refuses a loan at the RESOLVER (``resolve_grid_account`` and
 ``resolve_analytics_cash_flow_set`` both skip amortizing accounts), so this is a
 degenerate safety rather than a supported view; the replay reaches it anyway and
-returns the cash fold, because ``_modelled_return`` models nothing for the
+returns the cash fold, because ``_asset_return.modelled_return`` models nothing for the
 AMORTIZING kind.  An AMORTIZING account with no ``LoanParams`` lands in the same
 place and belongs there.
 """
@@ -573,7 +573,7 @@ def grid_balance_view(
     producer.
 
     **The account's REAL contribution feed is loaded here, and it is the whole
-    INVESTMENT half** (ruling R-AJ (a)).  :func:`._asset_fold._modelled_return`
+    INVESTMENT half** (ruling R-AJ (a)).  :func:`._asset_return.modelled_return`
     reads the CALLER's ``investment_params`` on the INVESTMENT arm, while the
     INTEREST and APPRECIATING arms read the account's own params row --
     so passing ``ContributionInputs.absent()`` here, as this entry did until the

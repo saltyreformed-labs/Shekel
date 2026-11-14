@@ -120,7 +120,7 @@ def interest_projection_for_account(
 
     **It takes no ``interest_params`` argument any more** (plan step X-g2b).
     The replay reads the account's own accrual rule through the ONE resolver
-    :func:`app.services.balance_at._asset_fold._modelled_return`, so the rate
+    :func:`app.services.balance_at._asset_return.modelled_return`, so the rate
     can no longer arrive from a caller that loaded a different row than the one
     the account carries -- the argument-a-caller-can-get-wrong shape the plan's
     Section 8 rules a defect rather than a contract.

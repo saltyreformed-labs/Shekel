@@ -39,7 +39,7 @@ from app.utils.money import round_money
 
 from ._context import BalanceContext
 
-from . import _cash_fold
+from . import _cash_day_facts, _cash_fold
 from ._inputs import _require_scenario
 
 _ONE_DAY = timedelta(days=1)
@@ -287,7 +287,7 @@ def cash_daily_facts_series(
     ctx: BalanceContext,
     first_day: date,
     last_day: date,
-) -> "_cash_fold.CashDaySeries":
+) -> "_cash_day_facts.CashDaySeries":
     """Return each day's cash-flow balance beside the three tiers that moved it.
 
     :func:`cash_daily_balance_series` with the day's MOVEMENT split out, for a
@@ -335,12 +335,12 @@ def cash_daily_facts_series(
     )
     days = days_in_range(first_day, last_day)
 
-    series = _cash_fold.day_facts(_cash_fold.assembled_fold(account, ctx), days)
+    series = _cash_day_facts.day_facts(_cash_fold.assembled_fold(account, ctx), days)
     # Re-keyed into range order, which a dict comprehension over an unordered
     # sample list does not promise.  An inverted range yields no days and still
     # reports the day the books opened -- the account HAS an opening whether or
     # not the caller asked about a day it falls in.
-    return _cash_fold.CashDaySeries(
+    return _cash_day_facts.CashDaySeries(
         facts=OrderedDict((day, series.facts[day]) for day in days),
         opened_on=series.opened_on,
     )

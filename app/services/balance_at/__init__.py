@@ -166,7 +166,7 @@ non-loan kind -- and plan step **X-g4b deleted the replaced producers whole**:
 carry-forward walk it delegated to), ``_investment`` (the growth / appreciation
 three-source merge) and ``_interest`` (the modelled accrual layered over a
 finished base map, whose one surviving predicate folded into
-``_asset_fold._modelled_return``).  Deleted alongside them at X-c2b3: the
+``_asset_return.modelled_return``).  Deleted alongside them at X-c2b3: the
 per-day producer ``_daily_series`` whole (the calendar's running-balance line is
 the fold sampled at every day of its range), the date-precise scalar
 ``balance_as_of_date`` with its prefix walk, and the ``BalanceResult``
@@ -264,7 +264,7 @@ All three classify asset-vs-liability through the one
 """
 
 from ._assertions import CashAnchorCorrection, assertion_corrections
-from ._cash_fold import CashDayFacts, CashDaySeries
+from ._cash_day_facts import CashDayFacts, CashDaySeries
 from ._cash_flow import (
     CashAnchorHistory,
     CashAnchorRow,

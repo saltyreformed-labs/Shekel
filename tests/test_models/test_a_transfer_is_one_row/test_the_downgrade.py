@@ -182,8 +182,11 @@ class TestTheDowngrade:
         ``category_id`` on BOTH sides (the kept to-side's stale category goes),
         ``name`` from the endpoints' current names, the day, basis and link
         from each side's record, and the rule's constants (a derived figure, no
-        template, notes or payback).  Only the four identity columns (``id``,
-        ``created_at``, ``updated_at``, ``version_id``) are the kept copy's.
+        template, notes, payback or carry).  Only the four identity columns
+        (``id``, ``created_at``, ``updated_at``, ``version_id``) are the kept
+        copy's.  The carry's link (``rolled_into_id``, plan#3985) is one of the
+        constants: a twin names no definition, so
+        ``ck_transactions_carry_names_a_definition`` holds it NULL.
         """
         with app.app_context():
             savings, van = _accounts(seed_user)
@@ -253,6 +256,7 @@ class TestTheDowngrade:
                 assert now["amount_source_id"] == _parent_transfer_id()
                 for column in (
                     "template_id", "credit_payback_for_id", "notes", "occurs_on",
+                    "rolled_into_id",
                 ):
                     assert now[column] is None, column
                 assert now["transfer_id"] == xfer.id
@@ -262,8 +266,9 @@ class TestTheDowngrade:
                 assert set(now) - set(resynced) == {
                     "name", "estimated_amount", "amount_source_id",
                     "template_id", "credit_payback_for_id", "notes",
-                    "occurs_on", "transfer_id", "transaction_type_id", "id",
-                    "created_at", "updated_at", "version_id",
+                    "occurs_on", "rolled_into_id", "transfer_id",
+                    "transaction_type_id", "id", "created_at", "updated_at",
+                    "version_id",
                 }, "a column this case does not grade"
                 assert now["transaction_type_id"] == kept["transaction_type_id"]
             assert kept_income["account_id"] == savings.id

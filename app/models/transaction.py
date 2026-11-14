@@ -491,6 +491,29 @@ class Transaction(
     # cannot express the rule.
     # version_id + its version_id_col mapper config: from OptimisticLockMixin.
 
+    # WHERE THIS ROW'S UNSPENT BUDGET WENT (plan#3985 under plan step
+    # ``balance:X-ax``, ruling plan#3973): the row a carry-forward rolled it
+    # into, set on the SOURCE.  The link is the carry's only stored fact.  The
+    # amount it carries is derived from this row each time it is read, so a
+    # purchase added, removed or re-costed here later moves the target's figure
+    # with nothing to keep in step (rule 14).  One column, so a source rolls into
+    # at most one row; a row may receive several.
+    #
+    # Nullable, and the NULL is a fact rather than a gap: nothing of this row's
+    # was carried.  It has the settle assertion's lifetime, since a carry is the
+    # settle's own act (``ck_transactions_carry_needs_settle_day``).  Its target
+    # is a row of the same owner, definition and scenario, by
+    # ``fk_transactions_rolled_into``, a composite key in
+    # :mod:`app.models._transaction_table_args`.
+    #
+    # **No single-column key beside it**, unlike ``account_id`` and
+    # ``pay_period_id``.  The composite always binds whenever the link is set:
+    # ``user_id`` and ``scenario_id`` are NOT NULL, and
+    # ``ck_transactions_carry_names_a_definition`` refuses a link on a row with
+    # no ``template_id``.  So it alone proves the target exists, and a second
+    # key over the same column would be a second home for that fact.
+    rolled_into_id = db.Column(db.Integer)
+
     # Relationships
     # ``foreign_keys`` on both, because each parent is now reached by TWO
     # declared keys -- the single-column one and the composite that also holds
@@ -523,6 +546,19 @@ class Transaction(
     transaction_type = db.relationship("TransactionType", lazy="joined")
     credit_payback_for = db.relationship(
         "Transaction", remote_side="Transaction.id", foreign_keys=[credit_payback_for_id]
+    )
+    # The row this one's carry rolled into (:attr:`rolled_into_id`).  The join
+    # is the composite key's ``rolled_into_id = id`` element alone: ``user_id``,
+    # ``template_id`` and ``scenario_id`` are columns the row owns, so naming
+    # them as this relationship's foreign columns would have it write them on
+    # flush, and the key already refuses a disagreement.  Many-to-one only, so a
+    # target's delete has no ORM path that nulls its sources' links: the
+    # database's RESTRICT answers it, behind the delete door that is to release
+    # them first (plan#3993).
+    # Being mapped is also what orders a flush that writes a new target and its
+    # source's link together: the target's INSERT goes first.
+    rolled_into = db.relationship(
+        "Transaction", remote_side="Transaction.id", foreign_keys=[rolled_into_id],
     )
     # **A ROW'S DELETE NEVER TAKES ITS MOVEMENTS, at this layer or the
     # database's** (plan step ``credit_card:CC-5-4a-4``, rulings **R-CC54**

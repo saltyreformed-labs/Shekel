@@ -357,5 +357,59 @@ transaction_table_args = (
         "reconciled_by_id IS NULL OR settled_on IS NOT NULL",
         name="ck_transactions_cleared_needs_settle_day",
     ),
+    # **A CARRY LANDS IN A ROW OF THE SAME OWNER, DEFINITION AND SCENARIO**
+    # (plan#3985 under plan step ``balance:X-ax``, ruling plan#3973).  The
+    # superkey constrains nothing (``id`` is the primary key) and exists
+    # because PostgreSQL requires a UNIQUE over exactly the referenced columns,
+    # ``uq_transactions_id_user``'s construction.  The owner is named in the
+    # key because ``template_id`` is a plain key: a shared definition does not
+    # imply a shared owner in the schema.  ``ON DELETE RESTRICT``: a row holding
+    # carried money does not vanish from under its source; the door that
+    # deletes one is to release its incoming links first (plan#3993), and this
+    # refuses a writer that does not.  Migration ``0ec92ce1634b`` carries the
+    # whole argument.
+    db.UniqueConstraint(
+        "id", "user_id", "template_id", "scenario_id",
+        name="uq_transactions_id_user_template_scenario",
+    ),
+    db.ForeignKeyConstraint(
+        ["rolled_into_id", "user_id", "template_id", "scenario_id"],
+        ["budget.transactions.id", "budget.transactions.user_id",
+         "budget.transactions.template_id", "budget.transactions.scenario_id"],
+        name="fk_transactions_rolled_into",
+        ondelete="RESTRICT",
+    ),
+    # The key above BINDS only on a row that names a definition: ``MATCH
+    # SIMPLE`` skips a composite key whenever any of its columns is NULL, and
+    # ``template_id`` is the one nullable column among the four.  Without this,
+    # a row with no definition (a CC payback) could name another owner's row,
+    # or no row, and the key would never look.
+    db.CheckConstraint(
+        "rolled_into_id IS NULL OR template_id IS NOT NULL",
+        name="ck_transactions_carry_names_a_definition",
+    ),
+    # A carry is the settle's own act -- the source settles at what it spent
+    # and rolls the rest forward -- so the link has the settle assertion's
+    # lifetime, the twin of ``ck_transactions_cleared_needs_settle_day``: the
+    # revert that releases the day is to release the link in the same write
+    # (plan#3991).
+    db.CheckConstraint(
+        "rolled_into_id IS NULL OR settled_on IS NOT NULL",
+        name="ck_transactions_carry_needs_settle_day",
+    ),
+    # The composite key admits a self-link (a row agrees with itself on owner,
+    # definition and scenario), and a row carried into itself would count its
+    # own unspent budget twice.
+    db.CheckConstraint(
+        "rolled_into_id <> id",
+        name="ck_transactions_carry_not_into_itself",
+    ),
+    # "Which sources rolled into this row" is the carried amount's read, and
+    # the key's own delete check runs it too; a foreign key indexes only the
+    # REFERENCED side.  Partial, because nearly every row carries no link.
+    db.Index(
+        "idx_transactions_rolled_into", "rolled_into_id",
+        postgresql_where=db.text("rolled_into_id IS NOT NULL"),
+    ),
     {"schema": "budget"},
 )

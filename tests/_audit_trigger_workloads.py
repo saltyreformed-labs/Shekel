@@ -766,12 +766,30 @@ def audit_triggers_off():
 #   insert      4.7 -  13.1 %      base 23.4-24.3 ms  (52 rows)
 #   update    131.9 - 146.1 %      base  5.2-5.8 ms   (260 rows)
 #   delete     25.2 -  34.3 %      base  5.1-5.4 ms   (52 rows)
+#
+# 2026-11-13, FIVE runs on a settling machine (load average 3.80 falling to
+# 2.78 over the minute before each run, the tail of this session's own full
+# suite, which had ended about two minutes before the first; no other pytest
+# live), PostgreSQL 18.6 (the test image), after plan#3985 added
+# ``budget.transactions.rolled_into_id``, a nullable integer (migration
+# ``0ec92ce1634b``), the one change to the surface pinned above.  Each range
+# overlaps the 2026-10-27 one: generate and delete start 0.1 and 0.3 points
+# below it and end inside it, insert ends 1.4 above, update starts 13.2 below
+# and ends 0.1 above, and regenerate starts 3.6 below and ends 4.8 above, on a
+# base about 7 ms lower:
+#
+#   generate    4.6 -   7.8 %      base 20.1-21.0 ms  (25 rows)
+#   regenerate  4.9 -  16.4 %      base 28.5-31.0 ms  (25 rows)
+#   insert      8.3 -  14.5 %      base 24.4-26.2 ms  (52 rows)
+#   update    118.7 - 146.2 %      base  5.3-6.9 ms   (260 rows)
+#   delete     24.9 -  32.0 %      base  5.4-6.4 ms   (52 rows)
 
 #: :func:`fingerprint_of` the :func:`cost_surface` of the database the
-#: 2026-10-27 block above was measured on, the test image (PostgreSQL 18.6).
-#: The 2026-09-25 pin still held at commit ``bec6f2218``, the one below that
-#: migration (its full suite passed this gate), and of what the surface reads
-#: the migration changes only the audited table's column list.  A
-#: PostgreSQL upgrade that re-renders the catalogue's text moves the
-#: fingerprint too, and a re-measure is the right answer then as well.
-PINNED_COST_FINGERPRINT = "6665a3656a1c1a166f9847e0a505528d0b91158a4545597a041bbb2264c3783b"
+#: 2026-11-13 block above was measured on, the test image (PostgreSQL 18.6).
+#: The 2026-10-27 pin still held one revision below that migration, measured
+#: by running its downgrade on the test database and fingerprinting the
+#: surface there, and of what the surface reads the migration changes only
+#: the audited table's column list.  A PostgreSQL upgrade that re-renders the
+#: catalogue's text moves the fingerprint too, and a re-measure is the right
+#: answer then as well.
+PINNED_COST_FINGERPRINT = "62c4029159f9a7e5d8cb0673991b877dbb06e91215b01aaa861020edb1d032b7"

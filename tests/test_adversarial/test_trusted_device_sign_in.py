@@ -416,7 +416,7 @@ class TestWhatForgetsTheDevice:
     ):
         """Deactivated and reactivated: her device asks the code.
 
-        Reactivation writes nothing to ``session_invalidated_at``, so the
+        Reactivation writes nothing to ``trusts_ended_at``, so the
         trusts the deactivation ended stay ended at the next sign-in.
         """
         companion_id = seed_companion["user"].id

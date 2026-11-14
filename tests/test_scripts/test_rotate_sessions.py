@@ -54,7 +54,7 @@ class TestExecuteRotation:
     """Tests for ``execute_rotation`` -- the core data operation."""
 
     def test_rotate_sessions_bumps_every_user(self, app, db):
-        """Every user row's ``session_invalidated_at`` is set to a
+        """Every user row's ``trusts_ended_at`` is set to a
         timestamp at or after the call time, and the return value
         equals the row count (3 in this case).
 
@@ -76,11 +76,11 @@ class TestExecuteRotation:
         users = db.session.query(User).all()
         assert len(users) == 3
         for user in users:
-            assert user.session_invalidated_at is not None
+            assert user.trusts_ended_at is not None
             # The bump timestamp must be at or after the call time.
             # Allow microsecond drift -- ``datetime.now`` and the
             # SQL bump can differ by a single ULP.
-            assert user.session_invalidated_at >= start - timedelta(seconds=1)
+            assert user.trusts_ended_at >= start - timedelta(seconds=1)
 
     def test_rotate_sessions_preserves_other_columns(self, app, db, seed_user):
         """The bump must not touch other user columns.
@@ -110,22 +110,22 @@ class TestExecuteRotation:
                 f"Column {column!r} mutated by rotate_sessions: "
                 f"{original!r} -> {getattr(user, column)!r}"
             )
-        assert user.session_invalidated_at is not None
+        assert user.trusts_ended_at is not None
 
     def test_rotate_sessions_overwrites_older_timestamp(self, app, db, seed_user):
-        """An existing ``session_invalidated_at`` is replaced, not
+        """An existing ``trusts_ended_at`` is replaced, not
         skipped.  The new timestamp must be strictly greater than the
         old one.
         """
         user_id = seed_user["user"].id
         old_timestamp = datetime(2026, 1, 1, tzinfo=timezone.utc)
-        seed_user["user"].session_invalidated_at = old_timestamp
+        seed_user["user"].trusts_ended_at = old_timestamp
         db.session.commit()
 
         execute_rotation(db.session)
 
         user = db.session.get(User, user_id)
-        assert user.session_invalidated_at > old_timestamp
+        assert user.trusts_ended_at > old_timestamp
 
     def test_rotate_sessions_forgets_every_trusted_device(
         self, app, db, seed_user, seed_second_user,
@@ -133,7 +133,7 @@ class TestExecuteRotation:
         """Every user's trusted device stops being trusted, with no write to it.
 
         The module docstring's claim (plan#2173): a device is live only while
-        it was trusted at or after its user's ``session_invalidated_at``, so
+        it was trusted at or after its user's ``trusts_ended_at``, so
         the bump leaves every device older than it.  Each is trusted an hour
         back, so the bump is later than the trust whatever the clock's
         resolution, and found live first, so its loss is the rotation's.
@@ -220,7 +220,7 @@ class TestMain:
         want a friction step in front of.
         """
         user_id = seed_user["user"].id
-        initial_invalidated_at = seed_user["user"].session_invalidated_at
+        initial_trusts_ended_at = seed_user["user"].trusts_ended_at
 
         exit_code = main([])
 
@@ -228,7 +228,7 @@ class TestMain:
         # ``execute_rotation`` was never called, so the row is
         # untouched.  Re-fetch so the assertion sees committed state.
         user = db.session.get(User, user_id)
-        assert user.session_invalidated_at == initial_invalidated_at
+        assert user.trusts_ended_at == initial_trusts_ended_at
         captured = capsys.readouterr()
         assert "Refusing to run without --confirm" in captured.err
 

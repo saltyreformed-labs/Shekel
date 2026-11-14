@@ -181,7 +181,7 @@ class TestTheReset:
             "Companion User has no two-factor authentication to reset."
         ) in text_of(response.get_data(as_text=True))
         db.session.expire_all()
-        assert db.session.get(User, companion.id).session_invalidated_at is None
+        assert db.session.get(User, companion.id).trusts_ended_at is None
         assert two_factor_row_of(companion.id) is None
 
     def test_midway_through_setup_is_nothing_to_reset_and_her_key_survives(
@@ -205,7 +205,7 @@ class TestTheReset:
             "Companion User has no two-factor authentication to reset."
         ) in text_of(landed_on_companions(response))
         db.session.expire_all()
-        assert db.session.get(User, companion_id).session_invalidated_at is None
+        assert db.session.get(User, companion_id).trusts_ended_at is None
         assert two_factor_row_of(companion_id).pending_secret_encrypted == pending
         # Still signed in, and her next setup shows the key she scanned.
         again = browser.get(_SETUP)

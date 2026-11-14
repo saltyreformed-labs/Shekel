@@ -409,17 +409,17 @@ class TestEditCompanion:
             user = stranger_signs_in(updated.email, "companionpass")
             assert user.id == comp_id
 
-    def test_edit_companion_password_change_sets_session_invalidated_at(
+    def test_edit_companion_password_change_sets_trusts_ended_at(
         self, auth_client, db, seed_user, seed_companion,
     ):
-        """Changing the password stamps session_invalidated_at.
+        """Changing the password stamps trusts_ended_at.
 
         The one act (ruling plan#3927) writes it, which ends every trust
         of hers; what it does to her sessions is graded in
         ``tests/test_adversarial/test_every_sign_out_everywhere.py``.
         """
         comp_id = seed_companion["user"].id
-        assert seed_companion["user"].session_invalidated_at is None
+        assert seed_companion["user"].trusts_ended_at is None
 
         auth_client.post(
             f"/settings/companions/{comp_id}/edit",
@@ -433,7 +433,7 @@ class TestEditCompanion:
 
         db.session.expire_all()
         updated = db.session.get(User, comp_id)
-        assert updated.session_invalidated_at is not None
+        assert updated.trusts_ended_at is not None
 
     def test_edit_companion_rejects_mismatched_password_confirm(
         self, auth_client, db, seed_user, seed_companion,
@@ -488,7 +488,7 @@ class TestDeactivateCompanion:
     def test_deactivate_sets_is_active_false(
         self, auth_client, db, seed_user, seed_companion,
     ):
-        """Deactivation sets is_active to False and stamps session_invalidated_at."""
+        """Deactivation sets is_active to False and stamps trusts_ended_at."""
         comp_id = seed_companion["user"].id
 
         resp = auth_client.post(
@@ -499,7 +499,7 @@ class TestDeactivateCompanion:
         db.session.expire_all()
         updated = db.session.get(User, comp_id)
         assert updated.is_active is False
-        assert updated.session_invalidated_at is not None
+        assert updated.trusts_ended_at is not None
 
     def test_deactivate_prevents_login(
         self, app, auth_client, db, seed_user, seed_companion,
@@ -566,7 +566,7 @@ class TestDeactivateCompanion:
         auth_client.post(f"/settings/companions/{comp_id}/deactivate")
 
         db.session.expire_all()
-        first_stamp = db.session.get(User, comp_id).session_invalidated_at
+        first_stamp = db.session.get(User, comp_id).trusts_ended_at
 
         # Second deactivation should be a no-op.
         resp = auth_client.post(
@@ -578,7 +578,7 @@ class TestDeactivateCompanion:
         second = db.session.get(User, comp_id)
         assert second.is_active is False
         # Timestamp is not updated on no-op.
-        assert second.session_invalidated_at == first_stamp
+        assert second.trusts_ended_at == first_stamp
 
 
 class TestReactivateCompanion:
@@ -616,10 +616,10 @@ class TestReactivateCompanion:
             assert user.id == comp_id
             assert user.is_active is True
 
-    def test_reactivate_preserves_session_invalidated_at(
+    def test_reactivate_preserves_trusts_ended_at(
         self, auth_client, db, seed_user, seed_companion,
     ):
-        """Reactivation does NOT clear session_invalidated_at.
+        """Reactivation does NOT clear trusts_ended_at.
 
         Trusts from before deactivation must stay ended -- the companion
         types her code at her next sign-in.  Her old sessions' records
@@ -630,12 +630,12 @@ class TestReactivateCompanion:
 
         auth_client.post(f"/settings/companions/{comp_id}/deactivate")
         db.session.expire_all()
-        deactivation_stamp = db.session.get(User, comp_id).session_invalidated_at
+        deactivation_stamp = db.session.get(User, comp_id).trusts_ended_at
         assert deactivation_stamp is not None
 
         auth_client.post(f"/settings/companions/{comp_id}/reactivate")
         db.session.expire_all()
-        stamp_after = db.session.get(User, comp_id).session_invalidated_at
+        stamp_after = db.session.get(User, comp_id).trusts_ended_at
         assert stamp_after == deactivation_stamp
 
     def test_reactivate_idempotent(

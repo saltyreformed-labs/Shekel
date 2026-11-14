@@ -28,7 +28,7 @@ and Regenerate's write left new backup codes on the row it had cleared
 (measured 2026-11-13, plan#3775).  Three operator scripts write rows the lock
 covers and take none -- ``scripts/rotate_totp_key.py`` (every
 ``totp_secret_encrypted``), ``scripts/rotate_sessions.py`` (every
-``users.session_invalidated_at`` and every ``auth.sign_ins`` row) and
+``users.trusts_ended_at`` and every ``auth.sign_ins`` row) and
 ``scripts/seed_companion.py``'s existing-user branch (``role_id`` and
 ``linked_owner_id``, the lock's key) --
 so each can race a sign-in or an MFA door that holds the lock (reported at

@@ -384,7 +384,7 @@ class TestEndEveryOtherSignIn:
             end_every_other_sign_in(seed_user["user"], now)
 
         db.session.expire_all()
-        assert db.session.get(User, user_id).session_invalidated_at == now
+        assert db.session.get(User, user_id).trusts_ended_at == now
 
     def test_a_failed_commit_leaves_the_cookie_as_it_was(
         self, app, seed_user, monkeypatch,

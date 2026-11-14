@@ -52,7 +52,7 @@ class TestResetMfa:
     def test_reset_mfa_ends_sessions_and_forgets_devices(
         self, app, db, seed_user,
     ):
-        """The reset moves ``session_invalidated_at`` to the moment it ran.
+        """The reset moves ``trusts_ended_at`` to the moment it ran.
 
         That is what forgets every trusted device (plan#2173, ruling
         plan#2406); the one act it runs ends the user's sessions by deleting
@@ -61,13 +61,13 @@ class TestResetMfa:
         """
         with app.app_context():
             user_id = seed_user["user"].id
-            assert db.session.get(User, user_id).session_invalidated_at is None
+            assert db.session.get(User, user_id).trusts_ended_at is None
             before = datetime.now(timezone.utc)
 
             reset_mfa(seed_user["user"].email)
 
             after = datetime.now(timezone.utc)
-            bumped = db.session.query(User.session_invalidated_at).filter_by(
+            bumped = db.session.query(User.trusts_ended_at).filter_by(
                 id=user_id,
             ).scalar()
             assert bumped is not None

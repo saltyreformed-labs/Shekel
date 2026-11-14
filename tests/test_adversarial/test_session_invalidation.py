@@ -510,16 +510,16 @@ class TestBackupCodeInvalidatesOtherSessions:
                 "Client A should redirect to /login after invalidation."
             )
 
-    def test_session_invalidated_at_advanced_after_backup_code(
+    def test_trusts_ended_at_advanced_after_backup_code(
         self, app, seed_user,
     ):
-        """The DB column is the load-bearing artefact; lock it down
-        directly.
+        """The act's time on the account, which ends every trust, is stamped.
 
-        The cross-client test above covers behaviour; this test
-        covers the underlying mechanism so a regression that broke
-        the helper (e.g. removed the commit) is detected even if a
-        bug elsewhere kept the cross-client test green.
+        The cross-client test above covers the sessions, which end by
+        their records; this test covers the trusts, which end by
+        ``trusts_ended_at`` (``known_device_service._trusted``), so a
+        door that deleted the records without running the one act is
+        detected even though the cross-client test stays green.
         """
         with app.app_context():
             _its_two_factor(seed_user["user"].id)
@@ -538,19 +538,19 @@ class TestBackupCodeInvalidatesOtherSessions:
             db.session.expire_all()
             from app.models.user import User  # pylint: disable=import-outside-toplevel
             reloaded = db.session.get(User, user_id)
-            assert reloaded.session_invalidated_at is not None, (
-                "Backup-code consume must stamp session_invalidated_at."
+            assert reloaded.trusts_ended_at is not None, (
+                "Backup-code consume must stamp trusts_ended_at."
             )
-            assert before <= reloaded.session_invalidated_at <= after, (
-                "session_invalidated_at must be set within the request "
-                f"window; got {reloaded.session_invalidated_at} not in "
+            assert before <= reloaded.trusts_ended_at <= after, (
+                "trusts_ended_at must be set within the request "
+                f"window; got {reloaded.trusts_ended_at} not in "
                 f"[{before}, {after}]"
             )
 
     def test_totp_verify_does_not_invalidate_other_sessions(
         self, app, seed_user, monkeypatch,
     ):
-        """A normal TOTP login does NOT bump session_invalidated_at.
+        """A normal TOTP login does NOT bump trusts_ended_at.
 
         Negative control: the F-003 fix targets backup-code paths
         specifically.  An ordinary TOTP login should not invalidate
@@ -573,8 +573,8 @@ class TestBackupCodeInvalidatesOtherSessions:
             db.session.expire_all()
             from app.models.user import User  # pylint: disable=import-outside-toplevel
             reloaded = db.session.get(User, user_id)
-            assert reloaded.session_invalidated_at is None, (
-                "TOTP login must NOT bump session_invalidated_at; "
+            assert reloaded.trusts_ended_at is None, (
+                "TOTP login must NOT bump trusts_ended_at; "
                 "backup codes are the canonical 'lost device' signal "
                 "and the bump is reserved for that case."
             )
@@ -599,8 +599,8 @@ class TestBackupCodeInvalidatesOtherSessions:
             )
 
             # Multiple subsequent requests must all succeed -- the
-            # cookie this client owns must be valid against the bumped
-            # column on every load_user call.
+            # token this client's cookie carries must name a live record
+            # on every load_user call.
             r1 = client.get("/dashboard")
             assert r1.status_code == 200, (
                 f"Backup-code-consuming client survived its own bump? "
@@ -626,7 +626,7 @@ class TestExistingInvariantsPreserved:
     def test_password_change_still_invalidates_sessions(
         self, app, auth_client, seed_user
     ):
-        """``change_password`` continues to bump session_invalidated_at.
+        """``change_password`` continues to bump trusts_ended_at.
 
         Locks down ``app/routes/auth/session_security.py:change_password``
         so a future refactor cannot silently drop the act (e.g. by
@@ -646,8 +646,8 @@ class TestExistingInvariantsPreserved:
 
             db.session.expire_all()
             reloaded = db.session.get(User, seed_user["user"].id)
-            assert reloaded.session_invalidated_at is not None
-            assert before <= reloaded.session_invalidated_at <= after
+            assert reloaded.trusts_ended_at is not None
+            assert before <= reloaded.trusts_ended_at <= after
 
     def test_explicit_invalidate_sessions_still_works(
         self, app, auth_client, seed_user
@@ -667,5 +667,5 @@ class TestExistingInvariantsPreserved:
 
             db.session.expire_all()
             reloaded = db.session.get(User, seed_user["user"].id)
-            assert reloaded.session_invalidated_at is not None
-            assert before <= reloaded.session_invalidated_at <= after
+            assert reloaded.trusts_ended_at is not None
+            assert before <= reloaded.trusts_ended_at <= after

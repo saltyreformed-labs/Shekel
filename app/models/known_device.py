@@ -19,7 +19,7 @@ the browser guesses wrong too many times in a row, which deletes the row
 (plan#2173, ruling plan#2406).  What trust skips is the code, and only that.
 A device is trusted while :attr:`KnownDevice.trusted_at` is less than
 :data:`TRUST_LIFETIME` ago AND not before its user's
-``session_invalidated_at``, so the one act that writes that column
+``trusts_ended_at``, so the one act that writes that column
 (``app.services.sign_in_service.sign_out_everywhere``, ruling plan#3927) ends
 every trust with no write of its own, whichever door runs it: log out all
 other sessions, a password change, the owner's companion password reset or
@@ -128,7 +128,7 @@ class KnownDevice(BrowserTokenMixin, db.Model):
         change the database and this value parted by an hour (plan#2173's
         review, measured under ``America/New_York``).  The bound now subtracts
         in Python, where a ``timedelta`` is exact.  It does not say whether
-        the trust ended by a ``session_invalidated_at`` bump: only the
+        the trust ended by its user's ``trusts_ended_at``: only the
         predicate in ``app.services.known_device_service`` says that.
 
         Returns:

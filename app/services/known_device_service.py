@@ -16,7 +16,7 @@ hashed is :mod:`app.utils.bearer_tokens`'s alone.
 **Each standing is stated once**: :func:`_known`, a finished sign-in less than
 :data:`~app.models.known_device.KNOWN_LIFETIME` ago, and :func:`_trusted`, a
 trust less than :data:`~app.models.known_device.TRUST_LIFETIME` old and not
-before its user's ``session_invalidated_at``.  Ending a trust is that comparison
+before its user's ``trusts_ended_at``.  Ending a trust is that comparison
 and nothing else: the one sign-out-everywhere act
 (``app.services.sign_in_service.sign_out_everywhere``, ruling plan#3927), the
 column's one writer, ends every trust of that user without a write here.  A
@@ -89,7 +89,7 @@ def _trusted(now: datetime) -> ColumnElement[bool]:
 
     Trusted while it was trusted strictly after *now* less
     :data:`~app.models.known_device.TRUST_LIFETIME` (so a device thirty days
-    old to the second is dead), AND its user's ``session_invalidated_at`` is
+    old to the second is dead), AND its user's ``trusts_ended_at`` is
     NULL or not later than the device's ``trusted_at``.  The age bound is
     computed here, in Python, where subtracting a ``timedelta`` is exact;
     adding the lifetime as an SQL interval would count calendar days in the
@@ -106,16 +106,16 @@ def _trusted(now: datetime) -> ColumnElement[bool]:
     Returns:
         A boolean clause over ``auth.known_devices``.
     """
-    invalidated_at = (
-        select(User.session_invalidated_at)
+    trusts_ended_at = (
+        select(User.trusts_ended_at)
         .where(User.id == KnownDevice.user_id)
         .scalar_subquery()
     )
     return and_(
         KnownDevice.trusted_at > now - TRUST_LIFETIME,
         or_(
-            invalidated_at.is_(None),
-            KnownDevice.trusted_at >= invalidated_at,
+            trusts_ended_at.is_(None),
+            KnownDevice.trusted_at >= trusts_ended_at,
         ),
     )
 

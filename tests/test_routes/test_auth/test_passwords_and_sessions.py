@@ -84,7 +84,7 @@ class TestSessionManagement:
     """Tests for session invalidation functionality."""
 
     def test_invalidate_sessions(self, app, auth_client, seed_user):
-        """POST /invalidate-sessions sets session_invalidated_at on user."""
+        """POST /invalidate-sessions sets trusts_ended_at on user."""
         with app.app_context():
             before = datetime.now(timezone.utc)
             response = auth_client.post(
@@ -98,7 +98,7 @@ class TestSessionManagement:
             # Reload user from database.
             user = db.session.get(User, seed_user["user"].id)
             # Verify timestamp is recent, not just non-null (audit section 43 smell fix).
-            assert before <= user.session_invalidated_at <= after
+            assert before <= user.trusts_ended_at <= after
 
     def test_invalidate_sessions_current_session_survives(self, app, auth_client, seed_user):
         """Current session remains valid after invalidation."""
@@ -111,7 +111,7 @@ class TestSessionManagement:
             assert response.status_code == 200
 
     def test_password_change_invalidates_sessions(self, app, auth_client, seed_user):
-        """Password change sets session_invalidated_at."""
+        """Password change sets trusts_ended_at."""
         with app.app_context():
             before = datetime.now(timezone.utc)
             auth_client.post("/change-password", data={
@@ -124,7 +124,7 @@ class TestSessionManagement:
             # Reload user from database.
             user = db.session.get(User, seed_user["user"].id)
             # Verify timestamp is recent, not just non-null (audit section 43 smell fix).
-            assert before <= user.session_invalidated_at <= after
+            assert before <= user.trusts_ended_at <= after
 
     def test_invalidate_sessions_requires_login(self, app, client):
         """POST /invalidate-sessions without login redirects to login."""

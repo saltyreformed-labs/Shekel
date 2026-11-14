@@ -158,7 +158,7 @@ def sign_out_everywhere(
     browser's cookie, which still carries the old token, is refused with the
     rest.
 
-    Every trust ends by the user's ``session_invalidated_at`` moving to *now*:
+    Every trust ends by the user's ``trusts_ended_at`` moving to *now*:
     a device is trusted only while it was trusted at or after it
     (``app.services.known_device_service._trusted``).  The browsers stay
     known, which no act a person presses ends (ruling plan#2997).
@@ -183,7 +183,7 @@ def sign_out_everywhere(
     if keeping is not None:
         ended = and_(ended, SignIn.token_hash != token_hash(keeping))
     db.session.execute(delete(SignIn).where(ended))
-    user.session_invalidated_at = now
+    user.trusts_ended_at = now
     token = None
     if keeping is not None:
         token = new_token()

@@ -15,7 +15,7 @@ deleted, so every session is refused on its next request, whatever key
 signed its cookie, and every active user signs in again.
 
 It also forgets every trusted device, of every user: the act moves each
-user's ``session_invalidated_at`` to that instant, and a device is trusted
+user's ``trusts_ended_at`` to that instant, and a device is trusted
 only while it was trusted at or after it
 (``app.services.known_device_service``, plan#2173), so the next sign-in on
 each one asks for the two-factor code again.  The script writes nothing to
@@ -80,7 +80,7 @@ def execute_rotation(db_session) -> int:
 
     Side effects:
         - Deletes every row of ``auth.sign_ins`` and moves every user's
-          ``session_invalidated_at`` to the one instant.
+          ``trusts_ended_at`` to the one instant.
         - Commits the transaction.
         - Emits a structured log event ``sessions_invalidated_global``
           at ``WARNING`` level with the user count.

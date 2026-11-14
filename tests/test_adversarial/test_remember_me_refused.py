@@ -9,9 +9,9 @@ expiry -- and Flask-Login restores a session from one on any request that
 carries it, whether or not the app ever issues one again.  Whenever the
 loader refuses the session's own user, or the session names none, the restore
 writes the cookie's user id into the CURRENT session and calls ``load_user``
-again.  On an empty session the ``session_invalidated_at`` check, which ran
-only when ``_session_created_at`` was present, never ran: measured on the real
-app on 2026-10-29, a client sending only a copied cookie stayed signed in
+again.  On an empty session the check of the account's sign-out time, which
+ran only when ``_session_created_at`` was present, never ran: measured on the
+real app on 2026-10-29, a client sending only a copied cookie stayed signed in
 after "log out all sessions", three requests of three.
 
 Deleting the checkbox could not reach a cookie already copied, so
@@ -107,14 +107,14 @@ class TestARememberCookieSignsNobodyIn:
     """A remember-me cookie alone never reaches a signed-in page."""
 
     def test_refused_with_no_sign_out_on_record(self, app, seed_user):
-        """With ``session_invalidated_at`` never set, the cookie is refused.
+        """With ``trusts_ended_at`` never set, the cookie is refused.
 
         The case the loader before plan#2173 had no answer for at all: nothing
         to compare against, and no stamp to compare.  Repeated, because an
         attacker who discards the response's session cookie arrives with an
         empty session every time.
         """
-        assert seed_user["user"].session_invalidated_at is None
+        assert seed_user["user"].trusts_ended_at is None
         for _ in range(3):
             remembered = _remembered_client(app, seed_user["user"].id)
             _assert_signed_out(remembered.get("/dashboard"))
@@ -125,13 +125,13 @@ class TestARememberCookieSignsNobodyIn:
         """After "log out all other sessions", the cookie is still refused.
 
         The sign-out runs through the real route from a signed-in client, so
-        ``session_invalidated_at`` is set exactly as the owner's click sets
+        ``trusts_ended_at`` is set exactly as the owner's click sets
         it; the case the review measured signing in three requests of three.
         """
         response = auth_client.post("/invalidate-sessions")
         assert response.status_code == 302
-        assert seed_user["user"].session_invalidated_at is not None, (
-            "Setup failed: the sign-out did not stamp session_invalidated_at"
+        assert seed_user["user"].trusts_ended_at is not None, (
+            "Setup failed: the sign-out did not stamp trusts_ended_at"
         )
         for _ in range(3):
             remembered = _remembered_client(app, seed_user["user"].id)
@@ -180,7 +180,7 @@ class TestACookieOnAnotherUsersRefusedSessionSignsNobodyIn:
         names is B's, so it is refused for A.
         """
         assert auth_client.post("/invalidate-sessions").status_code == 302
-        assert seed_user["user"].session_invalidated_at is not None
+        assert seed_user["user"].trusts_ended_at is not None
         browser = _signed_in_client(app, SEED_SECOND_USER_EMAIL, SEED_SECOND_USER_PASSWORD)
         elsewhere = _signed_in_client(app, SEED_SECOND_USER_EMAIL, SEED_SECOND_USER_PASSWORD)
         assert elsewhere.post("/invalidate-sessions").status_code == 302

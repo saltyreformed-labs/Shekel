@@ -235,10 +235,10 @@ docker exec shekel-prod-app python scripts/rotate_sessions.py --confirm
 ```
 
 The script signs every user out of every browser through the app's one sign-out-everywhere act: it
-deletes every row of `auth.sign_ins` and moves every user's `session_invalidated_at` to one instant,
-which ends every trusted device's trust. It is idempotent (a repeated run deletes nothing more and
-moves the timestamp forward) and emits a structured log event `sessions_invalidated_global` at
-WARNING level so the audit log captures the operation.
+deletes every row of `auth.sign_ins` and moves every user's `trusts_ended_at` to one instant, which
+ends every trusted device's trust. It is idempotent (a repeated run deletes nothing more and moves
+the timestamp forward) and emits a structured log event `sessions_invalidated_global` at WARNING
+level so the audit log captures the operation.
 
 The `--confirm` flag is mandatory; running without it prints a usage hint and exits with code 1.
 

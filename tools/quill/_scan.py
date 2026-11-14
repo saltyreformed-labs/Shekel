@@ -24,11 +24,11 @@ is the board's top.
 card whose fix the scanned image holds holds nothing (:func:`fixed`, the pass's
 :meth:`_waits.Holdings.left_out`), so a CVE only such cards hold is filed as a new one is, on
 a card of its own or the component's open card, which cites them (:func:`_again`).  A card's
-fix is in the image when git
-says the card shipped, its ``plan/ships/N`` in the merge of ``dev`` and ``main`` as a fetch
-finds them now, and the commit the image was built from (its revision label, ruling plan#3786)
-holds that file too.  So a card shipped into ``dev`` since the image was built holds its CVEs
-until a release puts its fix in what production runs, and a dropped card, closed and never
+fix is in the image when git says the card shipped, its ``plan/ships/N`` in the merge of
+``dev`` and ``main`` as the run's one fetch finds them (below), and the commit the image was
+built from (its revision label, ruling plan#3786) holds that file too.  So a card shipped
+into ``dev`` since the image was built holds its CVEs until a release puts its fix in what
+production runs, and a dropped card, closed and never
 shipped, holds them for good; so does a card shipped into the image and then reverted, which
 git no longer says shipped.  A card git says shipped but the tracker shows open holds them too:
 it is open.
@@ -50,13 +50,21 @@ check passed (``scan._listable``'s refusal), each in a code block fenced past ev
 backticks in it (:func:`_waits.block`): there it mentions no one, and no line of it holds a
 thing told, as only the lines ending a text do (:func:`_waits.holds`).
 
+**One fetch, first** (ruling plan#3970).  The door fetches ``dev`` and ``main`` once
+(:func:`_git.fetch`), before the scan reads anything of git, so a checkout that has not
+fetched since the last release still reads the commit production's image was built from, its
+Dockerfile and its lock (``scan._locks``); the same fetch serves the read of which cards'
+fixes the image holds (:func:`fixed`), which fetches nothing of its own.  So every run fetches
+once, a clean one included.
+
 A scan whose answer is refused (:class:`tools.update.scan.NotAScan`) is refused, exit 1; one
 that could not run (:class:`tools.update.scan.ScanFailed`, or git or the system failing it) is
 a failed call, exit 2 (the command module's exit statuses); each once its card is filed, and
-neither is ever read as a clean scan.  Git failing the read of which cards' fixes the image
-holds (:func:`fixed`) fails the scan so too, as no CVE it found can then be filed.  The door
-connects to the tracker, and fetches ``dev`` and ``main``, only when it has something to file,
-so a clean scan reads nothing of either.
+neither is ever read as a clean scan.  A fetch that fails is a scan that could not run, filed
+so (ruling plan#3788), and no scan runs; git failing the read of which cards' fixes the image holds
+(:func:`fixed`) fails the scan so too, as no CVE it found can then be filed.  The door
+connects to the tracker only when it has something to file, so a clean scan reads nothing of
+it.
 """
 from __future__ import annotations
 
@@ -193,16 +201,14 @@ def found_items(done: scan.Scanned, when: str, have: _waits.Holdings,
 def fixed(root: Path, revision: str) -> frozenset[int]:
     """Each card whose fix the image built from the commit ``revision`` holds (ruling
     plan#3765; the module says why): each git says shipped, its marker in the merge of ``dev``
-    and ``main`` as one fetch of both brings them now (:func:`_git.fetch`,
-    :func:`_git.shipped`), whose marker the tree of ``revision`` holds too
-    (:func:`_git.markers_in`), from the checkout at ``root``.
+    and ``main`` as the run's one fetch brought them (:func:`cmd_scan`; :func:`_git.shipped`),
+    whose marker the tree of ``revision`` holds too (:func:`_git.markers_in`), from the
+    checkout at ``root``.  It fetches nothing (ruling plan#3970).
 
     Raises:
-        GitError: the fetch failed, git cannot read ``revision``, or a marker or a task's file
-            conflicts in that merge (:class:`_git.MarkerConflict`), so which cards shipped is
-            unknown.
+        GitError: git cannot read ``revision``, or a marker or a task's file conflicts in that
+            merge (:class:`_git.MarkerConflict`), so which cards shipped is unknown.
     """
-    _git.fetch(root)
     return _git.shipped(root).cards & _git.markers_in(root, revision)[0]
 
 
@@ -271,22 +277,25 @@ def _failed(connect: Callable[[], Tracker], said: str, when: str, dry_run: bool)
 
 def cmd_scan(args, connect: Callable[[], Tracker], root: Path,
              clock: Callable[[], datetime] = lambda: datetime.now(UTC)) -> int:
-    """Scan the image production is running from the checkout at ``root``, and print the
+    """Fetch ``dev`` and ``main`` once into the checkout at ``root`` (:func:`_git.fetch`, the
+    module's one fetch), then scan the image production is running from it, and print the
     image's digest, the commit it was built from, how many matches count, and each one
     (:attr:`tools.update.scan.Counted.line`); then file each component one counts in that no
     card holds it for (:func:`file_found`), a closed card whose fix the image holds holding
-    nothing (:func:`fixed`, read only when one counts), or a scan refused or unable to run as
-    the scan's failure (:func:`file_failure`), each at the time ``clock`` reads at the start,
-    and under ``args.dry_run`` printed and not written.  Exit 0, or 1 on a REPORT.
+    nothing (:func:`fixed`, read only when one counts), or a fetch failed or a scan refused or
+    unable to run as the scan's failure (:func:`file_failure`), each at the time ``clock``
+    reads at the start, and under ``args.dry_run`` printed and not written.  Exit 0, or 1 on a
+    REPORT.
 
     Raises:
         Refused: the scanner's answer is no scan, names no commit, or saw not what the image
             runs, once its failure is filed.
-        ScanFailed, GitError, OSError: the scan could not run, or git could not say which
-            cards' fixes the image holds, once its failure is filed.
+        ScanFailed, GitError, OSError: the fetch failed, the scan could not run, or git could
+            not say which cards' fixes the image holds, once its failure is filed.
     """
     when = _git.instant(clock())
     try:
+        _git.fetch(root)
         done = scan.scanned(root)
         fix = fixed(root, done.revision) if done.found else frozenset()
     except scan.NotAScan as error:

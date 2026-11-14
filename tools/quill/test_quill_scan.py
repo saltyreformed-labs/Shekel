@@ -2,21 +2,23 @@
 that runs the daily scan of the image production is running, says what it found, and files it
 into the in-memory tracker (:class:`_fake.FakeTracker`): one open card for each component, a
 later CVE put on its open card, and a failure filed once while its card is open; and a CVE
-found again once the image holds its card's fix filed again (ruling plan#3765), git read as
-git runs it in a throwaway repository (the ``code`` fixture).  The scan itself is
+found again once the image holds its card's fix filed again (ruling plan#3765), and each run's
+one fetch of ``dev`` and ``main``, before it reads anything of git (ruling plan#3970), git read
+as git runs it in a throwaway repository (the ``code`` fixture).  The scan itself is
 :func:`tools.update.scan.scanned`'s, tested in ``tools/update/test_scan.py``; here it is stood
 in for, so the door is tested apart from docker.  Every CVE here is invented (ruling
 plan#3841)."""
 from __future__ import annotations
 
+import subprocess
 from datetime import UTC, datetime, timedelta
 from functools import partial
 
 import pytest
 
-from tools.ci import scratch
+from tools.ci import gitcmd, scratch
 from tools.ci.arcs import REPO
-from tools.ci.gitcmd import DEV, tracking
+from tools.ci.gitcmd import DEV, MAIN, tracking
 from tools.quill import _git, _scan, _waits, quill
 from tools.quill._fake import FakeTracker, assert_filed_high, ship, unship
 from tools.quill._github import GitHubError
@@ -61,13 +63,14 @@ def _never():
 
 def _stood_in(monkeypatch, outcome, root, at):
     """``quill scan``'s scan stood in for, run from the checkout at ``root``, answering
-    ``outcome`` or raising it, and its clock reading ``at``."""
+    ``outcome``, raising it, or, where it is a function of the checkout, answering what it
+    answers; and its clock reading ``at``."""
     def scanned(checkout):
         """The stand-in scan, run from the checkout's root."""
         assert checkout == root
         if isinstance(outcome, Exception):
             raise outcome
-        return outcome
+        return outcome(checkout) if callable(outcome) else outcome
 
     monkeypatch.setattr(scan, "scanned", scanned)
     monkeypatch.setitem(quill.CONNECTS_LATE, "scan", partial(_scan.cmd_scan, clock=lambda: at))
@@ -82,14 +85,20 @@ def _main(tracker, root, *argv):
 
 def _ran(monkeypatch, tracker, outcome, *argv, at=_AT):
     """``quill scan`` run from this checkout with ``argv`` (:func:`_main`), its scan stood in
-    for (:func:`_stood_in`), and git's answer of which cards' fixes the image holds stood in as
-    none: no test fetches this checkout's ``origin``, and the tests of a CVE found again
-    (below) read a throwaway repository's git as git runs it; its exit status."""
+    for (:func:`_stood_in`), and git stood in too: the run's fetch, which fetches nothing, and
+    its answer of which cards' fixes the image holds, none.  No test fetches this checkout's
+    ``origin``: the tests of the fetch and of a CVE found again (below) read a throwaway
+    repository's git as git runs it; its exit status."""
+    def fetch(root):
+        """This checkout's fetch, which fetches nothing."""
+        assert root == REPO
+
     def fixed(root, revision):
         """No card's fix is in the image this checkout's stand-in scan read."""
         assert (root, revision) == (REPO, _REVISION)
         return frozenset()
 
+    monkeypatch.setattr(_git, "fetch", fetch)
     monkeypatch.setattr(_scan, "fixed", fixed)
     _stood_in(monkeypatch, outcome, REPO, at)
     return _main(tracker, REPO, *argv)
@@ -482,13 +491,98 @@ def test_a_cve_found_again_goes_on_its_components_open_card_citing_the_shipped_o
         "another (ruling plan#3787).", "", *_lines(_PYTHON, _SEVEN[0])])
 
 
-def test_git_failing_to_say_which_fixes_the_image_holds_files_the_scans_failure(
-        code, monkeypatch, capsys):
-    """The fetch of ``dev`` and ``main`` failing once the scan found CVEs: exit 2 saying git's
-    failure, the scan's failure filed quoting it, and no CVE filed, as none can be judged."""
+def _released(code, files):
+    """A commit on ``origin``'s ``main`` writing ``files``, made on the ``main`` ``origin``
+    holds and pushed there from another clone (:func:`scratch.elsewhere`), as a release lands
+    the commit production's image is built from: ``code`` sees it only through a fetch of its
+    own; its sha."""
+    other = scratch.elsewhere(code)
+    sha = scratch.commit_files(other, scratch.run(other, "rev-parse", tracking(MAIN)), "release",
+                               files)
+    scratch.run(other, "push", "--quiet", "origin", f"{sha}:refs/heads/main")
+    return sha
+
+
+def _census(monkeypatch):
+    """Each git command started from here on, as its arguments, in order: every one is a
+    ``subprocess.run`` of ``git`` (:func:`tools.ci.gitcmd.run`), which this records, then
+    runs."""
+    started = []
+    real = subprocess.run
+
+    def run(command, *args, check=False, **kwargs):
+        """Record a git command, then run it as asked, ``check`` defaulting as
+        ``subprocess.run``'s does."""
+        if command[:1] == ["git"]:
+            started.append(tuple(command))
+        return real(command, *args, check=check, **kwargs)
+
+    monkeypatch.setattr(subprocess, "run", run)
+    return started
+
+
+def _fetched_once_first(started):
+    """Whether ``started`` (:func:`_census`) holds one fetch alone, its first command."""
+    fetches = [command for command in started if "fetch" in command]
+    return len(fetches) == 1 and started[0] == fetches[0]
+
+
+def test_a_checkout_lacking_the_images_commit_fetches_it_and_judges_the_scan(code, monkeypatch,
+                                                                             capsys):
+    """Production's image built from a commit a release landed on ``origin``'s ``main`` since
+    this checkout last fetched: the run fetches ``dev`` and ``main`` once, before any other git
+    command, so the scan reads that commit's Dockerfile and lock, as it does before it is
+    judged (``scan._locks``), and what it found is filed, never the scan's failure; the same
+    fetch serves the read of which cards' fixes the image holds (ruling plan#3970)."""
+    files = {name: f"{name}, as the release holds it\n"
+             for name in (scan.DOCKERFILE, *scan.LOCK_FILES)}
+    image = _released(code, files)
+    assert gitcmd.run(code, "cat-file", "-e", image).returncode != 0
+    read = {}
+
+    def scanned(checkout):
+        """The stand-in scan, reading what the scan reads of git: the image's commit's files."""
+        read.update({name: gitcmd.git(checkout, "cat-file", "blob", f"{image}:{name}")
+                     for name in files})
+        return scan.Scanned(_IMAGE, image, _SEVEN)
+
+    tracker = FakeTracker()
+    _stood_in(monkeypatch, scanned, code, _AT)
+    started = _census(monkeypatch)
+    assert _main(tracker, code) == 0
+    assert _fetched_once_first(started)
+    assert read == files
+    assert capsys.readouterr().out.endswith(_filed(1, _PYTHON_TITLE, _PYTHON, "plan#3787"))
+    assert _waits.holds(tracker.bodies[1]) == {(_PYTHON, item.marker) for item in _SEVEN}
+
+
+def test_a_clean_scan_fetches_once_before_any_other_git(code, monkeypatch, capsys):
+    """A scan in which no match counts fetches ``dev`` and ``main`` too, once, before any other
+    git command (ruling plan#3970): ``origin``'s ``dev`` moved, and this checkout's follows
+    it."""
+    built = _dev(code)
+    moved = ship(code, 5)
+    started = _census(monkeypatch)
+    assert _found_in(monkeypatch, _never, code, built) == 0
+    assert _fetched_once_first(started)
+    assert capsys.readouterr().out.endswith(
+        "scan: CVEs with a fix rated HIGH or CRITICAL, or known exploited: 0\n")
+    assert _dev(code) == moved
+
+
+def test_a_fetch_that_fails_files_the_scans_failure_and_runs_no_scan(code, monkeypatch,
+                                                                     capsys):
+    """The fetch of ``dev`` and ``main`` failing: exit 2 saying git's failure, the scan's
+    failure filed quoting it (ruling plan#3788), and no scan run, so nothing else is filed
+    (ruling plan#3970)."""
+    def scanned(_checkout):
+        """A scan that fails the test: none runs once its fetch failed."""
+        raise AssertionError("the scan ran though its fetch failed")
+
     scratch.run(code, "remote", "set-url", "origin", str(code.parent / "gone.git"))
     tracker = FakeTracker()
-    assert _found_in(monkeypatch, tracker, code, _dev(code), *_SEVEN) == 2
+    _stood_in(monkeypatch, scanned, code, _AT)
+    assert _main(tracker, code) == 2
     out, err = capsys.readouterr()
     assert out == _filed(1, _FAILED_TITLE, "failure", "plan#3788")
     assert err.startswith("failed: git fetch --quiet origin +refs/heads/dev:")
@@ -496,12 +590,15 @@ def test_git_failing_to_say_which_fixes_the_image_holds_files_the_scans_failure(
     assert list(tracker.bodies) == [1]
 
 
-def test_a_clean_scan_fetches_nothing(code, monkeypatch, capsys):
-    """A scan in which no match counts reads nothing of git: ``origin``'s ``dev`` moved, and
-    this checkout's stays where it was."""
-    built = _dev(code)
-    ship(code, 5)
-    assert _found_in(monkeypatch, _never, code, built) == 0
-    assert capsys.readouterr().out.endswith(
-        "scan: CVEs with a fix rated HIGH or CRITICAL, or known exploited: 0\n")
-    assert _dev(code) == built
+def test_git_failing_to_say_which_fixes_the_image_holds_files_the_scans_failure(
+        code, monkeypatch, capsys):
+    """The scan finding CVEs in an image built from a commit neither this checkout nor
+    ``origin`` holds, so git cannot say which cards' fixes it holds: exit 2 saying git's
+    failure, the scan's failure filed quoting it, and no CVE filed, as none can be judged."""
+    tracker = FakeTracker()
+    assert _found_in(monkeypatch, tracker, code, _REVISION, *_SEVEN) == 2
+    out, err = capsys.readouterr()
+    assert out == _filed(1, _FAILED_TITLE, "failure", "plan#3788")
+    assert err.startswith(f"failed: git ls-tree -r -z {_REVISION} -- plan/ships: ")
+    assert err.removeprefix("failed: ").rstrip("\n") in tracker.bodies[1]
+    assert list(tracker.bodies) == [1]

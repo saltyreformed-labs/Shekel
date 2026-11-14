@@ -24,7 +24,8 @@ marked -- first reads it once (:func:`_git.read`): it lists the ``card/N`` branc
 ``origin`` holds, then fetches ``dev``, ``main`` and each of them, which moves
 this checkout's ``origin/dev``, ``origin/main`` and ``origin/card/N``.
 ``start`` fetches only ``dev``, ``main`` and its card's branch (:func:`_git.fetch`), and
-``scan``, once it finds a CVE, ``dev`` and ``main`` alone (``_scan.fixed``).
+``scan`` fetches ``dev`` and ``main`` alone, once each run, before it reads anything of git
+(ruling plan#3970, :mod:`_scan`).
 (``move``, ``drop`` and ``effort`` ask it whether a step is split: a leaf dropped
 before its filing finished is no leaf unless git says it shipped, ``_state.leaves``.)
 A TASK (ruling ``balance:R-BAL386``) is a piece of one step or finding, a sub-issue

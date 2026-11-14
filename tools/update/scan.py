@@ -745,10 +745,12 @@ def _uv(directory: Path, arguments: Sequence[str], seconds: int) -> bytes:
 def _locks(root: Path, commit: str, interpreter: Interpreter,
            uv: Uv) -> frozenset[tuple[str, str]]:
     """The lock's set for the image built from ``commit`` (:func:`locked`; ruling plan#3877):
-    the commit's :data:`LOCK_FILES`, read from the git of the checkout at ``root``, written to a
-    directory of the scan's own, deleted however the run ends, where ``uv tree`` works the set
-    out from the lock alone, offline, for the groups the commit's :data:`DOCKERFILE` chooses
-    (:func:`chosen`, ruling plan#3884) and the image :func:`told` tells it of.
+    the commit's :data:`LOCK_FILES`, read from the git of the checkout at ``root``, which
+    ``quill scan``'s one fetch of ``dev`` and ``main`` brings it into first (ruling plan#3970),
+    written to a directory of the scan's own, deleted however the run ends, where ``uv tree``
+    works the set out from the lock alone, offline, for the groups the commit's
+    :data:`DOCKERFILE` chooses (:func:`chosen`, ruling plan#3884) and the image :func:`told`
+    tells it of.
 
     Raises:
         GitError: git cannot read a file at ``commit``.

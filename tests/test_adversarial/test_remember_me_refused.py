@@ -154,6 +154,12 @@ class TestACookieOnAnotherUsersRefusedSessionSignsNobodyIn:
     user on that same session.  No case needs a control that the session is
     refused for its own user: were it not, the page would answer 200 as that
     user and the signed-out assertion would fail.
+
+    The refusal that decides differs.  In the three cases after a sign-out
+    or a deactivation, the act deleted B's record, so the token B's session
+    carries names no live sign-in of anyone's.  Only in
+    :meth:`test_another_users_live_sign_in` is B's record live, so there the
+    record's user is what refuses A (``sign_in_service.is_live``).
     """
 
     @pytest.mark.usefixtures("seed_second_user")
@@ -176,8 +182,9 @@ class TestACookieOnAnotherUsersRefusedSessionSignsNobodyIn:
 
         The order the review measured, when A's sign-out was a time on A's
         account OLDER than B's session, so a timestamp comparison passed for A
-        on B's session.  B's session carries B's token, and the record it
-        names is B's, so it is refused for A.
+        on B's session.  No time on A's account is read now: B's own sign-out
+        everywhere deleted the record B's session's token names, so the
+        session is live for no one, A included.
         """
         assert auth_client.post("/invalidate-sessions").status_code == 302
         assert seed_user["user"].trusts_ended_at is not None
@@ -210,11 +217,37 @@ class TestACookieOnAnotherUsersRefusedSessionSignsNobodyIn:
         for _ in range(3):
             _assert_signed_out(companion_client.get("/dashboard"))
 
+    def test_another_users_live_sign_in(self, app, seed_user, seed_second_user):
+        """B is refused while B's record is live; A's cookie on B's session is refused.
+
+        The case the record's user decides: the restore asks the loader for A
+        on a session whose token names a live record, B's.  B is made
+        inactive by a write of the column alone, a state no act leaves
+        (deactivation deletes her records in the same transaction), standing
+        for any refusal of B's own that leaves B's record live.
+        """
+        second = seed_second_user["user"]
+        browser = _signed_in_client(app, SEED_SECOND_USER_EMAIL, SEED_SECOND_USER_PASSWORD)
+        second.is_active = False
+        db.session.commit()
+        record = db.session.query(SignIn).filter_by(
+            token_hash=token_hash(token_of(browser)),
+        ).one_or_none()
+        assert record is not None and record.user_id == second.id, (
+            "Setup failed: B's session does not name a live record of B's"
+        )
+
+        browser.set_cookie(COOKIE_NAME, _minted_cookie(app, seed_user["user"].id))
+
+        for _ in range(3):
+            _assert_signed_out(browser.get("/dashboard"))
+
     def test_the_sign_ins_record_holds_its_user(self, app, seed_user):
         """The real sign-in's token names a record of the user it signed in.
 
         That record's user is what refuses the cookie's user on another
-        user's session (``sign_in_service.is_live``).
+        user's session whose record is live
+        (:meth:`test_another_users_live_sign_in`, ``sign_in_service.is_live``).
         """
         browser = _signed_in_client(app, SEED_USER_EMAIL, SEED_USER_PASSWORD)
 

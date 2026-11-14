@@ -249,6 +249,7 @@ from app.services.recurrence._closing import (
     DerivedStop,
     Empty,
     Indefinite,
+    stop_on_closing_date,
 )
 from app.services.recurrence._describe import (
     RecurrenceDescription,
@@ -409,6 +410,7 @@ __all__ = [
     "rule_occurrences",
     "scheduling_day_of_month",
     "selected_cadence",
+    "stop_on_closing_date",
     "stored_cadence",
     "stored_month_reading",
     "weekday_reading_choices",

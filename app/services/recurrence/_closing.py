@@ -369,6 +369,41 @@ INDEFINITE: Indefinite = Indefinite()
 #: occurrence.  See :data:`INDEFINITE` for why it is a singleton.
 EMPTY: Empty = Empty()
 
+
+def stop_on_closing_date(
+    closes: "date | None", first_occurrence: date,
+) -> DerivedStop:
+    """Return the derived stop a source's closing date states for one definition.
+
+    **The ONE mapping from a closing date to a shape.**  A source that never
+    closes (``None``) stops nothing (:data:`INDEFINITE`); one that closed
+    before the definition's first occurrence admits nothing (:data:`EMPTY`);
+    any other admits through its closing day (:class:`ClosesOn`).  Two readers
+    ask it, and the second is why it is stated here rather than in either:
+    ``loan_recurrence_sync.loan_payment_window``, the stop generation, the
+    Recurring surface and the form read through the composed door, and the
+    balance seam's estimate of a loan payment's paying side past the last
+    saved paycheck (plan step ``pay_calendar:C9``, task plan#3941).  So the
+    occurrences generation writes and the occurrences the estimate debits are
+    admitted by one rule (``CLAUDE.md`` rule 14).
+
+    Args:
+        closes: The source's closing date (for a loan,
+            :attr:`~app.services.balance_at.LoanFigures.closing_date`), or
+            ``None`` when it never closes.
+        first_occurrence: The definition's RESOLVED first occurrence
+            (:attr:`~app.services.recurrence.ResolvedRecurrence.starts_on`),
+            never a stored column (plan ledger row **D39**).
+
+    Returns:
+        The :class:`DerivedStop` the closing date states.
+    """
+    if closes is None:
+        return INDEFINITE
+    if closes < first_occurrence:
+        return EMPTY
+    return ClosesOn(on=closes)
+
 #: The closed set of shapes a derived stop can take.
 #:
 #: **A weaker guarantee than :data:`.._bounds.END_BOUND_KINDS`, and an
@@ -497,4 +532,5 @@ __all__ = [
     "DerivedStop",
     "Empty",
     "Indefinite",
+    "stop_on_closing_date",
 ]

@@ -93,9 +93,6 @@ from app.models.account import Account
 from app.services import balance_at, installment_calendar, loan_loaders
 from app.services.pay_calendar import calendar_for
 from app.services.recurrence import (
-    EMPTY,
-    INDEFINITE,
-    ClosesOn,
     DerivedStop,
     EmptyAuthoredWindowError,
     RecurrenceSpec,
@@ -104,6 +101,7 @@ from app.services.recurrence import (
     reauthor_rule,
     recurrence_spec,
     resolve,
+    stop_on_closing_date,
 )
 from app.services.recurring_transfer_query import (
     active_recurring_transfer_template,
@@ -328,15 +326,10 @@ def loan_payment_window(
     figures = balance_at.loan_figures(account, ctx)
     if figures is None:
         return None
-    closes = figures.closing_date
-    if closes is None:
-        return INDEFINITE
     # The RESOLVED first occurrence, never ``rule.starts_on``: see the EMPTY
     # paragraph above for the ``PERIOD``-unit drift (plan ledger row **D39**)
     # that makes the column the wrong side of this comparison.
-    if closes < resolved.starts_on:
-        return EMPTY
-    return ClosesOn(on=closes)
+    return stop_on_closing_date(figures.closing_date, resolved.starts_on)
 
 
 @dataclass(frozen=True)

@@ -17,8 +17,9 @@ trigger writes each row whole (``to_jsonb``), so the ``system.audit_log`` rows
 of ``auth.users`` written before the release carry the old name and those
 after it the new one.
 
-**The downgrade renames it back, and loses nothing**: the code at
-``764fd7dfb6d4`` reads the column for trusts alone too.
+**The downgrade renames it back, and loses nothing**: a rename carries every
+value, so after the downgrade the column holds exactly what it held before the
+upgrade.
 
 Review: Josh, 2026-11-13 -- APPROVED: his pick of the name, ruling plan#3952,
 is also his approval of this destructive migration.

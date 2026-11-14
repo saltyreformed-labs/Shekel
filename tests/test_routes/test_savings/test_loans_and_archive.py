@@ -732,7 +732,7 @@ class TestDebtSummaryDisplay:
             # module's clock is NOT frozen, and the fold's zero crossing moves
             # with it (an installment already due and unpaid pushes it out).
             # The DERIVATION is oracle-tested at
-            # ``test_loan_payoff_date_oracle.py``; what is asserted here is
+            # ``test_loan_payoff_date_oracle/test_the_payoff_seam.py``; what is asserted here is
             # that the cell renders it, and the string "payoff <Mon YYYY>"
             # appears nowhere else on the page.
             assert figures.payoff_date is not None

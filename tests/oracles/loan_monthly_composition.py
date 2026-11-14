@@ -11,7 +11,7 @@ cash against whatever stands
 **It is deleted from ``app/`` and kept HERE because it is not only a producer: it
 is the second opinion that makes the equivalence claim measurable.**  Two suites
 re-fold a plan through it deliberately --
-``test_loan_payoff_date_oracle._clears_within`` and
+``test_loan_payoff_date_oracle.test_the_required_extra._clears_within`` and
 ``test_loan_interest_in_year._plan_projected_interest`` -- over plans that put
 exactly ONE payment in every accrual period.  On that shape the two compositions
 must agree to the cent, and *their agreeing IS the equivalence claim, measured
@@ -20,7 +20,7 @@ producer grading itself, which is the "green gate measuring nothing" shape this
 project has paid for repeatedly.  A plan with two payments in one period is NOT
 gradeable here -- it is the case the two compositions are supposed to disagree on
 -- and is pinned directly instead
-(``test_loan_payoff_date_oracle.TestChargePerPeriodNotPerPayment``).
+(``test_loan_payoff_date_oracle.test_the_payoff_fold.TestChargePerPeriodNotPerPayment``).
 
 **It still calls the production PRIMITIVES, and that is deliberate too.**  The
 oracle owns the COMPOSITION and nothing else: spelling the interest of

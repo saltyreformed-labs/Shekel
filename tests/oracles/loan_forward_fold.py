@@ -10,7 +10,7 @@ projections behind the recorded facts.
 
 Three suites grade the forward arithmetic with plans STATED BY HAND and a seed
 STATED BY HAND -- ``test_loan_plan_forward_oracle``,
-``test_loan_payoff_date_oracle`` and ``test_loan_plan_assembly`` -- against
+``test_loan_payoff_date_oracle``'s package and ``test_loan_plan_assembly`` -- against
 figures anyone can check.  Those figures are the grade, and they do not move:
 this module keeps the retired signatures and answers them over the one
 timeline, so every hand-computed assertion still fires against the SAME

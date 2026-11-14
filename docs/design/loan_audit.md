@@ -373,6 +373,6 @@ plus the schedule page and the lever's partial. The route-level locks in
 and `test_payoff_projection.py::TestOneWalkEdges`) pin hand-derived figures and the shapes the
 adversarial review traced (an ARM paying before its first charge, a retired loan, an installment due
 today, a plan that never clears, a loan behind); the seam parity oracles in
-`tests/test_services/test_loan_payoff_date_oracle.py` and
+`tests/test_services/test_loan_payoff_date_oracle/test_the_payoff_seam.py` and
 `tests/test_integration/test_loan_unified_figures.py` grade the fold against `project_forward` run
 directly (`tests/_test_helpers.contract_forward_references`), an independent walk.

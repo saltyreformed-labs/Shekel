@@ -227,8 +227,7 @@ cd /opt/shekel
 git checkout dev && git pull --ff-only
 
 # Ensure the dedicated shekel-frontend network exists.  The subnet
-# is pinned so Gunicorn's FORWARDED_ALLOW_IPS literal and the shared
-# Nginx's set_real_ip_from directive both reference the same CIDR.
+# is pinned so Gunicorn's FORWARDED_ALLOW_IPS literal matches it.
 # Audit finding F-015 + F-020 (Commit C-33).
 docker network ls --filter name=shekel-frontend
 # If missing:

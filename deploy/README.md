@@ -96,8 +96,7 @@ In shared mode:
   source of truth; the host copy at `/opt/docker/nginx/nginx.conf` must match.
 
 The `shekel-frontend` network must exist before `docker compose up`, with the subnet pinned so the
-`FORWARDED_ALLOW_IPS` literal Gunicorn and the app read matches and Nginx's `set_real_ip_from`
-directive applies:
+`FORWARDED_ALLOW_IPS` literal Gunicorn and the app read matches it.
 
 ```bash
 docker network ls --filter name=shekel-frontend
@@ -113,7 +112,8 @@ networks it already uses). Edit `/opt/docker/docker-compose.yml` and add the ser
 `docker compose up -d nginx` to recreate it. The detailed step list is in
 `deploy/docker-compose.prod.yml` under "OPERATOR PRE-FLIGHT". `/opt/docker/cloudflared` does NOT
 join `shekel-frontend`: it reaches nginx over a bridge of its own, `edge-tunnel`, shared with nginx
-and Alloy alone, and nginx trusts `CF-Connecting-IP` from its one address there (ruling plan#3942).
+and Alloy alone, and nginx trusts `CF-Connecting-IP` from its one address there and from no other
+peer (rulings plan#3942, plan#4066).
 
 `/opt/docker/cloudflared/config.yml` must also be updated so the Shekel ingress rule routes through
 `http://nginx:80` instead of straight at `http://shekel-prod-app:8000` (audit finding F-063 closed

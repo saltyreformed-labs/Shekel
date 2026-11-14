@@ -5,9 +5,7 @@ parsed by ``nginx -t`` in a container.
 
 from __future__ import annotations
 
-import ipaddress
 import os
-import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -19,14 +17,14 @@ from tests.test_deploy._compose import NGINX_TEST_IMAGE
 from ._helpers import (
     BUNDLED_NGINX_CONF,
     SHARED_NGINX_CONF,
+    SHARED_CONF_D,
     SHARED_VHOST_CONF,
     BUNDLED_FRONTEND_CIDR,
-    SHARED_FRONTEND_CIDR,
     CLOUDFLARED_TUNNEL_ADDRESS,
-    EDGE_TUNNEL_SUBNET,
     SECURITY_HEADERS,
     DOCKER_SUBPROCESS_TIMEOUT_S,
     _docker_available,
+    nginx_directive_args,
 )
 
 
@@ -145,9 +143,9 @@ class TestBundledNginxSecurityHeaders:
 
 
 class TestSharedNginxRealIpAndTokens:
-    """Verify the shared-mode Nginx config gains
-    ``set_real_ip_from`` for the pinned ``shekel-frontend`` subnet
-    and keeps ``server_tokens off`` (audit findings F-015 + F-156).
+    """Verify the shared-mode Nginx config trusts ``CF-Connecting-IP``
+    from cloudflared's one address and keeps ``server_tokens off``
+    (audit findings F-015 + F-156, S-10).
     """
 
     @pytest.fixture(scope="class")
@@ -163,52 +161,32 @@ class TestSharedNginxRealIpAndTokens:
         """
         assert "server_tokens off;" in conf_text
 
-    def test_set_real_ip_from_shared_frontend_subnet(
-        self, conf_text: str
-    ) -> None:
-        """The shared Nginx still trusts the ``shekel-frontend``
-        bridge subnet, which C-33 meant to carry cloudflared's traffic.
-        Measured on 2026-11-13 it never did (plan#2181): cloudflared
-        reached nginx over homelab, and the subnet admits only the
-        bridge gateway and the app.  plan#2169 removes the entry and
-        changes this expectation (CLAUDE.md rule 5).
-        """
-        assert (
-            f"set_real_ip_from {SHARED_FRONTEND_CIDR};" in conf_text
-        )
-
-    def test_set_real_ip_from_cloudflared_on_edge_tunnel(
-        self, conf_text: str
-    ) -> None:
-        """The shared Nginx trusts ``CF-Connecting-IP`` from
+    def test_set_real_ip_from_cloudflared_alone(self) -> None:
+        """The shared Nginx believes ``CF-Connecting-IP`` from one peer:
         cloudflared's pinned address on ``edge-tunnel``, the bridge it
-        shares with Nginx and Alloy alone (ruling plan#3942), and from
-        nothing else on that bridge.  The host copy must carry this
-        line BEFORE cloudflared moves onto the bridge, or every WAN
-        client looks like the one address.
+        shares with Nginx and Alloy and nothing else (rulings plan#3942,
+        plan#4066).  Any other trusted entry lets its peers choose the
+        client address: with the whole ``shekel-frontend`` /24 trusted, a
+        forged LAN address from that bridge passed ``_lan-only.inc``
+        (measured 2026-11-13, plan#2181).
 
-        Every active (uncommented) ``set_real_ip_from`` entry that
-        overlaps ``EDGE_TUNNEL_SUBNET`` must be that one address, so
-        a widened entry (``172.34.6.0/24``, ``172.34.6.20/24``)
-        fails whether it replaces the bare line or sits beside it:
-        either would trust the gateway, Nginx itself and Alloy.
+        Every ``set_real_ip_from`` in ``nginx.conf`` and in each file of
+        ``conf.d/`` (where a server-level entry would override the http
+        one) is read as nginx reads it, so the expectation is that one
+        entry in ``nginx.conf`` and none elsewhere, however spelled.
         """
-        trusted = re.findall(
-            r"^\s*set_real_ip_from\s+(\S+);", conf_text, re.MULTILINE
-        )
-        tunnel = ipaddress.ip_network(EDGE_TUNNEL_SUBNET)
-        on_tunnel = [
-            entry for entry in trusted
-            if ipaddress.ip_network(entry, strict=False).overlaps(tunnel)
+        trusted = [
+            (path.name, args)
+            for path in (SHARED_NGINX_CONF, *sorted(SHARED_CONF_D.iterdir()))
+            for args in nginx_directive_args(
+                path.read_text(encoding="utf-8"), "set_real_ip_from"
+            )
         ]
-        # As networks, so ``172.34.6.20/32`` reads as the address and
-        # ``172.34.6.20/24`` as the whole bridge it names.
-        assert [
-            ipaddress.ip_network(entry, strict=False) for entry in on_tunnel
-        ] == [ipaddress.ip_network(CLOUDFLARED_TUNNEL_ADDRESS)], (
-            f"edge-tunnel trust must be {CLOUDFLARED_TUNNEL_ADDRESS} "
-            f"alone; the active entries overlapping {EDGE_TUNNEL_SUBNET} "
-            f"are {on_tunnel} (all entries: {trusted})"
+        assert trusted == [
+            (SHARED_NGINX_CONF.name, [CLOUDFLARED_TUNNEL_ADDRESS])
+        ], (
+            f"the shared Nginx must trust {CLOUDFLARED_TUNNEL_ADDRESS} "
+            f"alone, in {SHARED_NGINX_CONF.name}; it trusts {trusted}"
         )
 
     def test_real_ip_header_cf_connecting_ip(

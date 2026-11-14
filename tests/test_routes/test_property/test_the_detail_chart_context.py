@@ -6,7 +6,6 @@ from decimal import Decimal
 
 from flask import template_rendered
 
-from app.routes.accounts import detail as property_detail_module
 from app.services.loan_loaders import load_loan_params
 from app.utils.dates import add_months
 from tests._test_helpers import create_loan_account, insert_tracking_start_event

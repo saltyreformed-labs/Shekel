@@ -103,6 +103,11 @@ class TestARecord:
                 Decimal("2000.00"), Decimal("2010.00"), Decimal("2000.00"),
             )
             assert offer.reach == PayReach(date(2026, 3, 13), and_before=False, until=None)
+            assert offer.label == "Use $2,010.00 as my pay from 2026-03-13"
+            assert offer.confirm == (
+                "Use $2,010.00 as your pay from 2026-03-13? $2,000.00 to "
+                "$2,010.00, every paycheck from 2026-03-13 on."
+            )
 
     def test_a_later_amount_bounds_what_it_reaches(
         self, app, seed_user, seed_periods,
@@ -114,6 +119,11 @@ class TestARecord:
             offer = _offer(profile, date(2026, 3, 13), "2010.00")
             assert offer.reach == PayReach(
                 date(2026, 3, 13), and_before=False, until=date(2026, 3, 27),
+            )
+            assert offer.confirm == (
+                "Use $2,010.00 as your pay from 2026-03-13? $2,000.00 to "
+                "$2,010.00, every paycheck from 2026-03-13 to the one before "
+                "2026-03-27, where your next pay amount starts."
             )
 
     def test_a_payday_the_record_door_refuses_offers_its_refusal(
@@ -156,6 +166,32 @@ class TestAFix:
             assert offer.old_figure == Decimal("2000.00")
             assert offer.stub_base == Decimal("2001.00")
             assert offer.reach == PayReach(date(2026, 1, 2), and_before=True, until=None)
+            assert offer.label == "Fix your pay from 2026-01-02: $2,000.00 to $2,001.00"
+            assert offer.confirm == (
+                "Fix your pay from 2026-01-02? $2,000.00 to $2,001.00, every "
+                "paycheck from 2026-01-02 on, and every one before 2026-01-02."
+            )
+
+    def test_the_first_amount_with_a_later_one_names_both_bounds(
+        self, app, seed_user, seed_periods,
+    ):
+        """With $2,100.00 recorded from 03-27, the 01-02 Fix reaches the paychecks before 03-27.
+
+        As the first amount it prices every paycheck before 01-02 too, and the
+        03-27 amount takes over from 03-27; the confirm names both bounds.
+        """
+        with app.app_context():
+            profile = _profile(seed_user, seed_periods)
+            _record(profile, "2100.00", date(2026, 3, 27))
+            offer = _offer(profile, date(2026, 1, 2), "2001.00")
+            assert offer.reach == PayReach(
+                date(2026, 1, 2), and_before=True, until=date(2026, 3, 27),
+            )
+            assert offer.confirm == (
+                "Fix your pay from 2026-01-02? $2,000.00 to $2,001.00, every "
+                "paycheck from 2026-01-02 to the one before 2026-03-27, where "
+                "your next pay amount starts, and every one before 2026-01-02."
+            )
 
 
 #: 5% from Wednesday 2026-03-11, inside 03-27's 03-08..03-21.

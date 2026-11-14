@@ -122,3 +122,24 @@ class PayStubOneOffSchema(PayStubFigureSchema):
             if not data["name"]:
                 del data["name"]
         return data
+
+
+class PayStubUseAsPaySchema(BaseSchema):
+    """Validates the Pay Stub page's pay button (plan step salary:X-av-4).
+
+    The button posts no figure and no payday: the door reads both off the
+    stub (ruling **R-SAL61**, "Use this as my pay from this payday").  It
+    posts what the figures it showed were read from, so a page left open
+    while either changed writes nothing:
+
+    * ``version_id`` -- the stub's optimistic-locking counter (see
+      :class:`~app.schemas.validation.TransactionUpdateSchema` for the
+      contract), so the base written is the base the owner saw;
+    * ``entry_version_id`` -- the counter of the pay amount a Fix corrects
+      (ruling **plan#3962**), posted only by a Fix's button.  Its presence
+      is which of the two the page offered; the door refuses a press whose
+      offer has since become the other.
+    """
+
+    version_id = RowId(required=True, validate=validate.Range(min=1))
+    entry_version_id = RowId(validate=validate.Range(min=1))

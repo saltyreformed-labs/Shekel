@@ -216,6 +216,17 @@ def _edit_page(profile_id: int) -> RedirectTarget:
     return RedirectTarget("salary.edit_profile", {"profile_id": profile_id})
 
 
+def _stub_page(stub_id: int) -> RedirectTarget:
+    """A saved pay stub's page as a redirect target: the salary package's one spelling of it.
+
+    The stub doors (:mod:`.stubs`) spelled it twice, and the Pay Stub page's
+    pay button (:mod:`.pay_list`, plan step salary:X-av-4) sends every answer
+    back to it, so it joined :func:`_edit_page` here rather than being
+    spelled a third time.
+    """
+    return RedirectTarget("salary.view_stub", {"stub_id": stub_id})
+
+
 def _raise_form_bounds() -> dict[str, int]:
     """The years the raise form's date and end-year controls offer.
 

@@ -83,6 +83,41 @@ class PayOffer:
         """
         return self.entry.amount if self.entry is not None else self.pays_now
 
+    @property
+    def label(self) -> str:
+        """Return the button's words.
+
+        "Use $X as my pay from P" for a Record; "Fix your pay from P: $old
+        to $new" for a Fix (ruling **plan#3962**).
+        """
+        payday = self.payday.isoformat()
+        if self.entry is None:
+            return f"Use {_dollars(self.stub_base)} as my pay from {payday}"
+        return (
+            f"Fix your pay from {payday}: {_dollars(self.old_figure)} to "
+            f"{_dollars(self.stub_base)}"
+        )
+
+    @property
+    def confirm(self) -> str:
+        """Return the question the button asks before it writes (ruling **plan#3965**).
+
+        It names the old figure, the new one and the paychecks that move
+        (:func:`_moves`), the check ruling plan#3965 chose over holding the
+        button back: "$3,525.96 to $3,626.00, every paycheck from 03-26 on"
+        is what the owner reads before a stub typed with an allowance folded
+        into its base reprices every paycheck.
+        """
+        payday = self.payday.isoformat()
+        question = (
+            f"Use {_dollars(self.stub_base)} as your pay from {payday}?"
+            if self.entry is None else f"Fix your pay from {payday}?"
+        )
+        return (
+            f"{question} {_dollars(self.old_figure)} to {_dollars(self.stub_base)}, "
+            f"{_moves(self.reach)}."
+        )
+
 
 @dataclass(frozen=True)
 class NoPayOffer:
@@ -155,6 +190,45 @@ def offer(
     return PayOffer(
         payday, pays_now, stub_base, pay_list_service.reach_of(profile, payday), held,
     )
+
+
+def _dollars(amount: Decimal) -> str:
+    """Word a pay figure as the page prints one: ``$3,631.70``.
+
+    Every figure here is above zero (the schema's bound on a pay amount and
+    a stub's base, and the columns' CHECKs), so there is no sign to word.
+    """
+    return f"${amount:,.2f}"
+
+
+def _moves(reach: PayReach) -> str:
+    """Word the paychecks a pay amount from *reach*'s payday prices.
+
+    Made-up: amounts from 01-02 and 06-05.  One from 03-13 moves "every
+    paycheck from 2026-03-13 to the one before 2026-06-05, where your next
+    pay amount starts"; one from 06-05, "every paycheck from 2026-06-05 on";
+    the 01-02 amount, as the first, "every paycheck from 2026-01-02 to the
+    one before 2026-06-05, where your next pay amount starts, and every one
+    before 2026-01-02".
+
+    Args:
+        reach: The paychecks, as :func:`~app.services.pay_list_service.reach_of`
+            answers them.
+
+    Returns:
+        The phrase, lower-case, without a full stop.
+    """
+    start = reach.payday.isoformat()
+    if reach.until is None:
+        moved = f"every paycheck from {start} on"
+    else:
+        moved = (
+            f"every paycheck from {start} to the one before "
+            f"{reach.until.isoformat()}, where your next pay amount starts"
+        )
+    if reach.and_before:
+        moved += f", and every one before {start}"
+    return moved
 
 
 def _raise_inside(

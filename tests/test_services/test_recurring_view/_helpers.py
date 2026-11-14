@@ -14,15 +14,7 @@ from app.models.transaction_template import TransactionTemplate
 from app.models.transfer_template import TransferTemplate
 from app.services import account_service
 from app.services.balance_at import BalanceContext
-from app.services.pay_calendar import PayCadence, calendar_for
-from app.services.pay_rhythm import FixedDays
-
-
-#: The cadence ``seed_periods_today`` builds and every figure below is
-#: hand-computed at: 14 days between paydays, 26 a year.  An explicit input
-#: since plan step R7a-2a, where the per-paycheck column read a hardcoded
-#: ``MONTHS_PER_YEAR / PAY_PERIODS_PER_YEAR`` ratio.
-_BIWEEKLY = PayCadence(FixedDays(14))
+from app.services.pay_calendar import calendar_for
 
 
 # ── Helpers ──────────────────────────────────────────────────────────

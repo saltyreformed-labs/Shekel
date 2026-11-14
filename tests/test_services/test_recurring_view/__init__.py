@@ -7,7 +7,7 @@ row the defined amount, monthly + per-paycheck equivalents, engine-backed
 next date, and share of section committed total.
 
 The producer has exactly one monthly source of truth
-(``obligations_aggregator.template_monthly_or_none``); the per-paycheck
+(``obligations_aggregator.monthly_or_none``); the per-paycheck
 value is DERIVED from it by
 ``PayCadence.monthly_to_per_paycheck`` -- the OWNER's cadence since plan step
 R7a-2a, a hardcoded ``12 / 26`` before it.

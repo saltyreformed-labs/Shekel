@@ -27,9 +27,13 @@
 # Grype's version and bytes: the tag says which release, the digest (its
 # multi-arch index's) pins what runs, so a tag moved or a download swapped
 # cannot change it.  Dependabot's ``docker-compose`` entry moves it each
-# Monday after its 7-day cooldown, and the daily queue lands the move with
-# no card (tools/quill/_versions.py reads Grype's ``v``-spelled tag, ruling
-# plan#3704).  The ``-nonroot`` variant runs as uid 65532, not root.
+# Monday after its 7-day cooldown (tools/quill/_versions.py reads Grype's
+# ``v``-spelled tag, ruling plan#3704).  The daily queue lands a patch
+# release's move with no card; Grype is 0.x, whose minor is its major to
+# the queue, so a minor's move waits for a card, on which the scan is run
+# on the new release before it lands, as the scan reads Grype's output as
+# its pinned release writes it (ruling plan#4065).  The ``-nonroot``
+# variant runs as uid 65532, not root.
 #
 # THE DATABASE (ruling plan#3708).  Grype downloads its vulnerability
 # database fresh on every run, into the tmpfs below, from Anchore's own

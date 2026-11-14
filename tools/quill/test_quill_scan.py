@@ -39,15 +39,16 @@ _FAILED_TITLE = "The daily scan of production's image failed"
 
 def _python(number, rating="high"):
     """An invented CVE in the interpreter, ``CVE-2000-0<number>``, fixed in 3.1.5."""
-    return scan.Counted(f"CVE-2000-0{number}", "binary", "python", "3.1.4", ("3.1.5",),
-                        scan.RATINGS.index(rating), False)
+    return scan.Counted(f"CVE-2000-0{number}", scan.Package("binary", "python", "python", "3.1.4"),
+                        ("3.1.5",), scan.RATINGS.index(rating), False)
 
 
 #: Seven CVEs in the interpreter, as the judge orders them: one CRITICAL, then six HIGH.
 _SEVEN = (_python(101, "critical"), *(_python(number) for number in range(102, 108)))
-#: A CVE in a Debian package, known exploited, with no fix.
-_DEB = scan.Counted("CVE-2000-0201", "deb", "libexample1", "1.0-1", (),
-                    scan.RATINGS.index("medium"), True)
+#: A CVE in a Debian package built from the source package libexample, known exploited, with
+#: no fix.
+_DEB = scan.Counted("CVE-2000-0201", scan.Package("deb", "libexample1", "libexample", "1.0-1"),
+                    (), scan.RATINGS.index("medium"), True)
 
 
 def _done(*found):
@@ -211,7 +212,7 @@ def test_each_component_files_a_card_the_most_severe_on_top(monkeypatch, capsys)
     tracker = FakeTracker()
     assert _ran(monkeypatch, tracker, _done(*_SEVEN, _DEB)) == 0
     out = capsys.readouterr().out
-    deb = "deb package libexample1"
+    deb = "deb source package libexample"
     assert out.endswith(_filed(1, "Production image CVEs: " + deb, deb, "plan#3787")
                         + _filed(2, _PYTHON_TITLE, _PYTHON, "plan#3787"))
     assert tracker.board.items == [2, 1]
@@ -219,6 +220,60 @@ def test_each_component_files_a_card_the_most_severe_on_top(monkeypatch, capsys)
     assert ("CVE-2000-0201, rated medium, known exploited: deb libexample1 1.0-1, no fix known"
             in tracker.bodies[1])
     assert _waits.holds(tracker.bodies[2]) == {(_PYTHON, item.marker) for item in _SEVEN}
+
+
+#: Where a card for the CVEs found in the packages built from libexample says they were found.
+_LIBEXAMPLE = "deb source package libexample"
+
+
+def _debian(number, package, source="libexample"):
+    """An invented CVE, ``CVE-2000-0<number>``, rated HIGH, in the Debian package ``package``
+    at 1.0-1, built from ``source``, fixed in 1.0-2."""
+    return scan.Counted(f"CVE-2000-0{number}", scan.Package("deb", package, source, "1.0-1"),
+                        ("1.0-2",), scan.RATINGS.index("high"), False)
+
+
+def test_two_debian_packages_of_one_source_file_one_card(monkeypatch, capsys):
+    """One CVE found in two Debian packages built from one source package, as one glibc fix is
+    found in ``libc6`` and ``libc-bin``: one card for that source package, listing the CVE in
+    each package and holding a line for each; a package of another source files a card of its
+    own (ruling plan#4067)."""
+    found = (_debian(301, "libexample-bin"), _debian(301, "libexample1"),
+             _debian(302, "libother2", "other"))
+    tracker = FakeTracker()
+    assert _ran(monkeypatch, tracker, _done(*found)) == 0
+    other = "deb source package other"
+    assert capsys.readouterr().out.endswith(
+        _filed(1, "Production image CVEs: " + other, other, "plan#3787")
+        + _filed(2, "Production image CVEs: " + _LIBEXAMPLE, _LIBEXAMPLE, "plan#3787"))
+    assert list(tracker.bodies) == [1, 2]
+    assert _waits.holds(tracker.bodies[2]) == {(_LIBEXAMPLE, item.marker) for item in found[:2]}
+    assert "\n".join(["```text",
+                      "CVE-2000-0301, rated high: deb libexample-bin 1.0-1, fixed in 1.0-2",
+                      "CVE-2000-0301, rated high: deb libexample1 1.0-1, fixed in 1.0-2",
+                      "```"]) in tracker.bodies[2]
+    assert _waits.holds(tracker.bodies[1]) == {(other, found[2].marker)}
+
+
+def test_a_later_cve_in_another_package_of_a_source_goes_on_its_open_card(monkeypatch, capsys):
+    """The card for libexample open holding a CVE in ``libexample1``: a CVE found the next day in
+    ``libexample-bin``, built from the same source, is put on that card in a comment of quill's
+    holding its line alone, and files no second card; the day after, nothing (rulings
+    plan#3787, plan#4067)."""
+    held, later = _debian(301, "libexample1"), _debian(303, "libexample-bin")
+    tracker = FakeTracker()
+    tracker.add(5, body="\n".join(_lines(_LIBEXAMPLE, held)))
+    assert _ran(monkeypatch, tracker, _done(held, later)) == 0
+    assert capsys.readouterr().out.endswith(
+        f"put the scan's {_LIBEXAMPLE}, found at {_WHEN}, on plan#5, the card open for it "
+        "(ruling plan#3787)\n")
+    assert [write[:2] for write in tracker.writes] == [("comment", 5)]
+    assert _waits.holds(tracker.writes[0][2]) == {(_LIBEXAMPLE, later.marker)}
+    assert later.line in tracker.writes[0][2]
+    assert held.line not in tracker.writes[0][2]
+    tracker.writes.clear()
+    assert _ran(monkeypatch, tracker, _done(held, later), at=_AT + timedelta(days=1)) == 0
+    assert not tracker.writes
 
 
 def test_a_dry_run_says_what_it_would_file_and_writes_nothing(monkeypatch, capsys):

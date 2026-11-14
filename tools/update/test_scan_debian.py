@@ -1,7 +1,8 @@
 """The daily image scan's read of the Debian the image runs (:mod:`tools.update.scan`, its
 paragraph on what it saw; ruling plan#4063): dpkg's status file read as dpkg writes it, and the
 refusal of a scan whose distro is not the release the image's os-release names, or whose
-catalog's Debian packages are not those dpkg lists as installed.  ``recorded/status`` is a
+catalog's Debian packages are not those dpkg lists as installed; and each Debian match counted
+with the source package Grype names it built from (ruling plan#4067).  ``recorded/status`` is a
 trimmed copy of a real status file: the stanzas of the four Debian packages the recorded
 catalog lists (``recorded/catalog.json``), each whole, at the versions it lists them, from an
 image the Dockerfile built 2026-11-13; ``recorded/os-release`` is that image's os-release.
@@ -282,3 +283,61 @@ def test_a_scan_of_an_image_reporting_another_release_is_refused_before_uv_runs(
         scan.scanned(RECORDED.parent, lambda *_: b"sha256:" + b"4f19" * 16,
                      lambda *called: ran.append(called) or b"")
     assert not ran
+
+
+def _counting(package: str) -> dict:
+    """The recorded scan holding its one match in the Debian package ``package`` alone, as
+    Grype would write it rated CRITICAL with a fix, so it counts."""
+    scanned = json.loads(RECORDED.read_text(encoding="utf-8"))
+    match, = (match for match in scanned["matches"] if match["artifact"]["name"] == package)
+    match["vulnerability"].update(severity="Critical",
+                                  fix={"versions": ["1.0-1"], "state": "fixed"})
+    scanned["matches"] = [match]
+    return scanned
+
+
+@pytest.mark.parametrize(("package", "upstreams", "source"), [
+    ("libc-bin", [{"name": "glibc"}], "glibc"),
+    ("libkrb5-3", [{"name": "krb5"}], "krb5"),
+    ("perl", [], "perl"),
+    ("openssl", [], "openssl"),
+])
+def test_a_debian_match_counts_with_the_source_package_grype_names_it_built_from(
+        package, upstreams, source):
+    """Ruling plan#4067: each Debian match of the recorded scan, once it counts, is counted
+    with the source its package's ``upstreams`` names, which is its stanza's ``Source`` in the
+    recorded status file (``libc-bin``'s ``glibc``, ``libkrb5-3``'s ``krb5``); one naming none,
+    as dpkg names no source that is the package's own name, is built from itself."""
+    scanned = _counting(package)
+    assert scanned["matches"][0]["artifact"]["upstreams"] == upstreams
+    found, = scan.judged(scanned)
+    assert (found.package.kind, found.package.name, found.package.source) == ("deb", package,
+                                                                              source)
+
+
+@pytest.mark.parametrize(("upstreams", "said"), [
+    (None, "match 0's artifact holds no upstreams that is a list"),
+    ({"name": "glibc"}, "match 0's artifact holds no upstreams that is a list"),
+    ([{"name": "glibc"}, {"name": "eglibc"}],
+     "match 0's artifact names 2 packages it was built from, where Grype names a Debian "
+     "package's source once at most"),
+    (["glibc"], "match 0's artifact's upstream holds no name that is a str"),
+    ([{"version": "2.41-12"}], "match 0's artifact's upstream holds no name that is a str"),
+    ([{"name": ""}], "match 0's artifact's upstream's name is '', which cannot be listed"),
+    ([{"name": "glibc`"}], "match 0's artifact's upstream's name is 'glibc`', which cannot be "
+                           "listed"),
+], ids=["missing", "an_object", "two", "an_entry_no_object", "an_entry_naming_none",
+        "a_name_empty", "a_name_unlistable"])
+def test_a_counted_debian_match_whose_source_is_not_as_grype_writes_it_is_refused(upstreams,
+                                                                                 said):
+    """Read as data: a counted Debian match's ``upstreams`` is a list Grype writes, holding one
+    entry at most, naming a source that can be listed, or the scan is refused whole, never
+    counted under a source read wrong."""
+    scanned = _counting("libc-bin")
+    artifact = scanned["matches"][0]["artifact"]
+    if upstreams is None:
+        del artifact["upstreams"]
+    else:
+        artifact["upstreams"] = upstreams
+    with pytest.raises(scan.NotAScan, match=f"^{re.escape(said)}$"):
+        scan.judged(scanned)

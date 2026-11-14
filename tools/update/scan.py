@@ -52,7 +52,9 @@ rating, with a fix or without one (ruling plan#3819).  Grype marks it from CISA'
 known to be exploited, which its database holds as the provider :data:`KEV`; a scan whose
 database names no such provider could mark nothing, so it is refused, never read as one in
 which nothing is exploited.  Each match counted is one :class:`Counted` for each package it
-was found in, its CVE as Grype names it.
+was found in, its CVE as Grype names it, with the package that one was built from: a Debian
+one's source package, as Grype names it, so ``quill scan`` files one Debian fix, which ships
+each package built from its source, as one card (ruling plan#4067; :func:`_built_from`).
 
 **Its sources** (ruling plan#4064).  Grype refuses a database built longer ago than the age
 ``docker-compose.scan.yml`` allows it (ruling plan#3708), but a source that stopped updating
@@ -92,7 +94,7 @@ from scripts import private_cluster
 from tools.ci.gitcmd import MAIN, git, tracking
 from tools.update.app import marker
 from tools.update._scan_data import NotAScan, _apart, _listable, _value, parsed
-from tools.update.scan_seen import (REPORT, Catalogued, Interpreter, Reported, catalogued,
+from tools.update.scan_seen import (DEB, REPORT, Catalogued, Interpreter, Reported, catalogued,
                                     reported, seen, seen_debian)
 
 #: Grype's ratings, lowest first, as it reads each, ignoring case: ``ParseSeverity``, which reads
@@ -223,37 +225,48 @@ class ScanFailed(RuntimeError):
 
 
 @dataclass(frozen=True)
+class Package:
+    """The package a match the scan counts was found in (:class:`Counted`): its ``kind``
+    (Grype's type: ``deb``, ``python``, ``binary``), its ``name``, ``source``, the package it
+    was built from (:func:`_built_from`), and its ``installed`` version."""
+
+    kind: str
+    name: str
+    source: str
+    installed: str
+
+
+@dataclass(frozen=True)
 class Counted:
     """One match the scan counts (the module's one judge): ``vulnerability``, the CVE as Grype
-    names it; the package it was found in, by its ``kind`` (Grype's type: ``deb``, ``python``,
-    ``binary``), its ``package`` name and its ``installed`` version; ``fixes``, each version
-    Grype names the fix in, in its order, none when Grype knows no fix; ``rating``, the highest
-    any source gives it, an index of :data:`RATINGS`; and ``exploited``, whether Grype marks it
-    known exploited."""
+    names it; ``package``, the package it was found in; ``fixes``, each version Grype names the
+    fix in, in its order, none when Grype knows no fix; ``rating``, the highest any source
+    gives it, an index of :data:`RATINGS`; and ``exploited``, whether Grype marks it known
+    exploited."""
 
     vulnerability: str
-    kind: str
-    package: str
-    installed: str
+    package: Package
     fixes: tuple[str, ...]
     rating: int
     exploited: bool
 
     @property
     def marker(self) -> str:
-        """The marker naming the CVE and the package (:func:`tools.update.app.marker`), the
-        same whatever version is installed or fixes it, so a CVE still unfixed the next day
-        is the same thing found again."""
-        return marker(f"scan {self.vulnerability} {self.kind} {self.package}")
+        """The marker naming the CVE and the package, by its type and name
+        (:func:`tools.update.app.marker`), the same whatever version is installed or fixes it,
+        so a CVE still unfixed the next day is the same thing found again."""
+        return marker(f"scan {self.vulnerability} {self.package.kind} {self.package.name}")
 
     @property
     def line(self) -> str:
         """The match as one line, as ``quill scan`` prints it and a card it files lists it: its
-        CVE, its rating, whether it is known exploited, the package it is in and each version
-        Grype names its fix in, or that Grype knows no fix."""
+        CVE, its rating, whether it is known exploited, the package it is in, by its type, name
+        and installed version, and each version Grype names its fix in, or that Grype knows no
+        fix."""
+        found = self.package
         return (f"{self.vulnerability}, rated {RATINGS[self.rating]}"
-                f"{', known exploited' if self.exploited else ''}: {self.kind} {self.package} "
-                f"{self.installed}, "
+                f"{', known exploited' if self.exploited else ''}: {found.kind} {found.name} "
+                f"{found.installed}, "
                 + (f"fixed in {', '.join(self.fixes)}" if self.fixes else "no fix known"))
 
 
@@ -312,6 +325,33 @@ def _exploited(record: object, where: str) -> bool:
     return True
 
 
+def _built_from(artifact: dict, kind: str, name: str, where: str) -> str:
+    """The package ``artifact``, a counted match's package, of Grype's type ``kind`` and named
+    ``name``, was built from (ruling plan#4067).  For a Debian one, the source package its
+    ``upstreams`` names: Grype writes that list for every package, and for a Debian one an entry
+    only where its stanza in dpkg's status file names a ``Source``, the entry's ``name`` that
+    source's, so one at most (``grype/pkg/package.go``'s ``dpkgDataFromPkg`` and
+    ``grype/presenter/models/package.go``, read 2026-11-14 at v0.121.2).  A stanza may leave
+    its ``Source`` out only where the source package has the binary package's own name and
+    version (Debian Policy 5.6.1, read 2026-11-14), so a Debian package with no entry is built
+    from itself.  Any other package is its own.
+
+    Raises:
+        NotAScan: a Debian package's ``upstreams`` is no list, holds more than one entry, or
+            one naming no source that can be listed; ``where`` names the package.
+    """
+    if kind != DEB:
+        return name
+    upstreams = _value(artifact, "upstreams", list, where)
+    if len(upstreams) > 1:
+        raise NotAScan(f"{where} names {len(upstreams)} packages it was built from, where Grype "
+                       "names a Debian package's source once at most")
+    if not upstreams:
+        return name
+    return _listable(_value(upstreams[0], "name", str, f"{where}'s upstream"),
+                     f"{where}'s upstream's name")
+
+
 def _counted(match: object, where: str) -> Counted | None:
     """``match``, one of the scan's, as a :class:`Counted`, or None when it does not count (the
     module's one judge).  Every record's mark is read, so one Grype does not write is refused
@@ -335,9 +375,12 @@ def _counted(match: object, where: str) -> Counted | None:
     fixes = _value(fix, "versions", list, f"{where}'s fix") if state == FIXED else []
     if state == FIXED and not fixes:
         raise NotAScan(f"{where}'s fix is {FIXED} in no version, which Grype does not write")
-    return Counted(_listable(vulnerability.get("id"), f"{where}'s vulnerability's id"),
-                   *(_listable(artifact.get(key), f"{where}'s artifact's {key}")
-                     for key in ("type", "name", "version")),
+    vulnerability_id = _listable(vulnerability.get("id"), f"{where}'s vulnerability's id")
+    kind, name, installed = (_listable(artifact.get(key), f"{where}'s artifact's {key}")
+                             for key in ("type", "name", "version"))
+    return Counted(vulnerability_id,
+                   Package(kind, name, _built_from(artifact, kind, name, f"{where}'s artifact"),
+                           installed),
                    tuple(_listable(version, f"{where}'s fix's version {index}")
                          for index, version in enumerate(fixes)),
                    rating, exploited)
@@ -410,8 +453,8 @@ def judged(scan: object) -> list[Counted]:
     _refused_unless_fresh(scan)
     found = {item for index, match in enumerate(_value(scan, "matches", list, "the scan"))
              if (item := _counted(match, f"match {index}")) is not None}
-    return sorted(found, key=lambda item: (-item.rating, item.vulnerability, item.kind,
-                                           item.package, item.installed))
+    return sorted(found, key=lambda item: (-item.rating, item.vulnerability, item.package.kind,
+                                           item.package.name, item.package.installed))
 
 
 def revision(scan: object) -> str:

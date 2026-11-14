@@ -42,7 +42,7 @@ TREE = RECORDED.with_name("tree.json")
 #: the four Debian packages the recorded catalog lists (``test_scan_debian.py``).
 RELEASED, STATUS = RECORDED.with_name("os-release"), RECORDED.with_name("status")
 #: The one match of the recorded scan that counts: the interpreter's CRITICAL CVE.
-_CRITICAL = scan.Counted("CVE-2026-1999903", "binary", "python", "3.14.8",
+_CRITICAL = scan.Counted("CVE-2026-1999903", scan.Package("binary", "python", "python", "3.14.8"),
                          ("3.11.18", "3.12.16", "3.13.18", "3.14.10", "3.15.2", "3.16.0"),
                          scan.RATINGS.index("critical"), False)
 
@@ -123,7 +123,7 @@ def test_a_fix_turns_a_match_red_by_the_highest_rating_any_source_gives(
     CRITICAL to NVD, once Debian ships a fix, is listed as CRITICAL; Perl's, HIGH to both."""
     match = _given_a_fix(_match(vulnerability, package), "1.0-1")
     found, = scan.judged(_scan(match))
-    assert (found.vulnerability, found.package, found.fixes, found.rating) == (
+    assert (found.vulnerability, found.package.name, found.fixes, found.rating) == (
         vulnerability, package, ("1.0-1",), scan.RATINGS.index(rating))
 
 
@@ -202,7 +202,7 @@ def test_a_cve_known_exploited_counts_at_medium_with_a_fix():
     assert not scan.judged(_scan(match))
     _marked(match["vulnerability"])
     assert scan.judged(_scan(match)) == [scan.Counted(
-        "CVE-2026-9999902", "binary", "python", "3.14.8",
+        "CVE-2026-9999902", scan.Package("binary", "python", "python", "3.14.8"),
         ("3.10.22", "3.11.17", "3.12.15", "3.13.16", "3.14.9", "3.15.0rc3"),
         scan.RATINGS.index("medium"), True)]
 
@@ -217,7 +217,8 @@ def test_a_cve_known_exploited_counts_at_low_with_no_fix(state):
     assert not scan.judged(_scan(match))
     _marked(match["vulnerability"])
     assert scan.judged(_scan(match)) == [scan.Counted(
-        "CVE-2026-1999901", "binary", "python", "3.14.8", (), scan.RATINGS.index("low"), True)]
+        "CVE-2026-1999901", scan.Package("binary", "python", "python", "3.14.8"), (),
+        scan.RATINGS.index("low"), True)]
 
 
 @pytest.mark.parametrize(("vulnerability", "package", "rating"), [
@@ -231,7 +232,8 @@ def test_a_mark_on_a_related_record_counts_as_one_on_the_match(vulnerability, pa
     match = _match(vulnerability, package)
     _marked(match["relatedVulnerabilities"][0])
     found, = scan.judged(_scan(match))
-    assert (found.vulnerability, found.package, found.fixes, found.rating, found.exploited) == (
+    assert (found.vulnerability, found.package.name, found.fixes, found.rating,
+            found.exploited) == (
         vulnerability, package, (), scan.RATINGS.index(rating), True)
 
 
@@ -361,7 +363,8 @@ def test_each_match_is_listed_once_for_each_package_and_version_installed():
     deb = copy.deepcopy(first)
     deb["artifact"].update(name="python3.14", type="deb")
     found = scan.judged(_scan(first, copy.deepcopy(first), second, deb))
-    assert [(item.kind, item.package, item.installed) for item in found] == [
+    assert [(item.package.kind, item.package.name, item.package.installed)
+            for item in found] == [
         ("binary", "python", "3.14.8"), ("binary", "python", "3.14.9"),
         ("deb", "python3.14", "3.14.8")]
     assert found[0].marker == found[1].marker != found[2].marker

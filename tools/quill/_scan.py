@@ -7,10 +7,12 @@ into the private tracker by the pass ``quill sync`` files the weekly update's wa
 (:func:`_waits.file_told`), so a card holds what the scan found as one holds what the update
 told, a line for each thing (:func:`_waits.told_line`), and nothing is filed twice.
 
-**One open card for each component** (ruling plan#3787): a Debian package, a Python package,
-or the interpreter, each by Grype's type and name (:func:`where`), which the card's lines name
-as the place each CVE was found at, the same each day whatever version is installed; one
-marker for each CVE in it (:attr:`tools.update.scan.Counted.marker`).  A CVE in a component
+**One open card for each component** (rulings plan#3787, plan#4067): a Debian source package,
+so one Debian fix is one card, a Python package, or the interpreter (:func:`where`), which the
+card's lines name as the place each CVE was found at, the same each day whatever version is
+installed; one marker for each CVE in each package it was found in
+(:attr:`tools.update.scan.Counted.marker`), so a source package's card lists a CVE found in
+two packages built from it, ``libc6`` and ``libc-bin`` say, once in each.  A CVE in a component
 whose card is open is put on that card in a comment of quill's (ruling plan#3722's
 mechanism); one in a component no card is open for is filed a card, the High step at the top
 of the board (ruling plan#3620); and a CVE a card holds, open or closed, files nothing again,
@@ -82,6 +84,7 @@ from tools.quill._github import CredentialsError, GitHubError
 from tools.quill._tracker import Tracker, TrackerError
 from tools.update import scan
 from tools.update.app import marker
+from tools.update.scan_seen import DEB
 
 #: The scan, as the pass's lines name it (:class:`_waits.Teller`): what it finds in each
 #: component filed, and put on the component's open card, under ruling plan#3787.
@@ -101,9 +104,14 @@ _FILING = (GitHubError, TrackerError, requests.RequestException, CredentialsErro
 
 
 def where(item: scan.Counted) -> str:
-    """The component ``item`` was found in, as the lines of its card name it: Grype's type and
-    the package's name (``deb package libssl3``), never its version."""
-    return f"{item.kind} package {item.package}"
+    """The component ``item`` was found in, as the lines of its card name it, never by a
+    version: a Debian package by the source package it was built from (``deb source package
+    glibc``, ruling plan#4067), any other by Grype's type and the package's name (``python
+    package requests``, ``binary package python``)."""
+    found = item.package
+    if found.kind == DEB:
+        return f"{DEB} source package {found.source}"
+    return f"{found.kind} package {found.name}"
 
 
 def _image(done: scan.Scanned) -> str:

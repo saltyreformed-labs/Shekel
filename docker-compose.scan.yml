@@ -39,8 +39,10 @@
 # database fresh on every run, into the tmpfs below, from Anchore's own
 # host, and refuses to scan with one built more than 120 hours ago or when
 # it cannot check for a newer one: each setting is written here, so the
-# refusal rests on no default.  No cache is restored between runs (ruling
-# plan#2471).  Grype's check for a newer Grype is off: the pin above is
+# refusal rests on no default.  The scan reads that age back from Grype's
+# record of how it ran, and refuses a scan any source of whose database was
+# captured longer before it (ruling plan#4064), so this line is the age's
+# one home.  No cache is restored between runs (ruling plan#2471).  Grype's check for a newer Grype is off: the pin above is
 # what moves it.
 #
 # WHAT IT HOLDS.  The image file, read-only, and the catalog's file, the

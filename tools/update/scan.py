@@ -50,6 +50,12 @@ database names no such provider could mark nothing, so it is refused, never read
 which nothing is exploited.  Each match counted is one :class:`Counted` for each package it
 was found in, its CVE as Grype names it.
 
+**Its sources** (ruling plan#4064).  Grype refuses a database built longer ago than the age
+``docker-compose.scan.yml`` allows it (ruling plan#3708), but a source that stopped updating
+rides inside a database built today.  So :func:`judged` refuses the scan unless its database
+names each source the scan relies on (:data:`SOURCES`), each captured no longer before the scan
+than that age, read back from the scan's record of how Grype was run, so the age has one home.
+
 **Read as data.**  What a package's name and version say is written by what the image holds.
 So :func:`judged` refuses the scan whole (:class:`NotAScan`) where it is not the shape Grype
 writes, where a fix state, a mark or a rating deciding a match is one Grype does not write (read
@@ -75,6 +81,7 @@ import subprocess
 import tempfile
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from scripts import private_cluster
@@ -103,6 +110,24 @@ FIX_STATES = frozenset({FIXED, "not-fixed", "wont-fix", "unknown", ""})
 #: (``cmd/grype/cli/commands/root.go``'s ``dbInfo``, read 2026-11-13 at v0.121.2; Grype writes
 #: no provider at all where it could not read them).
 KEV = "kev"
+#: The providers whose records the scan relies on (ruling plan#4064), each with what a database
+#: built without them could not do: Debian's match the image's Debian packages, NVD's match the
+#: interpreter and give a CVE NVD's rating, GitHub's advisories match the venv's Python
+#: packages, and CISA's list marks a CVE known to be exploited.
+SOURCES = {"debian": "records of Debian's and could match none of the image's Debian packages",
+           "nvd": "records of NVD's and could match the interpreter to none, nor rate any CVE "
+                  "as NVD does",
+           "github": "advisories of GitHub's and could match none of the venv's Python packages",
+           KEV: "list of CVEs known to be exploited and could mark none"}
+#: An instant as Grype writes the scan's and each provider's capture: Go's RFC 3339, the
+#: scan's with nanoseconds, trailing zeros dropped (``createTimestamp``,
+#: ``grype/presenter/models/document.go``), a capture's with none (``DataProvenance``'s
+#: ``MarshalJSON``, ``grype/vulnerability/provider.go``), each read 2026-11-14 at v0.121.2.
+_INSTANT = re.compile(r"(?P<whole>[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2})"
+                      r"(?:\.(?P<fraction>[0-9]{1,9}))?(?P<zone>Z|[+-][0-9]{2}:[0-9]{2})")
+#: The instant an instant's nanoseconds are counted from, and the second, in nanoseconds.
+_EPOCH = datetime(1970, 1, 1, tzinfo=timezone.utc)
+_SECOND = 10 ** 9
 
 #: The daemon production runs on: the system one, at docker's own default socket, where the
 #: deploy script, which hands docker no daemon, rolls production's container.
@@ -313,20 +338,57 @@ def _counted(match: object, where: str) -> Counted | None:
                    rating, exploited)
 
 
-def _refused_without_kev(scan: object) -> None:
-    """Refuse ``scan`` unless its database was built with CISA's list of CVEs known to be
-    exploited (:data:`KEV` among the providers its descriptor names), as without it no match
-    can be marked (the module's one judge).
+def _instant(spelled: object, where: str) -> int:
+    """``spelled``, an instant as Grype writes it (:data:`_INSTANT`), in whole nanoseconds since
+    :data:`_EPOCH`, so an age is compared to the nanosecond Grype counts it in.
 
     Raises:
-        NotAScan: the scan names no such provider.
+        NotAScan: ``spelled`` is no such instant, or names a day or a zone no instant has.
+    """
+    found = _INSTANT.fullmatch(spelled) if isinstance(spelled, str) else None
+    refused = NotAScan(f"{where} is {spelled!r}, which is no instant as Grype writes one")
+    if found is None:
+        raise refused
+    try:
+        whole = datetime.fromisoformat(found["whole"] + found["zone"])
+    except ValueError as error:
+        raise refused from error
+    return ((whole - _EPOCH) // timedelta(seconds=1) * _SECOND
+            + int((found["fraction"] or "").ljust(9, "0")))
+
+
+def _refused_unless_fresh(scan: object) -> None:
+    """Refuse ``scan`` unless its database was built from each source the scan relies on
+    (:data:`SOURCES` among the providers its descriptor names), as without one it read none of
+    that source's records, and without :data:`KEV` no match can be marked (the module's one
+    judge); and unless each was captured no longer before the scan than the age Grype was run
+    allowing its database (the module's paragraph on its sources), as Grype refuses a build.
+
+    Raises:
+        NotAScan: the scan names no such provider, or one captured longer ago, the message
+            naming each, with its instant and the scan's; or the age, the scan's instant or a
+            capture is not as Grype writes it.
     """
     descriptor = _value(scan, "descriptor", dict, "the scan")
     database = _value(descriptor, "db", dict, "the scan's descriptor")
     providers = _value(database, "providers", dict, "the scan's database")
-    if not isinstance(providers.get(KEV), dict):
-        raise NotAScan(f"the scan's database names no provider {KEV}, so it read no list of "
-                       "CVEs known to be exploited and could mark none")
+    if missing := [name for name in SOURCES if not isinstance(providers.get(name), dict)]:
+        raise NotAScan("the scan's database " + "; and ".join(
+            f"names no provider {name}, so it read no {SOURCES[name]}" for name in missing))
+    age = _value(_value(_value(descriptor, "configuration", dict, "the scan's descriptor"), "db",
+                        dict, "the scan's configuration"),
+                 "max-allowed-built-age", int, "the scan's database configuration")
+    stamp = descriptor.get("timestamp")
+    at = _instant(stamp, "the scan's timestamp")
+    stale = []
+    for name in SOURCES:
+        captured = providers[name].get("captured")
+        if at - _instant(captured, f"the scan's database's provider {name}'s capture") > age:
+            stale.append(f"the scan's database's provider {name} was captured at {captured}, "
+                         f"more than {timedelta(microseconds=age // 1000)}, the age its database "
+                         f"is allowed, before the scan at {stamp}")
+    if stale:
+        raise NotAScan("; ".join(stale))
 
 
 def judged(scan: object) -> list[Counted]:
@@ -335,10 +397,12 @@ def judged(scan: object) -> list[Counted]:
     type and name, and the version installed.
 
     Raises:
-        NotAScan: ``scan`` is no scan as Grype writes one, was read with no list of CVEs known
-            to be exploited, or holds what a counted match cannot name; the message says where.
+        NotAScan: ``scan`` is no scan as Grype writes one, was read from a database missing a
+            source the scan relies on or holding one captured too long before it
+            (:func:`_refused_unless_fresh`), or holds what a counted match cannot name; the
+            message says where.
     """
-    _refused_without_kev(scan)
+    _refused_unless_fresh(scan)
     found = {item for index, match in enumerate(_value(scan, "matches", list, "the scan"))
              if (item := _counted(match, f"match {index}")) is not None}
     return sorted(found, key=lambda item: (-item.rating, item.vulnerability, item.kind,

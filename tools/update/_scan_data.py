@@ -15,12 +15,13 @@ _LISTABLE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._+~:!/-]*")
 
 
 class NotAScan(ValueError):
-    """The scanner's answer is no scan as Grype writes one, read with no list of CVEs known to
-    be exploited, holds what a counted match cannot name, or names no commit the scanned image
-    was built from; its catalog, the image's python's report, ``uv tree``'s answer or the
-    Dockerfile's ``uv sync`` is not as written, or names a platform uv cannot be told; or the
-    scan did not see what the image runs (:func:`tools.update.scan_seen.seen`,
-    :func:`tools.update.scan.held`); the message says what and where."""
+    """The scanner's answer is no scan as Grype writes one, read from a database missing a
+    source the scan relies on or holding one captured too long before it, holds what a counted
+    match cannot name, or names no commit the scanned image was built from; its catalog, the
+    image's python's report, ``uv tree``'s answer or the Dockerfile's ``uv sync`` is not as
+    written, or names a platform uv cannot be told; or the scan did not see what the image runs
+    (:func:`tools.update.scan_seen.seen`, :func:`tools.update.scan.held`); the message says what
+    and where."""
 
 
 def _value(node: object, key: str, kind: type, where: str):

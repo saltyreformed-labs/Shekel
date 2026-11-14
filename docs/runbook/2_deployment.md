@@ -227,8 +227,7 @@ cd /opt/shekel
 git checkout dev && git pull --ff-only
 
 # Ensure the dedicated shekel-frontend network exists.  The subnet
-# is pinned so Gunicorn's FORWARDED_ALLOW_IPS literal and the shared
-# Nginx's set_real_ip_from directive both reference the same CIDR.
+# is pinned so Gunicorn's FORWARDED_ALLOW_IPS literal matches it.
 # Audit finding F-015 + F-020 (Commit C-33).
 docker network ls --filter name=shekel-frontend
 # If missing:
@@ -236,10 +235,11 @@ docker network create shekel-frontend \
     --driver bridge \
     --subnet 172.32.0.0/24
 
-# Edit /opt/docker/docker-compose.yml so the shared nginx and
-# cloudflared services attach to shekel-frontend in addition to the
-# homelab bridge they already join.  Apply with:
-#   cd /opt/docker && docker compose up -d nginx cloudflared
+# Edit /opt/docker/docker-compose.yml so the shared nginx service
+# attaches to shekel-frontend in addition to the networks it already
+# joins.  cloudflared does not: it reaches nginx over its own
+# edge-tunnel bridge (ruling plan#3942).  Apply with:
+#   cd /opt/docker && docker compose up -d nginx
 
 # Edit /opt/docker/cloudflared/config.yml so the shekel ingress rule
 # points to ``http://nginx:80`` instead of straight at
@@ -414,7 +414,7 @@ cd /opt/docker/shekel
 docker compose config | less
 
 # When ready to recreate:
-cd /opt/docker && docker compose up -d nginx cloudflared  # attach to shekel-frontend
+cd /opt/docker && docker compose up -d nginx  # attach to shekel-frontend
 docker exec nginx nginx -t && docker exec nginx nginx -s reload
 cd /opt/docker/shekel && docker compose down && docker compose up -d
 

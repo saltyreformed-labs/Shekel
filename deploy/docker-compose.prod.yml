@@ -18,12 +18,16 @@
 # WHAT IT CHANGES
 # ---------------
 # 1. shekel-prod-app joins the dedicated ``shekel-frontend`` bridge
-#    (instead of the shared ``homelab`` network) so the app is reachable
-#    only by the shared /opt/docker/nginx container and the cloudflared
-#    tunnel sidecar -- both attached to ``shekel-frontend`` from
+#    (instead of the shared ``homelab`` network), where its one peer is
+#    the shared /opt/docker/nginx, attached to ``shekel-frontend`` from
 #    /opt/docker/docker-compose.yml.  This isolates the app from
-#    co-tenants like jellyfin / immich / unifi that still live on the
-#    homelab bridge.  Audit findings F-020, F-129, F-063, Commit C-33.
+#    co-tenants like jellyfin / immich / unifi.  Its other network,
+#    ``backend``, holds only the database and the monitoring stack's
+#    postgres exporter.
+#    cloudflared is not on this bridge: it reaches nginx over a bridge
+#    of its own, ``edge-tunnel`` (ruling plan#3942), so it has no path
+#    to the app around nginx.  Audit findings F-020, F-129, F-063,
+#    Commit C-33.
 #
 # 2. The bundled shekel-prod-nginx service is parked in the "disabled"
 #    profile so ``docker compose up`` does not start it.  The shared
@@ -43,30 +47,26 @@
 #            --driver bridge \
 #            --subnet 172.32.0.0/24
 #
-#    The subnet matches FORWARDED_ALLOW_IPS below and the
-#    ``set_real_ip_from`` directive in deploy/nginx-shared/nginx.conf.
+#    The subnet matches FORWARDED_ALLOW_IPS below.
 #
-# 2. Edit /opt/docker/docker-compose.yml so the ``nginx`` and
-#    ``cloudflared`` services join shekel-frontend in addition to the
-#    homelab network they already use:
+# 2. Edit /opt/docker/docker-compose.yml so the ``nginx`` service
+#    joins shekel-frontend in addition to the networks it already
+#    uses.  cloudflared does NOT join it: it reaches nginx over
+#    ``edge-tunnel`` alone (ruling plan#3942).
 #
 #        services:
 #          nginx:
 #            networks:
-#              - homelab
-#              - shekel-frontend
-#          cloudflared:
-#            networks:
-#              - homelab
-#              - shekel-frontend
+#              homelab: ...
+#              shekel-frontend: {}
 #        networks:
 #          shekel-frontend:
 #            external: true
 #
-#    Recreate the affected containers:
+#    Recreate nginx:
 #
 #        cd /opt/docker
-#        docker compose up -d nginx cloudflared
+#        docker compose up -d nginx
 #
 # 3. Update /opt/docker/cloudflared/config.yml so the shekel ingress
 #    rule points to the shared Nginx instead of straight at gunicorn:
@@ -427,9 +427,10 @@ services:
       # Shared mode: the in-stack ``backend`` bridge no longer carries
       # the reverse-proxy hop -- the shared /opt/docker/nginx talks to
       # the app over ``shekel-frontend``.  Override the bundled-mode
-      # default with the shared subnet so Gunicorn keeps refusing
-      # X-Forwarded-* from any source other than the shared nginx /
-      # cloudflared sidecar.  Audit finding F-015, Commit C-33.
+      # default with the shared subnet so Gunicorn refuses X-Forwarded-*
+      # from every other network.  The subnet also holds the bridge's
+      # gateway, so it trusts more than nginx alone; plan#3922 narrows
+      # it to nginx's pinned address.  Audit finding F-015, Commit C-33.
       FORWARDED_ALLOW_IPS: 172.32.0.0/24
       # ── Postgres TLS (Commit C-37 / F-154) ────────────────────
       # Override the base file's plaintext DATABASE_URL with an
@@ -538,9 +539,10 @@ secrets:
 
 networks:
   # External pre-existing bridge that hosts the shared /opt/docker/nginx
-  # container, the cloudflared tunnel sidecar, and the shekel app.
-  # Nothing else -- co-tenants like jellyfin/immich/unifi stay on the
-  # homelab bridge.  Audit findings F-020, F-129, Commit C-33.
+  # container and the shekel app, and no other container: cloudflared
+  # reaches nginx over its own ``edge-tunnel`` bridge (ruling
+  # plan#3942), and co-tenants like jellyfin/immich/unifi are on
+  # bridges of their own.  Audit findings F-020, F-129, Commit C-33.
   #
   # The operator must create this network manually before the first
   # ``docker compose up`` (see "OPERATOR PRE-FLIGHT" above):

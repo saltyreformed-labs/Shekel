@@ -227,7 +227,6 @@ def _legs_of(xfer):
 
 def _generated_transfer(
     seed_user, period, to_account, *,
-    series=_OLD_PRICE, later=_NEW_PRICE, stored=Decimal("111.11"),
     owns=False, cadence=EVERY_PERIOD, fires_on_day=None,
 ):
     """The ENGINE's transfer, in *period*, of a template whose series states TWO prices.
@@ -248,7 +247,7 @@ def _generated_transfer(
     row BAL-488's census could not see.
 
     Pass ``owns=True`` for the shape where a HUMAN authored the figure --
-    parent and legs all holding ``stored``, a figure no derived rule may
+    parent and legs all holding ``$111.11``, a figure no derived rule may
     answer -- taken the way the transfer edit door takes it
     (:func:`transfer_repriced_by_the_owner`), which ruling **R-IO** says
     must keep the figure they typed.
@@ -265,16 +264,15 @@ def _generated_transfer(
     db.session.add(template)
     db.session.flush()
     template_amount_service.set_amount(
-        template, series, effective_on=_PRICE_ROSE_ON,
+        template, _OLD_PRICE, effective_on=_PRICE_ROSE_ON,
     )
-    if later is not None:
-        template_amount_service.set_amount(
-            template, later, effective_on=_PRICE_FELL_ON,
-        )
+    template_amount_service.set_amount(
+        template, _NEW_PRICE, effective_on=_PRICE_FELL_ON,
+    )
     make_cadence_rule(template, cadence, fires_on_day=fires_on_day)
     xfer = generate_transfer_of(template, period)
     if owns:
-        transfer_repriced_by_the_owner(xfer, stored)
+        transfer_repriced_by_the_owner(xfer, Decimal("111.11"))
     return xfer, template
 
 
@@ -297,10 +295,7 @@ def _mortgage(seed_user, escrow_annual=Decimal("3600.00")):
     return loan
 
 
-def _loan_payment(
-    seed_user, *, derive, extra=None, to_account=None,
-    series=Decimal("1300.00"), stored=Decimal("1250.00"), owns=False,
-):
+def _loan_payment(seed_user, *, derive, extra=None, to_account=None, owns=False):
     """A mortgage payment transfer in one of its two modes.
 
     The ENGINE's transfer of the loan's own definition
@@ -328,7 +323,7 @@ def _loan_payment(
     name a transfer: ``ck_transactions_names_no_transfer`` refused one until
     plan step balance:X-bi-6-5 dropped the column itself.
 
-    ``owns=True`` takes the transfer for the OWNER at ``stored`` through the
+    ``owns=True`` takes the transfer for the OWNER at ``$1,250.00`` through the
     transfer door (:func:`transfer_repriced_by_the_owner`).  It also took each
     shadow's figure back to ``$1,200.00`` until plan step balance:X-bi-6-4d-2,
     where no shadow is born and the database refuses one (ruling
@@ -342,7 +337,7 @@ def _loan_payment(
     """
     loan = _mortgage(seed_user) if to_account is None else to_account
     template = make_loan_payment_template(
-        db.session, seed_user, loan, amount=series,
+        db.session, seed_user, loan, amount=Decimal("1300.00"),
         derive_from_loan=derive,
         extra_principal="0.00" if extra is None else extra,
     )
@@ -350,7 +345,7 @@ def _loan_payment(
         template, current_pay_period(seed_user["user"].id, _FIRST_INSTALLMENT),
     )
     if owns:
-        transfer_repriced_by_the_owner(xfer, stored)
+        transfer_repriced_by_the_owner(xfer, Decimal("1250.00"))
     db.session.flush()
     return xfer
 

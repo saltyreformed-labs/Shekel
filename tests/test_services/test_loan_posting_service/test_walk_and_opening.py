@@ -45,19 +45,18 @@ class TestWalkReadsNoClock:
 
     The walk used to drop any anchor dated after the sync's as-of, which made what
     the ledger PERSISTED depend on the moment the sync happened to run.  That is
-    not a cache; it is a corruption generator, and it had two live consequences a
-    loan configured before its closing date could reach through the ordinary UI.
+    not a cache; it is a corruption generator, and a loan configured before its
+    closing date reached it through the ordinary UI: its opening went unposted.
 
-    Both tests here use a $200,000 / 5% / 360mo mortgage originating 2026-04-15 --
+    The test here uses a $200,000 / 5% / 360mo mortgage originating 2026-04-15 --
     AFTER the suite's frozen today (2026-03-20), which ``origination_date``
     permits (unlike a true-up's ``anchor_date``, it carries no not-future
-    validator, and the developer ruled the app must support it).
-
-    Arithmetic (200,000 @ 5.000%, payment_day=1):
-      monthly P&I = 1,073.64
-      first installment 2026-05-01:
-        interest  = round(200000 * 0.05/12) = 833.33
-        principal = 1073.64 - 833.33        =   240.31
+    validator, and the developer ruled the app must support it).  No payment
+    into it can be recorded before it starts: ruling plan#4040 refuses money
+    into a loan on or before its origination.  So the filter's other
+    consequence, a payment settled before closing split against a $0.00
+    balance, is a state that can no longer be stored, and the opening is the
+    half left to pin.
     """
 
     ORIGINATION = date(2026, 4, 15)
@@ -72,94 +71,43 @@ class TestWalkReadsNoClock:
             account_type=AcctTypeEnum.MORTGAGE,
         )
 
-    def test_early_settled_payment_splits_against_the_real_balance(
-        self, app, db, seed_user, seed_periods,
+    def test_the_posted_ledger_is_identical_at_two_different_clocks(
+        self, app, db, seed_user, monkeypatch,
     ):
-        """A payment settled before origination still splits on the opening balance.
+        """Syncing before vs after origination persists the SAME opening.
 
-        The payment is settled TODAY (2026-03-20) into the pay period starting
-        2026-04-24, so its installment is DUE 2026-05-01 -- after the 2026-04-15
-        origination.  Settling early is a supported state, not an abuse: the walk
-        deliberately splits every settled payment whatever its pay period
-        ("posting early changes when the fact is RECORDED, never when it is
-        SHOWN").
+        The property A3 exists to establish, stated directly: the walk's output is
+        a function of the loan's facts alone.  The loan is configured, and its
+        ledger opened, at 2026-03-20 (before it closes); the clock then moves past
+        origination to 2026-05-07 and the SAME sync re-runs.  Reconcile-to-target
+        means an already-correct ledger is not re-posted, so an unchanged entry
+        count is the proof: the first sync already recorded everything.  The
+        read's figure beside it grades that the walk's answer did not move with
+        the clock.
 
-        Before A3 the sync's as-of was 2026-03-20, so the origination anchor was
-        dropped, the running balance seeded at $0.00, and ``split_one_payment``'s
-        ``balance <= 0`` arm routed the ENTIRE $1,073.64 to ``excess`` -- real
-        mortgage cash reclassified as a Refund Receivable asset, with the whole
-        Schedule-A deductible interest erased.  Measured on the real Mortgage, the
-        same line cost $7,643.80.
+        The OPENING leg is what the clock moved: -$200,000.00 on the linked
+        ledger.  No payment rides beside it, since none can be recorded at the
+        first clock (ruling plan#4040; the class docstring).
 
         NEGATIVE CONTROL: restore the ``anchor.anchor_date <= as_of`` filter --
         it would now go in ``loan_ledger.loan_event_stream``, where the reset
         events are built (it was ``merge_anchor_and_payment_events`` until plan
-        step X-au-g-2c-3b-2) -- and this reports ``excess=1073.64`` with
-        interest, escrow and principal all $0.00.
+        step X-au-g-2c-3b-2), reading today -- and the first sync posts no
+        opening, so the linked ledger nets to exactly ``0.00``: the loan reads
+        as owing NOTHING.  The first assert below then fails
+        ``0.00 != -200000.00``.
         """
         with app.app_context():
             loan = self._upcoming_mortgage(seed_user)
-            due_period = next(
-                p for p in seed_periods if p.start_date >= date(2026, 4, 24)
-            )
-            _settle_payment(
-                seed_user, loan, due_period, Decimal("1073.64"),
-            )
-            db.session.commit()
-
-            splits = loan_ledger.compute_loan_payment_splits(
-                loan.id, seed_user["scenario"].id,
-            )
-            assert len(splits) == 1
-            split = splits[0]
-            # The installment this payment satisfies is due after origination, so
-            # the loan exists by then and the cash divides normally.
-            assert split.interest == Decimal("833.33")
-            assert split.principal == Decimal("240.31")
-            assert split.escrow == Decimal("0.00")
-            assert split.excess == Decimal("0.00")
-
-    def test_the_posted_ledger_is_identical_at_two_different_clocks(
-        self, app, db, seed_user, seed_periods, monkeypatch,
-    ):
-        """Syncing before vs after origination persists the SAME ledger.
-
-        The property A3 exists to establish, stated directly: the walk's output is
-        a function of the loan's facts alone.  The loan is configured and synced at
-        2026-03-20 (before it closes); the clock then moves past origination to
-        2026-05-07 and the SAME sync re-runs.  Reconcile-to-target means an
-        already-correct ledger is not re-posted, so an unchanged entry count is
-        the proof: the first sync already recorded everything.  The read's figure
-        beside it grades that the walk's answer did not move with the clock.
-
-        Both halves are asserted, because the clock moved both: the OPENING leg
-        (-$200,000.00 on the linked ledger) and the payment's split correction.
-
-        NEGATIVE CONTROL (measured on the store, before plan#2913): restore the
-        ``anchor.anchor_date <= as_of``
-        filter and the first sync posts no opening AND routes the whole payment to
-        Refund, so the linked ledger nets to exactly ``0.00`` -- the loan reads as
-        owing NOTHING while $1,073.64 of the borrower's cash sits in a Refund
-        Receivable.  The assert below then fails ``0.00 != -199759.69``.
-        """
-        with app.app_context():
-            loan = self._upcoming_mortgage(seed_user)
-            due_period = next(
-                p for p in seed_periods if p.start_date >= date(2026, 4, 24)
-            )
-            _settle_payment(
-                seed_user, loan, due_period, Decimal("1073.64"),
-            )
-            db.session.commit()
             scenario_id = seed_user["scenario"].id
 
-            # The settle already synced, as of 2026-03-20 -- before origination.
+            # Creating the loan opened its ledger, as the setup door does, as of
+            # 2026-03-20 -- before origination.
             linked_after_first = account_net(_db.session, loan.id, scenario_id)
             entries_after_first = _genesis_entry_count(seed_user["user"].id)
-            # -200,000.00 opening + 1,073.64 cash - 833.33 interest
-            # - 0.00 escrow = -199,759.69 owed, from a sync run 26 days before
-            # the loan even closes.
-            assert linked_after_first == Decimal("-199759.69")
+            # The -200,000.00 opening alone, posted by a sync run 26 days
+            # before the loan even closes.
+            assert linked_after_first == Decimal("-200000.00")
 
             # The clock crosses origination; the same sync re-runs.
             freeze_today(monkeypatch, date(2026, 5, 7))

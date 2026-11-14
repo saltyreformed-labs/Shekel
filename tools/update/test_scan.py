@@ -506,9 +506,12 @@ class _Uv:
 
 @pytest.fixture(name="rootless")
 def _rootless(monkeypatch):
-    """The cluster module's daemon, the rootless one, says it is rootless."""
+    """The cluster module's daemon, the rootless one, says it is rootless; and production's
+    container is named by this checkout's own deploy script, at its own commit, as CI's
+    checkout holds no ``main`` (``test_scan_container.py`` reads main's)."""
     monkeypatch.setattr(private_cluster, "endpoint", lambda: _ROOTLESS)
     monkeypatch.setattr(private_cluster, "asked_rootless", lambda: True)
+    monkeypatch.setattr(scan, "DEPLOYED", "HEAD")
 
 
 def _saved(docker: _Docker) -> Path:
@@ -845,20 +848,6 @@ def test_a_scanner_answer_that_is_no_scan_is_refused():
     """What the scanner writes is judged as data: no JSON is no scan."""
     with pytest.raises(scan.NotAScan, match="it is no JSON"):
         scan.scanned(REPO, _Docker(scan=b"Error: no image"), _Uv())
-
-
-@pytest.mark.parametrize("lines, count", [([], 0), (['CONTAINER_NAME="${SHEKEL_CONTAINER_NAME'
-                                                     ':-a}"', 'CONTAINER_NAME="${SHEKEL_'
-                                                     'CONTAINER_NAME:-b}"'], 2)])
-def test_production_s_container_is_the_one_the_deploy_script_names_once(lines, count, tmp_path):
-    """The deploy script's default for ``SHEKEL_CONTAINER_NAME`` names the container, as the
-    release reads it; a script naming none, or two, is refused."""
-    assert scan.container(REPO) == "shekel-prod-app"
-    (tmp_path / "deploy").mkdir()
-    (tmp_path / scan.DEPLOY_SCRIPT).write_text("\n".join(["#!/usr/bin/env bash", *lines]) + "\n",
-                                               encoding="utf-8")
-    with pytest.raises(scan.ScanFailed, match=f"names production's container {count} times"):
-        scan.container(tmp_path)
 
 
 # -- the scan's docker, a real process -------------------------------------------------------

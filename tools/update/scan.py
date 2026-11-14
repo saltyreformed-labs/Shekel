@@ -5,7 +5,7 @@ plan#3785).  ``quill scan`` runs it (:func:`scanned`), says what it found, and f
 private tracker (``tools/quill/_scan.py``, ruling plan#3787).
 
 **The scan reads production and writes nothing there** (ruling plan#3822).  Production's app
-container runs on the system daemon (:data:`PRODUCTION`), under the name the deploy script
+container runs on the system daemon (:data:`PRODUCTION`), under the name main's deploy script
 gives it (:func:`container`), and the scan's only acts on that daemon are reads: the inspect
 that names the image the container runs, by its digest, and the save of that image to a file
 of the scan's own.  The scanner, ``docker-compose.scan.yml``'s Grype, then reads the file on
@@ -78,7 +78,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from scripts import private_cluster
-from tools.ci.gitcmd import git
+from tools.ci.gitcmd import MAIN, git, tracking
 from tools.update.app import marker
 
 #: Grype's ratings, lowest first, as it reads each, ignoring case: ``ParseSeverity``, which reads
@@ -114,6 +114,9 @@ PRODUCTION = "unix:///var/run/docker.sock"
 #: container: the line the release reads that name from too (``.claude/skills/release/
 #: SKILL.md``, its step 1).
 DEPLOY_SCRIPT = "deploy/shekel-deploy.sh"
+#: The branch whose deploy script production is deployed with, by its remote-tracking ref as
+#: ``quill scan``'s one fetch brings it in (ruling plan#3970): ``main`` (ruling plan#4069).
+DEPLOYED = tracking(MAIN)
 #: That line, the name in it as docker allows a container's (a letter or digit, then those and
 #: ``_``, ``.`` and ``-``).
 _CONTAINER = re.compile(r'^CONTAINER_NAME="\$\{SHEKEL_CONTAINER_NAME:-'
@@ -686,14 +689,17 @@ def told(interpreter: Interpreter) -> tuple[str, ...]:
 
 
 def container(root: Path) -> str:
-    """The name of production's app container, as the checkout at ``root``'s deploy script
-    defaults ``SHEKEL_CONTAINER_NAME`` to it (:data:`DEPLOY_SCRIPT`).
+    """The name of production's app container, as the deploy script (:data:`DEPLOY_SCRIPT`) at
+    :data:`DEPLOYED`, main, in the git of the checkout at ``root`` defaults
+    ``SHEKEL_CONTAINER_NAME`` to it (ruling plan#4069): the script production is deployed with,
+    not the checkout's own, which on the timer is dev's tip, so a rename landing in dev before
+    a release fails no scan.
 
     Raises:
         ScanFailed: the script holds no such line, or more than one.
-        OSError: as reading the script raises it.
+        GitError: git cannot read the script at that branch.
     """
-    names = _CONTAINER.findall((root / DEPLOY_SCRIPT).read_text(encoding="utf-8"))
+    names = _CONTAINER.findall(git(root, "cat-file", "blob", f"{DEPLOYED}:{DEPLOY_SCRIPT}"))
     if len(names) != 1:
         raise ScanFailed(f"{DEPLOY_SCRIPT} names production's container {len(names)} times "
                          "where it names it once, so the scan cannot tell which to read")
@@ -914,9 +920,9 @@ def scanned(root: Path, docker: Docker = _docker, uv: Uv = _uv) -> Scanned:
             ``uv sync`` is not as written (:func:`judged`, :func:`revision`,
             :func:`catalogued`, :func:`reported`, :func:`seen`, :func:`told`, :func:`chosen`,
             :func:`locked`, :func:`held`).
-        GitError: git cannot read a file of the commit the image was built from.
-        OSError: as reading the deploy script, making the files or running docker or uv
-            raises it.
+        GitError: git cannot read main's deploy script, or a file of the commit the image was
+            built from.
+        OSError: as making the files or running docker or uv raises it.
     """
     before = signal.signal(signal.SIGTERM, _stopped)
     try:

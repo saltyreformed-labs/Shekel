@@ -716,17 +716,31 @@ class TestAPaymentIsPricedOnItsInterval:
         )
 
 
+def _cleared(on: date) -> SimpleNamespace:
+    """A trajectory's installment due *on* that leaves nothing owed: what ends a grid.
+
+    The two fields :func:`band_chart_dates` reads off an installment, through
+    the one payoff rule (``balance_at.installments_payoff``): the contract
+    line's (``balance_at.loan_contract_installments``) and the plan's
+    (``balance_at.loan_installments``).
+    """
+    return SimpleNamespace(due_date=on, balance_after=Decimal("0.00"))
+
+
+def _owing(on: date) -> SimpleNamespace:
+    """A trajectory's installment due *on* that still leaves money owed."""
+    return SimpleNamespace(due_date=on, balance_after=Decimal("1000.00"))
+
+
 class TestTheBandChartsExtension:
     """The loan page's grid past the contract steps the loan's own calendar."""
 
     _PARAMS = SimpleNamespace(origination_date=date(2026, 12, 31), payment_day=31)
     #: The loan is tracked from its origination (ruling R-R111's recorded start).
     _START = date(2026, 12, 31)
+    _HISTORY = [SimpleNamespace(payment_date=date(2027, 1, 31))]
     # A contract whose last installment is a CLAMPED February 28th.
-    _SCENARIOS = SimpleNamespace(
-        history_rows=[SimpleNamespace(payment_date=date(2027, 1, 31))],
-        original_forward=[SimpleNamespace(payment_date=date(2027, 2, 28))],
-    )
+    _CONTRACT = [_cleared(date(2027, 2, 28))]
 
     def test_a_contract_ending_on_a_clamped_february_returns_to_the_31st(self):
         """Due the 31st, the contract ends 2027-02-28, the payoff is 2027-06-30.
@@ -736,7 +750,8 @@ class TestTheBandChartsExtension:
         would keep the clamp: Mar 28, Apr 28, and so on.
         """
         assert band_chart_dates(
-            self._SCENARIOS, date(2027, 6, 30), [], self._PARAMS, self._START,
+            self._HISTORY, self._CONTRACT, [_cleared(date(2027, 6, 30))],
+            self._PARAMS, self._START,
         ) == [
             date(2027, 1, 31), date(2027, 2, 28), date(2027, 3, 31),
             date(2027, 4, 30), date(2027, 5, 31), date(2027, 6, 30),
@@ -745,15 +760,17 @@ class TestTheBandChartsExtension:
     def test_a_payoff_between_installments_runs_to_the_next_one(self):
         """A payoff on 2027-04-15 (a definition's own cadence) ends on Apr 30."""
         assert band_chart_dates(
-            self._SCENARIOS, date(2027, 4, 15), [], self._PARAMS, self._START,
+            self._HISTORY, self._CONTRACT, [_cleared(date(2027, 4, 15))],
+            self._PARAMS, self._START,
         )[-2:] == [date(2027, 3, 31), date(2027, 4, 30)]
 
 
 class TestTheBandChartsMonthsAreTheLoansInstallments:
     """Ruling R-R110: every installment from the loan's recorded start, whatever the rows say.
 
-    The rows only say where the contract ends and whether there is anything
-    to chart; the months are the loan's own installment dates.
+    The confirmed rows and the contract line only say where the contract
+    ends and whether there is anything to chart; the months are the loan's
+    own installment dates.
     """
 
     _PARAMS = SimpleNamespace(origination_date=date(2026, 1, 22), payment_day=22)
@@ -766,18 +783,14 @@ class TestTheBandChartsMonthsAreTheLoansInstallments:
         payment's own due date (Mar 10 -> Apr 22), skipping Mar 22.  The grid
         is every installment, one point each.
         """
-        scenarios = SimpleNamespace(
-            history_rows=[
-                SimpleNamespace(payment_date=date(2026, 2, 22)),
-                SimpleNamespace(payment_date=date(2026, 2, 22)),
-            ],
-            original_forward=[
-                SimpleNamespace(payment_date=date(2026, 4, 22)),
-                SimpleNamespace(payment_date=date(2026, 5, 22)),
-            ],
-        )
+        history = [
+            SimpleNamespace(payment_date=date(2026, 2, 22)),
+            SimpleNamespace(payment_date=date(2026, 2, 22)),
+        ]
+        contract = [_owing(date(2026, 4, 22)), _cleared(date(2026, 5, 22))]
         assert band_chart_dates(
-            scenarios, date(2026, 5, 22), [], self._PARAMS, date(2026, 1, 22),
+            history, contract, [_cleared(date(2026, 5, 22))], self._PARAMS,
+            date(2026, 1, 22),
         ) == [
             date(2026, 2, 22), date(2026, 3, 22), date(2026, 4, 22),
             date(2026, 5, 22),
@@ -785,12 +798,9 @@ class TestTheBandChartsMonthsAreTheLoansInstallments:
 
     def test_a_loan_tracked_mid_life_starts_at_its_first_tracked_installment(self):
         """Tracked from Mar 1: the first installment after it is Mar 22."""
-        scenarios = SimpleNamespace(
-            history_rows=[],
-            original_forward=[SimpleNamespace(payment_date=date(2026, 5, 22))],
-        )
         assert band_chart_dates(
-            scenarios, None, [], self._PARAMS, date(2026, 3, 1),
+            [], [_cleared(date(2026, 5, 22))], [], self._PARAMS,
+            date(2026, 3, 1),
         ) == [date(2026, 3, 22), date(2026, 4, 22), date(2026, 5, 22)]
 
     def test_a_tracking_start_on_an_installment_starts_at_the_next(self):
@@ -800,12 +810,9 @@ class TestTheBandChartsMonthsAreTheLoansInstallments:
         payments, so the balance it states is the one after Feb 22's
         installment, and the first installment the record owes is Mar 22.
         """
-        scenarios = SimpleNamespace(
-            history_rows=[],
-            original_forward=[SimpleNamespace(payment_date=date(2026, 4, 22))],
-        )
         assert band_chart_dates(
-            scenarios, None, [], self._PARAMS, date(2026, 2, 22),
+            [], [_cleared(date(2026, 4, 22))], [], self._PARAMS,
+            date(2026, 2, 22),
         ) == [date(2026, 3, 22), date(2026, 4, 22)]
 
     def test_a_record_starting_at_the_loans_end_charts_nothing_past_it(self):
@@ -820,16 +827,13 @@ class TestTheBandChartsMonthsAreTheLoansInstallments:
         R16-c-2's checkpoint 10), while a start of Apr 22 already read
         ``[]``.  A start the day before the last installment still charts it.
         """
-        scenarios = SimpleNamespace(
-            history_rows=[
-                SimpleNamespace(payment_date=date(2026, 1, 22)),
-                SimpleNamespace(payment_date=date(2026, 2, 22)),
-                SimpleNamespace(payment_date=date(2026, 3, 22)),
-            ],
-            original_forward=[],
-        )
+        history = [
+            SimpleNamespace(payment_date=date(2026, 1, 22)),
+            SimpleNamespace(payment_date=date(2026, 2, 22)),
+            SimpleNamespace(payment_date=date(2026, 3, 22)),
+        ]
         assert [
-            band_chart_dates(scenarios, None, [], self._PARAMS, start)
+            band_chart_dates(history, [], [], self._PARAMS, start)
             for start in (
                 date(2026, 3, 21), date(2026, 3, 22), date(2026, 4, 21),
                 date(2026, 4, 22),

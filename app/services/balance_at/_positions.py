@@ -69,7 +69,7 @@ from app.services.loan_ledger import PaymentOutcome
 from ._context import BalanceContext
 from ._memoize import _memoize_once, require_scenario
 from ._fold import fold_from_walk
-from ._loan_stream import loan_timeline, what_if_timeline
+from ._loan_stream import contract_line, loan_timeline, what_if_timeline
 from ._plan_fold import is_retired, required_extra, timeline_payoff_date
 from ._resolution import resolved_loan
 
@@ -494,6 +494,56 @@ def loan_installments(
     """
     owed_from = _owed_from(account, ctx, "loan_installments")
     walk = what_if_timeline(account, ctx, extra_monthly)
+    if is_retired(walk, owed_from, ctx.as_of):
+        return []
+    return walk.projected_splits
+
+
+def loan_contract_installments(
+    account: Account, ctx: BalanceContext,
+) -> list[PaymentOutcome]:
+    """Return what *account*'s CONTRACT still bills, one split per installment.
+
+    The loan page's contractual reference (plan step recurrence:R16-f, ruling
+    **R-R53**): the projected outcomes of the loan's contract line
+    (:func:`~._loan_stream.contract_line`), the pass's recorded facts with
+    every installment after the record's last event paid at its level P&I and
+    escrow and the term's last closing the loan.  The pay-off-sooner lever's
+    "current plan vs. original" line, the band chart's contract end and the
+    refinance calculator's current side read it, so what the loan owes under
+    its contract and what its plan, its balance and its history say are one
+    fold over the same facts.  Until that step they read
+    ``loan_resolver.compute_payoff_scenarios``' ``original_forward``, a walk
+    of its own seeded from the confirmed view's balance.
+
+    Not memoized: each reader asks once per request, and the facts walk it
+    extends is the pass's memo
+    (:meth:`~app.services.balance_at.BalanceContext.loan_walk`).
+
+    Args:
+        account: The amortizing loan account (the caller owns the ownership
+            check).
+        ctx: The read pass's :class:`~app.services.balance_at.BalanceContext`
+            -- its scenario scopes the facts, and its ``as_of`` is the read an
+            installment due before it counts the day after.
+
+    Returns:
+        The contract line's projected
+        :class:`~app.services.loan_ledger.PaymentOutcome` list in installment
+        order, through the term's last.  An installment after the one that
+        clears the loan pays into a zero balance, as the plan's do
+        (:func:`loan_installments`; finding REC-539).  EMPTY for a loan whose
+        record already reaches past its term, and for a loan already retired
+        (owing nothing at ``ctx.as_of``): its remaining installments would be
+        refunds of money it does not owe, the guard :func:`loan_installments`
+        applies.
+
+    Raises:
+        BaselineMissingError: When ``scenario`` is None (ruling R-BW).
+        ValueError: When *account* is not a configured loan.
+    """
+    owed_from = _owed_from(account, ctx, "loan_contract_installments")
+    walk = contract_line(ctx.loan_walk(account).stream, ctx.as_of)
     if is_retired(walk, owed_from, ctx.as_of):
         return []
     return walk.projected_splits

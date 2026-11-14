@@ -462,82 +462,58 @@ class TestRefinanceForwardOnlyBaseline:
     The refinance side is inherently forward-only (a brand-new loan from today),
     so the current side must be too: "Remaining Term" counts the payments still
     ahead and "Total Interest" the interest still to be paid.  And the current
-    side is the pure CONTRACT -- ``scenarios.original_forward``, a like-for-like
-    minimum-vs-minimum comparison -- never the owner's PLAN (the balance seam's
-    fold, which carries a standing extra a borrower could pay on either loan;
-    the builder is handed no fold at all, so that is structural).  Before these
-    rules the builder used whole-schedule aggregates, counting sunk history
-    against a from-today refinance.
+    side is the pure CONTRACT -- the contract line
+    (``balance_at.loan_contract_installments``, plan step recurrence:R16-f), a
+    like-for-like minimum-vs-minimum comparison -- never the owner's PLAN (the
+    balance seam's fold, which carries a standing extra a borrower could pay on
+    either loan; the builder is handed no plan and no history at all, so both
+    are structural).  Before these rules the builder used whole-schedule
+    aggregates, counting sunk history against a from-today refinance.
     """
 
-    def test_current_side_reads_contractual_original_forward(self):
-        """The current side derives from ``original_forward``, not ``state.schedule``.
+    def test_current_side_reads_the_contract_line_through_its_payoff(self):
+        """The current side is the contract's installments through the one that clears it.
 
-        The current baseline is the pure-CONTRACTUAL forward remainder read
-        from ``scenarios.original_forward``, like-for-like against a
-        from-today minimum-payment refi -- not the whole ``state.schedule``
-        (confirmed history plus that forward).  Here ``original_forward`` is
-        2 contractual rows (interest 400.00 + 300.00 = 700.00, payoff Apr
-        2026) behind 2 confirmed rows (interest 997.50): the current side
-        must report 2 remaining months / 700.00 / Apr-2026 from
-        ``original_forward``, NOT 4 / 1,697.50 from the whole schedule.
-        "Forward-only" is now structural too -- ``original_forward`` carries
-        no confirmed rows.
+        The contract line here bills three installments: Mar 2026 (interest
+        400.00, leaving 98,500.00), Apr 2026 (interest 300.00, clearing the
+        loan) and May 2026, which pays into the zero balance Apr left
+        (interest 0.00; projections run past the payoff until finding
+        REC-539 is fixed).  The current side must report 2 remaining
+        installments, 400.00 + 300.00 = 700.00 of interest and an Apr 2026
+        payoff: counting May would read 3, and the route context's payoff
+        (a stand-in dated Mar 2026) is the fallback for a contract that bills
+        nothing more, so reading it would date the payoff a month early.
+        Until plan step recurrence:R16-f the same figures came off the
+        composer's ``original_forward`` rows.
         """
         # Pylint: ``import-outside-toplevel`` -- route-private helper under
         # test; imported here so the module import stays route-surface only.
         from app.routes.loan.calculators import (  # pylint: disable=import-outside-toplevel
             _build_refinance_comparison,
         )
-        from app.services.amortization_engine import (  # pylint: disable=import-outside-toplevel
-            AmortizationRow,
-        )
-        from app.services.loan_resolver import (  # pylint: disable=import-outside-toplevel
-            LoanState,
-            PayoffScenarios,
-        )
 
-        def _row(month, interest, balance, confirmed):
-            return AmortizationRow(
-                month=month, payment_date=date(2026, month, 1),
-                payment=Decimal("1000.00"), principal=Decimal("500.00"),
-                interest=interest, extra_payment=Decimal("0.00"),
-                remaining_balance=balance, is_confirmed=confirmed,
-                interest_rate=Decimal("0.06"),
+        def _installment(month, interest, balance_after):
+            """A contract-line outcome's stand-in: the fields the builder reads."""
+            return SimpleNamespace(
+                due_date=date(2026, month, 1), interest=interest,
+                balance_after=balance_after,
             )
 
-        # Contractual forward -- the current side must read THIS: 2 rows.
-        original_forward = [
-            _row(3, Decimal("400.00"), Decimal("98500.00"), False),
-            _row(4, Decimal("300.00"), Decimal("98000.00"), False),
+        contract = [
+            _installment(3, Decimal("400.00"), Decimal("98500.00")),
+            _installment(4, Decimal("300.00"), Decimal("0.00")),
+            _installment(5, Decimal("0.00"), Decimal("0.00")),
         ]
-        confirmed = [
-            _row(1, Decimal("500.00"), Decimal("99500.00"), True),
-            _row(2, Decimal("497.50"), Decimal("99000.00"), True),
-        ]
-        scenarios = PayoffScenarios(
-            history_rows=confirmed,
-            original_forward=original_forward,
-        )
-        # ``state.schedule`` is confirmed history + the contract's forward --
-        # the current side must NOT read it (sunk history is not ahead).
-        state = LoanState(
-            monthly_payment=Decimal("1000.00"),
-            current_rate=Decimal("0.06"),
-            schedule=confirmed + original_forward,
-            total_interest=Decimal("1697.50"),
-        )
-        # The balance the route threads in explicitly (C4); a LoanState field
-        # until plan step D2a deleted it (the route reads the seam's fold).
+        # The balance the route threads in explicitly (C4); the route reads the
+        # seam's fold.
         current_balance = Decimal("99000.00")
         # The route context stand-in.  ``_build_refinance_comparison`` reads only
         # ``monthly_payment`` and ``payoff_date`` off it, and since plan C8d the
-        # payoff is the seam's DERIVED figure carried on the route context, not a
-        # ``LoanState`` field -- so the stand-in is the context's shape, not the
-        # resolver's.  The value here is the empty-slice fallback only; this
-        # fixture's ``original_forward`` is non-empty, so it must NOT be read.
+        # payoff is the seam's DERIVED figure carried on the route context.  The
+        # value here is the fallback only; this contract clears the loan, so it
+        # must NOT be read.
         route_ctx = SimpleNamespace(
-            monthly_payment=state.monthly_payment,
+            monthly_payment=Decimal("1000.00"),
             payoff_date=date(2026, 3, 1),
         )
         # The loan row's stand-in: its due day, and how its note accrues
@@ -556,15 +532,12 @@ class TestRefinanceForwardOnlyBaseline:
             "new_rate": Decimal("0.05"),
         }
 
-        # C4: the balance is threaded in explicitly (read once by the route);
-        # ``route_ctx`` stands in for the route context's monthly_payment /
-        # payoff_date.
         comparison = _build_refinance_comparison(
-            current_balance, route_ctx, scenarios, data, params,
+            current_balance, route_ctx, contract, data, params,
         )
 
-        # Current side reads the CONTRACTUAL original_forward: 2 months,
-        # 400 + 300 = 700.00, payoff Apr 2026.
+        # Through the clearing installment: 2 installments, 400 + 300 = 700.00,
+        # payoff Apr 2026; a 12-month refinance is 12 - 2 = 10 longer.
         assert comparison["current_remaining_months"] == 2
         assert comparison["current_total_interest"] == Decimal("700.00")
         assert comparison["current_payoff"] == date(2026, 4, 1)
@@ -572,8 +545,3 @@ class TestRefinanceForwardOnlyBaseline:
         assert comparison["interest_savings"] == (
             Decimal("700.00") - comparison["refi_total_interest"]
         )
-        # Non-vacuity: the whole schedule (4 months / 1,697.50) differs on
-        # both figures, so the current side is provably reading
-        # original_forward, not state.schedule.
-        assert comparison["current_remaining_months"] != len(state.schedule)
-        assert comparison["current_total_interest"] != state.total_interest

@@ -233,6 +233,7 @@ class TestPayoffChartShape:
         and the overlay are the same fold on the band's monthly grid, so they
         agree by construction.
         """
+        # Pylint: ``import-outside-toplevel`` -- a module only this test reads.
         import re as _re  # pylint: disable=import-outside-toplevel
 
         acct = self._create_loan_with_historical_confirmed(
@@ -356,6 +357,7 @@ class TestPayoffChartShape:
         call-style use of the symbol on its
         ``amortization_engine.`` prefix.
         """
+        # Pylint: ``import-outside-toplevel`` -- a module only this test reads.
         from pathlib import Path  # pylint: disable=import-outside-toplevel
 
         # loan.py is now the app/routes/loan/ package (Phase 3 pylint
@@ -387,6 +389,7 @@ class TestPayoffChartShape:
         ``compute_payoff_scenarios``, never a direct
         ``generate_schedule`` / ``calculate_summary`` call.
         """
+        # Pylint: ``import-outside-toplevel`` -- a module only this test reads.
         from pathlib import Path  # pylint: disable=import-outside-toplevel
 
         # Found from the package's own module, never from this test's place
@@ -413,6 +416,43 @@ class TestPayoffChartShape:
             "extra_payment computation still contains a direct "
             "amortization_engine.calculate_summary call."
         )
+
+
+def _band_inputs(seed_user, acct):
+    """Return ``(balance_ctx, history_rows, contract, dates)`` as the dashboard builds them.
+
+    ``_load_route_context`` reads the pass's owner off ``current_user``;
+    outside a request the pass is built from the owner's id and the loan
+    context loaded the same way it does.  The grid is
+    ``band_chart_dates`` over the confirmed history, the contract line
+    (``balance_at.loan_contract_installments``, plan step
+    recurrence:R16-f) and the plan as it stands, as the dashboard hands
+    it.  The contract of each loan here is behind or on its schedule, so
+    none of its installments falls after the one that closes it.
+    """
+    # Pylint: import-outside-toplevel -- route-private helpers under test.
+    from app.routes.loan._helpers import (  # pylint: disable=import-outside-toplevel
+        _loan_inputs, band_chart_dates, build_baseline_scenarios,
+    )
+    # Pylint: ``import-outside-toplevel`` -- a module only this test reads.
+    from app.services.loan_payment_service import (  # pylint: disable=import-outside-toplevel
+        load_loan_context,
+    )
+    params = load_loan_params(acct.id)
+    balance_ctx = BalanceContext.build(seed_user["user"].id)
+    loan = load_loan_context(acct.id)
+    history_rows = build_baseline_scenarios(
+        _loan_inputs(params, loan), acct, balance_ctx,
+    ).history_rows
+    contract = balance_at.loan_contract_installments(acct, balance_ctx)
+    dates = band_chart_dates(
+        history_rows,
+        contract,
+        balance_at.loan_installments(acct, balance_ctx),
+        params,
+        balance_at.loan_terms(acct, balance_ctx).recorded_start,
+    )
+    return balance_ctx, history_rows, contract, dates
 
 
 class TestBandChartLongestBaseline:
@@ -447,37 +487,6 @@ class TestBandChartLongestBaseline:
         db_session.commit()
         return acct
 
-    @staticmethod
-    def _band_inputs(seed_user, acct):
-        """Return ``(balance_ctx, scenarios, dates)`` the way the dashboard builds them.
-
-        ``_load_route_context`` reads the pass's owner off ``current_user``;
-        outside a request the pass is built from the owner's id and the loan
-        context loaded the same way it does.  The grid is
-        ``band_chart_dates`` over the pass's payoff and the plan as it
-        stands, as the dashboard hands it.
-        """
-        # Pylint: import-outside-toplevel -- route-private helpers under test.
-        from app.routes.loan._helpers import (  # pylint: disable=import-outside-toplevel
-            _loan_inputs, band_chart_dates, build_baseline_scenarios,
-        )
-        from app.services.loan_payment_service import (  # pylint: disable=import-outside-toplevel
-            load_loan_context,
-        )
-        params = load_loan_params(acct.id)
-        balance_ctx = BalanceContext.build(seed_user["user"].id)
-        loan = load_loan_context(acct.id)
-        scenarios = build_baseline_scenarios(
-            _loan_inputs(params, loan), acct, balance_ctx,
-        )
-        dates = band_chart_dates(
-            scenarios,
-            balance_at.loan_payoff_date(acct, balance_ctx),
-            balance_at.loan_installments(acct, balance_ctx),
-            params,
-            balance_at.loan_terms(acct, balance_ctx).recorded_start,
-        )
-        return balance_ctx, scenarios, dates
 
     def test_band_labels_cover_the_plans_line(
         self, app, seed_user, db, seed_periods,
@@ -494,18 +503,20 @@ class TestBandChartLongestBaseline:
         """
         acct = self._two_installments_behind(seed_user, db.session)
         with app.app_context():
-            balance_ctx, scenarios, dates = self._band_inputs(seed_user, acct)
+            balance_ctx, history_rows, contract, dates = _band_inputs(
+                seed_user, acct,
+            )
             band = build_band_chart(acct, balance_ctx, dates)
-            contract_end = scenarios.original_forward[-1].payment_date
+            contract_end = balance_at.installments_payoff(contract)
             grid_end = balance_at.loan_payoff_date(acct, balance_ctx)
-        assert not scenarios.history_rows
+        assert not history_rows
         assert len(band["labels"]) == len(band["balance"])
         assert band["labels"][0] == "Feb 2026"
-        assert band["labels"][len(scenarios.original_forward) - 1] == "Jan 2056"
+        assert band["labels"][len(contract) - 1] == "Jan 2056"
         assert contract_end == date(2056, 1, 1)
         assert grid_end is not None and grid_end > contract_end
         assert band["labels"][-1] == grid_end.strftime("%b %Y")
-        assert band["balance"][len(scenarios.original_forward) - 1] > 0.0
+        assert band["balance"][len(contract) - 1] > 0.0
         assert band["balance"][-1] == 0.0
         # The two grid dates at or before today are the ledger's.
         assert band["current_index"] == 2
@@ -533,7 +544,9 @@ class TestBandChartLongestBaseline:
         )
         db.session.commit()
         with app.app_context():
-            balance_ctx, scenarios, dates = self._band_inputs(seed_user, acct)
+            balance_ctx, _history_rows, contract, dates = _band_inputs(
+                seed_user, acct,
+            )
             band = build_band_chart(acct, balance_ctx, dates)
             payoff = balance_at.loan_payoff_date(acct, balance_ctx)
             plan_dates = [
@@ -542,11 +555,11 @@ class TestBandChartLongestBaseline:
                     acct, balance_ctx,
                 )
             ]
-        contract_end = scenarios.original_forward[-1].payment_date
+        contract_end = balance_at.installments_payoff(contract)
         assert contract_end.day == 31
         assert payoff is not None and payoff > contract_end
         assert payoff in plan_dates
-        past_contract = len(band["labels"]) - len(scenarios.original_forward)
+        past_contract = len(band["labels"]) - len(contract)
         assert past_contract == months_between(contract_end, payoff)
         assert band["labels"][-1] == payoff.strftime("%b %Y")
         assert band["balance"][-1] == 0.0
@@ -566,7 +579,9 @@ class TestBandChartLongestBaseline:
         """
         acct = self._two_installments_behind(seed_user, db.session)
         with app.app_context():
-            balance_ctx, _scenarios, dates = self._band_inputs(seed_user, acct)
+            balance_ctx, _history_rows, _contract, dates = _band_inputs(
+                seed_user, acct,
+            )
             band = build_band_chart(acct, balance_ctx, dates)
             overlay = accelerated_overlay(
                 acct, balance_ctx, dates, Decimal("500.00"),
@@ -821,6 +836,7 @@ class TestTheLoanChartKeepsTheMonthsOfACorrectedLoan:
         self, app, db, seed_user, seed_periods, monkeypatch,
     ):
         """The band's first four points are Jan 22, Feb 22, Mar 22 and Apr 22 2026."""
+        # Pylint: ``import-outside-toplevel`` -- the helpers this one test needs.
         # pylint: disable=import-outside-toplevel
         from tests._test_helpers import (
             create_loan_account,
@@ -853,9 +869,7 @@ class TestTheLoanChartKeepsTheMonthsOfACorrectedLoan:
             )
             db.session.commit()
 
-            _ctx, _scenarios, dates = TestBandChartLongestBaseline._band_inputs(
-                seed_user, loan,
-            )
+            dates = _band_inputs(seed_user, loan)[-1]
 
             assert dates[:4] == [
                 date(2026, 1, 22), date(2026, 2, 22), date(2026, 3, 22),

@@ -490,7 +490,7 @@ def _forward_boundary(account_id, scenario_id):
 
 
 def band_chart_dates(
-    scenarios, payoff, installments, params, start,
+    history_rows, contract, installments, params, start,
 ) -> list[date]:
     """Return the band chart's x-axis: the loan's installments, its record's start to the payoff.
 
@@ -504,12 +504,14 @@ def band_chart_dates(
     an origination is never itself an installment, and a tracking-start
     assertion dated on one already states the balance after it, since the
     walk applies an assertion after its day's charge and payments -- through
-    the CONTRACT's last installment, extended month by month whenever
-    the seam's DERIVED payoff falls later -- an underpaying plan clears the
-    loan in the post-contractual extension, and the line must run to where
-    the balance actually reaches zero rather than stop at the last labelled
-    tick.  A plan that never clears it runs to the plan's last installment
-    instead; a retired loan (no payoff, no plan) ends with its history.  Each
+    the installment the CONTRACT line clears the loan on, extended month by
+    month whenever the plan's payoff falls later -- an underpaying plan
+    clears the loan in the post-contractual extension, and the line must run
+    to where the balance actually reaches zero rather than stop at the last
+    labelled tick.  A plan that never clears it runs to the plan's last
+    installment instead; a retired loan (no payoff, no plan, no contract
+    left) ends with its history, as does the contract side of a loan whose
+    record already reaches past its term.  Each
     point is the balance the ledger holds that day (:func:`build_band_chart`),
     so a payment shows as the drop into the first installment after its money
     moved, and two payments inside one installment's interval are one point.
@@ -525,37 +527,47 @@ def band_chart_dates(
     at plan step recurrence:R16-e); two payments in one interval repeated a
     month, and a month nobody paid had no point at all.
 
-    Pure over values the caller already holds -- the pass's payoff figure,
-    the plan's installments and the loan's terms -- so the grid costs the page
-    no fold of its own (the payoff is folded once per pass,
-    ``balance_at.memoized_payoff``).
+    Pure over values the caller already holds -- the confirmed history, the
+    contract line's and the plan's installments and the loan's terms -- so
+    the grid costs the page no fold of its own.  Both ends are read off
+    their trajectory by the one payoff rule
+    (:func:`~app.services.balance_at.installments_payoff`): the plan's payoff
+    is the seam's derived payoff exactly (``loan_installments`` is empty for
+    a retired loan, whose payoff is ``None``), so it is read here rather than
+    passed beside the installments it is a reading of.  *Until plan step
+    recurrence:R16-f the contract's end was the composer's
+    ``original_forward``'s last row, a walk of its own, and the payoff came in
+    as a separate argument.*
 
     Args:
-        scenarios: The baseline :class:`~app.services.loan_resolver.PayoffScenarios`;
-            its confirmed history and contractual forward say only where the
-            contract ends and whether there is anything to chart.
-        payoff: The seam's derived payoff
-            (:attr:`~app.routes.loan._helpers._RouteLoanContext.payoff_date`),
-            ``None`` for a retired loan or a plan that never clears.
+        history_rows: The confirmed history
+            (:attr:`~app.services.loan_resolver.PayoffScenarios.history_rows`);
+            its last row ends the grid's contract side when the contract bills
+            nothing more, and with no contract left either there is nothing to
+            chart.
+        contract: The contract line's remaining installments
+            (:func:`~app.services.balance_at.loan_contract_installments`).
         installments: The plan as it stands
-            (:func:`~app.services.balance_at.loan_installments`), for the
-            never-clears case's last date.
+            (:func:`~app.services.balance_at.loan_installments`): its payoff,
+            or its last date when it never clears the loan.
         params: The loan's :class:`~app.models.loan_params.LoanParams`, whose
             origination and due day name its installment calendar.
         start: The day the loan's record starts
             (:attr:`~app.services.balance_at.LoanTerms.recorded_start`).
 
     Returns:
-        Ascending installment dates, one per month; empty for a loan whose
-        history and contract both hold no row (a retired loan the composer
-        drops), and empty when *start* is on or after the grid's last
+        Ascending installment dates, one per month; empty for a loan with no
+        confirmed history and no contract left (a retired loan that recorded
+        no payment), and empty when *start* is on or after the grid's last
         installment (a tracking start recorded at or after a loan's end), so
         no point ever falls past it.
     """
-    rows = [*scenarios.history_rows, *scenarios.original_forward]
-    if not rows:
-        return []
-    contract_end = rows[-1].payment_date
+    contract_end = balance_at.installments_payoff(contract)
+    if contract_end is None:
+        if not history_rows:
+            return []
+        contract_end = history_rows[-1].payment_date
+    payoff = balance_at.installments_payoff(installments)
     if payoff is None:
         payoff = installments[-1].due_date if installments else contract_end
     # Through the contract's last installment, or the first installment on or
@@ -654,9 +666,13 @@ def build_baseline_scenarios(loan_inputs, account, balance_ctx):
     """Run the baseline composer call for the loan detail page: history + contract.
 
     One ``compute_payoff_scenarios`` call whose ``history_rows`` (the
-    confirmed actuals, ledger-derived) and ``original_forward`` (the CONTRACT's
-    remaining installments) the band chart's x-axis, the amortization table's
-    confirmed half and the lever's contract-versus-plan comparison read.
+    confirmed actuals, ledger-derived) the band chart's x-axis and the
+    amortization table's confirmed half read.  **Its contractual forward has
+    no route reader since plan step recurrence:R16-f** (ruling **R-R53**):
+    the band chart's contract end, the lever's contract-versus-plan line and
+    the refinance calculator's current side read the contract line, the one
+    replay over the loan's facts with the contract's cash
+    (:func:`~app.services.balance_at.loan_contract_installments`).
     **It composes no planned trajectory since plan step R7d-g-3** (ruling
     **R-R88**): what the loan is projected to PAY is the balance seam's forward
     plan, read through :func:`~app.services.balance_at.loan_installments` and
@@ -742,13 +758,13 @@ def build_loan_band_chart(account, params):
         ``band_chart`` -- for the rate route to hand to ``loan_detail.js``.
     """
     ctx = _load_route_context(account)
-    scenarios = build_baseline_scenarios(
-        _loan_inputs(params, ctx.loan), account, ctx.balance_ctx,
-    )
     return build_band_chart(
         account, ctx.balance_ctx,
         band_chart_dates(
-            scenarios, ctx.payoff_date,
+            build_baseline_scenarios(
+                _loan_inputs(params, ctx.loan), account, ctx.balance_ctx,
+            ).history_rows,
+            balance_at.loan_contract_installments(account, ctx.balance_ctx),
             balance_at.loan_installments(account, ctx.balance_ctx),
             params, ctx.figures.terms.recorded_start,
         ),

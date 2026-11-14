@@ -17,11 +17,13 @@ Every interest figure is the balance x rate / 12, rounded once to the cent
 from datetime import date
 from decimal import Decimal
 
+from app.services import balance_at
 from app.services.balance_at import BalanceContext
-# Pylint: ``shekel-private-module-import`` -- the contract line has no reader
-# outside the seam yet (plan step recurrence:R16-f moves its readers in a later
-# task), so its tests reach the seam module that composes it, as the timeline's
-# do (``test_loan_plan_assembly``).
+# Pylint: ``shekel-private-module-import`` -- the seam publishes the contract
+# line's projections alone (``balance_at.loan_contract_installments``), so the
+# tests of the line itself, its fact prefix and its from-origination reading
+# reach the seam module that composes it, as the timeline's do
+# (``test_loan_plan_assembly``).
 # pylint: disable-next=shekel-private-module-import
 from app.services.balance_at._loan_stream import (
     contract_line,
@@ -37,7 +39,11 @@ from app.services.loan_ledger import (
     replay_loan_stream,
     with_contract_charges,
 )
-from tests._test_helpers import add_escrow_line, create_loan_account
+from tests._test_helpers import (
+    add_escrow_line,
+    create_loan_account,
+    create_loan_with_trueup,
+)
 from tests.oracles.loan_monthly_composition import rate_period
 
 _ZERO = Decimal("0.00")
@@ -266,3 +272,64 @@ class TestAStoredLoansContractLine:
                 date(2027, 1, 1), Decimal("1132.78"), Decimal("5.14"),
                 Decimal("100.00"), Decimal("1027.64"), _ZERO,
             )
+
+
+class TestTheLoanPagesReading:
+    """``balance_at.loan_contract_installments``: what the loan page reads of the line."""
+
+    def test_it_is_the_contract_lines_projections(self, app, db, seed_user):
+        """$12,000.00 at 6% over 12 months, read Jan 10, 2026: twelve installments.
+
+        The seam entry hands the loan page the contract line's projected
+        outcomes as they stand: Feb 1, 2026 through Jan 1, 2027, the last
+        closing the loan.
+        """
+        with app.app_context():
+            loan = create_loan_account(
+                seed_user, db.session, principal=Decimal("12000.00"),
+                rate=Decimal("0.06000"), term=12,
+                origination_date=date(2026, 1, 1), payment_day=1,
+            )
+            db.session.commit()
+            ctx = BalanceContext.build(seed_user["user"].id, date(2026, 1, 10))
+
+            installments = balance_at.loan_contract_installments(loan, ctx)
+
+            assert installments == contract_line(
+                ctx.loan_walk(loan).stream, ctx.as_of,
+            ).projected_splits
+            assert [installments[0].due_date, installments[-1].due_date] == [
+                date(2026, 2, 1), date(2027, 1, 1),
+            ]
+            assert len(installments) == 12
+            assert installments[-1].balance_after == _ZERO
+
+    def test_a_retired_loan_has_no_contract_left(self, app, db, seed_user):
+        """Trued up to $0.00 on Mar 15, 2026, read Mar 20: nothing for the page to show.
+
+        The same $12,000.00 loan.  The line itself still bills the ten
+        installments after the true-up, Apr 1, 2026 through Jan 1, 2027:
+        the first nine each $1,032.80 of P&I into a zero balance, every cent
+        of it a refund (finding REC-539), and the last pays nothing, nothing
+        standing to close.  The page reads none of them, as it reads no
+        planned payment of a retired loan (``balance_at.loan_installments``).
+        """
+        with app.app_context():
+            loan = create_loan_with_trueup(
+                seed_user, db.session,
+                origination_principal=Decimal("12000.00"),
+                anchor_balance=Decimal("0.00"), anchor_date=date(2026, 3, 15),
+                rate=Decimal("0.06000"), origination_date=date(2026, 1, 1),
+                term=12,
+            )
+            ctx = BalanceContext.build(seed_user["user"].id, date(2026, 3, 20))
+
+            line = contract_line(ctx.loan_walk(loan).stream, ctx.as_of)
+
+            assert len(line.projected_splits) == 10
+            assert {
+                (outcome.excess, outcome.balance_after)
+                for outcome in line.projected_splits[:-1]
+            } == {(Decimal("1032.80"), _ZERO)}
+            assert line.projected_splits[-1].cash == _ZERO
+            assert balance_at.loan_contract_installments(loan, ctx) == []

@@ -295,7 +295,7 @@ def _build_payment_summary(
     }
 
 
-def _build_band_context(ctx, scenarios, installments, params):
+def _build_band_context(ctx, history_rows, installments, params):
     """Build the dashboard's band-chart template context.
 
     Wraps :func:`._helpers.build_band_chart` (the seam's balance at every
@@ -308,12 +308,15 @@ def _build_band_context(ctx, scenarios, installments, params):
 
     Args:
         ctx: The route context (:func:`._helpers._load_route_context`) --
-            its pass and its derived payoff bound the grid.
-        scenarios: The baseline :class:`PayoffScenarios` from
+            its pass and its loan bound the grid.
+        history_rows: The confirmed history from
             :func:`._helpers.build_baseline_scenarios`, for the grid.
         installments: The plan as it stands
             (:func:`~app.services.balance_at.loan_installments`), read once
-            by the route and shared with the allocation bar.
+            by the route and shared with the allocation bar.  The grid's
+            contract end is the contract line's
+            (:func:`~app.services.balance_at.loan_contract_installments`),
+            read here.
         params: The loan's :class:`LoanParams`, whose installment calendar
             extends the grid past the contract.
 
@@ -323,8 +326,9 @@ def _build_band_context(ctx, scenarios, installments, params):
     band_chart = build_band_chart(
         ctx.account, ctx.balance_ctx,
         band_chart_dates(
-            scenarios, ctx.payoff_date, installments, params,
-            ctx.figures.terms.recorded_start,
+            history_rows,
+            balance_at.loan_contract_installments(ctx.account, ctx.balance_ctx),
+            installments, params, ctx.figures.terms.recorded_start,
         ),
     )
     return {
@@ -807,7 +811,9 @@ def dashboard(account_id):
     context["merge_candidates"] = escrow_calculator.build_merge_candidates(
         ctx.loan.escrow_lines,
     )
-    context.update(_build_band_context(ctx, scenarios, installments, params))
+    context.update(_build_band_context(
+        ctx, scenarios.history_rows, installments, params,
+    ))
     # YTD chips sum by the user's display-tz civil year (matching the Taxes tab
     # + the L9 attribution rule), not the backend-UTC ``today.year``.  The chips
     # fold the read pass's memoized walk (ctx.balance_ctx), so the page walks the

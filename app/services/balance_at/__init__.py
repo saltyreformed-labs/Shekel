@@ -326,6 +326,7 @@ from ._outstanding import (
 )
 from ._plan_fold import first_installment_at_most, installments_payoff
 from ._positions import (
+    loan_contract_installments,
     loan_installments,
     loan_payoff_date,
     loan_required_extra,
@@ -417,6 +418,7 @@ __all__ = [
     "liability_owed_at_dates",
     "is_standing_loan_payment",
     "loan_closing_date",
+    "loan_contract_installments",
     "loan_figures",
     "loan_terms",
     "loan_interest_in_year",

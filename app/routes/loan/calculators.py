@@ -12,6 +12,7 @@ preview cannot diverge from the chart it overlays.
 
 from datetime import date
 from decimal import Decimal, ROUND_CEILING
+from typing import NamedTuple
 
 from flask import render_template, request
 
@@ -36,25 +37,27 @@ from app.utils.money import round_money
 
 
 def _plan_trajectory(installments):
-    """Return ``(payoff date | None, remaining interest)`` of a folded plan.
+    """Return ``(payoff date | None, remaining interest)`` of a folded trajectory.
 
     Read off the seam's own split (:func:`~app.services.balance_at.loan_installments`,
-    plan step R7d-g-3, ruling **R-R88**): the payoff is the ONE rule
+    plan step R7d-g-3, ruling **R-R88**; the contract line's
+    :func:`~app.services.balance_at.loan_contract_installments` since plan
+    step recurrence:R16-f): the payoff is the ONE rule
     :func:`~app.services.balance_at.installments_payoff` states -- the same
     the "Projected payoff" chip's fold applies -- and the interest is summed
-    over the whole plan (a split past the payoff accrues on a zero balance
-    and adds nothing) and rounded once at this boundary (ROUND_HALF_UP,
-    E-26).  Pure over the installments the caller already holds, so the
-    lever folds the plan once per trajectory, not once per figure.
+    over the whole trajectory (a split past the payoff accrues on a zero
+    balance and adds nothing) and rounded once at this boundary
+    (ROUND_HALF_UP, E-26).  Pure over the installments the caller already
+    holds, so the lever folds each trajectory once, not once per figure.
 
     Args:
-        installments: A folded plan -- as it stands, or with the lever's
-            extra on top.
+        installments: A folded trajectory -- the plan as it stands, the plan
+            with the lever's extra on top, or the contract line.
 
     Returns:
-        The DUE date the balance first folds to zero (``None`` when the plan
-        never clears the loan, or the loan is already retired) and the
-        interest the plan pays from the pass's now.
+        The DUE date the balance first folds to zero (``None`` when the
+        trajectory never clears the loan, or the loan is already retired) and
+        the interest it pays from the pass's now.
     """
     interest = round_money(sum(
         (installment.interest for installment in installments),
@@ -63,41 +66,41 @@ def _plan_trajectory(installments):
     return balance_at.installments_payoff(installments), interest
 
 
-def _plan_vs_contract(scenarios, committed):
+def _plan_vs_contract(contract, committed):
     """Months and interest the owner's plan saves vs the pure contract, or ``None``.
 
-    The plan's payoff and remaining interest (:func:`_plan_trajectory`,
-    the seam's fold) against the contractual reference the composer
-    projects from the same confirmed starting state
-    (:attr:`~app.services.loan_resolver.PayoffScenarios.original_forward`),
-    so the comparison quantifies what the owner's planned outlays save vs
-    paying pure contractual from today onward.
+    The plan's payoff and remaining interest against the contract line's
+    (:func:`_plan_trajectory` over each), so the comparison quantifies what
+    the owner's planned outlays save vs paying exactly what the contract
+    bills from today onward.  Both are the one replay over the same recorded
+    facts (plan step recurrence:R16-f, ruling **R-R53**): until that step the
+    contract side was ``loan_resolver.compute_payoff_scenarios``'
+    ``original_forward``, a walk of its own seeded from the confirmed view's
+    balance.
 
     Args:
-        scenarios: The baseline :class:`~app.services.loan_resolver.PayoffScenarios`.
+        contract: The contract line's remaining installments
+            (:func:`~app.services.balance_at.loan_contract_installments`).
         committed: ``(payoff, interest)`` of the plan as it stands.
 
     Returns:
-        ``None`` when the contract has no forward row to compare with (a
+        ``None`` when the contract bills nothing more to compare with (a
         loan past its term still owing, which its plan is clearing);
         otherwise ``{"months": int | None, "interest": Decimal}`` -- the
         months the plan finishes AHEAD of the contract (negative when
         behind; ``None`` when the plan never clears the loan), and the
-        interest saved (negative when the plan costs more), the latter
-        routed through ``round_money`` (ROUND_HALF_UP, E-26).
+        interest saved (negative when the plan costs more), each side's
+        interest rounded once (ROUND_HALF_UP, E-26).  The contract always
+        clears: its last installment closes the loan.
     """
-    if not scenarios.original_forward:
+    if not contract:
         return None
     committed_payoff, committed_interest = committed
-    contract_interest = sum(
-        (row.interest for row in scenarios.original_forward), Decimal("0.00"),
-    )
+    contract_payoff, contract_interest = _plan_trajectory(contract)
     return {
         "months": (
             None if committed_payoff is None
-            else months_between(
-                committed_payoff, scenarios.original_forward[-1].payment_date,
-            )
+            else months_between(committed_payoff, contract_payoff)
         ),
         "interest": round_money(contract_interest - committed_interest),
     }
@@ -168,10 +171,11 @@ def _payoff_extra_payment_result(account, params, ctx, data, has_plan):
         Rendered ``loan/_payoff_results.html`` response.
     """
     extra = Decimal(str(data.get("extra_monthly", "0")))
-    scenarios = build_baseline_scenarios(
+    history_rows = build_baseline_scenarios(
         _loan_inputs(params, ctx.loan), account, ctx.balance_ctx,
-    )
+    ).history_rows
     plan = balance_at.loan_installments(account, ctx.balance_ctx)
+    contract = balance_at.loan_contract_installments(account, ctx.balance_ctx)
     committed = _plan_trajectory(plan)
     accelerated = _plan_trajectory(
         balance_at.loan_installments(account, ctx.balance_ctx, extra),
@@ -185,13 +189,13 @@ def _payoff_extra_payment_result(account, params, ctx, data, has_plan):
         overlay=accelerated_overlay(
             account, ctx.balance_ctx,
             band_chart_dates(
-                scenarios, committed[0], plan, params,
+                history_rows, contract, plan, params,
                 ctx.figures.terms.recorded_start,
             ),
             extra,
         ),
         has_plan=has_plan,
-        plan_vs_contract=_plan_vs_contract(scenarios, committed),
+        plan_vs_contract=_plan_vs_contract(contract, committed),
     )
 
 
@@ -429,7 +433,53 @@ def _refinance_break_even(closing_costs, monthly_savings):
     )
 
 
-def _build_refinance_comparison(current_owed, ctx, scenarios, data, params):
+class _ContractRemainder(NamedTuple):
+    """What the contract still has ahead of the loan: the refinance's current side.
+
+    Attributes:
+        interest: The interest every remaining installment pays, rounded once.
+        payoff: The due date of the installment that clears the loan, or the
+            caller's fallback when the contract bills nothing more.
+        installments: How many installments that is, counting the clearing
+            one; ``0`` when the contract bills nothing more.
+    """
+
+    interest: Decimal
+    payoff: date | None
+    installments: int
+
+
+def _contract_remainder(contract, fallback_payoff) -> _ContractRemainder:
+    """Return what the contract line still has ahead, through the installment that clears it.
+
+    The refinance calculator's current side, read off the contract line
+    (:func:`_plan_trajectory` for the interest, rounded once): the interest
+    every remaining installment pays, the due date of the one that clears the
+    loan (:func:`~app.services.balance_at.first_installment_at_most`, the ONE
+    statement of "when does this trajectory get to X"), and how many
+    installments that is, counting it.  The installments after it pay into a
+    zero balance (finding REC-539) and are not counted.
+
+    Args:
+        contract: The contract line's remaining installments
+            (:func:`~app.services.balance_at.loan_contract_installments`).
+        fallback_payoff: The payoff shown when the contract bills nothing
+            more (a loan past its term still owing): the seam's derived
+            payoff, ``None`` for a plan that never clears it.
+
+    Returns:
+        The :class:`_ContractRemainder`.
+    """
+    _, interest = _plan_trajectory(contract)
+    clearing = balance_at.first_installment_at_most(contract, Decimal("0.00"))
+    if clearing is None:
+        return _ContractRemainder(interest, fallback_payoff, 0)
+    return _ContractRemainder(
+        interest, clearing.due_date, contract.index(clearing) + 1,
+    )
+
+
+def _build_refinance_comparison(current_owed, ctx, contract, data, params):
     """Build the refinance side-by-side comparison from validated form data.
 
     Compares the current loan's CONTRACTUAL forward trajectory against a
@@ -438,21 +488,24 @@ def _build_refinance_comparison(current_owed, ctx, scenarios, data, params):
     refinance comparison must instead be like-for-like -- minimum-payment
     current vs minimum-payment refi -- because a borrower could pay the same
     extra on either loan (step 8, ``docs/design/escrow_line_identity_refactor.md``
-    Sec. 16).  So the current side reads the pure-contractual
-    ``scenarios.original_forward`` slice (extra-free; this builder is handed
-    no fold at all), while ``ctx`` supplies the current monthly P&I (the seam
-    figure) and real balance (the seam's fold, both independent of
-    plan-vs-contract).  The refinance principal defaults to the current real
-    balance + closing costs; the user may override for cash-out refinances.
-    The principal delta and its absolute magnitude are pre-computed server-side
-    (MED-04 / E-16).
+    Sec. 16).  So the current side reads the contract line (extra-free: each
+    remaining installment at its level P&I, the one replay over the loan's
+    recorded facts, plan step recurrence:R16-f), while ``ctx`` supplies the
+    current monthly P&I (the seam figure) and real balance (the seam's fold,
+    both independent of plan-vs-contract).  The refinance principal defaults
+    to the current real balance + closing costs; the user may override for
+    cash-out refinances.  The principal delta and its absolute magnitude are
+    pre-computed server-side (MED-04 / E-16).
 
-    The current side is measured FORWARD-ONLY -- ``original_forward`` is already
-    the from-today contractual remainder -- because the refinance side is
-    inherently forward-only (a brand-new loan from today): "Remaining Term" is
-    the count of payments still ahead, and "Total Interest" the interest still to
-    be paid.  Counting sunk history rows would skew the comparison against a
-    from-today refinance.
+    The current side is measured FORWARD-ONLY -- the contract line's
+    projections are its installments after the record's last event --
+    because the refinance side is inherently forward-only (a brand-new loan
+    from today): "Remaining Term" is the count of installments still ahead
+    through the one that clears the loan
+    (:func:`~app.services.balance_at.first_installment_at_most`; the ones
+    after it pay into a zero balance, finding REC-539), and "Total Interest"
+    the interest still to be paid.  Counting sunk history rows would skew the
+    comparison against a from-today refinance.
 
     Args:
         current_owed: What the loan owes today (the seam's fold), read
@@ -460,11 +513,12 @@ def _build_refinance_comparison(current_owed, ctx, scenarios, data, params):
             not each re-sample the seam.
         ctx: The :class:`~app.routes.loan._helpers._RouteLoanContext` for the
             current loan (its ``monthly_payment``, and its DERIVED
-            ``payoff_date`` as the empty-slice fallback -- which may be ``None``
-            for a retired loan or one that never clears, so the template renders
-            the absence; the plan is NOT read).
-        scenarios: The loan's :class:`loan_resolver.PayoffScenarios`; its
-            ``original_forward`` slice is the contractual current-side baseline.
+            ``payoff_date`` as the fallback when the contract bills nothing
+            more -- which may be ``None`` for a loan that never clears, so the
+            template renders the absence; the plan is NOT read).
+        contract: The contract line's remaining installments
+            (:func:`~app.services.balance_at.loan_contract_installments`), the
+            contractual current-side baseline.
         data: Validated :class:`RefinanceSchema` form data.  ``new_rate``
             is already the storage-domain fraction (schema ``@pre_load``).
         params: ORM :class:`LoanParams` instance (payment_day and accrual
@@ -488,23 +542,17 @@ def _build_refinance_comparison(current_owed, ctx, scenarios, data, params):
 
     # Forward-only CONTRACTUAL baseline: what is still ahead on the current loan
     # at the minimum payment (the like-for-like basis against a from-today
-    # refinance; see the docstring).  ``original_forward`` is already forward-only.
-    forward_rows = scenarios.original_forward
-    current_remaining_interest = round_money(sum(
-        (row.interest for row in forward_rows), Decimal("0.00"),
-    ))
+    # refinance; see the docstring), through the installment that clears it.
+    remaining = _contract_remainder(contract, ctx.payoff_date)
 
     monthly_savings = ctx.monthly_payment - refi_monthly
     principal_diff = refi_principal - current_owed
 
     return {
         "current_monthly": ctx.monthly_payment,
-        "current_total_interest": current_remaining_interest,
-        "current_payoff": (
-            forward_rows[-1].payment_date if forward_rows
-            else ctx.payoff_date
-        ),
-        "current_remaining_months": len(forward_rows),
+        "current_total_interest": remaining.interest,
+        "current_payoff": remaining.payoff,
+        "current_remaining_months": remaining.installments,
         "current_principal": current_owed,
         "refi_monthly": refi_monthly,
         "refi_total_interest": refi_total_interest,
@@ -513,10 +561,10 @@ def _build_refinance_comparison(current_owed, ctx, scenarios, data, params):
         # Term delta (new term minus current remaining), pre-computed
         # server-side so the template renders without inline arithmetic
         # (MED-04 / E-16, same rationale as principal_diff above).
-        "term_diff": refi_term - len(forward_rows),
+        "term_diff": refi_term - remaining.installments,
         "refi_principal": refi_principal,
         "monthly_savings": monthly_savings,
-        "interest_savings": current_remaining_interest - refi_total_interest,
+        "interest_savings": remaining.interest - refi_total_interest,
         "break_even_months": _refinance_break_even(closing_costs, monthly_savings),
         "closing_costs": closing_costs,
         "principal_diff": principal_diff,
@@ -535,9 +583,9 @@ def refinance_calculate(account_id):
     comparison partial with monthly savings, interest savings, and
     break-even calculation.
 
-    The "current" baseline is deliberately contractual
-    (``scenarios.original_forward``), NOT the plan-aware committed schedule the
-    resolver seam now produces (step 8, Sec. 16): a refinance is a like-for-like
+    The "current" baseline is deliberately contractual (the contract line,
+    :func:`~app.services.balance_at.loan_contract_installments`), NOT the
+    owner's plan (step 8, Sec. 16): a refinance is a like-for-like
     minimum-vs-minimum comparison, since any standing extra could be paid on
     either loan.  See :func:`_build_refinance_comparison`.
 
@@ -581,16 +629,13 @@ def refinance_calculate(account_id):
 
     # Contractual current-side baseline (step 8 / Sec. 16): a like-for-like
     # comparison holds any standing extra constant on both sides, so the current
-    # side reads the pure-contractual ``original_forward`` slice -- NOT the
-    # owner's plan -- against a from-today minimum-payment refi.  The seam's
-    # confirmed view (the fold, plan step E1d-b) seeds it from the real owed
-    # balance the loan card shows.
-    scenarios = build_baseline_scenarios(
-        _loan_inputs(params, ctx.loan), account, ctx.balance_ctx,
-    )
-
+    # side reads the contract line -- NOT the owner's plan -- against a
+    # from-today minimum-payment refi.  It replays the same recorded facts the
+    # loan card's balance folds, so it starts from the real owed balance.
     comparison = _build_refinance_comparison(
-        current_owed, ctx, scenarios, data, params,
+        current_owed, ctx,
+        balance_at.loan_contract_installments(account, ctx.balance_ctx),
+        data, params,
     )
     return render_template(
         "loan/_refinance_results.html",

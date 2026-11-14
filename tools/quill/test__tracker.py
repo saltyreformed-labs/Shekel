@@ -38,6 +38,7 @@ import copy
 import pytest
 
 from tools.quill import quill
+from tools.quill._board_lag import BOARD_WAIT_SECONDS, read_until
 from tools.quill._draft import Draft
 from tools.quill._fake import Sent
 from tools.quill._github import GitHub, GitHubError
@@ -50,7 +51,6 @@ from tools.quill._recorded import (
 )
 from tools.quill._state import filing_unfinished
 from tools.quill._tracker import (
-    BOARD_WAIT_SECONDS,
     Board,
     Child,
     Comment,
@@ -58,7 +58,6 @@ from tools.quill._tracker import (
     Tracker,
     TrackerError,
     card_from,
-    read_until,
 )
 from tools.quill.setup_tracker import FILING, PLAN, find_board
 
@@ -206,7 +205,7 @@ def _replay_board(tracker, order, parent):
     item = tracker.board.add(parent)
     assert tracker.board.place(item, order[0][1])
     quick = Board(tracker.github, PLAN, tracker.board_id, sleep=lambda _seconds: None)
-    assert quick.shows(item, None) is False, "second on the board is not first"
+    assert quick.shows([(item, None)]) is False, "second on the board is not first"
     assert tracker.board.place(item, None)
     tracker.board.remove(item)
     tracker.board.order()
@@ -702,7 +701,7 @@ def _status_round(tracker, sleep):
     """Every call ``recorded/status.json`` holds, in its order: the recording session ran this
     once against GitHub (``sleep`` waiting out the board), and the test replays it.  A scratch
     step filed and put on the board; the board's Status read until it shows the card holding
-    none (the board lags a write, :func:`_tracker.read_until`); its Status set to In Progress,
+    none (the board lags a write, :func:`_board_lag.read_until`); its Status set to In Progress,
     then to Done, then cleared, each read back the same way; the card taken off the board and
     closed.  The card, its item, and the read that showed each state, by that state."""
     number = tracker.create(Draft("step", f"{SCRATCH}: a card whose Status quill writes",

@@ -52,7 +52,9 @@ step's Effort too, which ``effort`` refuses to set on a split step (ruling plan#
 that fails, or exits 1 on a REPORT, pushes its last fifteen log lines (plan#1809), and ``next``
 says when sync is behind.  ``next`` hands out Urgent, then High, Medium, Low and the rest, each in
 the board's order, a step's unfinished prerequisites just ahead of it, never one On hold (rulings
-plan#1830, plan#1831, plan#1832, plan#4016; :mod:`_next`).  ``watch`` runs every minute from the
+plan#1830, plan#1831, plan#1832, plan#4016; :mod:`_next`), and ``sync`` and ``priority`` keep
+the board in those groups, the developer's order kept inside each (the regroup, rulings
+plan#4011, plan#4012, :mod:`_regroup_pass`).  ``watch`` runs every minute from the
 same clone, never beside ``sync`` (``shekel-plan-watch.timer``): the same producer over each card
 whose branch moved since its last pass, so the board shows a push within a minute (rulings
 plan#1871, plan#1874, :mod:`_watch`).  ``answer`` answers the developer's comments on a card, and
@@ -131,7 +133,6 @@ failure cut short.
 from __future__ import annotations
 
 import argparse
-import difflib
 import sys
 from collections.abc import Callable
 from datetime import UTC, datetime
@@ -150,6 +151,7 @@ from tools.quill import (
     _git,
     _notes,
     _pr,
+    _regroup_pass,
     _relabel,
     _status,
     _sync,
@@ -174,6 +176,7 @@ from tools.quill._filing import cmd_file
 from tools.quill._github import CredentialsError, GitHubError
 from tools.quill._next import next_step, unranked_lines
 from tools.quill._show import cmd_show
+from tools.quill._spec_history import cmd_spec_history, cmd_spec_revert
 from tools.quill._state import (
     STALE_CLAIM,
     SyncPlan,
@@ -783,7 +786,10 @@ def cmd_sync(args, tracker: Tracker, root: Path) -> int:
     of the plan, so a failed write in one costs nothing above it; run again, it makes the
     writes still owed.  Last, file a card for each pull request or issue the weekly update
     told a wait on while no card for it is open, and put each later wait told there on that
-    card (rulings plan#3619, plan#3620, plan#3722, :func:`_waits.file_waits`).
+    card (rulings plan#3619, plan#3620, plan#3722, :func:`_waits.file_waits`); and move each
+    card the board holds out of its Priority's group back into it, over the cards it read (the
+    regroup, rulings plan#4011, plan#4012, :func:`_regroup_pass.sync_pass`), where a Priority
+    set on the web is seen.
 
     Prints a REPORT for each thing a person must fix in the tracker, which makes
     it exit 1, and a HISTORY line for each thing ``dev`` and ``main`` already hold
@@ -806,74 +812,8 @@ def cmd_sync(args, tracker: Tracker, root: Path) -> int:
     for line in (shown := _status.sync_statuses(tracker, decided.cards, reads, args.dry_run)):
         print(f"REPORT: {line}")
     waits = _waits.file_waits(tracker, args.dry_run)
+    _regroup_pass.sync_pass(tracker, decided.cards, changes, args.dry_run)
     return 1 if changes.reports or reports or shown or waits else 0
-
-
-# -- spec-history, spec-revert ------------------------------------------------------
-
-def _since(root: Path, text: str) -> datetime:
-    """``--since``: an ISO date or time, or a branch (when its work started,
-    :func:`_git.started`)."""
-    try:
-        when = datetime.fromisoformat(text)
-    except ValueError:
-        when = datetime.fromisoformat(_git.started(root, text))
-    return when if when.tzinfo else when.replace(tzinfo=UTC)
-
-
-def _diff(before: str, after: str, label: str) -> str:
-    """A unified diff of two bodies."""
-    return "".join(difflib.unified_diff(
-        before.splitlines(keepends=True), after.splitlines(keepends=True),
-        "before", label, lineterm="\n",
-    ))
-
-
-def cmd_spec_history(args, tracker: Tracker, root: Path) -> int:
-    """Every saved change to a card's body in a window, for the review R-BAL174 requires."""
-    _one(tracker, args.card)
-    _, versions = tracker.edits(args.card)
-    since = _since(root, args.since) if args.since else None
-    shown = 0
-    for index, version in enumerate(versions):
-        if since and datetime.fromisoformat(version.edited_at) < since:
-            continue
-        before = versions[index - 1].body if index else ""
-        what = "filed" if index == 0 else f"edit {version.edit_id}"
-        print(f"== {what}, {version.edited_at} by {version.editor}")
-        print(_diff(before, version.body, version.edited_at) or "(no change to the text)")
-        shown += 1
-    if not shown:
-        last = versions[-1]
-        print(f"plan#{args.card}'s body has not changed since {args.since} (last saved "
-              f"{last.edited_at} by {last.editor})")
-    return 0
-
-
-def cmd_spec_revert(args, tracker: Tracker, _root: Path) -> int:
-    """Restore a card's body to an earlier saved version, by hand.
-
-    The body is read again just before the write, and the write is refused if
-    it changed since the history was read: the diff printed is then still the
-    change made.  (GitHub offers no conditional issue write, so a change in the
-    instant between that read and the write is not seen.)
-    """
-    _one(tracker, args.card)
-    body, versions = tracker.edits(args.card)
-    chosen = [version for version in versions if version.edit_id == args.to]
-    if not chosen:
-        raise Refused(f"plan#{args.card} has no saved version {args.to!r}; "
-                      f"`quill spec-history plan#{args.card}` lists them")
-    if chosen[0].body == body:
-        raise Refused(f"plan#{args.card}'s body already is that version")
-    print(_diff(body, chosen[0].body, f"version {args.to}"))
-    if tracker.body(args.card) != body:
-        raise Refused(f"plan#{args.card} changed while its history was read; nothing was "
-                      "written: run it again")
-    tracker.set_body(args.card, chosen[0].body)
-    print(f"restored plan#{args.card}'s body to the version saved {chosen[0].edited_at} "
-          f"by {chosen[0].editor}")
-    return 0
 
 
 # -- the command line -----------------------------------------------------------------

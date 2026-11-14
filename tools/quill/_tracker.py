@@ -18,7 +18,9 @@ claim is the code repository's branch ``card/N``, read and written by ``_git``.
 - The board's order is ``items(orderBy: {field: POSITION})``, and it LAGS a
   write (L1 measured 7 of 9 just-added cards listed, all 9 about 20 seconds
   later), so a write that places a card reads the board back until it shows
-  the card where it was put (:data:`BOARD_WAIT_SECONDS`).
+  the card where it was put (:mod:`_board_lag`).  Moves sent back to back land
+  as sent (measured 2026-11-14, ``_regroup_pass``), so a pass of several reads
+  back once, after the last (:meth:`Board.move`).
 - GitHub silently drops an issue's ``type`` when the writer lacks push access,
   so every write that sets one reads it back.
 - The listings of open cards and of marked cards (the :data:`setup_tracker.FILING`
@@ -57,7 +59,7 @@ reader that reads each card with its board item, a :class:`Card`.
 from __future__ import annotations
 
 import time
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from functools import partial
 from typing import overload
@@ -65,6 +67,7 @@ from urllib.parse import quote
 
 from tools.quill import _arcs, _queries
 from tools.quill._arcs import ARC_FIELD, ArcCard, arc_answered, arc_of, labels_and_values
+from tools.quill._board_lag import read_until
 from tools.quill._draft import Draft
 from tools.quill._fields import FIELDS, answered_value, value_of
 from tools.quill._filed import filed_labels, filed_values
@@ -94,12 +97,6 @@ from tools.quill.setup_tracker import (
     linked,
 )
 
-#: How long a write waits for the board to show what it placed: three times
-#: the ~20 seconds L1 measured, so a slow read is waited out and a stuck one
-#: is reported rather than waited on forever.
-BOARD_WAIT_SECONDS = 60
-#: How often a board that lags a write is read again.
-POLL_SECONDS = 5
 #: How many cards one read by number asks for (:meth:`CardReader._lookup`), inside GitHub's
 #: limit of about ten seconds a request.  Measured 2026-10-26 15:27-15:33 on the tracker,
 #: the slowest batch in each of three rounds: of 50 cards, 1.8-2.5 s; of 25, 1.4 s.
@@ -380,22 +377,6 @@ def board_of(github: GitHub, place: Place) -> str:
     return board_id
 
 
-def read_until[T](read: Callable[[], list[T]], holds: Callable[[list[T]], bool],
-                  sleep: Callable[[float], None]) -> tuple[list[T], bool]:
-    """Read the board (``read``, :meth:`Board.held`) every :data:`POLL_SECONDS` until a read
-    of it ``holds``, for at most :data:`BOARD_WAIT_SECONDS`: the board's lag waited out in
-    one place.  The last read, and whether it holds."""
-    waited = 0
-    while True:
-        order = read()
-        if holds(order):
-            return order, True
-        if waited >= BOARD_WAIT_SECONDS:
-            return order, False
-        sleep(POLL_SECONDS)
-        waited += POLL_SECONDS
-
-
 def in_order(held: Iterable[tuple[int, str, str | None]]) -> list[tuple[int, str]]:
     """The developer's drag order (R-BAL177) of what a board holds (:meth:`Board.held`), its
     steps and questions alone (:data:`setup_tracker.IN_ORDER`): ``(card number, board item
@@ -471,27 +452,30 @@ class Board:
         """Take a card off the board (the card itself is untouched)."""
         self._write(BOARD_REMOVE, i=item)
 
-    def place(self, item: str, after: str | None) -> bool:
-        """Move a board item to just after ``after`` (the top when None); whether the
-        board shows it there within :data:`BOARD_WAIT_SECONDS`."""
+    def move(self, item: str, after: str | None) -> None:
+        """Move a board item to just after ``after`` (the top when None), not read back: moves
+        sent back to back land as sent, so a caller sending several reads the board back once,
+        after the last (:meth:`shows`; measured 2026-11-14, ``_regroup_pass``)."""
         if after is None:
             self._write(BOARD_TOP, i=item)
         else:
             self._write(BOARD_AFTER, i=item, a=after)
-        return self.shows(item, after)
 
-    def shows(self, item: str, after: str | None) -> bool:
-        """Read the board until ``item`` sits right after ``after`` (first when None),
-        for at most :data:`BOARD_WAIT_SECONDS` (:func:`read_until`).  It reads every item's
-        position (:meth:`held`), not the order: a move is a write of positions, which it
-        makes whatever the item's type."""
-        def placed(positions: list[tuple[int, str, str | None]]) -> bool:
+    def place(self, item: str, after: str | None) -> bool:
+        """:meth:`move` a board item, then whether the board shows it there (:meth:`shows`)."""
+        self.move(item, after)
+        return self.shows([(item, after)])
+
+    def shows(self, placed: Sequence[tuple[str, str | None]]) -> bool:
+        """Read the board until each item of ``placed`` sits right after the item paired with
+        it (first when None), for at most ``_board_lag.BOARD_WAIT_SECONDS`` (:func:`read_until`).
+        It reads every item's position (:meth:`held`), not the order: a move is a write of
+        positions, which it makes whatever the item's type."""
+        def holds(positions: list[tuple[int, str, str | None]]) -> bool:
             items = [item_id for _, item_id, _ in positions]
-            if item not in items:
-                return False
-            index = items.index(item)
-            return (after is None and index == 0) or bool(index and items[index - 1] == after)
-        return read_until(self.held, placed, self._sleep)[1]
+            before = dict(zip(items, [None, *items]))
+            return all(item in before and before[item] == after for item, after in placed)
+        return read_until(self.held, holds, self._sleep)[1]
 
 
 class CardReader:

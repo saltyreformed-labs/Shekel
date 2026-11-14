@@ -100,12 +100,28 @@ class FakeBoard:
     def place(self, item, after):
         """Move an item to just after ``after`` (the top when None); whether the board
         shows it there (not while :attr:`lagging`)."""
+        self._put(item, after, "board_place")
+        return not self.lagging
+
+    def move(self, item, after):
+        """Move an item to just after ``after`` (the top when None), not read back, as
+        :meth:`_tracker.Board.move` sends one of several back to back; logged apart from
+        :meth:`place`, which reads one back."""
+        self._put(item, after, "board_move")
+
+    def shows(self, placed):
+        """Whether the board shows each item of ``placed`` where it was put: at once, as it
+        shows a placement, unless :attr:`lagging`."""
+        assert placed, "a read back of no placement"
+        return not self.lagging
+
+    def _put(self, item, after, write):
+        """Move an item to just after ``after`` (the top when None), logged as ``write``."""
         number = int(item.removeprefix("PVTI_"))
-        self.writes.append(("board_place", number, after))
+        self.writes.append((write, number, after))
         self.items.remove(number)
         index = 0 if after is None else self.items.index(int(after.removeprefix("PVTI_"))) + 1
         self.items.insert(index, number)
-        return not self.lagging
 
     def statuses(self):
         """The Status field and every card on the board with the Status it holds."""

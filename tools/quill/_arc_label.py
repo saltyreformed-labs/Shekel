@@ -9,7 +9,9 @@ sync``'s pass would at its next run (:mod:`_relabel`).  ``label`` adds or remove
 :data:`setup_tracker.CHOSEN_LABELS`: never an arc label, which displays the Arc, nor quill's
 filing mark.  ``priority`` and ``effort`` set a card's Priority or Effort to one of its
 options (``setup_tracker.ISSUE_FIELDS``), or clear it, one function writing either
-(:func:`cmd_field`), a Priority's set taking back quill's pending suggestion of one.  Each
+(:func:`cmd_field`), a Priority's set taking back quill's pending suggestion of one, and
+``priority`` then moving each card the board holds out of its Priority's group back into it
+(the regroup, ruling plan#4012, :mod:`_regroup_pass`).  Each
 writes only what differs, each write printed as it lands, so the same command run again
 finishes one a failure cut short.  Each works on a ruling, whose title
 and text alone are the developer's words (R-BAL220), and on a closed card, and refuses a card
@@ -35,6 +37,7 @@ from tools.quill._command import _label, _one, card_number, with_closure
 from tools.quill._exits import Refused
 from tools.quill._fields import EFFORT, EFFORT_FIELD, FIELDS, PRIORITY, PRIORITY_FIELD
 from tools.quill._next import is_piece, ranked
+from tools.quill._regroup_pass import priority_pass
 from tools.quill._state import (
     at_and_above,
     filing_unfinished,
@@ -174,7 +177,9 @@ def cmd_field(args, tracker: Tracker, root: Path) -> int:
     on a step split into smaller steps (:func:`_split_refusal`), whose clear is still taken,
     and a Priority's clear that would leave a piece of a split step unranked
     (:func:`_unranked_refusal`, ruling plan#3304).
-    Written only when it differs from what the card holds.
+    Written only when it differs from what the card holds.  Then, for a Priority, written or
+    not, the regroup's pass over the board (:func:`_regroup_pass.priority_pass`, ruling
+    plan#4012), so the same command run again finishes one a failure cut short.
 
     A Priority's set takes back quill's pending suggestion of one first
     (:func:`_suggestion.take_back`, plan#2798): GitHub's API leaves it pending beside the value
@@ -205,13 +210,15 @@ def cmd_field(args, tracker: Tracker, root: Path) -> int:
     if held == value:
         holds = f"no {field}" if value is None else f"the {field} {value!r}"
         print(f"{_label(card)} holds {holds} already: not written")
-        return 0
-    tracker.set_field(card.number, field, value)
-    if value is None:
-        print(f"cleared {_label(card)}'s {field}, which was {held!r}")
     else:
-        print(f"set {_label(card)}'s {field} to {value!r}"
-              + ("" if held is None else f", which was {held!r}"))
+        tracker.set_field(card.number, field, value)
+        if value is None:
+            print(f"cleared {_label(card)}'s {field}, which was {held!r}")
+        else:
+            print(f"set {_label(card)}'s {field} to {value!r}"
+                  + ("" if held is None else f", which was {held!r}"))
+    if part == PRIORITY:
+        priority_pass(tracker, card, value)
     return 0
 
 

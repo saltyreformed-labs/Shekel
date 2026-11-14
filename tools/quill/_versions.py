@@ -45,7 +45,7 @@ and only in the files that pin versions (:func:`pins_versions`):
   (``name:<version><variant>@sha256:<digest>``): only the tag's version and the digest
   move, the image's name, the tag's variant (``-alpine``) and the rest of the line as they
   were.  A tag may spell its version after a ``v`` (``anchore/grype:v0.121.2-nonroot``, the
-  weekly scan's, ruling plan#3704), which is part of the line and no part of the version, as
+  daily scan's, ruling plan#3704), which is part of the line and no part of the version, as
   a ``uses:`` line's release is read: the major is read from the digits, and a move that
   adds or drops the ``v`` moves more than the version.  **An image's version is read from
   its tag alone** (ruling plan#2474): Docker pulls

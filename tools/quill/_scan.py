@@ -1,5 +1,7 @@
 """``quill scan``: the daily scan of the image production is running, from this host (rulings
-plan#3785, plan#3786, plan#3820, plan#3822, plan#3825).  :func:`tools.update.scan.scanned`
+plan#3785, plan#3786, plan#3820, plan#3822, plan#3825), which ``shekel-image-scan.timer`` runs
+from ``quill sync``'s own clone at dev's tip (its units' sources in ``/opt/docker/scripts``,
+ruling plan#3963).  :func:`tools.update.scan.scanned`
 reads production's image, scans it and judges it; this door says what it found, and files it
 into the private tracker by the pass ``quill sync`` files the weekly update's waits by
 (:func:`_waits.file_told`), so a card holds what the scan found as one holds what the update

@@ -56,9 +56,10 @@ unfinished prerequisites just ahead of it, never one On hold (rulings plan#1830,
 plan#1832; :mod:`_next`).  ``watch`` runs every minute from the same clone, never beside
 ``sync`` (``shekel-plan-watch.timer``): the same producer over each card whose branch moved
 since its last pass, so the board shows a push within a minute (rulings plan#1871, plan#1874,
-:mod:`_watch`).  ``scan`` scans the image production is running, daily from this host, says
-what it found, and files a card for each component it finds a CVE in and for its failure
-(rulings plan#3787, plan#3788, plan#3820, plan#3825, :mod:`_scan`).  ``answer`` answers the
+:mod:`_watch`).  ``scan`` scans the image production is running, daily from the same clone
+(``shekel-image-scan.timer``, ruling plan#3963), says what it found, and files a card for each
+component it finds a CVE in and for its failure (rulings plan#3787, plan#3788, plan#3820,
+plan#3825, :mod:`_scan`).  ``answer`` answers the
 developer's comments on a card, and ``next`` names each claimed card, and each task under
 one, holding one no answer has followed (plan#1822, ruling plan#1924, :mod:`_comments`).
 ``note`` posts a stop's note on the task a claimed card's next session starts and prints its

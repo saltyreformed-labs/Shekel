@@ -393,7 +393,7 @@ def test_a_compose_image_line_moves_its_tag_and_digest(repo):
         (Move("postgres", "18", "18.7", False),), (Move("postgres", "18", "19", True),))
 
 
-#: A compose file pinning Grype as the weekly scan's does, its tag spelling the version after
+#: A compose file pinning Grype as the daily scan's does, its tag spelling the version after
 #: a ``v`` (ruling plan#3704).
 _SCAN = (f"services:\n  scan:\n    image: anchore/grype:v0.121.2-nonroot@sha256:{_OLD}\n"
          "    read_only: true\n")

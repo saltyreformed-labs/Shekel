@@ -44,7 +44,8 @@ from ._helpers import (
     _salary_template,
     _template_row,
     _legs_of,
-    _generated_transfer,
+    _priced_transfer_template,
+    _template_transfer,
     _loan_payment,
     _declare_loan_payment_derived,
 )
@@ -233,9 +234,8 @@ class TestWhatEachRuleAnswers:
         savings = create_savings_account(
             seed_user, db.session, "Money Market", Decimal("5000.00"),
         )
-        xfer, _ = _generated_transfer(
-            seed_user, seed_periods[_PAYCHECK_UNDER_OLD_PRICE], savings,
-        )
+        template = _priced_transfer_template(seed_user, savings)
+        xfer = _template_transfer(seed_periods[_PAYCHECK_UNDER_OLD_PRICE], template)
         expense_leg, _income_leg = _legs_of(xfer)
         assert xfer.amount is None
         assert amounts_by_key([expense_leg], _basis_for(seed_user)) == {
@@ -262,9 +262,8 @@ class TestWhatEachRuleAnswers:
         savings = create_savings_account(
             seed_user, db.session, "Money Market", Decimal("5000.00"),
         )
-        xfer, _ = _generated_transfer(
-            seed_user, seed_periods[_PAYCHECK_UNDER_OLD_PRICE], savings,
-        )
+        template = _priced_transfer_template(seed_user, savings)
+        xfer = _template_transfer(seed_periods[_PAYCHECK_UNDER_OLD_PRICE], template)
         assert amounts_by_key(_legs_of(xfer), _basis_for(seed_user)) == {
             (xfer.id, seed_user["account"].id): _OLD_PRICE,
             (xfer.id, savings.id): _OLD_PRICE,
@@ -322,9 +321,8 @@ class TestTheTransferRule:
         savings = create_savings_account(
             seed_user, db.session, "Money Market", Decimal("5000.00"),
         )
-        xfer, _ = _generated_transfer(
-            seed_user, seed_periods[_PAYCHECK_UNDER_OLD_PRICE], savings,
-        )
+        template = _priced_transfer_template(seed_user, savings)
+        xfer = _template_transfer(seed_periods[_PAYCHECK_UNDER_OLD_PRICE], template)
         assert xfer.amount is None
         assert resolve_transfer_amount(xfer, _basis_for(seed_user)) == _OLD_PRICE
 
@@ -350,9 +348,11 @@ class TestTheTransferRule:
         savings = create_savings_account(
             seed_user, db.session, "Money Market", Decimal("5000.00"),
         )
-        xfer, _ = _generated_transfer(
-            seed_user, seed_periods[_PAYCHECK_STRADDLING_THE_PRICE_FALL], savings,
-            cadence=MONTHLY, fires_on_day=1,
+        template = _priced_transfer_template(
+            seed_user, savings, cadence=MONTHLY, fires_on_day=1,
+        )
+        xfer = _template_transfer(
+            seed_periods[_PAYCHECK_STRADDLING_THE_PRICE_FALL], template,
         )
         assert xfer.pay_period.start_date < _PRICE_FELL_ON <= xfer.due_date
         assert resolve_transfer_amount(xfer, _basis_for(seed_user)) == _NEW_PRICE
@@ -371,9 +371,9 @@ class TestTheTransferRule:
         savings = create_savings_account(
             seed_user, db.session, "Money Market", Decimal("5000.00"),
         )
-        xfer, template = _generated_transfer(
-            seed_user, seed_periods[_PAYCHECK_UNDER_OLD_PRICE], savings,
-            owns=True,
+        template = _priced_transfer_template(seed_user, savings)
+        xfer = _template_transfer(
+            seed_periods[_PAYCHECK_UNDER_OLD_PRICE], template, owns=True,
         )
         assert template_amount_service.amount_as_of(
             template, _DUE_UNDER_OLD_PRICE,
@@ -397,9 +397,8 @@ class TestTheTransferRule:
         savings = create_savings_account(
             seed_user, db.session, "Money Market", Decimal("5000.00"),
         )
-        xfer, _ = _generated_transfer(
-            seed_user, seed_periods[_PAYCHECK_UNDER_OLD_PRICE], savings,
-        )
+        template = _priced_transfer_template(seed_user, savings)
+        xfer = _template_transfer(seed_periods[_PAYCHECK_UNDER_OLD_PRICE], template)
         xfer.status_id = ref_cache.status_id(status)
         db.session.flush()
         assert resolve_transfer_amount(xfer, _basis_for(seed_user)) == _OLD_PRICE
@@ -560,9 +559,8 @@ class TestTheDefinitionPriceIsTheRowsOwnRule:
         savings = create_savings_account(
             seed_user, db.session, "Money Market", Decimal("5000.00"),
         )
-        xfer, _template = _generated_transfer(
-            seed_user, seed_periods[_PAYCHECK_UNDER_OLD_PRICE], savings,
-        )
+        template = _priced_transfer_template(seed_user, savings)
+        xfer = _template_transfer(seed_periods[_PAYCHECK_UNDER_OLD_PRICE], template)
         basis = _basis_for(seed_user)
         row = _row_of(xfer)
 

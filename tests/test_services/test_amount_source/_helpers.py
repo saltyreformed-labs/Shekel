@@ -61,9 +61,10 @@ _DUE_UNDER_OLD_PRICE = date(2026, 2, 14)
 # row older than the series needs a paycheck before 2026-01-01, which that
 # calendar does not hold -- its one case rebuilds the calendar to open in
 # 2025.  A TRANSFER's date is the engine's too since plan step balance:X-ch
-# (the twin builder :func:`_generated_transfer`), so the same two paychecks
-# select a transfer's price; ``_DUE_UNDER_OLD_PRICE`` is what one case asks
-# the DEFINITION's series directly with.
+# (the twin builders :func:`_priced_transfer_template` and
+# :func:`_template_transfer`), so the same two paychecks select a transfer's
+# price; ``_DUE_UNDER_OLD_PRICE`` is what one case asks the DEFINITION's
+# series directly with.
 #
 # **Under the every-paycheck cadence a row's due date IS its paycheck's
 # start**, so a case whose subject is "the due date, not the period start"
@@ -225,35 +226,16 @@ def _legs_of(xfer):
     ]
 
 
-def _generated_transfer(
-    seed_user, period, to_account, *,
-    owns=False, cadence=EVERY_PERIOD, fires_on_day=None,
+def _priced_transfer_template(
+    seed_user, to_account, *, cadence=EVERY_PERIOD, fires_on_day=None,
 ):
-    """The ENGINE's transfer, in *period*, of a template whose series states TWO prices.
+    """A transfer template, checking to *to_account*, whose series states two prices.
 
-    The twin of :func:`_template_row` (plan step balance:X-ch): DERIVED,
-    parent and both legs -- the parent names its definition and each leg
-    names the parent, the state plan step X-au-f puts every generated
-    transfer in -- so their amount columns are EMPTY and a resolver reading
-    any of the three answers ``None`` against an asserted ``Decimal``.  It is
-    dated by the engine: on the paycheck's start under the every-paycheck
-    *cadence* it carries by default, so WHICH paycheck selects the price
-    (``_PAYCHECK_UNDER_OLD_PRICE`` opens before ``_PRICE_FELL_ON`` and takes
-    the first; a paycheck opening on or after that day takes the later), or on
-    the day a MONTHLY *cadence* names inside the paycheck, for the one case
-    whose subject is the date being the row's OWN and not its period's.  It
-    built the transfer through the ad-hoc door, dated it by hand and linked
-    it afterwards until X-ch -- date first, link second, the shape ledger
-    row BAL-488's census could not see.
-
-    Pass ``owns=True`` for the shape where a HUMAN authored the figure --
-    parent and legs all holding ``$111.11``, a figure no derived rule may
-    answer -- taken the way the transfer edit door takes it
-    (:func:`transfer_repriced_by_the_owner`), which ruling **R-IO** says
-    must keep the figure they typed.
-
-    The price is stated through ``template_amount_service.set_amount``, the
-    one write door, at the two dates the module's constants name.
+    The transfer twin of :func:`_priced_template`.  The price is stated
+    through ``template_amount_service.set_amount``, the one write door, at
+    the two dates the module's constants name.  Every-paycheck by default;
+    the one case whose subject is the transfer's OWN date against its
+    period's start states a MONTHLY *cadence* and the day.
     """
     template = TransferTemplate(
         user_id=seed_user["user"].id,
@@ -270,10 +252,34 @@ def _generated_transfer(
         template, _NEW_PRICE, effective_on=_PRICE_FELL_ON,
     )
     make_cadence_rule(template, cadence, fires_on_day=fires_on_day)
+    return template
+
+
+def _template_transfer(period, template, *, owns=False):
+    """The ENGINE's transfer of *template* in *period* (plan step balance:X-ch).
+
+    The twin of :func:`_template_row`: DERIVED -- it names its definition,
+    the state plan step X-au-f puts every generated transfer in -- so its one
+    amount column is EMPTY and a resolver reading it answers ``None`` against
+    an asserted ``Decimal``; both legs are read off it (:func:`_legs_of`).
+    It is dated by the engine: on the paycheck's start under the
+    every-paycheck cadence :func:`_priced_transfer_template` gives by default,
+    so WHICH paycheck selects the price (``_PAYCHECK_UNDER_OLD_PRICE`` opens
+    before ``_PRICE_FELL_ON`` and takes the first; a paycheck opening on or
+    after that day takes the later), or on the day a MONTHLY cadence names
+    inside the paycheck, for the one case whose subject is the date being the
+    transfer's OWN and not its period's.  It built the transfer through the
+    ad-hoc door, dated it by hand and linked it afterwards until X-ch -- date
+    first, link second, the shape ledger row BAL-488's census could not see.
+
+    Pass ``owns=True`` for the shape where a HUMAN authored the figure -- the
+    transfer holding ``$111.11``, a figure no derived rule may answer -- taken
+    the way the transfer edit door takes it
+    (:func:`transfer_repriced_by_the_owner`), which ruling **R-IO** says must
+    keep the figure they typed.
+    """
     xfer = generate_transfer_of(template, period)
-    if owns:
-        transfer_repriced_by_the_owner(xfer, Decimal("111.11"))
-    return xfer, template
+    return transfer_repriced_by_the_owner(xfer, Decimal("111.11")) if owns else xfer
 
 
 def _mortgage(seed_user, escrow_annual=Decimal("3600.00")):
@@ -358,10 +364,14 @@ def _declare_loan_payment_derived(xfer):
     transfer's shadows first, and the paragraphs below are the history of
     that loop's scope.
 
-    Separate from :func:`_generated_transfer` for two reasons.  One is ordering:
-    a test builds the payment, watches the producer price it off the stored
-    column, and only THEN declares it -- the transition the loan cutover (plan
-    step X-au-g) performs.
+    A step of its own, after the build, for one reason: ordering.  A test
+    builds the payment owning its figure (:func:`_loan_payment` with
+    ``owns=True``), asserts the figure its column stores, and only THEN
+    declares it -- the transition the loan cutover (plan step X-au-g)
+    performs.  It gave a second reason, and named the transfer builder whose
+    declaration loop it stood apart from, while that builder declared what it
+    built; the second reason is the bound the next paragraph says is twice
+    gone, and the engine's transfer is derived from birth.
 
     **It declares BOTH legs since plan step X-au-g-2c-2, and the bound that
     once stopped it is twice gone.**  It read: the loan-side income leg cannot

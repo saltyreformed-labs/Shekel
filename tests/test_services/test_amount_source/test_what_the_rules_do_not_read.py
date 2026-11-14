@@ -30,7 +30,8 @@ from ._helpers import (
     _salary_template,
     _template_row,
     _legs_of,
-    _generated_transfer,
+    _priced_transfer_template,
+    _template_transfer,
     _loan_payment,
 )
 
@@ -111,9 +112,8 @@ class TestTheRulesDoNotReadTheColumnTheyReplace:
         savings = create_savings_account(
             seed_user, db.session, "Money Market", Decimal("5000.00"),
         )
-        xfer, template = _generated_transfer(
-            seed_user, seed_periods[_PAYCHECK_UNDER_OLD_PRICE], savings,
-        )
+        template = _priced_transfer_template(seed_user, savings)
+        xfer = _template_transfer(seed_periods[_PAYCHECK_UNDER_OLD_PRICE], template)
         expense_leg, _income_leg = _legs_of(xfer)
         basis = _basis_for(seed_user)
         with db.session.no_autoflush:

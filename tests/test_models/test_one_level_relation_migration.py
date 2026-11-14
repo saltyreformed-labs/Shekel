@@ -138,7 +138,6 @@ def _seed_placed_import(account, *, file_name, stated, day, period):
     return statement, level
 
 
-@pytest.mark.xdist_group("level_relation_ddl")
 class TestTheRoundTrip:
     """Head -> down -> up, over a standing placement and a released one."""
 

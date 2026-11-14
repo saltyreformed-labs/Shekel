@@ -168,10 +168,10 @@ def without_the_schedule_key(db, with_the_pay_period_derived_columns):
     order is safe" from an argument in a docstring into something this suite
     measures.
 
-    **It restores nothing, deliberately.**  The ``db`` fixture drops and
-    re-clones the per-worker database for EVERY test (``setup_drop_db`` ->
-    ``setup_clone_template``), so a schema left short of head cannot reach the
-    next test.  The round trip is worth asserting on its own terms rather than
+    **It restores nothing, deliberately.**  The ``db`` fixture clones the
+    per-worker database for EVERY test and drops it when the test ends
+    (``setup_clone_template``, then ``teardown``), so a schema left short of
+    head cannot reach the next test.  The round trip is worth asserting on its own terms rather than
     hiding in a teardown, and it is:
     ``tests/test_models/test_c4b2_pay_period_schedule_key.py`` runs
     ``downgrade`` then ``upgrade`` and checks the key comes back.
@@ -192,7 +192,7 @@ def _profile(db, seed_user, name="R-F16"):
     )
     db.session.add(profile)
     db.session.flush()
-    start_test_pay_list(profile, Decimal("3525.96"))  # $91,675.00 a year / 26
+    start_test_pay_list(profile, Decimal("3019.23"))  # $78,500.00 a year / 26, made up
     return profile
 
 

@@ -3,14 +3,16 @@
 Rulings **R-SAL59** (the stored fact is what one paycheck pays from a dated
 payday on) and **R-SAL61** ("'Fix' edits one": an entry's amount, its payday,
 or both).  Every POST here is what the page RENDERS, read off the page by
-:class:`_FormReader` -- a hand-written payload is written by the same author
-as the template and agrees with it about a mistake as readily as about the
-truth.  Every figure is made up.
+the shared :func:`tests._form_controls.rendered_form_controls` (this file's
+own reader until plan step salary:X-av-3b, finding SAL-593) -- a hand-written
+payload is written by the same author as the template and agrees with it
+about a mistake as readily as about the truth.  Every figure is made up.
 
 * create: the form's pay a paycheck and its payday become the first entry;
 * Fix: the amount, the payday, both; a payday that is not one, or that another
   entry holds, is refused and nothing moves; an unchanged payday is not asked
-  again (R-SAL53's shape); a stale form is refused;
+  again (R-SAL53's shape); a stale form is refused; a Fix racing another onto
+  one payday is reported, never a 500, in the held-payday refusal's words;
 * ownership: another owner's entry is a 404, paired with the owner's own POST
   to the same URL shape resolving, so the 404 is the gate's and not the URL
   map's;
@@ -27,15 +29,20 @@ next.
 
 from datetime import date, timedelta
 from decimal import Decimal
-from html.parser import HTMLParser
+from unittest.mock import patch
 
 import pytest
+import sqlalchemy
 
+from app import ref_cache
+from app.enums import RaiseTypeEnum
 from app.extensions import db
 from app.models.ref import FilingStatus
 from app.models.salary_pay_entry import SalaryPayEntry
 from app.models.salary_profile import SalaryProfile
-from app.services import pay_era_write
+from app.models.salary_raise import SalaryRaise
+from app.services import pay_era_write, pay_list_service
+from tests._salary_forms import create_through_the_form, rendered_page_form
 from tests._stub_period import stub_period_on
 from tests._test_helpers import era_of, freeze_today, start_test_pay_list
 
@@ -46,79 +53,6 @@ def _freeze_today(monkeypatch):
     freeze_today(monkeypatch, date(2026, 3, 20))
 
 
-class _FormReader(HTMLParser):
-    """Collect the controls of the ONE form whose ``action`` is *action*, at their rendered values.
-
-    An ``<input>`` submits its ``value``; a ``<select>`` submits the option
-    carrying ``selected``, else its first.  A page carries several forms and a
-    browser posts one, so only the named form's controls are kept.
-    """
-
-    def __init__(self, action):
-        super().__init__()
-        self.action = action
-        self.controls = {}
-        self.found = False
-        self._inside = False
-        self._select = None
-        self._first = None
-
-    def handle_starttag(self, tag, attrs):
-        """Open the form, record an input, or open a select and read its options."""
-        attributes = dict(attrs)
-        if tag == "form":
-            self._inside = attributes.get("action") == self.action
-            self.found = self.found or self._inside
-            return
-        if not self._inside:
-            return
-        name = attributes.get("name")
-        if tag == "input" and name:
-            self.controls[name] = attributes.get("value", "")
-        elif tag == "select" and name:
-            self._select, self._first = name, None
-        elif tag == "option" and self._select is not None:
-            value = attributes.get("value", "")
-            if self._first is None:
-                self._first = value
-            if "selected" in attributes:
-                self.controls[self._select] = value
-
-    def handle_endtag(self, tag):
-        """Close a select (defaulting to its first option) or the form."""
-        if tag == "select" and self._select is not None:
-            self.controls.setdefault(self._select, self._first or "")
-            self._select = None
-        elif tag == "form":
-            self._inside = False
-
-
-def _rendered_form(client, page, action):
-    """Return the controls the form posting to *action* on *page* submits."""
-    response = client.get(page)
-    assert response.status_code == 200
-    reader = _FormReader(action)
-    reader.feed(response.get_data(as_text=True))
-    assert reader.found, f"{page} renders no form posting to {action}"
-    return reader.controls
-
-
-def _create_through_the_form(client, seed_user, pay, payday):
-    """POST the create form as ``salary/form.html`` renders it, typing *pay* and *payday*."""
-    controls = _rendered_form(client, "/salary/new", "/salary")
-    # The owner types the name and pay and PICKS the state: the form opens on
-    # "Choose your state" and chooses none (plan step salary:X-at-3).
-    controls.update({
-        "name": "Day Job", "pay_amount": pay, "pay_payday": payday,
-        "state_code": "NC", **stub_period_on(payday),
-    })
-    response = client.post("/salary", data=controls)
-    assert response.status_code == 302, response.get_data(as_text=True)
-    return db.session.query(SalaryProfile).filter_by(
-        user_id=seed_user["user"].id, name="Day Job",
-    ).one()
-
-
 def _fix_url(entry):
     """The Fix door's URL for *entry*."""
     return f"/salary/pay/{entry.id}/fix"
@@ -126,7 +60,7 @@ def _fix_url(entry):
 
 def _fix_form(client, entry):
     """The Fix form of *entry* as the salary page renders it."""
-    return _rendered_form(
+    return rendered_page_form(
         client, f"/salary/{entry.salary_profile_id}/edit", _fix_url(entry),
     )
 
@@ -146,7 +80,7 @@ class TestCreateByPayPerPaycheck:
     ):
         """``$2,000.00`` from 2026-01-16's payday: one entry, exactly that."""
         with app.app_context():
-            profile = _create_through_the_form(
+            profile = create_through_the_form(
                 auth_client, seed_user, "2000.00", seed_periods[1].start_date.isoformat(),
             )
             assert [
@@ -164,9 +98,9 @@ class TestCreateByPayPerPaycheck:
         again on top.
         """
         with app.app_context():
-            controls = _rendered_form(auth_client, "/salary/new", "/salary")
+            controls = rendered_page_form(auth_client, "/salary/new", "/salary")
             assert date(2026, 3, 13) in {period.start_date for period in seed_periods}
-            assert controls["pay_payday"] == "2026-03-13"
+            assert controls["pay_payday"] == ["2026-03-13"]
             assert "pay_amount" in controls
 
     def test_a_day_that_is_not_a_payday_creates_nothing(
@@ -174,7 +108,7 @@ class TestCreateByPayPerPaycheck:
     ):
         """2026-01-03 is the day after a payday: refused with the stub door's words."""
         with app.app_context():
-            controls = _rendered_form(auth_client, "/salary/new", "/salary")
+            controls = rendered_page_form(auth_client, "/salary/new", "/salary")
             controls.update({
                 "name": "Day Job", "pay_amount": "2000.00",
                 "pay_payday": "2026-01-03", "state_code": "NC",
@@ -208,7 +142,7 @@ class TestUpToTheNextPayday:
     ):
         """04-10 has not been paid yet on 03-20: the pay doors' words; no profile."""
         with app.app_context():
-            controls = _rendered_form(auth_client, "/salary/new", "/salary")
+            controls = rendered_page_form(auth_client, "/salary/new", "/salary")
             controls.update({
                 "name": "Day Job", "pay_amount": "2000.00",
                 "pay_payday": "2026-04-10", "state_code": "NC",
@@ -229,7 +163,7 @@ class TestUpToTheNextPayday:
     ):
         """03-27 is the next payday: the first entry is written on it."""
         with app.app_context():
-            profile = _create_through_the_form(
+            profile = create_through_the_form(
                 auth_client, seed_user, "2000.00", "2026-03-27",
             )
             assert [entry.payday for entry in profile.pay_entries] == [
@@ -241,7 +175,7 @@ class TestUpToTheNextPayday:
     ):
         """A Fix to 04-10 on 03-20 is refused; the entry is untouched."""
         with app.app_context():
-            profile = _create_through_the_form(
+            profile = create_through_the_form(
                 auth_client, seed_user, "2000.00", seed_periods[0].start_date.isoformat(),
             )
             entry = profile.pay_entries[0]
@@ -264,7 +198,7 @@ class TestFix:
     def test_fix_the_amount(self, app, auth_client, seed_user, seed_periods):
         """``$2,000.00`` -> ``$2,070.00``; the page shows the new yearly ``$53,820.00`` (x 26)."""
         with app.app_context():
-            profile = _create_through_the_form(
+            profile = create_through_the_form(
                 auth_client, seed_user, "2000.00", seed_periods[0].start_date.isoformat(),
             )
             entry = profile.pay_entries[0]
@@ -283,7 +217,7 @@ class TestFix:
     def test_fix_the_payday(self, app, auth_client, seed_user, seed_periods):
         """Moved to the third payday: the amount stays, the day moves."""
         with app.app_context():
-            profile = _create_through_the_form(
+            profile = create_through_the_form(
                 auth_client, seed_user, "2000.00", seed_periods[0].start_date.isoformat(),
             )
             entry = profile.pay_entries[0]
@@ -301,7 +235,7 @@ class TestFix:
     ):
         """2026-01-03: the stub door's words, and the entry is untouched."""
         with app.app_context():
-            profile = _create_through_the_form(
+            profile = create_through_the_form(
                 auth_client, seed_user, "2000.00", seed_periods[0].start_date.isoformat(),
             )
             entry = profile.pay_entries[0]
@@ -321,7 +255,7 @@ class TestFix:
     ):
         """Two entries; moving the second onto the first's payday is refused by name."""
         with app.app_context():
-            profile = _create_through_the_form(
+            profile = create_through_the_form(
                 auth_client, seed_user, "2000.00", seed_periods[0].start_date.isoformat(),
             )
             later = SalaryPayEntry(
@@ -353,14 +287,14 @@ class TestFix:
         a payday it does not change.
         """
         with app.app_context():
-            profile = _create_through_the_form(
+            profile = create_through_the_form(
                 auth_client, seed_user, "2000.00", seed_periods[0].start_date.isoformat(),
             )
             entry = profile.pay_entries[0]
             entry.payday = date(2026, 1, 3)
             db.session.commit()
             controls = _fix_form(auth_client, entry)
-            assert controls["payday"] == "2026-01-03"
+            assert controls["payday"] == ["2026-01-03"]
             controls["amount"] = "2070.00"
 
             auth_client.post(_fix_url(entry), data=controls)
@@ -370,7 +304,7 @@ class TestFix:
     def test_a_stale_form_is_refused(self, app, auth_client, seed_user, seed_periods):
         """A form rendered before another tab's Fix is refused; that Fix stands."""
         with app.app_context():
-            profile = _create_through_the_form(
+            profile = create_through_the_form(
                 auth_client, seed_user, "2000.00", seed_periods[0].start_date.isoformat(),
             )
             entry = profile.pay_entries[0]
@@ -400,15 +334,8 @@ class TestFix:
         bumping the version with autoflush held off, right after the service
         stages its change.
         """
-        # pylint: disable=import-outside-toplevel  -- the one patch target here.
-        from unittest.mock import patch
-
-        import sqlalchemy
-
-        from app.services import pay_list_service
-
         with app.app_context():
-            profile = _create_through_the_form(
+            profile = create_through_the_form(
                 auth_client, seed_user, "2000.00", seed_periods[0].start_date.isoformat(),
             )
             entry = profile.pay_entries[0]
@@ -437,12 +364,71 @@ class TestFix:
             assert b"changed by another action" in response.data
             assert _state(entry_id)[1] == Decimal("2000.00")
 
+    def test_a_fix_racing_another_onto_the_payday_says_what_the_check_says(
+        self, app, auth_client, seed_user, seed_periods,
+    ):
+        """Another tab records 01-16 between the check and the move: the held-payday sentence.
+
+        The race the service's own check cannot see: it finds 01-16 free, then
+        another request's entry lands there before this Fix's UPDATE, which
+        meets ``uq_pay_entries_profile_payday`` at the flush, inside the
+        route's guard.  What the owner reads is what a Fix onto a payday
+        already held is refused with before any race (task plan#3579), so
+        the two words of one state cannot drift apart.  Planted by inserting
+        the other entry with autoflush held off, right after the service
+        stages the move.
+        """
+        with app.app_context():
+            profile = create_through_the_form(
+                auth_client, seed_user, "2000.00", seed_periods[0].start_date.isoformat(),
+            )
+            profile_id = profile.id
+            entry = profile.pay_entries[0]
+            entry_id = entry.id
+            before = _state(entry_id)
+            target = seed_periods[1].start_date
+            controls = _fix_form(auth_client, entry)
+            controls.update({"payday": target.isoformat(), "amount": "2070.00"})
+            real_fix = pay_list_service.fix_entry
+
+            def fix_then_lose_the_race(*args, **kwargs):
+                staged = real_fix(*args, **kwargs)
+                with db.session.no_autoflush:
+                    db.session.execute(sqlalchemy.text(
+                        "INSERT INTO salary.pay_entries "
+                        "(salary_profile_id, payday, amount) "
+                        "VALUES (:profile, :payday, 2050.00)"
+                    ), {"profile": profile_id, "payday": target})
+                return staged
+
+            with patch.object(
+                pay_list_service, "fix_entry", side_effect=fix_then_lose_the_race,
+            ):
+                response = auth_client.post(
+                    _fix_url(entry), data=controls, follow_redirects=True,
+                )
+
+            assert response.status_code == 200
+            assert (
+                f"Your pay from {target.isoformat()} is already recorded; "
+                "fix that entry instead."
+            ).encode() in response.data
+            # This request moved nothing.  The planted entry shares its
+            # transaction, so the guard's rollback takes it too; another
+            # tab's would be its own, committed.
+            assert _state(entry_id) == before
+            assert [
+                (row.payday, row.amount)
+                for row in db.session.query(SalaryPayEntry)
+                .filter_by(salary_profile_id=profile_id).all()
+            ] == [(seed_periods[0].start_date, Decimal("2000.00"))]
+
     def test_an_amount_not_above_zero_is_refused(
         self, app, auth_client, seed_user, seed_periods,
     ):
         """``0.00`` is refused by the schema; nothing moves."""
         with app.app_context():
-            profile = _create_through_the_form(
+            profile = create_through_the_form(
                 auth_client, seed_user, "2000.00", seed_periods[0].start_date.isoformat(),
             )
             entry = profile.pay_entries[0]
@@ -480,7 +466,7 @@ class TestOwnership:
             )
             db.session.commit()
             before = _state(theirs.id)
-            mine = _create_through_the_form(
+            mine = create_through_the_form(
                 auth_client, seed_user, "2000.00", seed_periods[0].start_date.isoformat(),
             ).pay_entries[0]
             controls = _fix_form(auth_client, mine)
@@ -509,22 +495,33 @@ class TestOwnership:
 class TestACutReadsAsACut:
     """A recorded pay cut renders amber with a down arrow; an increase stays green (R-SAL85).
 
-    The second entry is planted through the model: in this leaf no door
-    records a second entry (plan step salary:X-av-3b's "Record a pay
-    change" will), and the screens read the pay list whichever door wrote it.
-    Made-up: $2,000.00 from 2026-01-02, then $1,930.00 (a cut) or $2,070.00
-    (an increase) from 2026-02-13, the fourth seeded payday.
+    The second entry is recorded through the Record door's rendered form
+    (plan step salary:X-av-3b; planted through the model until that door
+    existed).  Made-up: $2,000.00 from 2026-01-02, then $1,930.00 (a cut) or
+    $2,070.00 (an increase) from 2026-02-13, the fourth seeded payday, or
+    from 03-27, the next.  Every paycheck pays the two weeks ending six days
+    before it: 02-13 pays 01-24..02-06 and 03-27 pays 03-07..03-20.
     """
 
-    def _profile_changing_to(self, client, seed_user, seed_periods, amount):
-        """The profile, its first entry through the form, the second planted."""
-        profile = _create_through_the_form(
+    def _profile_changing_to(self, client, seed_user, seed_periods, amount, payday=3):
+        """The profile, its first entry through the create form, the second through Record.
+
+        *payday* indexes ``seed_periods``: the fourth (02-13) unless a case
+        records from another.
+        """
+        profile = create_through_the_form(
             client, seed_user, "2000.00", seed_periods[0].start_date.isoformat(),
         )
-        profile.pay_entries.append(SalaryPayEntry(
-            payday=seed_periods[3].start_date, amount=Decimal(amount),
-        ))
-        db.session.commit()
+        record = f"/salary/{profile.id}/pay"
+        controls = rendered_page_form(client, f"/salary/{profile.id}/edit", record)
+        controls.update({
+            "payday": seed_periods[payday].start_date.isoformat(), "amount": amount,
+        })
+        assert client.post(record, data=controls).status_code == 302
+        db.session.expire_all()
+        assert [entry.amount for entry in profile.pay_entries] == [
+            Decimal("2000.00"), Decimal(amount),
+        ]
         return profile
 
     def test_the_projection_row_and_badge_of_a_cut_are_amber_with_a_down_arrow(
@@ -577,6 +574,114 @@ class TestACutReadsAsACut:
             assert "<strong>Pay cut:</strong> Pay -$70.00" in page
             assert "<strong>Raise:</strong>" not in page
 
+    @staticmethod
+    def _add_merit(profile, day):
+        """A one-time 2.5% merit raise from *day*, committed."""
+        db.session.add(SalaryRaise(
+            salary_profile_id=profile.id,
+            raise_type_id=ref_cache.raise_type_id(RaiseTypeEnum.MERIT),
+            effective_date=day,
+            percentage=Decimal("0.0250"),
+        ))
+        db.session.commit()
+
+    def test_a_cut_and_a_raise_on_one_paycheck_show_both_each_in_its_colour(
+        self, app, auth_client, seed_user, seed_periods,
+    ):
+        """02-13 holds the recorded cut and a raise from Monday 02-02: amber and green (plan#3118).
+
+        The entry opens on 01-24, so it holds no raise dated after it, and
+        02-13 is the first paycheck paying a day of 02-02's; 01-30 pays
+        01-10..01-23, none of it.  The banner named the cut alone until task
+        plan#3168, and the raise was announced nowhere.
+        """
+        with app.app_context():
+            profile = self._profile_changing_to(
+                auth_client, seed_user, seed_periods, "1930.00",
+            )
+            self._add_merit(profile, date(2026, 2, 2))
+            anatomy = auth_client.get(
+                f"/salary?profile={profile.id}&period={seed_periods[3].id}",
+            ).get_data(as_text=True)
+            assert "<strong>Pay cut:</strong> Pay -$70.00" in anatomy
+            assert "<strong>Raise:</strong> Merit +2.5%" in anatomy
+            ledger = auth_client.get(f"/salary/{profile.id}/projection").get_data(
+                as_text=True,
+            )
+            assert ledger.count('class="sal-row-cut"') == 1
+            assert (
+                '<span class="sal-badge-cut"><i class="bi bi-arrow-down" '
+                'aria-hidden="true"></i> Pay -$70.00</span>'
+            ) in ledger
+            assert '<span class="sal-badge-raise">Merit +2.5%</span>' in ledger
+            assert ledger.count("sal-badge-raise") == 1
+
+    @pytest.mark.parametrize("page", ["/salary?profile={id}", "/salary/{id}/projection"])
+    def test_the_next_raise_chip_names_a_coming_cut_in_amber(
+        self, app, auth_client, seed_user, seed_periods, page,
+    ):
+        """A cut recorded from 03-27, the next payday: "Next pay cut", amber, a down arrow (R-SAL85).
+
+        The chip named every banner "Next raise" in green until task
+        plan#3168.  With no raise beside the cut the chip is not the green
+        raise chip.
+        """
+        with app.app_context():
+            profile = self._profile_changing_to(
+                auth_client, seed_user, seed_periods, "1930.00", payday=6,
+            )
+            html = auth_client.get(page.format(id=profile.id)).get_data(as_text=True)
+            assert (
+                '<div class="pulse-chip">\n'
+                '  <div class="pulse-chip__label">Next pay cut</div>\n'
+                '  <div class="pulse-chip__value"><span class="sal-chip-cut">'
+                '<i class="bi bi-arrow-down" aria-hidden="true"></i> Pay -$70.00'
+                '</span></div>\n'
+                '  <div class="sal-chip__sub">Mar 2026</div>'
+            ) in html
+            assert "Next raise" not in html
+
+    @pytest.mark.parametrize("page", ["/salary?profile={id}", "/salary/{id}/projection"])
+    def test_the_next_raise_chip_keeps_an_increase_green(
+        self, app, auth_client, seed_user, seed_periods, page,
+    ):
+        """An increase recorded from 03-27: "Next raise", the green chip, no arrow, as before."""
+        with app.app_context():
+            profile = self._profile_changing_to(
+                auth_client, seed_user, seed_periods, "2070.00", payday=6,
+            )
+            html = auth_client.get(page.format(id=profile.id)).get_data(as_text=True)
+            assert (
+                '<div class="pulse-chip sal-chip-up">\n'
+                '  <div class="pulse-chip__label">Next raise</div>\n'
+                '  <div class="pulse-chip__value">Pay +$70.00</div>\n'
+                '  <div class="sal-chip__sub">Mar 2026</div>'
+            ) in html
+            assert "sal-chip-cut" not in html
+
+    def test_a_coming_cut_with_a_raise_names_both_each_in_its_colour(
+        self, app, auth_client, seed_user, seed_periods,
+    ):
+        """The cut from 03-27 and a raise from Monday 03-16 it first pays: amber beside green.
+
+        03-13 pays 02-21..03-06, none of the raise.  The chip says "Next pay
+        cut" for the cut it holds, and the raise keeps the green raise chip's
+        colour beside it.
+        """
+        with app.app_context():
+            profile = self._profile_changing_to(
+                auth_client, seed_user, seed_periods, "1930.00", payday=6,
+            )
+            self._add_merit(profile, date(2026, 3, 16))
+            html = auth_client.get(f"/salary?profile={profile.id}").get_data(as_text=True)
+            assert (
+                '<div class="pulse-chip sal-chip-up">\n'
+                '  <div class="pulse-chip__label">Next pay cut</div>\n'
+                '  <div class="pulse-chip__value"><span class="sal-chip-cut">'
+                '<i class="bi bi-arrow-down" aria-hidden="true"></i> Pay -$70.00'
+                '</span> Merit +2.5%</div>'
+            ) in html
+
 
 class TestTheRhythmNotice:
     """The salary page names a change of rhythm no pay is recorded from (R-SAL82).
@@ -597,7 +702,7 @@ class TestTheRhythmNotice:
             switch = max(period.start_date for period in seed_periods) + timedelta(days=28)
             pay_era_write.mint_era(seed_user["user"].id, era_of(switch, 7))
             db.session.commit()
-            profile = _create_through_the_form(
+            profile = create_through_the_form(
                 auth_client, seed_user, "2000.00", "2026-03-13",
             )
 
@@ -623,7 +728,7 @@ class TestTheRhythmNotice:
             switch = max(period.start_date for period in seed_periods) + timedelta(days=28)
             pay_era_write.mint_era(seed_user["user"].id, era_of(switch, 7))
             db.session.commit()
-            profile = _create_through_the_form(
+            profile = create_through_the_form(
                 auth_client, seed_user, "2000.00", "2026-03-13",
             )
             profile.pay_entries.append(SalaryPayEntry(
@@ -635,3 +740,37 @@ class TestTheRhythmNotice:
 
             assert page.status_code == 200
             assert "Your pay rhythm changes on" not in page.get_data(as_text=True)
+
+    def test_the_page_says_the_first_rhythm_carried_back(
+        self, app, auth_client, seed_user, seed_periods,
+    ):
+        """The first pay is weekly from the switch: the paychecks before it are carried back, said.
+
+        1,000.00 x 52 / 26 = 2,000.00 every two weeks, from the yearly
+        1,000.00 x 52 = 52,000.00 (task plan#3171, finding plan#1586).  The
+        one entry is moved onto the switch's payday through the model, as the
+        case above plants its second: no door records pay that far ahead
+        (R-SAL90).
+        """
+        with app.app_context():
+            switch = max(period.start_date for period in seed_periods) + timedelta(days=28)
+            pay_era_write.mint_era(seed_user["user"].id, era_of(switch, 7))
+            db.session.commit()
+            profile = create_through_the_form(
+                auth_client, seed_user, "2000.00", "2026-03-13",
+            )
+            entry = profile.pay_entries[0]
+            entry.payday = switch
+            entry.amount = Decimal("1000.00")
+            db.session.commit()
+
+            page = auth_client.get(f"/salary/{profile.id}/edit")
+
+            assert page.status_code == 200
+            text = " ".join(page.get_data(as_text=True).split())
+            assert (
+                f"Your pay rhythm changes on {switch.isoformat()} and no pay is "
+                "recorded before then: priced at $2,000.00 from your yearly "
+                "$52,000.00."
+            ) in text
+            assert "recorded from then" not in text

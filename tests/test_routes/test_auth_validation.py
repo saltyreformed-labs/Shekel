@@ -17,6 +17,12 @@ Each test exercises the route boundary (not the schema directly --
 that file is ``tests/test_schemas/test_auth_validation.py``) and
 asserts the externally visible response shape that an attacker would
 see, plus -- where relevant -- that bcrypt was NOT called.
+
+The seed owner is made with two-factor (plan#3600), so a sign-in that must
+finish at ``/login`` is on a browser the owner trusts
+(``tests._trusted_devices.trust_browser``), a backup-code case gives the
+owner's row known codes (``tests._test_helpers.store_backup_codes``), and the
+setup case signs in as the owner after a reset (``no_two_factor_client``).
 """
 
 from datetime import datetime, timezone
@@ -26,7 +32,11 @@ from app.extensions import db
 from app.models.user import MfaConfig, User
 from app.services import mfa_service
 from app.services.mfa_service import TotpVerificationResult
-from tests._test_helpers import register_form_data
+from tests._test_helpers import register_form_data, store_backup_codes
+from tests._trusted_devices import trust_browser
+
+#: The backup codes a ``/mfa/verify`` case gives the owner's row.
+_KNOWN_BACKUP_CODES = ["aaaaaaaa", "bbbbbbbb", "cccccccc"]
 
 
 # ── /login ───────────────────────────────────────────────────────────
@@ -83,9 +93,11 @@ class TestLoginSchemaWiring:
         "Remember me" is gone (plan#2173, ruling plan#2406), but a browser
         holding the old login page still posts the box.  The sign-in must
         succeed and must not set Flask-Login's ``remember_token``: the cookie
-        could not be revoked, which is why it went.
+        could not be revoked, which is why it went.  The browser is one the
+        owner trusts, so the password finishes the sign-in with no code.
         """
         with app.app_context():
+            trust_browser(client, seed_user["user"].id)
             response = client.post("/login", data={
                 "email": "test@shekel.local",
                 "password": "testpass",
@@ -267,20 +279,6 @@ class TestMfaVerifySchemaWiring:
                 datetime.now(timezone.utc).isoformat()
             )
 
-    def _enable_mfa(self, user_id):
-        """Enable MFA with a known secret and three known backup codes."""
-        secret = "JBSWY3DPEHPK3PXP"
-        known_codes = ["aaaaaaaa", "bbbbbbbb", "cccccccc"]
-        mfa_config = MfaConfig(
-            user_id=user_id,
-            is_enabled=True,
-            totp_secret_encrypted=mfa_service.encrypt_secret(secret),
-            backup_codes=mfa_service.hash_backup_codes(known_codes),
-        )
-        db.session.add(mfa_config)
-        db.session.commit()
-        return secret
-
     def test_oversized_backup_code_rejected_before_bcrypt(
         self, app, client, seed_user,
     ):
@@ -303,7 +301,7 @@ class TestMfaVerifySchemaWiring:
         before the schema ran.*
         """
         with app.app_context():
-            self._enable_mfa(seed_user["user"].id)
+            store_backup_codes(db.session, seed_user["user"].id, _KNOWN_BACKUP_CODES)
             self._start_mfa_pending_session(client, seed_user["user"].id)
 
             with patch(
@@ -330,7 +328,7 @@ class TestMfaVerifySchemaWiring:
         replay-table touch.  We assert the verifier is not called.
         """
         with app.app_context():
-            self._enable_mfa(seed_user["user"].id)
+            store_backup_codes(db.session, seed_user["user"].id, _KNOWN_BACKUP_CODES)
             self._start_mfa_pending_session(client, seed_user["user"].id)
 
             calls = []
@@ -356,7 +354,7 @@ class TestMfaVerifySchemaWiring:
     def test_valid_backup_code_still_works(self, app, client, seed_user):
         """Happy path: a valid 8-char backup code consumes correctly."""
         with app.app_context():
-            self._enable_mfa(seed_user["user"].id)
+            store_backup_codes(db.session, seed_user["user"].id, _KNOWN_BACKUP_CODES)
             self._start_mfa_pending_session(client, seed_user["user"].id)
             response = client.post("/mfa/verify", data={
                 "backup_code": "aaaaaaaa",
@@ -377,81 +375,19 @@ class TestMfaVerifySchemaWiring:
 class TestMfaConfirmSchemaWiring:
     """POST /mfa/confirm validates payload through MfaConfirmSchema."""
 
-    def test_oversized_totp_code_rejected(self, app, auth_client, seed_user):
+    def test_oversized_totp_code_rejected(self, app, no_two_factor_client, seed_user):
         """An oversized totp_code on enrolment is rejected as 'Invalid code'.
 
         The route would otherwise pass the value to
         ``mfa_service.verify_totp_setup_code``; the schema cap means
         the user-visible error is the same flash but the service is
-        not invoked.
+        not invoked.  Setup is for an account without two-factor.
         """
         with app.app_context():
             # Trigger /mfa/setup so a pending secret exists in the DB.
-            auth_client.get("/mfa/setup")
-            response = auth_client.post("/mfa/confirm", data={
+            no_two_factor_client.get("/mfa/setup")
+            response = no_two_factor_client.post("/mfa/confirm", data={
                 "totp_code": "1" * 100_000,
             }, follow_redirects=True)
             assert response.status_code == 200
             assert b"Invalid code" in response.data
-
-
-# ── /mfa/disable ─────────────────────────────────────────────────────
-
-
-class TestMfaDisableSchemaWiring:
-    """POST /mfa/disable validates payload through MfaDisableSchema."""
-
-    def _enable_mfa(self, user_id):
-        secret = "JBSWY3DPEHPK3PXP"
-        mfa_config = MfaConfig(
-            user_id=user_id,
-            is_enabled=True,
-            totp_secret_encrypted=mfa_service.encrypt_secret(secret),
-            backup_codes=mfa_service.hash_backup_codes(["aaaaaaaa"]),
-        )
-        db.session.add(mfa_config)
-        db.session.commit()
-        return secret
-
-    def test_oversized_current_password_rejected_before_bcrypt(
-        self, app, auth_client, seed_user,
-    ):
-        """F-163: oversized current_password on disable rejected pre-bcrypt."""
-        with app.app_context():
-            self._enable_mfa(seed_user["user"].id)
-            with patch(
-                "app.services.auth_service.bcrypt.checkpw",
-                return_value=False,
-            ) as mock_check:
-                response = auth_client.post("/mfa/disable", data={
-                    "current_password": "x" * 100_000,
-                    "totp_code": "123456",
-                }, follow_redirects=True)
-                assert response.status_code == 200
-                assert mock_check.call_count == 0
-                # MFA should still be enabled.
-                config = (
-                    db.session.query(MfaConfig)
-                    .filter_by(user_id=seed_user["user"].id)
-                    .first()
-                )
-                assert config.is_enabled is True
-
-    def test_missing_current_password_rejected(
-        self, app, auth_client, seed_user,
-    ):
-        """Missing current_password is rejected as 'Invalid password.'"""
-        with app.app_context():
-            self._enable_mfa(seed_user["user"].id)
-            response = auth_client.post("/mfa/disable", data={
-                "totp_code": "123456",
-            }, follow_redirects=True)
-            assert response.status_code == 200
-            assert b"Invalid password" in response.data
-            # MFA should still be enabled.
-            config = (
-                db.session.query(MfaConfig)
-                .filter_by(user_id=seed_user["user"].id)
-                .first()
-            )
-            assert config.is_enabled is True

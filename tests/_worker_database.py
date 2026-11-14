@@ -4,8 +4,22 @@ Importing this module runs :func:`_bootstrap_worker_database`, which clones this
 database from ``shekel_test_template`` and points ``TEST_DATABASE_URL`` at it, so it must be
 imported before any ``app`` module is: ``tests/conftest.py`` imports it right after the
 profile harness, and it imports nothing from ``app``.  The ``db`` fixture
-(:mod:`tests._app_fixtures`) drops and re-clones the database for every test with
-:func:`_drop_worker_database` and :func:`_clone_worker_database`.
+(:mod:`tests._app_fixtures`) clones the database for every test with
+:func:`_clone_worker_database` and drops it with :func:`_drop_worker_database` when the test
+ends, so a test's database lives exactly as long as the test (ruling plan#3870).
+
+**Every clone, drop and catalog read goes over ONE admin connection per worker**
+(:data:`_ADMIN_CONNECTION`, ruling plan#3900), opened as this module is imported, before any
+test runs.  libpq reads its settings from the environment (``PGHOSTADDR``, ``PGSERVICE``,
+``PGOPTIONS`` and dozens more) only when a connection opens, and a test sets them with
+``monkeypatch`` on purpose to test code that reads them
+(``tests/test_scripts/test_dev_two_factor.py``).  pytest-flask's autouse fixtures take the
+shared ``monkeypatch`` before ``db``, so it is undone only after ``db``'s teardown: a
+connection opened there would read the test's settings, and a drop sent to the wrong server
+leaves the database standing for every later clone on the worker to refuse.  A connection
+opened before any test reads none of them.  It is never reopened, since a reopen would read
+the environment of that moment: a connection that dies fails every later clone and drop on
+the worker, loudly.
 """
 
 import os
@@ -44,10 +58,19 @@ _DEFAULT_ADMIN_URL = "postgresql:///postgres"
 _EXPECTED_ACCOUNT_TYPE_COUNT = 19
 
 
+#: The condition both by-hand rebuild hints below name.  A template built on a
+#: cluster without the role carries none of the grants the role tests read
+#: (``tests/test_models/test_audit_migration.py``), so the suite fails on it.
+_HOLD_THE_APP_ROLE_FIRST = (
+    "which must hold the shekel_app role first, as the baked image does "
+    "(scripts/build_test_db_image.py)"
+)
+
+
 #: What separates a world SNAPSHOT's name from the worker database it was
-#: frozen from (plan step balance:X-be-2).  One constant because three places
-#: depend on the split: the name is built with it, the orphan sweep recovers a
-#: snapshot's OWNER with it, and the length guard measures across it.
+#: frozen from (plan step balance:X-be-2).  One constant because two places
+#: depend on the split: the name is built with it, and the orphan sweep
+#: recovers a snapshot's OWNER with it.
 _SNAPSHOT_INFIX = "__world_"
 
 
@@ -68,6 +91,22 @@ def _like_escape(value):
     return (
         value.replace("\\", "\\\\").replace("_", "\\_").replace("%", "\\%")
     )
+
+
+def _database_url(admin_url, name):
+    """The DSN of database *name*, reached as *admin_url* reaches its own.
+
+    Only the path is replaced, so the scheme, the user, the password and the
+    query (the run cluster's socket directory, ``scripts/test.sh``) survive.
+
+    Args:
+        admin_url: The admin DSN.
+        name: The database to point at.
+
+    Returns:
+        The DSN.
+    """
+    return urlunparse(urlparse(admin_url)._replace(path=f"/{name}"))
 
 
 def _bootstrap_worker_database():
@@ -113,7 +152,8 @@ def _bootstrap_worker_database():
         The bootstrap fails fast with an actionable
         ``RuntimeError`` if ``shekel_test_template`` does not
         exist.  The fix is documented in the error message:
-        ``python scripts/build_test_template.py``.
+        ``python scripts/build_test_template.py``, on a cluster
+        that already holds the ``shekel_app`` role.
 
     Clone verification:
         After the clone, a fresh psycopg connection counts rows
@@ -127,11 +167,16 @@ def _bootstrap_worker_database():
         session DSN.  ``app.config.TestConfig`` reads this at
         class-body evaluation time during the next ``from app
         import ...``; the env var write must precede that import.
+        The database it clones serves no test: ``setup_database``
+        (:mod:`tests._app_fixtures`) drops it once the ref cache has
+        read it, so the first test's clone finds the name free.
 
     Returns:
         ``None`` when bootstrap is skipped (xdist master).
-        ``(db_name, admin_url)`` otherwise; ``pytest_sessionfinish``
-        uses these to DROP the per-session DB after the suite ends.
+        ``(db_name, admin_url)`` otherwise: the ``db`` fixture
+        clones and drops each test's database under ``db_name``, and
+        ``pytest_sessionfinish`` drops it if a session ended with one
+        standing.
 
     Raises:
         RuntimeError: When the template DB is missing, or when
@@ -146,13 +191,12 @@ def _bootstrap_worker_database():
         return None
 
     worker_id = os.environ.get("PYTEST_XDIST_WORKER", "main")
-    # Phase 3b: stable per-worker DB name (no PID suffix).  Per-test
-    # drop+reclone re-uses the SAME name on every test so the
-    # Flask-SQLAlchemy engine's URL stays valid across test boundaries
-    # -- only the underlying database is swapped atomically by
-    # DROP+CREATE.  The PID-bearing form (legacy) leaked into the
-    # cluster's DB list whenever a previous run crashed; orphan
-    # cleanup below catches both forms.
+    # Phase 3b: stable per-worker DB name (no PID suffix).  Every
+    # test's clone takes the SAME name, so the Flask-SQLAlchemy
+    # engine's URL stays valid across test boundaries -- only the
+    # database under it is new.  The PID-bearing form (legacy) leaked
+    # into the cluster's DB list whenever a previous run crashed;
+    # orphan cleanup below catches both forms.
     db_name = f"{_TEST_DATABASE_PREFIX}_{worker_id}"
     admin_url = os.environ.get(
         "TEST_ADMIN_DATABASE_URL", _DEFAULT_ADMIN_URL
@@ -171,36 +215,37 @@ def _bootstrap_worker_database():
             # Unescaped, ``shekel_test_gw1_%`` matches ``shekel_test_gw11`` --
             # worker gw1 sweeping gw10's and gw11's databases, which is a real
             # drop whenever the victim sits between tests with its engine
-            # disposed, and pytest-xdist restarts a crashed worker (up to
-            # ``numprocesses * 4``), so a restart re-runs this sweep mid-session
-            # rather than only at startup.  Verified on the cluster:
+            # disposed.  Workers start together, and pytest-xdist also starts a
+            # replacement for each crashed worker (up to ``numprocesses * 4``)
+            # mid-session, under a NEW id (``xdist/dsession.py``,
+            # ``_clone_node``), so this sweep runs while its siblings are live.
+            # Verified on the cluster:
             # ``'shekel_test_gw11' LIKE 'shekel_test_gw1\_%'`` is false and
             # ``'shekel_test_gw1__world_x' LIKE 'shekel_test_gw1\_%'`` is true.
             #
-            # The second pattern collects WORLD SNAPSHOTS left by a run at any
-            # ``-n``: a killed ``-n 0`` run leaves ``{prefix}_main__world_*``
-            # that no later ``-n 12`` run would otherwise ever name, because
-            # the first pattern only ever sweeps the ids the CURRENT
-            # invocation happens to use.
+            # **Only this worker's own names, never another's** (plan#3639,
+            # ruling plan#3660).  A third pattern once took every world
+            # snapshot on the cluster, ``{prefix}_%__world_%``, to collect
+            # snapshots a killed run of another ``-n`` had left.  Every run now
+            # has a cluster of its own (``scripts/test.sh``, ``balance:X-br-4``),
+            # so any snapshot on it belongs to THIS run, and the pattern could
+            # only ever take a live one: a replacement worker's sweep dropped
+            # each sibling's snapshot whose owner was between tests, and every
+            # later test declaring that world failed at its clone.
             cur.execute(
                 "SELECT datname FROM pg_database "
-                r"WHERE datname = %s OR datname LIKE %s ESCAPE '\' "
-                r"   OR datname LIKE %s ESCAPE '\'",
-                (
-                    db_name,
-                    f"{_like_escape(db_name)}\\_%",
-                    f"{_like_escape(_TEST_DATABASE_PREFIX)}\\_%"
-                    f"{_like_escape(_SNAPSHOT_INFIX)}%",
-                ),
+                r"WHERE datname = %s OR datname LIKE %s ESCAPE '\'",
+                (db_name, f"{_like_escape(db_name)}\\_%"),
             )
             candidate_orphans = [row[0] for row in cur.fetchall()]
             if candidate_orphans:
                 # **A snapshot's own connections say NOTHING about whether it
                 # is in use, and that is what makes the filter below a
-                # different question for it.**  Nothing ever connects to a
-                # snapshot: it is written by ``CREATE DATABASE ... TEMPLATE``
-                # and read only AS a template, by an admin-DSN connection to
-                # another database.  So it never appears in
+                # different question for it.**  Nothing can connect to a
+                # snapshot: it is created by ``CREATE DATABASE ... TEMPLATE``
+                # with ``ALLOW_CONNECTIONS false`` and read only AS a
+                # template, by an admin-DSN connection to another database
+                # (ruling plan#3870).  So it never appears in
                 # ``pg_stat_activity``, the filter can never spare it, and
                 # before this predicate a second invocation dropped a LIVE
                 # run's snapshot -- reproduced twice by review, once as 158
@@ -240,7 +285,8 @@ def _bootstrap_worker_database():
                     f"{_TEST_TEMPLATE_DATABASE!r} not found.  Under "
                     "./scripts/test.sh this is unreachable -- the image is "
                     "verified before pytest starts -- so something else "
-                    "supplied this cluster.  On a cluster you control: "
+                    "supplied this cluster.  On a cluster you control, "
+                    f"{_HOLD_THE_APP_ROLE_FIRST}: "
                     "python scripts/build_test_template.py"
                 )
 
@@ -264,9 +310,7 @@ def _bootstrap_worker_database():
     # bypasses any SQLAlchemy pool state from the admin connection
     # above.  A row count mismatch means the template itself was
     # corrupt; the message names the fix.
-    per_session_url = urlunparse(
-        urlparse(admin_url)._replace(path=f"/{db_name}")
-    )
+    per_session_url = _database_url(admin_url, db_name)
     verify_conn = psycopg.connect(per_session_url)
     try:
         with verify_conn.cursor() as cur:
@@ -282,7 +326,8 @@ def _bootstrap_worker_database():
                     "the image is stale in a way its own verification missed "
                     "-- rebuild it with "
                     "'python scripts/build_test_db_image.py --force'.  On a "
-                    "cluster you supplied: python scripts/build_test_template.py"
+                    f"cluster you supplied, {_HOLD_THE_APP_ROLE_FIRST}: "
+                    "python scripts/build_test_template.py"
                 )
     finally:
         verify_conn.close()
@@ -302,58 +347,84 @@ _BOOTSTRAP_RESULT = _bootstrap_worker_database()
 
 
 # Pull the worker DB name and admin DSN into module-level constants so
-# the per-test ``db`` fixture (Phase 3b) can drop+reclone without
-# unpacking ``_BOOTSTRAP_RESULT`` on every call.  ``None`` when the
-# bootstrap was skipped (xdist master), in which case the per-test
-# fixture will refuse to run -- the master never executes tests so
-# this branch should be unreachable in practice; the defensive check
-# inside the fixture surfaces a clear error if it ever fires.
+# the per-test ``db`` fixture (Phase 3b) can clone and drop without
+# unpacking ``_BOOTSTRAP_RESULT`` on every call, and open the worker's
+# one admin connection (the module docstring says why it is one, and
+# why now).  ``_WORKER_ADMIN_URL`` stays for a DSN a test builds to
+# reach another database.  All ``None`` when the bootstrap was skipped
+# (xdist master), in which case the per-test fixture will refuse to
+# run -- the master never executes tests so this branch should be
+# unreachable in practice; the defensive check inside the fixture
+# surfaces a clear error if it ever fires.  ``pytest_sessionfinish``
+# (``tests/conftest.py``) closes the connection.
 if _BOOTSTRAP_RESULT is not None:
     _WORKER_DB_NAME, _WORKER_ADMIN_URL = _BOOTSTRAP_RESULT
+    _ADMIN_CONNECTION = psycopg.connect(_WORKER_ADMIN_URL, autocommit=True)
 else:
     _WORKER_DB_NAME = None
     _WORKER_ADMIN_URL = None
+    _ADMIN_CONNECTION = None
 
 
-def _drop_worker_database(db_name, admin_url):
-    """Drop the per-worker test database via an admin psycopg connection.
+def database_exists(name):
+    """Whether *name* is a database on this run's cluster right now.
 
-    Phase 3b helper.  Called once per test by the ``db`` fixture
-    (before ``_clone_worker_database`` re-creates it) and at session
-    end by ``pytest_sessionfinish``.
+    Asked on the worker's admin connection rather than the app's engine: the
+    subject is the catalog, not any one test's database.
 
-    ``WITH (FORCE)`` (PostgreSQL 13+) terminates any leftover backend
-    that escaped the previous test's ``_db.engine.dispose()``;
-    without it a stuck transaction would block the drop.  Identifier
+    Args:
+        name: The database name to look for.
+
+    Returns:
+        ``True`` when it exists.
+    """
+    with _ADMIN_CONNECTION.cursor() as cur:
+        cur.execute(
+            "SELECT 1 FROM pg_database WHERE datname = %s", (name,),
+        )
+        return cur.fetchone() is not None
+
+
+def _drop_worker_database(db_name):
+    """Drop the per-worker test database on the worker's admin connection.
+
+    Phase 3b helper.  The ``db`` fixture calls it as each test ends,
+    ``setup_database`` for the bootstrap's start-up database, a world's
+    build for its scratch database, :func:`built_worlds`
+    (:mod:`tests._seeded_start_states`) for each snapshot, and
+    ``pytest_sessionfinish`` (``tests/conftest.py``) for a name a session
+    ended with a database standing under.  No caller
+    drops a name in order to clone over it: each name is cloned once
+    and dropped once, so a drop that failed makes the next clone under
+    that name refuse (``already exists``) rather than reuse what stood
+    there (ruling plan#3870).
+
+    ``WITH (FORCE)`` (PostgreSQL 13+) terminates any backend that
+    escaped this test's ``_db.engine.dispose()``, such as one a test
+    opened itself; without it a stuck transaction would block the drop.  Identifier
     interpolation goes through :mod:`psycopg.sql` so the
     ``shekel_test_*`` name stays safely quoted even though it comes
     from a controlled f-string at module load time -- consistent
-    with the rest of this module's admin-DSN access pattern.
+    with the rest of this module's admin access pattern.
 
     Args:
-        db_name: Name of the per-worker DB to drop.
-        admin_url: Admin DSN (must NOT point at ``db_name`` itself
-            -- ``DROP DATABASE`` cannot run against the connection's
-            own database).
+        db_name: Name of the per-worker DB to drop.  Never the admin
+            database the connection is on: ``DROP DATABASE`` cannot run
+            against the connection's own database.
     """
-    admin_conn = psycopg.connect(admin_url)
-    try:
-        admin_conn.autocommit = True
-        with admin_conn.cursor() as cur:
-            cur.execute(
-                sql.SQL(
-                    "DROP DATABASE IF EXISTS {} WITH (FORCE)"
-                ).format(sql.Identifier(db_name))
-            )
-    finally:
-        admin_conn.close()
+    with _ADMIN_CONNECTION.cursor() as cur:
+        cur.execute(
+            sql.SQL(
+                "DROP DATABASE IF EXISTS {} WITH (FORCE)"
+            ).format(sql.Identifier(db_name))
+        )
 
 
-def _clone_worker_database(db_name, admin_url, template=None):
-    """Re-create the per-worker test DB by cloning ``shekel_test_template``.
+def _clone_worker_database(db_name, template=None):
+    """Create the per-worker test DB by cloning ``shekel_test_template``.
 
-    Phase 3b helper.  Called once per test by the ``db`` fixture
-    (immediately after ``_drop_worker_database``) to give every test
+    Phase 3b helper.  Called once per test by the ``db`` fixture, under
+    the name the previous test's teardown dropped, to give every test
     the same start state the prior TRUNCATE+reseed cycle provided:
     empty ``system.audit_log``, no rows in ``budget.*`` / ``auth.*`` /
     ``salary.*``, full ref-data seed in ``ref.*``.  The template's
@@ -401,9 +472,10 @@ def _clone_worker_database(db_name, admin_url, template=None):
     ``ref.account_types`` count the bootstrap verifies are therefore
     unchanged.
 
+    Issued on the worker's admin connection (:data:`_ADMIN_CONNECTION`).
+
     Args:
         db_name: Name of the per-worker DB to create.
-        admin_url: Admin DSN (must NOT point at ``db_name`` itself).
         template: The database to clone FROM.  Defaults to the empty
             ``shekel_test_template``, which is what every test that has not
             declared a seeded start state gets.  A test carrying the
@@ -412,17 +484,12 @@ def _clone_worker_database(db_name, admin_url, template=None):
             way, a private database per test; only the content it starts with
             differs.
     """
-    admin_conn = psycopg.connect(admin_url)
-    try:
-        admin_conn.autocommit = True
-        with admin_conn.cursor() as cur:
-            cur.execute(
-                sql.SQL(
-                    "CREATE DATABASE {} TEMPLATE {} STRATEGY WAL_LOG"
-                ).format(
-                    sql.Identifier(db_name),
-                    sql.Identifier(template or _TEST_TEMPLATE_DATABASE),
-                )
+    with _ADMIN_CONNECTION.cursor() as cur:
+        cur.execute(
+            sql.SQL(
+                "CREATE DATABASE {} TEMPLATE {} STRATEGY WAL_LOG"
+            ).format(
+                sql.Identifier(db_name),
+                sql.Identifier(template or _TEST_TEMPLATE_DATABASE),
             )
-    finally:
-        admin_conn.close()
+        )

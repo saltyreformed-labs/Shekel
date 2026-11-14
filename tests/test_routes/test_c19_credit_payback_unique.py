@@ -56,7 +56,10 @@ from app.services.auth_service import hash_password
 from app.services.entry_credit_workflow import sync_entry_payback
 from app.services import account_service
 from app.utils.dates import display_today
+from tests._seed_owner_fixtures import OWNERS_PAGE
+from tests._two_factor_sign_in import sign_in_from_a_trusted_browser
 from tests._test_helpers import (
+    enable_mfa,
     generate_row_of,
     make_expense_template,
     one_off_row_of,
@@ -139,7 +142,9 @@ def _create_concurrent_user(db_session):
     The default ``seed_user`` fixture is application-context-bound
     and tied to the main test session; threaded tests instead create
     a fresh user via the test session and then have each worker
-    open its own app context for its own session.
+    open its own app context for its own session.  The user is made with
+    two-factor (``enable_mfa``), as every account past setup has it: the login
+    gate holds one without it at setup (plan#3452).
     """
     from datetime import date as _date  # pylint: disable=import-outside-toplevel
 
@@ -204,6 +209,7 @@ def _create_concurrent_user(db_session):
     # tree's helper for exactly that state.
     periods = record_paydays_across_a_hole(user.id, base, 3, rhythm_of(14))
     db_session.commit()
+    enable_mfa(db_session, user.id)
 
     return {
         "user": user,
@@ -252,13 +258,14 @@ def _make_auth_client(app, email, password):
     second client whose POST /login returns 302 to /dashboard
     without ever having captured a ``_user_id`` in its session,
     rendering it effectively anonymous for subsequent requests.
+
+    It signs in through the shared sign-in (``tests._two_factor_sign_in``), on
+    a browser the account trusts: the account has two-factor, as every account
+    past setup does (plan#3452), so the password signs it in with no code.
     """
-    client = app.test_client(use_cookies=True)
-    resp = client.post("/login", data={"email": email, "password": password})
-    assert resp.status_code == 302, (
-        f"Login failed for {email}: {resp.status_code}"
+    return sign_in_from_a_trusted_browser(
+        app.test_client(use_cookies=True), email, password, OWNERS_PAGE,
     )
-    return client
 
 
 # ---------------------------------------------------------------------------

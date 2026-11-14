@@ -37,8 +37,9 @@ display_today()     -> America/New_York      (app/utils/dates.py, DISPLAY_TIMEZO
 ```
 
 The application's civil day is `display_today()`. The process clock agrees with it
-**only because the deployment pins the timezone**: `deploy/docker-compose.prod.yml` and
-`docker-compose.dev.yml` both set `TZ: America/New_York`, and the prod file says why in its own
+**only because the deployment pins the timezone**: the image sets `ENV TZ=America/New_York`
+(`Dockerfile`, step plan#3812), `deploy/docker-compose.prod.yml` and `docker-compose.dev.yml` both
+set `TZ: America/New_York` until step plan#2166 deletes them, and the prod file says why in its own
 comment --
 
 > the default is UTC, which flipped `date.today()` to the next day at 20:00 America/New_York [...]

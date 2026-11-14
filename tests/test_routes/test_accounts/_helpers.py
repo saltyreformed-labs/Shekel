@@ -18,6 +18,8 @@ from tests._test_helpers import (
 from app.models.user import User, UserSettings
 from app.models.ref import AccountType
 from app.services.auth_service import hash_password
+from tests._seed_owner_fixtures import OWNERS_PAGE
+from tests._two_factor_sign_in import sign_in_from_a_trusted_browser
 
 
 #: The out-of-band swap that carries the balance acknowledgement into
@@ -368,10 +370,9 @@ def _login_as(app, email, password):
     cross-contaminated by any other client built earlier in the same
     test, which is the only reliable way to stage a two-owner
     interaction without one client's session leaking into the other.
+    It signs in through the shared sign-in, on a browser the account
+    trusts, so the account must be a shared one, which has two-factor.
     """
-    client = app.test_client()
-    resp = client.post("/login", data={"email": email, "password": password})
-    assert resp.status_code == 302, (
-        f"login as {email} failed; got status {resp.status_code}"
+    return sign_in_from_a_trusted_browser(
+        app.test_client(), email, password, OWNERS_PAGE,
     )
-    return client

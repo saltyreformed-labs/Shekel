@@ -20,6 +20,7 @@ from tests._test_helpers import (
     one_off_row_of,
     payback_row_of,
 )
+from tests._trusted_devices import trust_browser
 from tests._two_factor_sign_in import sign_in_seed_companion
 
 
@@ -156,9 +157,12 @@ class TestCompanionLoginRouting:
     def test_owner_login_redirects_to_dashboard(self, app, db, seed_user):
         """POST /login as owner redirects to /dashboard.
 
-        Verifies the owner login path is unchanged by companion routing.
+        Verifies the owner login path is unchanged by companion routing.  The
+        owner has two-factor, so the browser is one the owner trusts, which
+        the password alone signs in, as the shared sign-in does.
         """
         client = app.test_client()
+        trust_browser(client, seed_user["user"].id)
         resp = client.post("/login", data={
             "email": "test@shekel.local",
             "password": "testpass",

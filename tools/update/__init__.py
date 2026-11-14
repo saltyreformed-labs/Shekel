@@ -5,7 +5,8 @@ publish of that folder (``publish``) and the daily queue (``queue``), by the job
 the update App's token (``app``) and run main's own code and no package code but the
 ``landing`` group's, installed from main's lock, each file checked against its hash; the
 daily issue saying a release is due (``due``, ruling plan#2829) on that code and that group
-with no App's token; and the alert of a failed run (``alert``).  Beside them, the daily scan of
-the image production is running and its judge (``scan``, rulings plan#3720, plan#3825), which
-``quill scan`` runs on this host and no job of the workflow runs: the scan's findings stay off
-GitHub (ruling plan#3785)."""
+with no App's token; and the alert of a failed run (``alert``), which
+``.github/workflows/docker-publish.yml``'s weekly rebuild runs too (ruling plan#3724).  Beside
+them, the daily scan of the image production is running and its judge (``scan``, rulings
+plan#3720, plan#3825), which ``quill scan`` runs on this host and no job of the workflow runs:
+the scan's findings stay off GitHub (ruling plan#3785)."""

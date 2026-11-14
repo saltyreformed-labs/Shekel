@@ -12,7 +12,7 @@ other users in ``tests/_other_user_fixtures.py``, the rich datasets in
 ``tests/_cross_page_fixtures.py``.  Under them sit the per-worker
 database (``tests/_worker_database.py``), the seeded start states
 (``tests/_seeded_start_states.py``) and the profile harness
-(``tests/_fixture_profile.py``).  The suite's three hooks stay here.
+(``tests/_fixture_profile.py``).  The suite's four hooks stay here.
 
 Strategy: each test gets a brand-new database cloned from
 ``shekel_test_template`` via ``CREATE DATABASE ... TEMPLATE ...``
@@ -36,11 +36,15 @@ and the failures that decision produced; do not restore
 ``FILE_COPY`` without re-measuring against a durable cluster.
 """
 
+# Pylint: wrong-import-position, wrong-import-order -- SECRET_KEY and the
+# two-factor key must be set, and the per-worker database cloned, before any
+# ``app`` module is imported; the comment below says why.
 # pylint: disable=wrong-import-position,wrong-import-order
-# Imports below are intentionally ordered so the SECRET_KEY env var
-# is set AND the per-pytest-worker database is cloned from
-# ``shekel_test_template`` BEFORE any ``app`` module is imported.
-# Two class-body reads at first-app-import time depend on this:
+# Imports below are intentionally ordered so the SECRET_KEY and
+# TOTP_ENCRYPTION_KEY env vars are set AND the per-pytest-worker
+# database is cloned from ``shekel_test_template`` BEFORE any ``app``
+# module is imported.  Three class-body reads at first-app-import time
+# depend on this:
 #
 # * ``app.config.TestConfig.SQLALCHEMY_DATABASE_URI`` reads
 #   ``TEST_DATABASE_URL`` -- ``_bootstrap_worker_database``, which
@@ -48,17 +52,19 @@ and the failures that decision produced; do not restore
 #   the per-session DSN.
 # * Production / ``_reject_sentinel`` defends read ``SECRET_KEY``
 #   with no fallback (audit finding F-016).
+# * ``app.config.BaseConfig.TOTP_ENCRYPTION_KEY`` reads the suite's
+#   one two-factor key (ruling plan#3890).
 #
-# Setting either env var after the first ``from app import ...``
+# Setting any of these env vars after the first ``from app import ...``
 # would leave the app pointed at a stale value.  So the two modules
 # imported first, ``tests._fixture_profile`` and
 # ``tests._worker_database``, import nothing from ``app``, and every
 # fixture module after them may.
 
+import base64
 import os
 
-import psycopg
-from psycopg import sql
+import pytest
 
 # IMPORTANT: SECRET_KEY must be set in the environment BEFORE the
 # ``app`` package is imported, because ``app/config.py`` reads it at
@@ -74,9 +80,27 @@ os.environ.setdefault(
     "test-suite-fixed-key-not-used-in-production-do-not-deploy",
 )
 
+# The suite's ONE two-factor encryption key (ruling plan#3890), written here
+# for the reason SECRET_KEY is: ``app/config.py`` reads it at class-definition
+# time, as production's config does.  ``app.services.mfa_service`` reads the
+# environment at each call, so every build, test, worker and run holds this one
+# key, and a seeded world's owner, whose secret is encrypted once when the
+# worker builds the world, decrypts in every test that clones it.  Written
+# outright rather than ``setdefault``, so a key in the developer's shell or
+# ``.env`` is never the run's.  A test needing another key, or none, sets or
+# deletes it with ``monkeypatch``, which puts this one back after it.  A
+# Fernet key is 32 bytes in url-safe base64, built here from readable bytes so
+# the source holds no string the secret scan reads as a credential.
+os.environ["TOTP_ENCRYPTION_KEY"] = base64.urlsafe_b64encode(
+    b"shekel-test-suite-two-factor-key",
+).decode()
+
 from tests._fixture_profile import _FIXTURE_PROFILE_ENABLED, _profile_print_summary
-from tests._worker_database import _BOOTSTRAP_RESULT
-from tests._seeded_start_states import _drop_seeded_snapshots
+from tests._worker_database import (
+    _ADMIN_CONNECTION,
+    _BOOTSTRAP_RESULT,
+    _drop_worker_database,
+)
 from tests._shard import SHARD_ENV, apply_shard, parse_shard
 # Every fixture, imported by name: pytest registers each fixture it finds in this
 # module's namespace with this conftest's directory as its base, so each keeps the
@@ -86,6 +110,7 @@ from tests._shard import SHARD_ENV, apply_shard, parse_shard
 # pylint: disable=unused-import
 from tests._app_fixtures import (
     _calendar_sweep,
+    _seeded_snapshots,
     app,
     below_the_transfer_column_drop,
     client,
@@ -95,7 +120,6 @@ from tests._app_fixtures import (
     fast_bcrypt,
     owner_client,
     seeded_world,
-    set_totp_key,
     setup_database,
     tax_law,
 )
@@ -105,6 +129,7 @@ from tests._seed_owner_fixtures import (
     bare_periods,
     bare_user,
     bare_user_with_cadence,
+    no_two_factor_client,
     seed_periods,
     seed_periods_52,
     seed_periods_today,
@@ -138,14 +163,69 @@ from tests._dataset_fixtures import (
 # pylint: enable=unused-import
 
 
+@pytest.hookimpl(wrapper=True)
+def pytest_make_collect_report():
+    """Fail a collector whose tests or classes carry ``@pytest.mark.xdist_group``.
+
+    The suite has no groups and runs under xdist's default scheduling
+    (plan#2954), so the marker would keep nothing together: a test that relied
+    on it would fail only when the scheduler split it from its partner, which
+    is the failure pytest 9.2.0 caused (ruling plan#3768).  It is a tripwire,
+    not a guarantee: nothing structural stops a new test sharing state, so the
+    message says where each kind of state belongs instead.
+
+    **A collection error, not a usage error** (ruling plan#3814).  A
+    ``pytest.UsageError`` raised from ``pytest_collection_modifyitems`` says
+    nothing under xdist, measured 2026-11-13 on throwaway test files: pytest
+    calls ``pytest_collection_finish`` in a ``finally``, so the worker reports
+    its whole collection, then dies on the error, and the controller crashes on
+    xdist's own assertion naming one test.  A failed collection report is what
+    xdist forwards from a worker by design.  Measured the same day, this
+    wrapper's error printed under ``-n 0`` and ``-n 2`` and in shards 0/6 and
+    3/6, since collection comes before the shard narrows anything.  Under
+    xdist the other files' tests still run and the run ends red (exit 1), as for
+    any file that fails to collect; without it the run stops (exit 2).
+
+    Each node is read through ``get_closest_marker``, which finds a mark set on
+    it, its class, its module or one of its parameters.  pytest reads a class's
+    own marks only when it collects that class, so a class marked by its own
+    decorator fails its own report, naming its tests; inside a file whose other
+    tests are refused it shows on the run after those are fixed, since pytest
+    collects nothing under a collector that failed.
+
+    Yields:
+        To pytest's own report of the collector, which comes back as the result.
+
+    Returns:
+        pytest.CollectReport: That report, or a failed one naming each test or
+        class it collected that carries the marker.
+    """
+    report = yield
+    grouped = [node.nodeid for node in report.result if node.get_closest_marker("xdist_group")]
+    if not grouped:
+        return report
+    return pytest.CollectReport(
+        report.nodeid,
+        "failed",
+        "The suite has no xdist_group (plan#2954), so the marker on these "
+        "tests would keep nothing on one worker:\n  "
+        + "\n  ".join(grouped)
+        + "\nA test must hold no state another test reads: its rows in its "
+        "own clone of the database, and its process-wide state in a "
+        "session-scoped fixture (docs/testing-standards.md, Cluster-state "
+        "and process-wide state).",
+        [],
+        report.sections,
+    )
+
+
 def pytest_collection_modifyitems(config, items):
     """Narrow the collection to one CI shard when ``SHEKEL_TEST_SHARD`` is set.
 
     CI splits the suite across parallel jobs (plan step ``bank_import:X-gy``);
     each exports ``SHEKEL_TEST_SHARD=<index>/<total>`` and runs only its share.
     Unset -- every local run -- this deselects nothing.  How the split is a
-    partition by construction, and why it keeps every ``xdist_group`` whole,
-    is :mod:`tests._shard`.
+    partition by construction is :mod:`tests._shard`.
     """
     apply_shard(config, items, os.environ.get(SHARD_ENV))
 
@@ -169,16 +249,20 @@ def pytest_report_header():
     )
 
 
-def pytest_sessionfinish(session, exitstatus):  # pylint: disable=unused-argument
-    """Drop the per-pytest-worker database AND emit the profile summary.
+def pytest_sessionfinish():
+    """Drop the per-pytest-worker database if one stands, AND emit the profile summary.
 
     Pytest invokes this hook at the end of every session -- including
-    failed sessions -- so the per-session DB is cleaned up regardless
-    of pass/fail.  No-op when the xdist master process skipped the
+    failed sessions.  The ``db`` fixture drops each test's database as
+    the test ends and ``setup_database`` drops the bootstrap's, so on
+    an ordinary session the name is already free and this drop finds
+    nothing; it is there for a session that ended with a database
+    standing under the name (a fixture that never reached its
+    teardown).  No-op when the xdist master process skipped the
     bootstrap (``_BOOTSTRAP_RESULT`` is ``None``); only worker
     processes own a DB to drop.
 
-    Why psycopg directly (not SQLAlchemy):
+    Why the worker's admin connection (not SQLAlchemy):
         Flask-SQLAlchemy 3.x scopes ``db.session`` and ``db.engine``
         to the current app context, and the
         ``pytest_sessionfinish`` hook runs AFTER the session-scoped
@@ -194,7 +278,10 @@ def pytest_sessionfinish(session, exitstatus):  # pylint: disable=unused-argumen
         ``WITH (FORCE)`` clause severs any backend that did
         escape, at the protocol level.  See
         ``docs/audits/test_improvements/per-worker-database-plan.md``
-        Phase 3 for the broader context.
+        Phase 3 for the broader context.  The connection is the one
+        every clone and drop of the session went over
+        (``tests/_worker_database.py``, ruling plan#3900), and it is
+        closed here, after its last statement.
 
     Survives SIGKILL imperfectly: a process killed before this hook
     runs leaves an orphan DB.  Where a NEXT session reaches the same
@@ -217,35 +304,19 @@ def pytest_sessionfinish(session, exitstatus):  # pylint: disable=unused-argumen
         the DB drop so a flaky summary path cannot leave per-
         session databases behind.
 
-    Args:
-        session (pytest.Session): pytest Session object (required
-            by the hook signature; unused here -- the cleanup keys
-            off the module-level ``_BOOTSTRAP_RESULT`` instead).
-        exitstatus (int): Session exit code.  Unused: we drop the
-            per-session DB regardless of pass / fail because it is
-            throwaway.
+    It takes neither of the hook's arguments, since pluggy passes a hook
+    only the ones it names: the cleanup keys off the module-level
+    ``_BOOTSTRAP_RESULT``, not the session, and the DB is dropped
+    whatever the exit status, because it is throwaway.
     """
     if _BOOTSTRAP_RESULT is not None:
-        db_name, admin_url = _BOOTSTRAP_RESULT
-        # ``try``/``finally`` so the NEW cleanup can never strand the old one.
-        # Worlds go first -- a snapshot is a database of its own, and one left
-        # behind would be a start state dated from a session that has ended --
-        # but a snapshot drop that raised must not take the worker database's
-        # drop with it, which is the cleanup this suite has always relied on.
+        db_name, _admin_url = _BOOTSTRAP_RESULT
+        # The worlds' snapshots are not dropped here: the ``_seeded_snapshots``
+        # fixture's teardown drops them, as pytest tears session fixtures down.
         try:
-            _drop_seeded_snapshots()
+            _drop_worker_database(db_name)
         finally:
-            admin_conn = psycopg.connect(admin_url)
-            try:
-                admin_conn.autocommit = True
-                with admin_conn.cursor() as cur:
-                    cur.execute(
-                        sql.SQL(
-                            "DROP DATABASE IF EXISTS {} WITH (FORCE)"
-                        ).format(sql.Identifier(db_name))
-                    )
-            finally:
-                admin_conn.close()
+            _ADMIN_CONNECTION.close()
 
     # Only the xdist controller / single-process run aggregates and
     # prints.  Workers (PYTEST_XDIST_WORKER set) are write-only: they

@@ -295,8 +295,8 @@ class TestTheGrossIsARateAndNotAShareOfAYear:
     # wiring, because the two sides' INPUTS still differed by any applicable
     # raise (finding **D45**), and that "a case asserting these two equal on a
     # raise-BEARING profile would fail, and should".  There is one input now,
-    # and ``test_income_service.TestThePerPeriodGrossIsTheENGINES`` grades a
-    # raise-bearing profile end to end.
+    # and ``test_income_service.test_the_engines_gross.TestThePerPeriodGrossIsTheENGINES``
+    # grades a raise-bearing profile end to end.
 
 
 class TestGrossPerPaycheck:
@@ -394,8 +394,10 @@ class TestTheGrossContractIsDocumented:
         the yearly figure is pay x paychecks a year rather than the salary
         typed (R-SAL59), and each raise step rounds to the cent (R-SAL60).
         """
-        from app.services.payroll_basis import (  # pylint: disable=import-outside-toplevel
+        from app.services.pay_rate import (  # pylint: disable=import-outside-toplevel
             BasePay,
+        )
+        from app.services.payroll_basis import (  # pylint: disable=import-outside-toplevel
             PayrollBasis,
         )
 

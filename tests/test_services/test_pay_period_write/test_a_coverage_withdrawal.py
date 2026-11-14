@@ -48,7 +48,7 @@ class TestACoverageWithdrawalIsAccepted:
     identity and cancels.  The money reports as a timing remainder -- the row
     ruling R-DH split out to carry exactly this -- and the balance is right
     either way: on the shortened schedule's last day the bank genuinely had not
-    taken the money yet.  ``test_cash_period_view.py``'s
+    taken the money yet.  ``test_cash_period_view/test_the_identity.py``'s
     ``test_a_settle_day_past_the_window_keeps_every_column_exact`` is the
     arithmetic; these are the doors.
 

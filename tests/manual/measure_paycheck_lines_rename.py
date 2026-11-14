@@ -62,7 +62,7 @@ def _breakdown(breakdown) -> dict:
         "payday": breakdown.period.payday.isoformat(),
         "period_id": breakdown.period.period_id,
         "is_third_paycheck": breakdown.period.is_third_paycheck,
-        "raise_event": breakdown.period.raise_event,
+        "banner": breakdown.period.banner.text,
         "annual_salary": str(breakdown.earnings.annual_salary),
         "base_biweekly": str(breakdown.earnings.base_biweekly),
         "gross_biweekly": str(breakdown.earnings.gross_biweekly),

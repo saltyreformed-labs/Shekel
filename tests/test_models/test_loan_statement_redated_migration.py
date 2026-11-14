@@ -41,7 +41,6 @@ from datetime import date, datetime, timezone
 from decimal import Decimal
 from types import SimpleNamespace
 
-import pytest
 from sqlalchemy import text
 
 from app import ref_cache
@@ -235,7 +234,6 @@ def test_the_predicate_selects_the_copy_and_nothing_else(app, db, seed_user):
     ]
 
 
-@pytest.mark.xdist_group("loan_withdrawal_ddl")
 def test_down_up_down_up_re_dates_the_copy_and_undoes_it_exactly(
     db, seed_user,
 ):
@@ -340,7 +338,6 @@ def test_the_setup_day_is_the_owners_civil_day(app, db, seed_user):
     ]
 
 
-@pytest.mark.xdist_group("loan_withdrawal_ddl")
 def test_the_downgrade_deletes_ONLY_the_statement_it_recorded(db, seed_user):
     """R-R99's "only", graded by decoys on the SAME loan.
 

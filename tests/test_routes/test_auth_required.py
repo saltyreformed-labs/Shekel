@@ -39,9 +39,10 @@ What is graded, and how each arm is kept honest:
   ``LOGIN_DISABLED`` -- each with the arm that proves the switch is a switch.
 * **the hook's place in the request** is pinned: after CSRF and the rate
   limiter, before the session-activity stamp.
-* **a signed-in companion without two-factor is held at its setup** (ruling
-  plan#3434): the hold's own set is pinned and resolves, every served pair
-  outside it and the front door sends her to setup by the hold's decision,
+* **a signed-in user without two-factor is held at its setup**, a companion
+  and an owner alike (ruling plan#3434, widened to every account by
+  plan#3452): the hold's own set is pinned and resolves, every served pair
+  outside it and the front door sends each to setup by the hold's decision,
   and none inside them is decided by the hold.  Its behaviour on a page, an
   htmx request and a POST is ``tests/test_routes/test_two_factor_required.py``.
 """
@@ -58,7 +59,12 @@ from app.extensions import db as _db, login_manager
 from app.rate_limits import limiter
 from app import login_gate
 from app.login_gate import PUBLIC_ENDPOINTS, TWO_FACTOR_SETUP_ENDPOINTS
-from tests._two_factor_sign_in import sign_in_seed_companion_by_password
+from tests._seed_owner_fixtures import OWNERS_PAGE, SEED_USER_EMAIL, SEED_USER_PASSWORD
+from tests._two_factor_sign_in import (
+    reset_two_factor_of,
+    sign_in_by_password,
+    sign_in_seed_companion_by_password,
+)
 from tests.test_integration.test_rate_limiter import _disable_limiter
 from tests.test_routes.test_no_baseline_policy._helpers import _route_table_app
 
@@ -243,6 +249,35 @@ def spy_on_the_hold(monkeypatch):
 
     monkeypatch.setattr(login_gate, "_hold_at_two_factor_setup", counting)
     return held
+
+
+#: The roles the hold's sweeps sign in as: every account must have two-factor
+#: (plan#3452), so each sweep runs for a companion and for an owner.
+_ROLES = ("companion", "owner")
+
+
+def _sign_in_without_two_factor(app, seed_user, role):
+    """Sign a fresh browser in to an account of *role* that has no two-factor.
+
+    The seed companion as her owner made her, or the seed owner after the
+    reset act took his away (``scripts/reset_mfa.py``), each signed in with
+    the password alone.  Call inside an app context, with ``seed_companion``
+    made.
+
+    Args:
+        app: The Flask application.
+        seed_user: The seed owner fixture.
+        role: ``"companion"`` or ``"owner"``.
+
+    Returns:
+        The signed-in test client.
+    """
+    if role == "companion":
+        return sign_in_seed_companion_by_password(app)
+    reset_two_factor_of(seed_user["user"].id)
+    return sign_in_by_password(
+        app.test_client(), SEED_USER_EMAIL, SEED_USER_PASSWORD, OWNERS_PAGE,
+    )
 
 
 def _assert_bounced_to_login(response, path):
@@ -529,7 +564,7 @@ class TestWhereTheGateSitsInTheRequest:
 
 
 class TestTheTwoFactorHold:
-    """A signed-in companion without two-factor reaches setup and sign-out only."""
+    """A signed-in user without two-factor, of either role, reaches setup and sign-out only."""
 
     def test_the_setup_set_is_pinned(self):
         """Adding a name to ``TWO_FACTOR_SETUP_ENDPOINTS`` is a two-file diff."""
@@ -544,18 +579,20 @@ class TestTheTwoFactorHold:
         )
 
     @pytest.mark.usefixtures("seed_companion")
-    def test_every_other_pair_sends_her_to_setup(
-        self, app, monkeypatch,
+    @pytest.mark.parametrize("role", _ROLES)
+    def test_every_other_pair_sends_them_to_setup(
+        self, app, monkeypatch, seed_user, role,
     ):
         """Every served pair outside both sets is held, by the hold's decision.
 
-        One case over the whole table, rather than one per pair, because each
-        case would need a companion signed in, and the anonymous sweep above
-        already names each route.  The pairs the hold missed are listed whole.
+        One case over the whole table per role, rather than one per pair,
+        because each case would need an account signed in, and the anonymous
+        sweep above already names each route.  The pairs the hold missed are
+        listed whole.
         """
         held = spy_on_the_hold(monkeypatch)
         with app.app_context():
-            browser = sign_in_seed_companion_by_password(app)
+            browser = _sign_in_without_two_factor(app, seed_user, role)
             swept, missed = 0, []
             for method, path, endpoint in _PROTECTED:
                 if endpoint in TWO_FACTOR_SETUP_ENDPOINTS:
@@ -571,12 +608,13 @@ class TestTheTwoFactorHold:
         assert swept > 200, swept
 
     @pytest.mark.usefixtures("seed_companion")
+    @pytest.mark.parametrize("role", _ROLES)
     def test_the_setup_door_and_the_front_door_are_not_held(
-        self, app, monkeypatch,
+        self, app, monkeypatch, seed_user, role,
     ):
         """No pair of either set is decided by the hold, sign-out last.
 
-        Sign-out ends her session, so it runs after every other; what each
+        Sign-out ends the session, so it runs after every other; what each
         view then answers is its own business, above a crash.
         """
         held = spy_on_the_hold(monkeypatch)
@@ -587,7 +625,7 @@ class TestTheTwoFactorHold:
         )
         assert let_through[-1][2] == "auth.logout", let_through
         with app.app_context():
-            browser = sign_in_seed_companion_by_password(app)
+            browser = _sign_in_without_two_factor(app, seed_user, role)
             for method, path, endpoint in let_through:
                 response = _request(browser, method, path)
                 assert response.status_code < 500, (endpoint, response.status_code)

@@ -18,10 +18,10 @@ Plan#2772.  A browser that finishes a sign-in holds one record and one cookie
 * :class:`TestTenWrongMakeAStranger` -- a known browser's wrong passwords
   count on its own record, and ten in a row delete it (ruling **plan#2996**),
   leaving the user's other browsers signing in.
-* :class:`TestEveryDoorHasTheOneRule` -- the code form, re-confirm, Change
-  password and Disable two-factor let a known browser past the strangers' lock
-  and count its wrong answers on its own record (ruling **plan#3034**).  Their
-  stranger's side is ``tests/test_routes/test_every_guess_counts.py``.
+* :class:`TestEveryDoorHasTheOneRule` -- the code form, re-confirm and Change
+  password let a known browser past the strangers' lock and count its wrong
+  answers on its own record (ruling **plan#3034**).  Their stranger's side is
+  ``tests/test_routes/test_every_guess_counts.py``.
 * :class:`TestAReConfirmReplacesTheCookie` -- a finished re-confirm gives a
   known browser a new token on the same row, as a sign-in does (ruling
   **plan#3070**), and moves neither its thirty days nor its trust; a stranger
@@ -30,6 +30,15 @@ Plan#2772.  A browser that finishes a sign-in holds one record and one cookie
 
 The code form's tries, which a known browser has of its own (ruling
 **plan#3023**), are ``test_known_browser_code_tries.py``.
+
+Every shared account is made with two-factor (plan#3600).  A test of what a
+password alone finishes resets the account's two-factor first, as
+``scripts/reset_mfa.py`` does (``reset_two_factor_of``), so its password
+signs it in as it does an account before setup; a test of a code types the
+account's own (``two_factor_secret_of``).  A test of a door past the sign-in
+(re-confirm, Change password) signs in with the account's code: the login gate
+holds an account without two-factor at setup (plan#3452), so only an account
+with it reaches those doors, and its re-confirm types the next step's code.
 """
 
 import logging
@@ -41,15 +50,18 @@ import sqlalchemy
 
 from app.extensions import db
 from app.models.known_device import KnownDevice
-from app.models.user import MfaConfig, User
+from app.models.user import User
 from app.routes.auth import _helpers as auth_route_helpers
 from app.services import auth_service, known_device_service
 from app.utils.log_events import EVT_KNOWN_DEVICE_DELETED
 from app.utils.session_helpers import SESSION_SIGNED_IN_AT_KEY
 from tests._guess_records import count_of, locked_until_of
 from tests._sign_in import make_a_stranger
-from tests._test_helpers import enable_mfa
+from tests._test_helpers import store_backup_codes
 from tests._seed_owner_fixtures import SEED_USER_EMAIL, SEED_USER_PASSWORD
+from tests._two_factor_sign_in import (
+    code_now, reset_two_factor_of, two_factor_secret_of,
+)
 
 _SECOND_EMAIL = "second@shekel.local"
 _SECOND_PASSWORD = "secondpass12"
@@ -154,11 +166,6 @@ def _known(app, email=SEED_USER_EMAIL, password=SEED_USER_PASSWORD):
     return browser
 
 
-def _code(secret):
-    """Return the code valid now for *secret*."""
-    return pyotp.TOTP(secret).at(int(time.time()))
-
-
 def _second_code(secret):
     """Return a code for *secret* one step past now's, for a second sign-in.
 
@@ -180,7 +187,7 @@ def _known_with_a_code(app, secret, trust):
     """
     browser = app.test_client()
     assert _asked_the_code(_password(browser))
-    form = {"totp_code": _code(secret)}
+    form = {"totp_code": code_now(secret)}
     if trust:
         form["trust_device"] = "1"
     assert _signed_in(browser.post("/mfa/verify", data=form))
@@ -192,7 +199,7 @@ def _signed_in_with_a_code(app, secret):
     """Return a browser that finished a sign-in with its code, still signed in."""
     browser = app.test_client()
     assert _asked_the_code(_password(browser))
-    assert _signed_in(browser.post("/mfa/verify", data={"totp_code": _code(secret)}))
+    assert _signed_in(browser.post("/mfa/verify", data={"totp_code": code_now(secret)}))
     return browser
 
 
@@ -225,6 +232,7 @@ class TestEveryFinishedSignIn:
 
     def test_a_password_with_no_second_factor_writes_both(self, app, seed_user):
         """One row holding no trust, and the cookie with its flags, on the redirect."""
+        reset_two_factor_of(seed_user["user"].id)
         user_id = seed_user["user"].id
 
         response = _password(app.test_client())
@@ -260,7 +268,6 @@ class TestEveryFinishedSignIn:
         So knowing the password never makes a browser known.
         """
         user_id = seed_user["user"].id
-        enable_mfa(db.session, user_id)
 
         response = _password(app.test_client())
 
@@ -271,7 +278,6 @@ class TestEveryFinishedSignIn:
     def test_a_wrong_code_earns_nothing(self, app, seed_user):
         """The code form refuses: still no row and no cookie."""
         user_id = seed_user["user"].id
-        enable_mfa(db.session, user_id)
         browser = app.test_client()
         assert _asked_the_code(_password(browser))
 
@@ -294,7 +300,7 @@ class TestEveryFinishedSignIn:
     def test_a_backup_code_finishes_a_sign_in(self, app, seed_user):
         """The browser is known, and survives the bump its own backup code makes."""
         user_id = seed_user["user"].id
-        enable_mfa(db.session, user_id, backup_codes=[_BACKUP_CODE])
+        store_backup_codes(db.session, user_id, [_BACKUP_CODE])
         browser = app.test_client()
         assert _asked_the_code(_password(browser))
 
@@ -311,6 +317,8 @@ class TestEveryFinishedSignIn:
         self, app, seed_user, seed_second_user,
     ):
         """Two cookies and two rows; neither sign-in disturbs the other's."""
+        reset_two_factor_of(seed_user["user"].id)
+        reset_two_factor_of(seed_second_user["user"].id)
         first_id = seed_user["user"].id
         second_id = seed_second_user["user"].id
         browser = app.test_client()
@@ -334,6 +342,7 @@ class TestTheCookieIsReplaced:
         self, app, seed_user,
     ):
         """One row still, and a stolen copy of the old token now names nothing."""
+        reset_two_factor_of(seed_user["user"].id)
         user_id = seed_user["user"].id
         browser = app.test_client()
         assert _signed_in(_password(browser))
@@ -356,7 +365,6 @@ class TestTheCookieIsReplaced:
         Trusted through the service, so no second code is spent.
         """
         user_id = seed_user["user"].id
-        enable_mfa(db.session, user_id)
         token = known_device_service.record_sign_in(
             user_id, None, "", now=datetime.now(timezone.utc), trust=True,
         )
@@ -375,6 +383,7 @@ class TestTheCookieIsReplaced:
 
     def test_a_sign_in_keeps_the_latest_browser_name(self, app, seed_user):
         """The row names the browser as it last signed in."""
+        reset_two_factor_of(seed_user["user"].id)
         user_id = seed_user["user"].id
         browser = app.test_client()
         assert _signed_in(_password(browser, headers={"User-Agent": "First"}))
@@ -391,6 +400,7 @@ class TestWhatEndsBeingKnown:
 
     def test_a_sign_in_renews_the_thirty_days(self, app, seed_user):
         """Twenty-nine days old, signed in again: as good as new."""
+        reset_two_factor_of(seed_user["user"].id)
         user_id = seed_user["user"].id
         browser = app.test_client()
         assert _signed_in(_password(browser))
@@ -409,6 +419,7 @@ class TestWhatEndsBeingKnown:
 
         The control is the same browser a minute inside the thirty days.
         """
+        reset_two_factor_of(seed_user["user"].id)
         user_id = seed_user["user"].id
         browser = app.test_client()
         assert _signed_in(_password(browser))
@@ -427,6 +438,7 @@ class TestWhatEndsBeingKnown:
 
     def test_logging_out_all_sessions_leaves_it_known(self, app, seed_user):
         """``/invalidate-sessions`` writes the bump, and the token is still good."""
+        reset_two_factor_of(seed_user["user"].id)
         user_id = seed_user["user"].id
         browser = app.test_client()
         assert _signed_in(_password(browser))
@@ -439,6 +451,7 @@ class TestWhatEndsBeingKnown:
 
     def test_a_password_change_leaves_it_known(self, app, seed_user):
         """``/change-password`` writes the bump, and the token is still good."""
+        reset_two_factor_of(seed_user["user"].id)
         user_id = seed_user["user"].id
         browser = app.test_client()
         assert _signed_in(_password(browser))
@@ -466,6 +479,7 @@ class TestPastTheStrangersLock:
 
     def test_a_known_browser_signs_in_and_the_lock_stays(self, app, seed_user):
         """No two-factor: signed in, and the strangers' count and lock as they were."""
+        reset_two_factor_of(seed_user["user"].id)
         user_id = seed_user["user"].id
         browser = _known(app)
         lock_before = _strangers_lock(app, user_id)
@@ -483,6 +497,7 @@ class TestPastTheStrangersLock:
         writes (ruling plan#3130), so one that read the other name would make
         every browser in production a stranger, locked out with the rest.
         """
+        reset_two_factor_of(seed_user["user"].id)
         user_id = seed_user["user"].id
         monkeypatch.setitem(app.config, "SESSION_COOKIE_SECURE", True)
         https = {"base_url": "https://localhost"}
@@ -499,7 +514,7 @@ class TestPastTheStrangersLock:
     def test_a_trusted_browser_signs_in_with_two_factor(self, app, seed_user):
         """A browser trusted with a code skips it, locked or not, and the lock stays."""
         user_id = seed_user["user"].id
-        secret = enable_mfa(db.session, user_id)
+        secret = two_factor_secret_of(user_id)
         browser = _known_with_a_code(app, secret, trust=True)
         lock_before = _strangers_lock(app, user_id)
 
@@ -510,7 +525,7 @@ class TestPastTheStrangersLock:
     def test_a_known_browser_owing_its_code_is_asked_for_it(self, app, seed_user):
         """Known but not trusted: the password gets past the lock to the code form."""
         user_id = seed_user["user"].id
-        secret = enable_mfa(db.session, user_id)
+        secret = two_factor_secret_of(user_id)
         browser = _known_with_a_code(app, secret, trust=False)
         lock_before = _strangers_lock(app, user_id)
 
@@ -524,6 +539,7 @@ class TestPastTheStrangersLock:
         Neither moves the count while the lock holds, and neither earns a
         cookie or a row: the one row is the known browser's.
         """
+        reset_two_factor_of(seed_user["user"].id)
         user_id = seed_user["user"].id
         _known(app)
         lock_before = _strangers_lock(app, user_id)
@@ -540,6 +556,7 @@ class TestPastTheStrangersLock:
 
     def test_a_cookie_alone_signs_nobody_in(self, app, seed_user):
         """The known browser with a wrong password is refused, and it counts there."""
+        reset_two_factor_of(seed_user["user"].id)
         user_id = seed_user["user"].id
         browser = _known(app)
         lock_before = _strangers_lock(app, user_id)
@@ -558,6 +575,8 @@ class TestPastTheStrangersLock:
 
         The record is the second user's, so it is worth nothing for the first.
         """
+        reset_two_factor_of(seed_user["user"].id)
+        reset_two_factor_of(seed_second_user["user"].id)
         user_id = seed_user["user"].id
         browser = _known(app, _SECOND_EMAIL, _SECOND_PASSWORD)
         browser.set_cookie(
@@ -573,6 +592,7 @@ class TestPastTheStrangersLock:
 
     def test_a_cookie_thirty_days_old_is_a_strangers(self, app, seed_user):
         """Thirty days and a minute since its last sign-in: refused like a stranger."""
+        reset_two_factor_of(seed_user["user"].id)
         user_id = seed_user["user"].id
         browser = _known(app)
         _age_the_last_sign_in(user_id, "30 days 1 minute")
@@ -589,6 +609,7 @@ class TestPastTheStrangersLock:
 
         So a known browser's sign-in refills no stranger's guesses.
         """
+        reset_two_factor_of(seed_user["user"].id)
         user_id = seed_user["user"].id
         browser = _known(app)
         _strangers_guess(app, 4)
@@ -602,7 +623,7 @@ class TestPastTheStrangersLock:
     ):
         """Four strangers' guesses, then the known browser types its code: still four."""
         user_id = seed_user["user"].id
-        secret = enable_mfa(db.session, user_id)
+        secret = two_factor_secret_of(user_id)
         browser = _known_with_a_code(app, secret, trust=False)
         _strangers_guess(app, 4)
         assert _asked_the_code(_password(browser))
@@ -627,6 +648,7 @@ class TestTenWrongMakeAStranger:
         moves, and the guessing browser's next wrong password is a stranger's,
         so it counts on the account.
         """
+        reset_two_factor_of(seed_user["user"].id)
         user_id = seed_user["user"].id
         guessing = _known(app)
         other = _known(app)
@@ -659,7 +681,7 @@ class TestTenWrongMakeAStranger:
         the account's (ruling plan#3007).
         """
         user_id = seed_user["user"].id
-        secret = enable_mfa(db.session, user_id)
+        secret = two_factor_secret_of(user_id)
         browser = _known_with_a_code(app, secret, trust=False)
         token = _token(browser, user_id)
         for _ in range(_THRESHOLD - 1):
@@ -673,6 +695,7 @@ class TestTenWrongMakeAStranger:
 
     def test_a_finished_sign_in_breaks_the_row(self, app, seed_user):
         """Nine wrong, a sign-in, nine more: the browser is still known, at nine."""
+        reset_two_factor_of(seed_user["user"].id)
         user_id = seed_user["user"].id
         browser = _known(app)
         for _ in range(_THRESHOLD - 1):
@@ -699,7 +722,7 @@ class TestEveryDoorHasTheOneRule:
     def test_a_known_browser_finishes_its_code_while_locked(self, app, seed_user):
         """Known but not trusted: the password and then the code both get past."""
         user_id = seed_user["user"].id
-        secret = enable_mfa(db.session, user_id)
+        secret = two_factor_secret_of(user_id)
         browser = _known_with_a_code(app, secret, trust=False)
         lock_before = _strangers_lock(app, user_id)
         assert _asked_the_code(_password(browser))
@@ -714,7 +737,7 @@ class TestEveryDoorHasTheOneRule:
     def test_a_known_browsers_wrong_code_counts_on_its_record(self, app, seed_user):
         """One wrong code: 1 on the browser's record, 0 on the account's."""
         user_id = seed_user["user"].id
-        secret = enable_mfa(db.session, user_id)
+        secret = two_factor_secret_of(user_id)
         browser = _known_with_a_code(app, secret, trust=False)
         assert _asked_the_code(_password(browser))
 
@@ -725,13 +748,15 @@ class TestEveryDoorHasTheOneRule:
         assert _lock_state(user_id) == (0, None)
 
     def test_a_known_browser_re_confirms_while_locked(self, app, seed_user):
-        """Signed in, then locked by strangers: ``/reauth`` takes the right password."""
+        """Signed in, then locked by strangers: ``/reauth`` takes the right password and code."""
         user_id = seed_user["user"].id
-        browser = app.test_client()
-        assert _signed_in(_password(browser))
+        secret = two_factor_secret_of(user_id)
+        browser = _signed_in_with_a_code(app, secret)
         lock_before = _strangers_lock(app, user_id)
 
-        response = browser.post("/reauth", data={"password": SEED_USER_PASSWORD})
+        response = browser.post("/reauth", data={
+            "password": SEED_USER_PASSWORD, "totp_code": _second_code(secret),
+        })
 
         assert response.status_code == 302
         assert response.headers["Location"].endswith("/dashboard")
@@ -740,11 +765,13 @@ class TestEveryDoorHasTheOneRule:
     def test_a_re_confirm_counts_and_clears_on_the_browser(self, app, seed_user):
         """A wrong password counts 1 on the record; the right one clears it to 0.
 
-        The strangers' four on the account stay four throughout.
+        The strangers' four on the account stay four throughout.  The wrong
+        password is refused before any code is asked; the right one goes with
+        the account's code.
         """
         user_id = seed_user["user"].id
-        browser = app.test_client()
-        assert _signed_in(_password(browser))
+        secret = two_factor_secret_of(user_id)
+        browser = _signed_in_with_a_code(app, secret)
         _strangers_guess(app, 4)
         token = _token(browser, user_id)
 
@@ -752,9 +779,9 @@ class TestEveryDoorHasTheOneRule:
         assert b"Invalid password." in refused.data
         assert _device_count(user_id, token) == 1
 
-        assert browser.post(
-            "/reauth", data={"password": SEED_USER_PASSWORD},
-        ).status_code == 302
+        assert browser.post("/reauth", data={
+            "password": SEED_USER_PASSWORD, "totp_code": _second_code(secret),
+        }).status_code == 302
 
         assert _device_count(user_id, _token(browser, user_id)) == 0
         assert _lock_state(user_id) == (4, None)
@@ -767,7 +794,7 @@ class TestEveryDoorHasTheOneRule:
         The password is right.
         """
         user_id = seed_user["user"].id
-        secret = enable_mfa(db.session, user_id)
+        secret = two_factor_secret_of(user_id)
         browser = _signed_in_with_a_code(app, secret)
 
         response = browser.post("/reauth", data={
@@ -782,8 +809,7 @@ class TestEveryDoorHasTheOneRule:
     def test_a_known_browser_changes_its_password_while_locked(self, app, seed_user):
         """The current password gets past the lock, and the new one is stored."""
         user_id = seed_user["user"].id
-        browser = app.test_client()
-        assert _signed_in(_password(browser))
+        browser = _signed_in_with_a_code(app, two_factor_secret_of(user_id))
         lock_before = _strangers_lock(app, user_id)
         new_password = "a-brand-new-passphrase"
 
@@ -797,48 +823,6 @@ class TestEveryDoorHasTheOneRule:
         user = db.session.get(User, user_id)
         assert auth_service.verify_password(new_password, user.password_hash)
         assert _lock_state(user_id) == lock_before
-
-    def test_a_known_browser_turns_two_factor_off_while_locked(self, app, seed_user):
-        """The password and the code get past the lock, and two-factor is off."""
-        user_id = seed_user["user"].id
-        secret = enable_mfa(db.session, user_id)
-        browser = app.test_client()
-        assert _asked_the_code(_password(browser))
-        assert _signed_in(browser.post("/mfa/verify", data={"totp_code": _code(secret)}))
-        _strangers_lock(app, user_id)
-
-        browser.post("/mfa/disable", data={
-            "current_password": SEED_USER_PASSWORD,
-            "totp_code": _second_code(secret),
-        })
-
-        db.session.expire_all()
-        assert db.session.query(MfaConfig).filter_by(
-            user_id=user_id,
-        ).one().is_enabled is False
-
-    def test_a_known_browsers_wrong_code_at_disable_counts_on_its_record(
-        self, app, seed_user,
-    ):
-        """A wrong code at Disable two-factor: 1 on its record, 0 on the account's.
-
-        The password is right, and two-factor stays on.
-        """
-        user_id = seed_user["user"].id
-        secret = enable_mfa(db.session, user_id)
-        browser = _signed_in_with_a_code(app, secret)
-
-        response = browser.post("/mfa/disable", data={
-            "current_password": SEED_USER_PASSWORD, "totp_code": _NEVER_A_CODE,
-        }, follow_redirects=True)
-
-        assert _INVALID_CODE in response.data
-        assert _device_count(user_id, _token(browser, user_id)) == 1
-        assert _lock_state(user_id) == (0, None)
-        db.session.expire_all()
-        assert db.session.query(MfaConfig).filter_by(
-            user_id=user_id,
-        ).one().is_enabled is True
 
 
 def _re_confirmed(response):
@@ -855,21 +839,24 @@ class TestAReConfirmReplacesTheCookie:
     def test_the_old_cookie_is_a_strangers_and_the_new_one_known(
         self, app, seed_user,
     ):
-        """No two-factor: a new token on the same row, its thirty days unmoved.
+        """A known browser not trusted: a new token on the same row, its thirty days unmoved.
 
         The re-confirm's response carries the cookie, so the browser holds the
         new token; a stolen copy of the old one now names nothing.  Neither the
         record's last sign-in nor the session's sign-in stamp moves: a
-        re-confirm is not a sign-in (ruling plan#3069).
+        re-confirm is not a sign-in (ruling plan#3069).  The trusted
+        browser's case is the next one.
         """
         user_id = seed_user["user"].id
-        browser = app.test_client()
-        assert _signed_in(_password(browser))
+        secret = two_factor_secret_of(user_id)
+        browser = _signed_in_with_a_code(app, secret)
         old_token = _token(browser, user_id)
         (device,) = _rows_of(user_id)
         device_id, signed_in_at = device.id, device.last_signed_in_at
 
-        response = browser.post("/reauth", data={"password": SEED_USER_PASSWORD})
+        response = browser.post("/reauth", data={
+            "password": SEED_USER_PASSWORD, "totp_code": _second_code(secret),
+        })
 
         assert _re_confirmed(response)
         assert _cookie_header(response, user_id) is not None
@@ -894,7 +881,7 @@ class TestAReConfirmReplacesTheCookie:
         still trusted.
         """
         user_id = seed_user["user"].id
-        secret = enable_mfa(db.session, user_id)
+        secret = two_factor_secret_of(user_id)
         browser = _known_with_a_code(app, secret, trust=True)
         assert _signed_in(_password(browser))
         old_token = _token(browser, user_id)
@@ -921,12 +908,14 @@ class TestAReConfirmReplacesTheCookie:
         (ruling plan#3007).
         """
         user_id = seed_user["user"].id
-        browser = app.test_client()
-        assert _signed_in(_password(browser))
+        secret = two_factor_secret_of(user_id)
+        browser = _signed_in_with_a_code(app, secret)
         make_a_stranger(user_id)
         _strangers_guess(app, 4)
 
-        response = browser.post("/reauth", data={"password": SEED_USER_PASSWORD})
+        response = browser.post("/reauth", data={
+            "password": SEED_USER_PASSWORD, "totp_code": _second_code(secret),
+        })
 
         assert _re_confirmed(response)
         assert _cookie_header(response, user_id) is None
@@ -946,7 +935,7 @@ class TestAReConfirmReplacesTheCookie:
         on the account: their count is not cleared in the record's place.
         """
         user_id = seed_user["user"].id
-        secret = enable_mfa(db.session, user_id)
+        secret = two_factor_secret_of(user_id)
         browser = _signed_in_with_a_code(app, secret)
         _strangers_guess(app, 4)
         real_check = auth_route_helpers._verify_totp_with_replay_logging

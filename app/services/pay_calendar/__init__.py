@@ -122,11 +122,10 @@ from ._loader import (
     calendar_for,
     schedule_for,
 )
-from ._paid_days import (
-    PaidDays, days_paid_for, first_day_paid_at, previous_payday, scheduled_payday,
-)
+from ._paid_days import PaidDays, days_paid_for, previous_payday, scheduled_payday
 from ._rhythm import (
     cadence_on,
+    first_paycheck_at,
     paydays_in_month_through,
     paydays_in_year_before,
     saved_paydays_in_month_through,
@@ -166,7 +165,7 @@ __all__ = [
     "earliest_started_period",
     "era_index_at",
     "final_covered_day",
-    "first_day_paid_at",
+    "first_paycheck_at",
     "first_payday_of",
     "latest_started_period",
     "nominal_payday",

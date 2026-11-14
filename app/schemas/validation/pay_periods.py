@@ -12,7 +12,9 @@ which the writer asks before its transaction does the work
 which is not a column's bound at all but how far this application's calendar
 reaches, mirrored onto ``ck_pay_schedule_history_opens_range`` for the writers
 that never see a schema.  A schema is a door, and a door does not get to
-invent the rule it enforces.
+invent the rule it enforces.  The payday window is the shared one in
+:mod:`app.schemas.validation._helpers` (``_PAYDAY_RANGE``, task plan#3577),
+which every door that types a payday reads.
 
 *TWO pairs here, where this paragraph counted three until plan step*
 ``pay_calendar:C17-d-3`` *moved the rhythm's -- the cadence pair, and the
@@ -44,6 +46,7 @@ from app.config import BaseConfig
 from app.schemas.validation._helpers import (
     BaseSchema,
     RowId,
+    _PAYDAY_RANGE,
     _normalize_empty_inputs,
 )
 from app.schemas.validation._pay_rhythm import (
@@ -59,10 +62,13 @@ _PERIOD_BATCH_RANGE = validate.Range(
 )
 #: The window a stated pay-history opening may fall in, from
 #: :mod:`app.utils.dates`, which OWNS it.  Not the column's own rule, unlike
-#: the two ranges above: it is how far this application's calendar reaches,
+#: the batch range above: it is how far this application's calendar reaches,
 #: and ``ck_pay_schedule_history_opens_range`` mirrors the same pair onto the
 #: table.  Reading the constant here rather than an alias of it is what keeps
-#: one number from acquiring a fourth name.
+#: one number from acquiring a fourth name.  The history opening's ALONE since
+#: task plan#3577: a payday is not a history, and :func:`payday_field` reads
+#: the window every payday door shares,
+#: :data:`~app.schemas.validation._helpers._PAYDAY_RANGE`.
 _HISTORY_OPENS_RANGE = validate.Range(
     min=CALENDAR_DATE_MIN, max=CALENDAR_DATE_MAX,
 )
@@ -108,15 +114,22 @@ def payday_field(**kwargs) -> fields.Date:
     makes that sentence true again rather than fencing a state the door should
     never have admitted.
 
+    **The window is the one every door that types a payday reads**,
+    :data:`~app.schemas.validation._helpers._PAYDAY_RANGE` (task plan#3577):
+    the salary and pay-stub doors' paydays take it too, so no two doors can
+    come to accept different paydays for one calendar.  Until that task it
+    read :data:`_HISTORY_OPENS_RANGE`, a stated history's window: the same
+    calendar's reach, but a different fact's bound.
+
     Args:
         **kwargs: Forwarded to :class:`marshmallow.fields.Date` -- the
             per-schema half of the declaration (``required``, and
             registration's own ``error_messages``).
 
     Returns:
-        The field, carrying the shared calendar-range validator.
+        The field, carrying the one payday window.
     """
-    return fields.Date(validate=_HISTORY_OPENS_RANGE, **kwargs)
+    return fields.Date(validate=_PAYDAY_RANGE, **kwargs)
 
 
 def history_opens_on_field(**kwargs) -> fields.Date:

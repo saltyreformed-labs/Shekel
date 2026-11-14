@@ -482,10 +482,10 @@ jobs:
       # runner's own throwaway daemon.
       #
       # ``SHEKEL_TEST_SHARD`` is read by ``tests/conftest.py``: the job keeps
-      # the tests ``tests/_shard.py`` assigns it, a partition by construction
-      # that keeps every ``xdist_group`` whole.  ``-m ""`` overrides the
-      # wrapper's local ``not docker`` default, so the container-spawning
-      # ``tests/test_deploy`` tests run here as they always have.
+      # the tests ``tests/_shard.py`` assigns it, a partition by construction.
+      # ``-m ""`` overrides the wrapper's local ``not docker`` default, so the
+      # container-spawning ``tests/test_deploy`` tests run here as they always
+      # have.
       #
       # ``-n logical`` is the runner's logical CPU count, 4 today -- ``auto``
       # would drop to the PHYSICAL count (2) the day psutil is installed.
@@ -564,10 +564,10 @@ jobs:
         run: pytest tools/rehearsal -c /dev/null -q -m cluster
 
   # ── 8. The app image, built and checked before a merge ───────────
-  # docker-publish.yml builds the release image only on a push to main, so
-  # without this job a change that breaks the build -- a lock moving
-  # psycopg-c past what compiles here, a base or uv image a digest update
-  # moves -- would land in dev and fail only at the release (task plan#2366;
+  # docker-publish.yml builds the release image only from main, on a push
+  # and weekly, so without this job a change that breaks the build -- a lock
+  # moving psycopg-c past what compiles here, a base or uv image a digest
+  # update moves -- would land in dev and fail only at the release (task plan#2366;
   # a version-only update lands with no card once CI is green, ruling
   # plan#2351).  The image is built from the Dockerfile as the release builds
   # it, loaded into this runner's docker, never pushed; the job holds no
@@ -695,6 +695,43 @@ jobs:
           found="$(find / -xdev \( -name pip -o -name "pip[0-9]*" -o -name "pip-*" -o -name uv -o -name uvx -o -name "uv-*" \) -print)" || exit 1
           echo "${found:-no pip and no uv}"
           test -z "${found}"
+          '
+
+      # The Dockerfile's ENV TZ pins the image's process clock to the app's
+      # zone (rulings plan#3807, plan#3852; parity audit finding M01), and
+      # test_dockerfile.py holds the line to DISPLAY_TIMEZONE.  But the line
+      # works only while the image holds the zone's tzdata file: glibc runs a
+      # TZ it cannot find as UTC, silently, the line still there.  The app's
+      # zoneinfo then refuses DISPLAY_TIMEZONE at import, so the image would
+      # fail first when production boots it, and silently once a tzdata
+      # wheel reached it (the image holds none: the lock takes one only on
+      # Windows).  So the image's own clock is read here, before a merge: its
+      # UTC offset (time.localtime, glibc's reading) at one January and one
+      # July instant must each equal DISPLAY_TIMEZONE's (zoneinfo's), so the
+      # zone resolves and its winter and summer offsets are the app's.  Which
+      # zone it names is the Dockerfile test's to hold: another zone with New
+      # York's offsets, America/Toronto, passes this step.
+      # Measured 2026-11-13 on the rootless daemon: the built image passes;
+      # one without the line, and one with /usr/share/zoneinfo deleted, each
+      # fail.  The runner's TZ above reaches no container.  The clock rework,
+      # plan#1068, deletes this step with the pin (ruling plan#3857).
+      - name: The image's clock runs the app's zone
+        shell: bash
+        run: |
+          docker run --rm --network none --entrypoint python "${IMAGE}" -c '
+          import sys
+          import time
+          from datetime import datetime, timezone
+          from app.utils.dates import DISPLAY_TIMEZONE
+          wrong = False
+          for month in (1, 7):
+              instant = datetime(2026, month, 15, 12, tzinfo=timezone.utc)
+              process = time.localtime(instant.timestamp()).tm_gmtoff
+              app = int(instant.astimezone(DISPLAY_TIMEZONE).utcoffset().total_seconds())
+              print(f"{instant:%B}: the process clock at UTC{process / 3600:+g}, "
+                    f"{DISPLAY_TIMEZONE.key} at UTC{app / 3600:+g}")
+              wrong = wrong or process != app
+          sys.exit(wrong)
           '
 
   lint-and-test:

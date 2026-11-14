@@ -21,6 +21,7 @@ from app.utils.dates import display_today
 from app.services.auth_service import hash_password
 from app.services import account_service
 
+from tests._seed_owner_fixtures import log_in_seed_user
 from tests._test_helpers import (
     create_loan_account,
     loan_params_for,
@@ -191,8 +192,7 @@ class TestDashboardGrouping:
         seed_user["account"].is_active = False
         db.session.commit()
 
-        client = app.test_client()
-        client.post("/login", data={"email": "test@shekel.local", "password": "testpass"})
+        client = log_in_seed_user(app.test_client())
         resp = client.get("/savings")
         assert resp.status_code == 200
         assert b"Accounts" in resp.data

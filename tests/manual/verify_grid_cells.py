@@ -54,7 +54,6 @@ paychecks BEFORE today (where every settled leg sits).
 import json
 import pathlib
 import sys
-from datetime import datetime, timezone
 from html.parser import HTMLParser
 
 # Python puts the SCRIPT's own directory on ``sys.path``, not the working
@@ -70,7 +69,7 @@ from app import create_app  # noqa: E402
 from app.extensions import db, login_manager  # noqa: E402
 from app.models.account import Account  # noqa: E402
 from app.models.user import User  # noqa: E402
-from app.utils.session_helpers import login_session_stamps  # noqa: E402
+from tests.manual.forged_sign_in import signed_in_client  # noqa: E402
 # pylint: enable=wrong-import-position
 
 
@@ -270,16 +269,9 @@ def main(out_path):
             db.session.query(Account).filter_by(user_id=user_id)
             .order_by(Account.id).all()
         ]
-    client = app.test_client()
-    with client.session_transaction() as session:
-        session["_user_id"] = str(user_id)
-        session["_fresh"] = True
-        session["_id"] = None
-        # The stamps a sign-in writes, the user's among them: ``load_user``
-        # refuses a session without them (plan#2173).
-        session.update(login_session_stamps(
-            datetime.now(timezone.utc), user_id,
-        ))
+    # Stops here, before any grid is rendered, when the app does not let the
+    # session in: an owner without two-factor is held at its setup.
+    client = signed_in_client(app, user_id)
     snapshot = {}
     # Three windows per account: the default (today forward), the same with
     # every row shown, and a PAST window -- a settled transfer's legs sit in

@@ -33,7 +33,9 @@ the repository root's own (``gunicorn.conf.py``, ``run.py``):
   referenced only by its homes (:data:`_HOMES`): the one statement of the lock
   (``take_owner_write_lock``) by ``app/db_transaction.py`` and
   ``app/services/user_write_lock.py``; the every-owner form by the three
-  deploy reconciles' modules; the lock's KEY (``_USER_WRITE_LOCK_NAMESPACE``)
+  deploy reconciles' modules and the two-factor reset script
+  (``scripts/reset_mfa.py``, ruling plan#3823); the lock's KEY
+  (``_USER_WRITE_LOCK_NAMESPACE``)
   by ``user_write_lock.py`` alone, so no module can take the same lock under
   its own statement; ``bind_request_actor`` (where a request's owner becomes
   known) by the logging hook that signs the request in;
@@ -57,7 +59,8 @@ the repository root's own (``gunicorn.conf.py``, ``run.py``):
   reference each locking name are pinned by name
   (:data:`_PINNED_CALLERS`): ``db_transaction``'s listener and locker, the
   every-owner form alone calling the statement, and each deploy reconcile
-  alone calling the every-owner form -- so a new request-path function in
+  and the reset script's ``reset_mfa`` alone calling the every-owner form
+  -- so a new request-path function in
   ``posting_service`` that takes every owner's lock (the deadlock that form
   exists to prevent, taken by two requests) fails too.
 
@@ -124,6 +127,10 @@ _HOMES: dict[str, frozenset[str]] = {
         "app/services/posting_service.py",
         "app/services/account_posting_service/_sync.py",
         "app/services/loan_posting_service/_sync.py",
+        # A reset of an account's two-factor, before it reads anything
+        # (ruling plan#3823): a signed-in save holds its owner's lock while
+        # the login gate's read of the two-factor row stands.
+        "scripts/reset_mfa.py",
     }),
     _NAMESPACE: frozenset({_USER_WRITE_LOCK}),
     _REQUEST_OWNER: frozenset({"app/utils/logging_config.py"}),
@@ -153,7 +160,8 @@ _USER_WRITE_LOCK_BINDINGS = frozenset({_NAMESPACE, _PRIMITIVE, _EVERY_OWNER})
 #: take the statement, the before-request hook and the sign-in door call the
 #: open-transaction lock, and only the boundary registers the hook; in
 #: ``user_write_lock`` only the every-owner form calls the statement; in each
-#: deploy reconcile's module only that reconcile calls the every-owner form.
+#: deploy reconcile's module only that reconcile calls the every-owner form,
+#: and in the reset script only ``reset_mfa``.
 _PINNED_CALLERS: dict[str, dict[str, frozenset[str]]] = {
     _DB_TRANSACTION: {
         _PRIMITIVE: frozenset({"_bind_transaction_mode", _LOCK_OPEN}),
@@ -170,6 +178,7 @@ _PINNED_CALLERS: dict[str, dict[str, frozenset[str]]] = {
     "app/services/loan_posting_service/_sync.py": {
         _EVERY_OWNER: frozenset({"backfill_all_loan_postings"}),
     },
+    "scripts/reset_mfa.py": {_EVERY_OWNER: frozenset({"reset_mfa"})},
 }
 
 
@@ -413,8 +422,9 @@ class TestTheOwnerLockHasOneHome:
         assert not violations, (
             "The owner's write lock is taken where a writing transaction "
             "BEGINS (app/db_transaction.py), at a sign-in, and at the start "
-            "of the three deploy reconciles, and nowhere else (rulings "
-            "R-CC106, R-CC115, R-CC121).  An acquisition deeper in a "
+            "of the three deploy reconciles and of the two-factor reset "
+            "script, and nowhere else (rulings R-CC106, R-CC115, R-CC121, "
+            "plan#3823).  An acquisition deeper in a "
             "transaction can only repeat a lock already held -- or, off a "
             "request, be the only one, which is a writer that must take it "
             "at its own start instead.  Sites:\n" + "\n".join(violations)

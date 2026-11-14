@@ -11,7 +11,8 @@
 # are the one home of what the image pins, so no comment restates it: an
 # update moves them with nothing else to re-measure (ruling plan#2443),
 # and both move in one change, the builder and the runtime in lockstep
-# (tests/test_deploy/test_image_supply_chain.py holds them to one digest).
+# (tests/test_deploy/test_image_supply_chain/test_dockerfile.py holds them
+# to one digest).
 #
 # OPENSSL DEFENSE-IN-DEPTH
 # ------------------------
@@ -32,7 +33,7 @@
 FROM ghcr.io/astral-sh/uv:0.13.7@sha256:96f40d3904aad8d0bd010539001d36c8e2188b981e1334471a90c4a1d93bb490 AS uv
 
 # -- Stage 1: Builder -------------------------------------------------
-FROM python:3.14-slim@sha256:a2b82f3c48559aa0a8446d9af49826b6e2b2016f4cd2afabfe6013ec53729170 AS builder
+FROM python:3.14-slim@sha256:9aaa474097d094040649f2162a627c0049b408f52138d980916788d80f04802f AS builder
 
 # Apply Debian security upgrades to the OpenSSL packages and install
 # the build-only deps (libpq headers + ``pg_config`` + a C toolchain)
@@ -79,7 +80,7 @@ RUN uv sync --locked --compile-bytecode --no-install-project \
         --no-default-groups --group server
 
 # -- Stage 2: Runtime -------------------------------------------------
-FROM python:3.14-slim@sha256:a2b82f3c48559aa0a8446d9af49826b6e2b2016f4cd2afabfe6013ec53729170
+FROM python:3.14-slim@sha256:9aaa474097d094040649f2162a627c0049b408f52138d980916788d80f04802f
 
 # Apply the same Debian OpenSSL upgrade to the runtime stage.  The
 # runtime image carries libssl3t64 (pulled in transitively by
@@ -147,6 +148,25 @@ ENV PSYCOPG_IMPL=c
 # production container: its installed locales are C, C.utf8 and POSIX, so
 # C.UTF-8 is the one UTF-8 locale this image can adopt.
 ENV LC_ALL=C.UTF-8
+
+# THE PROCESS TIMEZONE IS PINNED HERE (rulings plan#3807, plan#3811; parity
+# audit 2026-06-12, finding M01 in shekel-audits/dev-prod-parity/findings.md).
+# The app still reads the process clock as its civil day in places
+# (``date.today()``), so the process timezone is the app's there, and the base
+# image's default is UTC: ``date.today()`` turned to the next day at 20:00 New
+# York (19:00 in winter), so date-defaulted entries, pay-period membership and
+# staleness flags disagreed with the user's wall clock until midnight.  Pinned
+# in the image, every container of the app runs it, a bundled install's too.
+# The zone is ``app.utils.dates.DISPLAY_TIMEZONE``'s, which
+# tests/test_deploy/test_image_supply_chain/test_dockerfile.py holds this line
+# to; tzdata ships in python:3.14-slim (/usr/share/zoneinfo/America/New_York),
+# and ci.yml's ``image`` job reads the built image's clock against the zone
+# (ruling plan#3852).
+# deploy/docker-compose.prod.yml and docker-compose.dev.yml pin the same value
+# until plan#2166 deletes them.  The clock rework, plan#1068, deletes this
+# line once each user's own zone answers every civil-day read (ruling
+# plan#3857).
+ENV TZ=America/New_York
 
 # Copy application code.  entrypoint.sh ships in the build context (see
 # .dockerignore -- it is a must-ship file), so this single COPY already

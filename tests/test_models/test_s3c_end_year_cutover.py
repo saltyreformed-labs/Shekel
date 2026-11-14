@@ -95,7 +95,7 @@ def _profile(seed_user, name="S3-c") -> SalaryProfile:
         name=name,
     )
     db.session.add(profile)
-    start_test_pay_list(profile, Decimal("3525.96"))  # $91,675.00 a year / 26
+    start_test_pay_list(profile, Decimal("3019.23"))  # $78,500.00 a year / 26, made up
     db.session.commit()
     return profile
 
@@ -120,7 +120,7 @@ def _badged_paydays(profile, year):
     """The paydays from December of the year before *year* through its February that badge a raise.
 
     The paycheck engine's banner
-    (:meth:`~app.services.payroll_basis.PayrollBasis.pay_event_on`) over the
+    (:meth:`~app.services.payroll_basis.PayrollBasis.banner_on`) over the
     profile's own rows, on the owner's calendar projected past its record.
     Every raise here starts on January 1, so the window holds the one
     paycheck whose pay period holds that day in *year* (ruling plan#3092: a
@@ -139,7 +139,7 @@ def _badged_paydays(profile, year):
     return [
         period.start_date
         for period in calendar.projection_axis(date(year - 1, 12, 1), date(year, 2, 28))
-        if basis.pay_event_on(period)
+        if basis.banner_on(period).events
     ]
 
 
@@ -534,7 +534,7 @@ class TestARaiseStopsBadgingAfterItsEndYear:
 
     Plan step salary:S3-a named the banner's walk as the one that did not know
     about termination and left nothing enforcing it.  The banner is the
-    paycheck engine's ``PeriodInfo.raise_event``, which every salary surface
+    paycheck engine's ``PeriodInfo.banner``, which every salary surface
     reads, so before this step a raise whose end year had already stopped
     moving the gross went on announcing itself every January for as long as
     the projection ran.  Each case counts the badged paychecks around one

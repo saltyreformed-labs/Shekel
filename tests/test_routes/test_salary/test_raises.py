@@ -1,6 +1,9 @@
-"""Salary route tests: raises, a raise's end year, and the raise label filter.
+"""Salary route tests: raises and a raise's end year.
 
 Split from ``tests/test_routes/test_salary.py`` by ``tools/split`` (ruling R-BAL301).
+The raise label filter it also graded was deleted with the filter (task
+plan#3168): a raise's words are its banner's, graded in
+``tests/test_services/test_pay_banner.py``.
 """
 
 from datetime import date
@@ -661,22 +664,3 @@ class TestARaisesEndYearIsWrittenHere:
                 "the end-year question for the owner -- the default ruling "
                 "R-SAL11's write door refuses"
             )
-
-
-class TestRaiseLabelFilter:
-    """The app-wide ``raise_label`` Jinja filter (salary raise displays)."""
-
-    def test_filter_registered_and_cleans(self, app):
-        """raise_label is registered and wraps clean_raise_label.
-
-        "MERIT +2.5000%" -> title-case + trailing-zero trim -> "Merit
-        +2.5%"; "COLA +3.0000%" -> whole number drops the dot -> "Cola
-        +3%"; None renders as "" so templates can pipe an absent event
-        through without guarding.
-        """
-        with app.app_context():
-            filter_fn = app.jinja_env.filters["raise_label"]
-            assert filter_fn("MERIT +2.5000%") == "Merit +2.5%"
-            assert filter_fn("COLA +3.0000%") == "Cola +3%"
-            assert filter_fn("MERIT +$2,000.00") == "Merit +$2,000.00"
-            assert filter_fn(None) == ""

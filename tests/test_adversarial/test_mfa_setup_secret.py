@@ -13,6 +13,10 @@ extension, or anyone with read access to a shared profile.
 
 If any of these tests starts failing, the F-031 fix has regressed.
 Related: ``shekel-audits/security-2026-04-15/remediation-plan.md`` C-05.
+
+Setup is for an account without two-factor, and every shared test account is
+made with it (plan#3600), so each test sets up as the seed owner after a reset
+(``no_two_factor_client``).
 """
 
 import hashlib
@@ -27,6 +31,14 @@ from app.extensions import db
 from app.models.user import MfaConfig
 from app.services import mfa_service
 from app.utils.session_helpers import SESSION_LAST_ACTIVITY_KEY
+from tests._seed_owner_fixtures import (
+    OWNERS_PAGE, SEED_USER_EMAIL, SEED_USER_PASSWORD,
+)
+from tests._two_factor_sign_in import (
+    reset_two_factor_of,
+    sign_in_by_password,
+    sign_in_seed_companion_by_password,
+)
 
 
 def _decode_session_cookie(app, cookie_value: str) -> dict:
@@ -72,7 +84,7 @@ class TestMfaSetupSecretIsServerSide:
     """The pending TOTP secret must never appear in the session cookie."""
 
     def test_flask_session_does_not_contain_plaintext_secret(
-        self, app, auth_client, seed_user
+        self, app, no_two_factor_client, seed_user
     ):
         """The session cookie has no ``_mfa_setup_secret`` key after setup.
 
@@ -85,7 +97,7 @@ class TestMfaSetupSecretIsServerSide:
         moved the value to a differently-named session key).
         """
         with app.app_context():
-            response = auth_client.get("/mfa/setup")
+            response = no_two_factor_client.get("/mfa/setup")
             assert response.status_code == 200
 
             # Pull the secret from the database where C-05 says it
@@ -103,7 +115,7 @@ class TestMfaSetupSecretIsServerSide:
             )
 
             # High-level: Flask test client's session view.
-            with auth_client.session_transaction() as sess:
+            with no_two_factor_client.session_transaction() as sess:
                 assert "_mfa_setup_secret" not in sess, (
                     "Legacy session key found -- C-05 has regressed."
                 )
@@ -113,7 +125,7 @@ class TestMfaSetupSecretIsServerSide:
 
             # Low-level: itsdangerous-verified deserialization of the
             # actual ``session`` cookie value the browser would send.
-            cookie_value = _get_session_cookie_value(auth_client)
+            cookie_value = _get_session_cookie_value(no_two_factor_client)
             assert cookie_value, "Test client did not set a session cookie."
             payload = _decode_session_cookie(app, cookie_value)
             assert isinstance(payload, dict)
@@ -127,7 +139,7 @@ class TestMfaSetupSecretIsServerSide:
                 )
 
     def test_one_pending_secret_at_a_time(
-        self, app, auth_client, seed_user
+        self, app, no_two_factor_client, seed_user
     ):
         """A second ``/mfa/setup`` keeps the one pending secret; a new one replaces it.
 
@@ -140,12 +152,12 @@ class TestMfaSetupSecretIsServerSide:
         """
         with app.app_context():
             user_id = seed_user["user"].id
-            auth_client.get("/mfa/setup")
+            no_two_factor_client.get("/mfa/setup")
             config = db.session.query(MfaConfig).filter_by(user_id=user_id).one()
             first_ciphertext = config.pending_secret_encrypted
             first_secret = mfa_service.decrypt_secret(first_ciphertext)
 
-            auth_client.get("/mfa/setup")
+            no_two_factor_client.get("/mfa/setup")
             db.session.refresh(config)
             # The same pending secret, untouched: one row, one ciphertext.
             assert config.pending_secret_encrypted == first_ciphertext
@@ -155,7 +167,7 @@ class TestMfaSetupSecretIsServerSide:
                 datetime.now(timezone.utc) - timedelta(seconds=1)
             )
             db.session.commit()
-            auth_client.get("/mfa/setup")
+            no_two_factor_client.get("/mfa/setup")
             db.session.refresh(config)
             second_secret = mfa_service.decrypt_secret(config.pending_secret_encrypted)
             assert second_secret != first_secret
@@ -171,13 +183,13 @@ class TestMfaSetupSecretIsServerSide:
                 code for code in (pyotp.TOTP(first_secret).at(t) for t in steps)
                 if code not in accepted_now
             )
-            replaced = auth_client.post("/mfa/confirm", data={"totp_code": stale})
+            replaced = no_two_factor_client.post("/mfa/confirm", data={"totp_code": stale})
             assert replaced.status_code == 302
             db.session.refresh(config)
             assert config.is_enabled is False
 
     def test_setup_adds_only_the_keys_fingerprint_to_the_session(
-        self, app, auth_client, seed_user
+        self, app, client, seed_user
     ):
         """The session gains one value at setup: a SHA-256 digest of the ciphertext.
 
@@ -189,17 +201,22 @@ class TestMfaSetupSecretIsServerSide:
         and with the digest added, and nothing else: no value holds the key or
         its ciphertext in any encoding, under any name.  The digest is spelled
         here with ``hashlib``, never read from the route's helper.
+
+        The browser opens the sign-in form before it signs in, as a person's
+        does, so its session holds the form token every page with a form
+        writes the first time it renders one.  Setup is the first page this
+        account can open, since the login gate holds an account without
+        two-factor there (plan#3452), so without that the token would be
+        added at setup beside the digest.
         """
         with app.app_context():
-            assert auth_client.get("/security").status_code == 200
-            before = _decode_session_cookie(
-                app, _get_session_cookie_value(auth_client),
-            )
+            reset_two_factor_of(seed_user["user"].id)
+            assert client.get("/login").status_code == 200
+            sign_in_by_password(client, SEED_USER_EMAIL, SEED_USER_PASSWORD, OWNERS_PAGE)
+            before = _decode_session_cookie(app, _get_session_cookie_value(client))
 
-            assert auth_client.get("/mfa/setup").status_code == 200
-            after = _decode_session_cookie(
-                app, _get_session_cookie_value(auth_client),
-            )
+            assert client.get("/mfa/setup").status_code == 200
+            after = _decode_session_cookie(app, _get_session_cookie_value(client))
 
             config = (
                 db.session.query(MfaConfig)
@@ -220,7 +237,7 @@ class TestMfaSetupSecretIsServerSide:
             assert datetime.fromisoformat(after[SESSION_LAST_ACTIVITY_KEY]).tzinfo
 
     def test_cross_user_cannot_consume_pending(
-        self, app, auth_client, seed_user, second_auth_client, seed_second_user
+        self, app, no_two_factor_client, seed_user, seed_companion
     ):
         """User B cannot complete /mfa/confirm using user A's pending secret.
 
@@ -230,11 +247,14 @@ class TestMfaSetupSecretIsServerSide:
         regression check: any future refactor that accidentally
         replaces ``filter_by(user_id=current_user.id)`` with a global
         lookup would let user B silently inherit user A's
-        in-progress credential.
+        in-progress credential.  User B is the seed companion, whom her
+        owner has just made: a user with no two-factor row at all, signed
+        in with her password alone.
         """
         with app.app_context():
+            user_b_client = sign_in_seed_companion_by_password(app)
             # User A initiates setup -- writes pending state.
-            auth_client.get("/mfa/setup")
+            no_two_factor_client.get("/mfa/setup")
             user_a_config = (
                 db.session.query(MfaConfig)
                 .filter_by(user_id=seed_user["user"].id)
@@ -247,7 +267,7 @@ class TestMfaSetupSecretIsServerSide:
             # User B attempts to confirm.  User B has no MfaConfig at
             # all (no /mfa/setup call as user B), so the route should
             # treat this as an expired/missing setup.
-            response = second_auth_client.post("/mfa/confirm", data={
+            response = user_b_client.post("/mfa/confirm", data={
                 "totp_code": "123456",
             }, follow_redirects=False)
             assert response.status_code == 302
@@ -256,7 +276,7 @@ class TestMfaSetupSecretIsServerSide:
             # User B has no MfaConfig.
             user_b_config = (
                 db.session.query(MfaConfig)
-                .filter_by(user_id=seed_second_user["user"].id)
+                .filter_by(user_id=seed_companion["user"].id)
                 .first()
             )
             assert user_b_config is None, (
@@ -272,7 +292,7 @@ class TestMfaSetupSecretIsServerSide:
             assert user_a_config.totp_secret_encrypted is None
 
     def test_pending_decryptable_after_key_rotation(
-        self, app, auth_client, seed_user, monkeypatch
+        self, app, no_two_factor_client, seed_user, monkeypatch
     ):
         """Pending secret survives a TOTP_ENCRYPTION_KEY rotation mid-setup.
 
@@ -294,12 +314,12 @@ class TestMfaSetupSecretIsServerSide:
         their MFA.
         """
         with app.app_context():
-            # Capture the original primary that auth_client's setup
-            # call will use.  conftest sets a fresh key per test via
-            # the ``set_totp_key`` autouse fixture.
+            # Capture the original primary that the setup call will
+            # use: the suite's one key, which ``tests/conftest.py``
+            # writes before the app is imported (ruling plan#3890).
             old_primary = mfa_service.get_encryption_key()
             # Perform setup under the original primary.
-            auth_client.get("/mfa/setup")
+            no_two_factor_client.get("/mfa/setup")
             config = (
                 db.session.query(MfaConfig)
                 .filter_by(user_id=seed_user["user"].id)
@@ -331,7 +351,7 @@ class TestMfaSetupSecretIsServerSide:
             monkeypatch.setattr(
                 mfa_service, "verify_totp_setup_code", lambda s, c: 12345,
             )
-            response = auth_client.post("/mfa/confirm", data={
+            response = no_two_factor_client.post("/mfa/confirm", data={
                 "totp_code": "123456",
             }, follow_redirects=False)
             assert response.status_code == 200
@@ -363,7 +383,7 @@ class TestMfaSetupExpiryEnforcement:
     """The 15-minute pending TTL is the second half of the C-05 contract."""
 
     def test_confirm_just_before_expiry_succeeds(
-        self, app, auth_client, seed_user, monkeypatch
+        self, app, no_two_factor_client, seed_user, monkeypatch
     ):
         """Confirm one second before expiry still works.
 
@@ -379,19 +399,22 @@ class TestMfaSetupExpiryEnforcement:
                 mfa_service, "verify_totp_setup_code", lambda s, c: 12345,
             )
 
-            mfa_config = MfaConfig(
-                user_id=seed_user["user"].id,
-                pending_secret_encrypted=mfa_service.encrypt_secret(
-                    "JBSWY3DPEHPK3PXP"
-                ),
-                pending_secret_expires_at=(
-                    datetime.now(timezone.utc) + timedelta(seconds=1)
-                ),
+            # The owner's row, which the reset left disabled, holds a
+            # pending secret one second from its expiry.
+            mfa_config = (
+                db.session.query(MfaConfig)
+                .filter_by(user_id=seed_user["user"].id)
+                .one()
             )
-            db.session.add(mfa_config)
+            mfa_config.pending_secret_encrypted = mfa_service.encrypt_secret(
+                "JBSWY3DPEHPK3PXP"
+            )
+            mfa_config.pending_secret_expires_at = (
+                datetime.now(timezone.utc) + timedelta(seconds=1)
+            )
             db.session.commit()
 
-            response = auth_client.post("/mfa/confirm", data={
+            response = no_two_factor_client.post("/mfa/confirm", data={
                 "totp_code": "123456",
             }, follow_redirects=False)
             # Either the response is the backup codes page (200) or

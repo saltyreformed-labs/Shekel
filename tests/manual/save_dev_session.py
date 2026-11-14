@@ -10,6 +10,12 @@ gateway) to perform the login, then writes Playwright's
 ``storage_state`` -- cookies + localStorage -- to
 ``tests/manual/.dev_session_state.json``.
 
+Every account signs in with its password and then a two-factor code
+(plan#3452).  The dev copy's account has the dev key as its two-factor,
+written by ``tools/dev_two_factor.py``, and this script signs in through that
+module's one sign-in, which types that key's current code at ``/mfa/verify``
+(``SHEKEL_DEV_TOTP_SECRET``, that module's docstring).
+
 Subsequent verification scripts launch Playwright with
 ``storage_state=<that file>`` and skip the login flow entirely.  The
 file is gitignored (see .gitignore "Manual verification harness").
@@ -30,14 +36,28 @@ from __future__ import annotations
 import getpass
 import pathlib
 import sys
-
-from playwright.sync_api import TimeoutError as PlaywrightTimeout, sync_playwright
+from playwright.sync_api import sync_playwright
 
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
+# Python puts the SCRIPT's own directory on ``sys.path``, not the working
+# directory, so the repository root is added explicitly -- the same line every
+# harness in this directory carries.
+sys.path.insert(0, str(REPO_ROOT))
+
+# Pylint: ``wrong-import-position`` -- this import must FOLLOW the ``sys.path``
+# line above, which is what makes this checkout's ``tools`` the one imported.
+# pylint: disable=wrong-import-position
+from tools.dev_two_factor import (  # noqa: E402
+    sign_in_with_dev_key, why_not_signed_in,
+)
+# pylint: enable=wrong-import-position
+
 STATE_FILE = REPO_ROOT / "tests" / "manual" / ".dev_session_state.json"
 DEV_BASE_URL = "http://172.32.0.1:5000"
 DEFAULT_EMAIL = "josh@saltyreformed.com"
+#: How long each sign-in form's answer may take to settle.
+SIGN_IN_TIMEOUT_MS = 10_000
 
 
 def main() -> int:
@@ -53,42 +73,26 @@ def main() -> int:
         browser = p.chromium.launch(headless=True)
         context = browser.new_context()
         page = context.new_page()
-        page.goto(f"{DEV_BASE_URL}/login", wait_until="domcontentloaded")
-        page.fill('input[name="email"]', email)
-        page.fill('input[name="password"]', password)
-        page.click('button[type="submit"]')
-        # Successful login redirects to /grid (or / -> /grid).  Wait
-        # until the response settles to a non-login URL.
-        try:
-            page.wait_for_url(
-                lambda url: "/login" not in url,
-                timeout=10000,
-            )
-        except PlaywrightTimeout:
-            # Re-read the page to see what came back.  Capture the
-            # body so the operator can diagnose (often an MFA prompt
-            # or a validation error).
+        if not sign_in_with_dev_key(
+            page, DEV_BASE_URL, email, password, SIGN_IN_TIMEOUT_MS,
+        ):
+            # The page's body follows, for a form error the sentence does
+            # not name.
             print(
-                "Login did not redirect away from /login.  "
-                "Inspect the response below:",
+                f"Login did not finish.  {why_not_signed_in(page.url, email)}  "
+                "The response:",
                 file=sys.stderr,
             )
             print(page.content()[:2000], file=sys.stderr)
             browser.close()
-            raise
+            return 1
 
         # Hit /grid once so any post-login redirect chain settles
         # and the storage_state captures everything the verification
         # script will need.
         page.goto(f"{DEV_BASE_URL}/grid", wait_until="domcontentloaded")
         assert page.url.endswith("/grid"), (
-            f"Expected to land on /grid, got {page.url}.  If the login "
-            "went to /mfa/verify, the account has MFA and this script "
-            "does not answer it; on a PRODUCTION CLONE under the dev "
-            "checkout's TOTP key the secret cannot be decrypted either, "
-            "so remove MFA from the clone's copy of the user first: "
-            "DELETE FROM auth.mfa_configs WHERE user_id = <id> "
-            "(the clone only, never the shared or production database)."
+            f"Expected to land on /grid, got {page.url}."
         )
 
         STATE_FILE.parent.mkdir(parents=True, exist_ok=True)

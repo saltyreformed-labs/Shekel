@@ -33,7 +33,6 @@ from app.services.grid_view_service import (
     cell_key,
     leg_dom_id,
 )
-from app.services.salary_cockpit_service import clean_raise_label, is_pay_cut
 from app.services.statement_match import (
     CandidateRow,
     MatchProposal,
@@ -148,54 +147,12 @@ def months_to_years(months: int | None, digits: int = 1) -> int | float | str:
     return years
 
 
-def raise_label(value: str | None) -> str:
-    """Display-clean a calculator ``raise_event`` string for templates.
-
-    Thin filter wrapper over
-    :func:`app.services.salary_cockpit_service.clean_raise_label` so the
-    salary templates (the anatomy card's raise alert, the projection
-    ledger's raise badges) render the same cleaned label the cockpit
-    producers emit: title-cased type + trailing-zero-trimmed percentage
-    (``"MERIT +2.5000%"`` -> ``"Merit +2.5%"``), flat amounts kept to the
-    cent.  Presentation-only: the cleaning is pure string manipulation on
-    the calculator's own Decimal-derived text.
-
-    Args:
-        value: The verbatim ``PeriodInfo.raise_event`` string, or ``None``.
-
-    Returns:
-        The cleaned display label, or ``""`` for ``None``/empty input so a
-        template can pipe an absent event through without guarding.
-    """
-    if value is None:
-        return ""
-    return clean_raise_label(value)
-
-
-def pay_cut(value: str | None) -> bool:
-    """Whether a calculator ``raise_event`` string announces a pay cut (R-SAL85).
-
-    Thin filter wrapper over
-    :func:`app.services.salary_cockpit_service.is_pay_cut`, so the anatomy
-    banner and the projection ledger's badge choose the amber "Pay cut:"
-    styling from one reading of the label.
-
-    Args:
-        value: The verbatim ``PeriodInfo.raise_event`` string, or ``None``.
-
-    Returns:
-        ``True`` when the label is a recorded pay cut.
-    """
-    return is_pay_cut(value)
-
-
 def reviewed_token(row: CandidateRow) -> str:
     """Render one candidate row as the form value a match submits for it.
 
     Thin filter wrapper over
-    :func:`app.services.statement_match.as_reviewed`, the same shape
-    :func:`raise_label` is, and for a sharper reason: this string is not
-    read by a person, it is read back by
+    :func:`app.services.statement_match.as_reviewed`, for the reason the
+    module states: this string is not read by a person, it is read back by
     :class:`~app.schemas.validation.statements.ReviewedRowField` on the
     next request.  The statement review screen emits one per row it
     offers, carrying the row's kind, its id, and the figure and revision
@@ -304,8 +261,6 @@ def register_template_filters(app: Flask) -> None:
     app.add_template_filter(ordinal, "ordinal")
     app.add_template_filter(months_to_years, "months_to_years")
     app.add_template_filter(month_name, "month_name")
-    app.add_template_filter(raise_label, "raise_label")
-    app.add_template_filter(pay_cut, "pay_cut")
     app.add_template_filter(reviewed_token, "reviewed_token")
     app.add_template_filter(stated_difference, "stated_difference")
     # The one wording of a list of states (ruling plan#3202), registered as

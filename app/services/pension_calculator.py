@@ -80,7 +80,7 @@ def project_profile_salaries(basis, start_year, end_year):
 
     **Each year's salary is the pay in force on December 1, times that
     day's paychecks a year** -- :meth:`~app.services.payroll_basis
-    .PayrollBasis.pay_rate_on`'s :attr:`~app.services.payroll_basis.PayRate
+    .PayrollBasis.pay_rate_on`'s :attr:`~app.services.pay_rate.PayRate
     .annual`, the one derivation of a pay rate since task plan#3100, and the
     engine's own base pay on December 1 from plan step salary:X-av-3a
     (ruling **R-SAL59**: the yearly figure is pay x paychecks a year, derived

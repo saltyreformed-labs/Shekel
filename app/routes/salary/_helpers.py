@@ -41,7 +41,9 @@ from app.services import (
 )
 from app.services.balance_at import BalanceContext
 from app.services.pay_calendar import PayCalendar, calendar_for
-from app.services.salary_raises import RAISE_YEAR_MAX, RAISE_YEAR_MIN
+from app.services.payroll_basis import PayrollBasis
+from app.services.raise_in_pay import RaiseInPay
+from app.services.salary_raises import RAISE_YEAR_MAX, RAISE_YEAR_MIN, RaiseTerms
 from app.services.recurrence import (
     NEVER_ENDS,
     EndBound,
@@ -179,7 +181,9 @@ def _regenerate_salary_transactions(
     each derived the calendar twice in one POST.  A route builds the one pass
     and what it calls takes it as a required argument, never an optional one
     built when absent (ruling of 2026-08-16, plan step pay_calendar:C2-f2d-1).
-    Every other door builds its pass at this call, after its write is
+    The three raise doors build theirs before staging their write since task
+    plan#3169, because the add and edit doors' refusal reads its calendar
+    first.  Every other door builds its pass at this call, after its write is
     staged, which is when this adapter built it.  The two line doors and the
     stub doors hold a pre-write pass beside that one, which is finding
     plan#1589's.
@@ -200,12 +204,14 @@ def _regenerate_salary_transactions(
 
 
 def _edit_page(profile_id: int) -> RedirectTarget:
-    """Where every refused or failed line-item submission sends the user: the profile's edit page.
+    """The profile's edit page as a redirect target: the salary package's one spelling of it.
 
     Twelve literal spellings of one target until plan step salary:R15-c
     added four more; one function is the answer to a review that counted them.
     It moved here from ``items.py`` with task plan#3136, so the responders
-    below, which spelled the target twice more, reach the one home too.
+    below, which spelled the target twice more, reach the one home too.  The
+    pay list's doors take it since task plan#3579, and the profile and pay
+    stub doors, which spelled it fifteen more times, since task plan#3796.
     """
     return RedirectTarget("salary.edit_profile", {"profile_id": profile_id})
 
@@ -256,13 +262,55 @@ class RefusedRaise:
     edit_url: str | None
 
 
+def _raise_card_context(
+    profile: SalaryProfile, basis_source: "Callable[[], PayrollBasis]",
+) -> dict[str, dict[int, RaiseInPay] | int]:
+    """The context both renders of the Raises card draw from (task plan#3169).
+
+    ONE producer for the edit page and the HTMX fragment, as
+    :func:`_line_cadence_context` is for the lines card, so a full load and a
+    swap cannot word one raise two ways:
+
+    * ``raises_in_pay`` -- ``{raise id: RaiseInPay}``, what recorded pay
+      already holds of each raise (ruling **R-SAL95**, worded by ruling
+      **plan#3375**), from
+      :meth:`~app.services.payroll_basis.PayrollBasis.raise_in_pay`, the one
+      producer the add and edit doors refuse by.  The basis is asked for only
+      when the profile has a raise, so a card with none derives no calendar;
+    * ``raise_year_min`` / ``raise_year_max`` -- the form's years
+      (:func:`_raise_form_bounds`).
+
+    Args:
+        profile: The salary profile whose raises the card lists.
+        basis_source: A zero-argument callable answering the profile's
+            :class:`~app.services.payroll_basis.PayrollBasis`: the edit page
+            hands the basis its pay list is priced from, the fragment one
+            over its door's calendar.
+
+    Returns:
+        The three context keys.
+    """
+    basis = basis_source() if profile.raises else None
+    return {
+        "raises_in_pay": (
+            {} if basis is None
+            else {row.id: basis.raise_in_pay(RaiseTerms.of(row)) for row in profile.raises}
+        ),
+        **_raise_form_bounds(),
+    }
+
+
 def _render_raises_partial(
-    profile: SalaryProfile, refused: RefusedRaise | None = None,
+    profile: SalaryProfile,
+    calendar_source: "Callable[[], PayCalendar]",
+    refused: RefusedRaise | None = None,
 ) -> str:
     """Return the raises section partial for HTMX updates.
 
     Args:
         profile: The owned profile.
+        calendar_source: The door's calendar (its pass's memo), which the
+            card's labels are read against (:func:`_raise_card_context`).
         refused: A refused form to redraw open, with its reason
             (:class:`RefusedRaise`), or ``None`` for the card after a change.
     """
@@ -274,11 +322,15 @@ def _render_raises_partial(
         profile=profile,
         raise_types=raise_types,
         refused=refused,
-        **_raise_form_bounds(),
+        **_raise_card_context(
+            profile, lambda: PayrollBasis(profile, calendar_source()),
+        ),
     )
 
 
-def _respond_after_raise_change(profile):
+def _respond_after_raise_change(
+    profile: SalaryProfile, calendar_source: "Callable[[], PayCalendar]",
+):
     """Respond after a raise mutation succeeds (or is idempotently absorbed).
 
     Returns the raises-section partial for an in-page HTMX swap, or a
@@ -286,9 +338,14 @@ def _respond_after_raise_change(profile):
     Centralises the response branch shared by the add/update/delete raise
     handlers so each has a single success exit point.  A refused form is
     :class:`RaiseRefusal`'s.
+
+    Args:
+        profile: The owned profile.
+        calendar_source: The door's calendar, its pass's memo, so the card
+            derives none of its own.
     """
     if request.headers.get("HX-Request"):
-        return _render_raises_partial(profile)
+        return _render_raises_partial(profile, calendar_source)
     return _edit_page(profile.id).to_response()
 
 
@@ -314,10 +371,13 @@ class RaiseRefusal:
 
     Attributes:
         profile: The owned profile whose card is redrawn.
+        calendar_source: The door's calendar, its pass's memo, which the
+            redrawn card's labels are read against.
         edit_url: The update door the form posted to, so the form reopens in
             edit mode; ``None`` for the add door.
     """
     profile: SalaryProfile
+    calendar_source: "Callable[[], PayCalendar]"
     edit_url: str | None = None
 
     def __call__(self, message: str, category: str = "danger") -> Response:
@@ -339,7 +399,7 @@ class RaiseRefusal:
                 self.edit_url,
             )
             return make_response(designed_error(
-                _render_raises_partial(self.profile, refused), 422,
+                _render_raises_partial(self.profile, self.calendar_source, refused), 422,
             ))
         flash(message, category)
         return _edit_page(self.profile.id).to_response()

@@ -244,8 +244,9 @@ class TestTheBasisReadsEachLinesCadence:
 
     def test_the_rule_is_resolved_and_walked_once_per_basis(self, monkeypatch):
         """Twenty asks, one resolution, one walk: the memo is per basis, not per ask."""
+        # Each name is patched in the leaf that looks it up (task plan#3576).
         # pylint: disable=import-outside-toplevel
-        from app.services import payroll_basis as module
+        from app.services.payroll_basis import _basis, _line_cadence
 
         line = FakeDeduction(
             name="Health", amount="100", recurrence_rule=twenty_four_rule(date(2026, 1, 2)),
@@ -255,7 +256,8 @@ class TestTheBasisReadsEachLinesCadence:
             lines=[line],
         ), self._january())
         resolves, walks = [], []
-        real_resolve, real_walk = module.resolve, module.projected_occurrence_placements
+        real_resolve = _basis.resolve
+        real_walk = _line_cadence.projected_occurrence_placements
 
         def counted_resolve(*args, **kwargs):
             resolves.append(args)
@@ -265,8 +267,8 @@ class TestTheBasisReadsEachLinesCadence:
             walks.append(args)
             return real_walk(*args, **kwargs)
 
-        monkeypatch.setattr(module, "resolve", counted_resolve)
-        monkeypatch.setattr(module, "projected_occurrence_placements", counted_walk)
+        monkeypatch.setattr(_basis, "resolve", counted_resolve)
+        monkeypatch.setattr(_line_cadence, "projected_occurrence_placements", counted_walk)
         answers = [
             basis.line_applies_on(line, p.start_date)
             for p in self._january() * 5
@@ -306,7 +308,7 @@ class TestTheBasisReadsEachLinesCadence:
         pricing from 800 ms to 9 ms beside the base tree's 5 ms).
         """
         # pylint: disable=import-outside-toplevel
-        from app.services import payroll_basis as module
+        from app.services.payroll_basis import _line_cadence as module
 
         lines = [
             FakeDeduction(
@@ -342,7 +344,7 @@ class TestTheBasisReadsEachLinesCadence:
         to be load-bearing (the containing-date case below).
         """
         # pylint: disable=import-outside-toplevel
-        from app.services import payroll_basis as module
+        from app.services.payroll_basis import _line_cadence as module
 
         line = FakeDeduction(
             name="Health", amount="100", recurrence_rule=twenty_four_rule(date(2026, 1, 2)),

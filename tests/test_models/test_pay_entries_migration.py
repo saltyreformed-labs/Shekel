@@ -54,6 +54,11 @@ _MIGRATION = "70680a4a7405_a_salary_is_a_dated_pay_list.py"
 #: date (plan step salary plan#3048).  The revision under test reads the pair
 #: in raw SQL, so its cases run with this one stepped back (:func:`_pair_shape`).
 _DATED_RAISES = "6740ce13e174_a_raise_states_the_date_it_starts.py"
+#: The later revision that gave the database the at-least-one-entry rule (task
+#: plan#3167).  The revision under test met no such rule, and its downgrade
+#: refuses a profile with no entry, a state the rule makes unstorable, so its
+#: cases run with this one stepped back (:func:`_without_the_pay_entry_rule`).
+_PAY_ENTRY_RULE = "c3a7e5d91f42_a_salary_profile_holds_a_pay_entry.py"
 
 
 def _scalar(sql, **params):
@@ -133,6 +138,19 @@ def _pair_shape(app, db):
         run_migration_callable(load_migration_module(_DATED_RAISES).downgrade, db.session)
 
 
+@pytest.fixture
+def _without_the_pay_entry_rule(app, db):
+    """Step the at-least-one-entry rule back: this revision met a database without it.
+
+    ``c3a7e5d91f42`` installed it after this revision, on the table this
+    revision's downgrade drops.  Stepped back first, newest first, before
+    :func:`_pair_shape`; each test's database is a clone of its own, so
+    nothing steps it forward again.
+    """
+    with app.app_context():
+        run_migration_callable(load_migration_module(_PAY_ENTRY_RULE).downgrade, db.session)
+
+
 def _raise(profile, year, month):
     """Add a 3% merit raise first landing on the 1st of *month* in *year*.
 
@@ -159,7 +177,7 @@ def _downgraded(seed_user, *, pay=Decimal("2000.00"), name="Day job"):
     return migration, profile_id
 
 
-@pytest.mark.usefixtures("_pair_shape")
+@pytest.mark.usefixtures("_without_the_pay_entry_rule", "_pair_shape")
 class TestTheUpgrade:
     """One entry per profile, half-up to the cent, on the first saved payday."""
 
@@ -342,7 +360,7 @@ class TestTheUpgrade:
             assert _annual_column_exists()
 
 
-@pytest.mark.usefixtures("_pair_shape")
+@pytest.mark.usefixtures("_without_the_pay_entry_rule", "_pair_shape")
 class TestTheDowngrade:
     """The yearly figure back as entry x count; history, emptiness and eras refused."""
 

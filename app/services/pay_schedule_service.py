@@ -824,8 +824,9 @@ def resolve_schedule(user_id: int) -> "ScheduleFacts | None":
     **The two doors above the calendar refuse it and this one does not**, which
     is the split C4-d makes explicit rather than leaves to chance.  This is the
     SOFT door: it answers "does this owner have a schedule" and a caller decides
-    what that means, which is what ``routes/salary/profiles._paychecks_per_year``
-    needs -- a FORM must not 500 on the state the form itself repairs.  The HARD
+    what that means, which is what ``routes/salary/profiles.new_profile`` needs
+    (task plan#3170) -- a FORM must not 500 on the state it points the owner to
+    the fix for.  The HARD
     doors are :func:`app.services.pay_calendar.calendar_for` and
     :func:`app.services.pay_calendar.cadence_for`, which answer or raise
     ``PayCalendarError``, because every figure they feed is a per-paycheck one.
@@ -895,8 +896,12 @@ def resolve_cadence(user_id: int) -> "FixedDays | Monthly | SemiMonthly | None":
     what distinguishes it from :func:`app.services.pay_calendar.cadence_for`
     rather than how much of the schedule each reads.  Both cost one query of
     one row; this one ANSWERS ``None`` for an owner with no schedule row and
-    that one REFUSES them.  ``routes/salary/profiles._paychecks_per_year`` is
-    why the soft half exists: a form must not 500 on the state it repairs.
+    that one REFUSES them.  **No application code calls it since task
+    plan#3170**: the new-profile form, its last caller, reads
+    :func:`resolve_schedule` whole, because it derives the owner's calendar
+    from the facts (ruling **R-SAL97**: the count in force on its default
+    payday, not the latest rhythm's).  The callers the paragraph above names
+    no longer call it either; step plan#3505 deletes it.
 
     Args:
         user_id: The owning user's id.

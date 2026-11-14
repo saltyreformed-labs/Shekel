@@ -172,7 +172,6 @@ def _set_old_counts(session, counts):
 
 
 @pytest.mark.usefixtures("seed_periods")
-@pytest.mark.xdist_group("recurrence_rules_ddl")
 class TestTheRoundTrip:
     """The template carries the arm and not the column; down then up restores exactly that."""
 
@@ -218,7 +217,6 @@ class TestTheRoundTrip:
 
 
 @pytest.mark.usefixtures("seed_periods")
-@pytest.mark.xdist_group("recurrence_rules_ddl")
 class TestTheUpgradeRewritesEachLine:
     """26 -> no rule; 24 -> at most 2 a month from the opening payday; 12 -> monthly, first paycheck."""
 
@@ -343,7 +341,6 @@ class TestTheUpgradeRewritesEachLine:
 
 
 @pytest.mark.usefixtures("seed_periods")
-@pytest.mark.xdist_group("recurrence_rules_ddl")
 class TestTheDowngradeRebuildsTheColumnAndRefusesWhatItCannotSay:
     """The two shapes go back to 24 / 12 and their rules are deleted; any other shape refuses."""
 

@@ -3,8 +3,9 @@ hash covers (task plan#2575).
 
 pyproject.toml's ``[tool.uv]`` sets ``require-build-hashes`` (task plan#2550, ruling
 plan#2494): every build tool a source build installs must be one of its
-``build-constraint-dependencies``, each held by its hash.  :mod:`test_image_supply_chain`
-reads that the line is there.  These tests run uv on it:
+``build-constraint-dependencies``, each held by its hash.
+:mod:`test_image_supply_chain.test_dockerfile` reads that the line is there.  These tests run
+uv on it:
 
 * uv reads the checkout's own settings with no warning but the one the experimental setting
   draws on every run, and the control shows the read warns of a setting it cannot parse.
@@ -50,7 +51,7 @@ from tests.test_deploy._compose import REPO_ROOT
 #: them (task plan#2550).
 PYPROJECT = REPO_ROOT / "pyproject.toml"
 #: The line of :data:`PYPROJECT` that requires them, as written (its ``[tool.uv]`` holds it
-#: once, which ``test_image_supply_chain`` checks).
+#: once, which ``test_image_supply_chain.test_dockerfile`` checks).
 BUILD_HASHES_SETTING = "require-build-hashes = true\n"
 #: The checkout's settings, as committed.
 _TEXT = PYPROJECT.read_text(encoding="utf-8")

@@ -18,6 +18,7 @@ import json
 import os
 import platform
 import re
+import signal
 import stat
 import subprocess
 import sys
@@ -739,6 +740,89 @@ def test_the_saved_file_is_deleted_however_the_scan_fails(failing):
     with pytest.raises(scan.ScanFailed, match=f"docker {failing} failed"):
         scan.scanned(REPO, docker, _Uv())
     assert not _saved(docker).parent.exists()
+
+
+class _Terminated:
+    """An action for SIGTERM that records each one and goes on, so a scan that did not take
+    the signal as its exit runs to its end, failing its test, where the signal's own action
+    would end the test's process."""
+
+    def __init__(self) -> None:
+        """An action that has recorded no signal yet."""
+        self.caught: list[int] = []
+
+    def __call__(self, signum: int, _frame: object) -> None:
+        """One SIGTERM, recorded."""
+        self.caught.append(signum)
+
+
+@pytest.fixture(name="terminated")
+def _terminated():
+    """SIGTERM's action for the test, a :class:`_Terminated`, the one before it restored
+    after."""
+    action = _Terminated()
+    before = signal.signal(signal.SIGTERM, action)
+    yield action
+    signal.signal(signal.SIGTERM, before)
+
+
+class _Stopping(_Docker):
+    """The stand-in for docker, the process sent SIGTERM as the command ``at`` names runs, as
+    systemd stops a run at its unit's limit or at a shutdown."""
+
+    def __init__(self, at: str) -> None:
+        """A stand-in that answers as :class:`_Docker` does, sending SIGTERM at ``at``."""
+        super().__init__()
+        self.at = at
+
+    def __call__(self, daemon, arguments, added, seconds) -> bytes:
+        """One docker command, SIGTERM sent once it has answered where it is ``at``."""
+        answer = super().__call__(daemon, arguments, added, seconds)
+        if _command(list(arguments)) == self.at:
+            os.kill(os.getpid(), signal.SIGTERM)
+        return answer
+
+
+@pytest.mark.usefixtures("rootless")
+@pytest.mark.parametrize(("at", "ran"), [
+    ("probe", ["inspect", "save", "load", "probe", "rm", "down"]),
+    ("scan", ["inspect", "save", "load", "probe", "rm", "scan", "down"]),
+])
+def test_a_scan_systemd_stops_removes_what_it_made_then_exits(at, ran, terminated):
+    """SIGTERM as the probe or the scanner runs: the scan exits as a shell reports a process
+    the signal ended, 143, once the loaded image is removed and the compose project taken
+    down, the saved file gone; the signal is the scan's alone, and SIGTERM's action before the
+    scan is its action again after."""
+    docker = _Stopping(at)
+    with pytest.raises(SystemExit) as stopped:
+        scan.scanned(REPO, docker, _Uv())
+    assert stopped.value.code == 128 + signal.SIGTERM
+    assert [_command(arguments) for _, arguments, _, _ in docker.calls] == ran
+    assert not _saved(docker).parent.exists()
+    assert not terminated.caught
+    assert signal.getsignal(signal.SIGTERM) is terminated
+
+
+@pytest.mark.usefixtures("rootless")
+def test_a_scan_that_ends_leaves_sigterm_s_action_as_it_found_it(terminated):
+    """A clean scan restores SIGTERM's action as it returns: the exit is the scan's alone."""
+    assert scan.scanned(REPO, _Docker(), _Uv()).found == (_CRITICAL,)
+    assert signal.getsignal(signal.SIGTERM) is terminated
+
+
+@pytest.mark.usefixtures("rootless")
+def test_the_venv_held_to_the_lock_is_the_one_the_image_s_python_reports():
+    """The lock's set is held to the packages the catalog lists under the venv the image's
+    python reports (its ``sys.prefix``), wherever that is: an image whose venv is
+    ``/srv/venv``, its packages listed there, is clean, and is refused where the catalog lists
+    them in ``/opt/venv``, none of them then in the venv it reports."""
+    reported = json.dumps({**_REPORTED, "prefix": "/srv/venv"}).encode()
+    moved = CATALOGUED.read_bytes().replace(b'"/opt/venv/', b'"/srv/venv/')
+    assert moved != CATALOGUED.read_bytes()
+    assert scan.scanned(REPO, _Docker(probe=reported, catalog=moved), _Uv()).found == (_CRITICAL,)
+    with pytest.raises(scan.NotAScan, match="^Grype's catalog of the venv /srv/venv is not the "
+                                            "lock's set for the image, .*: missing from it"):
+        scan.scanned(REPO, _Docker(probe=reported), _Uv())
 
 
 @pytest.mark.usefixtures("rootless")

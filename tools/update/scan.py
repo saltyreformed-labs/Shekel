@@ -16,7 +16,10 @@ daemon; and the scanner holds that file and the one it writes its catalog to alo
 (rulings plan#3706, plan#3875).  The image's own python runs on that daemon too, in a copy of
 the file loaded there and removed however the scan ends (ruling plan#3876).  The scanner's own
 compose project is taken down there however the scan's runs in it end, so the network compose
-makes for the scanner, which ``run --rm`` leaves standing, goes with it (plan#3864).  The
+makes for the scanner, which ``run --rm`` leaves standing, goes with it (plan#3864).  A scan
+systemd stops ends so too: systemd stops a run by SIGTERM, at its unit's limit or at a shutdown,
+and Python's own action for that signal ends the process with none of those removals run, so
+:func:`scanned` takes the signal as an exit (:func:`_stopped`) for as long as it runs.  The
 commit the image was built from is read from the scanner's own record of the file it scanned
 (:func:`revision`), so the commit and the findings are one read of the same bytes.  Measured
 2026-11-13 on production's image: the save, a 98 MB archive, in 0.8 s; the load in 2 s and
@@ -67,6 +70,7 @@ import json
 import os
 import re
 import shlex
+import signal
 import subprocess
 import tempfile
 from collections.abc import Callable, Mapping, Sequence
@@ -882,15 +886,28 @@ def _read(root: Path, docker: Docker, scanner: str,
         return interpreter, answer, catalogued(written.read_bytes())
 
 
+def _stopped(signum: int, _frame: object) -> None:
+    """Take ``signum``, SIGTERM, as an exit with the status a shell gives a process the signal
+    ended, raised where the scan is, so each removal it owes runs (the module's first paragraph
+    says which).
+
+    Raises:
+        SystemExit: always.
+    """
+    raise SystemExit(128 + signum)
+
+
 def scanned(root: Path, docker: Docker = _docker, uv: Uv = _uv) -> Scanned:
     """One scan of the image production is running, from the checkout at ``root`` (the module's
     first paragraphs): the rootless daemon asked first, so a scan it would refuse reads nothing
     of production; then production's container's image read, by its digest, and saved, probed
     and scanned (:func:`_read`); then judged, and refused unless it saw what the image runs
     (:func:`seen`) and every package the lock installs there, at its locked version
-    (:func:`held`), the lock's set worked out by ``uv`` (:func:`_locks`).
+    (:func:`held`), the lock's set worked out by ``uv`` (:func:`_locks`).  SIGTERM, while it
+    runs, is an exit (:func:`_stopped`); the action before it is restored as it returns.
 
     Raises:
+        SystemExit: SIGTERM stopped it, once each removal it owes ran.
         ScanFailed: the scan could not run (:class:`ScanFailed`).
         NotAScan: the scanner's answer is no scan, names no commit, or saw not what the image
             runs, or its catalog, the image's python's report, uv's tree or the Dockerfile's
@@ -901,17 +918,21 @@ def scanned(root: Path, docker: Docker = _docker, uv: Uv = _uv) -> Scanned:
         OSError: as reading the deploy script, making the files or running docker or uv
             raises it.
     """
-    scanner = _rootless()
-    name = container(root)
-    image = docker(PRODUCTION, ["inspect", "--format", "{{.Image}}", name], {},
-                   DOCKER_SECONDS).decode("utf-8", errors="replace").strip()
-    if not _DIGEST.fullmatch(image):
-        raise ScanFailed(f"production's container {name} runs {image!r}, which is no image "
-                         "digest")
-    interpreter, answer, catalog = _read(root, docker, scanner, image)
-    scan = parsed(answer)
-    found = judged(scan)
-    seen(scan, catalog, interpreter)
-    commit = revision(scan)
-    held(catalog, interpreter.prefix, _locks(root, commit, interpreter, uv))
-    return Scanned(image, commit, tuple(found))
+    before = signal.signal(signal.SIGTERM, _stopped)
+    try:
+        scanner = _rootless()
+        name = container(root)
+        image = docker(PRODUCTION, ["inspect", "--format", "{{.Image}}", name], {},
+                       DOCKER_SECONDS).decode("utf-8", errors="replace").strip()
+        if not _DIGEST.fullmatch(image):
+            raise ScanFailed(f"production's container {name} runs {image!r}, which is no image "
+                             "digest")
+        interpreter, answer, catalog = _read(root, docker, scanner, image)
+        scan = parsed(answer)
+        found = judged(scan)
+        seen(scan, catalog, interpreter)
+        commit = revision(scan)
+        held(catalog, interpreter.prefix, _locks(root, commit, interpreter, uv))
+        return Scanned(image, commit, tuple(found))
+    finally:
+        signal.signal(signal.SIGTERM, before)

@@ -18,12 +18,15 @@ journald adds itself and no client can write (``systemd.journal-fields(7)``), so
 process's line can pass for a run.
 
 **What counts.**  ``quill scan`` exits 0 on a clean scan and on a red one whose cards it filed,
-so a run ``done`` is a scan that ran; a run whose job ended any other way, whatever systemd
-names the result, is failed until a later run is done.  The newest run by when it ended is the
-one judged: a run still going has no end yet, so the run before it is judged.  None on record
-refuses the release too, saying how to start one:
-the timer not installed (plan#3971 installs it), or this user unable to read the system's
-journal, whose runs it then cannot see.  A record not as PID 1 writes it is refused whole
+and the unit is ``Type=oneshot``, whose start job ends only when its process does, so a run
+``done`` is a scan that ran; a unit of another type ends its start job ``done`` as its process
+starts, which would read every run as done whatever the scan did: this reading rests on that
+type, as the unit's source says beside it.  A run whose job ended any other way, whatever
+systemd names the result, is failed until a later run is done.  The newest run by when it
+ended is the one judged: a run still going has no end yet, so the run before it is judged.
+None on record refuses the release too, saying how to start one: the timer not installed
+(plan#3971 installs it), or this user unable to read the system's journal, whose runs it then
+cannot see.  A record not as PID 1 writes it is refused whole
 (:class:`~tools.release._model.ReleaseError`), and journalctl failing judges nothing: the
 release's exit 2, never a pass.
 """

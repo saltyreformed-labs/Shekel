@@ -71,8 +71,8 @@ card, or held already.  The scan says which cards hold nothing for its pass
 (:meth:`Holdings.left_out`): each closed card whose fix the image it read holds (ruling
 plan#3765), and, for its failure, each closed card (:meth:`Holdings.open_alone`).
 
-Its own module: the command module stands within ten lines of the 1,000 ``too-many-lines``
-allows, and the tracker's within two.
+Its own module: when it was split out (2026-11-13), the command module stood within ten lines
+of the 1,000 ``too-many-lines`` allows, and the tracker's within two.
 """
 from __future__ import annotations
 

@@ -142,7 +142,12 @@
     the card it is withdrawn too, and the caption names those lines
     (`off_card_frees`, the lines `payment_withdraws` names).
     `put_on_the_card` (set above; `status_seam.revert_moves_payment_home`)
-    says whether the revert moves it; a bill that lives on the card does not. -#}
+    says whether the revert moves it; a bill that lives on the card does not.
+    Where the card would then be in credit, its last sentence says by how
+    much (plan task plan#3095, ruling plan#3955): `left_in_credit`, the
+    route's read of the card's balance without the payment, so a payoff
+    already marked Paid is shown as money the card keeps.  The figure alone:
+    a refund can leave a card in credit too. -#}
 {% set off_card_frees = withdraws_a_line and put_on_the_card %}
 {#- **What Credit says before the press** (plan task plan#3056).  Credit is
     offered on a Projected expense whose purchases are not tracked (each
@@ -348,7 +353,7 @@
   {%- endif %}
   {%- if put_on_the_card %}
   <div class="form-text mb-2" id="off-card-{{ txn.id }}">
-    Undo CC, or setting Status back to Projected, takes this off the card{% if off_card_frees %} and {{ frees_lines(payment_withdraws) }}{% endif %}. After that, Paid takes it from {{ txn.account.name }}, and Credit puts it back on the card.
+    Undo CC, or setting Status back to Projected, takes this off the card{% if off_card_frees %} and {{ frees_lines(payment_withdraws) }}{% endif %}. After that, Paid takes it from {{ txn.account.name }}, and Credit puts it back on the card.{% if left_in_credit %} {{ left_in_credit.card.name }} would then be {{ money(left_in_credit.figure) }} in credit.{% endif %}
   </div>
   {%- endif %}
 

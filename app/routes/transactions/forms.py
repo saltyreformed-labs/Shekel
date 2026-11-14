@@ -30,7 +30,8 @@ from app.services import (
 from app.services.account_resolver import resolve_cash_flow_set
 from app.services.card_today import date_left_by_a_move
 from app.services.cash_flow_set import CashFlowSet
-from app.services.pay_calendar import FiledRow, calendar_for
+from app.services.balance_at import BalanceContext
+from app.services.pay_calendar import FiledRow
 from app.services.scenario_resolver import get_baseline_scenario
 from app.utils.auth_helpers import require_owner
 from app.utils.balance_predicates import is_credit
@@ -179,9 +180,18 @@ def render_full_edit(txn, *, page_refusal):
     #     makes a row whose paycheck belongs to someone else UNSTORABLE, so
     #     the equality this leg used to establish by asking is now a fact the
     #     schema will not let be false.  The leg is replaced, not lost.
-    calendar = calendar_for(current_user.id)
+    #
+    # **One read pass for the render** (plan task plan#3095): Undo CC's
+    # credit line reads the card's balance on a pass, and a pass derives the
+    # owner's calendar for itself (``BalanceContext.calendar``) and prices the
+    # row (``fragment_amounts``), so this render takes its one calendar and
+    # the row's amounts from that pass rather than deriving each a second
+    # time beside it.  Still after the row: the pass derives nothing until
+    # asked.
+    ctx = BalanceContext.build(current_user.id)
+    calendar = ctx.calendar()
     periods = period_move_options(calendar, txn.pay_period_id)
-    amounts = fragment_amounts(txn)
+    amounts = fragment_amounts(txn, ctx=ctx)
     # A PLACED row's item is edited HERE (ruling **R-BAL23**; the controls
     # **R-BAL36**): its category select offers the definition's own edit
     # form's list (``list_categories_for_edit``): the owner's ACTIVE
@@ -250,6 +260,13 @@ def render_full_edit(txn, *, page_refusal):
         # the way off the card, and the seam's tender reading refuses a
         # re-point there by the same predicate (plan task plan#3289).
         takes_off_the_card=status_seam.revert_moves_payment_home(txn),
+        # **What the card holds once Undo CC has taken the row off it, when
+        # that is in credit** (plan task plan#3095, ruling plan#3955): the
+        # card's balance today with the row's payment left out, so a payoff
+        # already marked Paid shows as money the card keeps.  ``None`` where
+        # Undo CC takes nothing off a card or the card is left at or below
+        # $0.00.
+        left_in_credit=transaction_service.undo_credit_leaves_in_credit(txn, ctx),
         # **Whether Paid / Received would record $0.00** (plan step
         # ``credit_card:CC-5-4a-5``): such a settle takes a kept payment off
         # the books exactly as a typed $0.00 does, so Paid's caption names

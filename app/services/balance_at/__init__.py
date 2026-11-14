@@ -63,7 +63,10 @@ kill.
   single-account cash-flow surfaces (dashboard pulse, calendar, cash detail)
   need, where the balance must reconcile with the on-screen transaction
   rows, and where the account is NOT guaranteed cash
-  (``resolve_grid_account`` can point at any kind).  A modelled return may
+  (``resolve_grid_account`` can point at any kind).  One what-if reads the
+  same fold over the walk less one movement
+  (:func:`cash_balance_without_movement`, plan task plan#3095): what a card
+  holds once Undo CC moves a row's payment off it.  A modelled return may
   reach such a surface only where a ROW explains it, which is ruling R-K's
   ``balance[p] - balance[p-1]
   == net[p] + period_timing[p] + book_vs_bank[p] + contribution[p]
@@ -275,6 +278,7 @@ from ._cash_flow import (
     cash_anchor_history,
     cash_balance_at,
     cash_balance_map,
+    cash_balance_without_movement,
     cash_daily_balance_series,
     cash_daily_facts_series,
     cash_last_record_on,
@@ -415,6 +419,7 @@ __all__ = [
     "cash_anchor_history",
     "cash_balance_at",
     "cash_balance_map",
+    "cash_balance_without_movement",
     "cash_daily_balance_series",
     "cash_daily_facts_series",
     "cash_last_record_on",

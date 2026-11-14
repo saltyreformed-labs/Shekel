@@ -66,7 +66,8 @@ SEVEN leaves, cut by what each DECIDES rather than by size:
   names or the one card it could mean (plan tasks plan#2929, plan#3056); which
   rows offer it, and whether the C key and the palette press it at once or
   open the popover (plan task plan#3114); and Undo CC, the revert
-  that takes it off the card (plan task plan#3055);
+  that takes it off the card (plan task plan#3055), and what it leaves the
+  card in credit (plan task plan#3095);
 * :mod:`._card_day` -- the day money put on a CARD is dated, by Credit or by
   a Paid whose payment lands on the card (plan task plan#3234, ruling
   plan#3225): one leaf both read, since ``._credit`` enters the settle verb;
@@ -85,6 +86,7 @@ from app.services.transaction_service._credit import (
     credit_opens_the_popover_by_key,
     mark_as_credit,
     undo_credit,
+    undo_credit_leaves_in_credit,
 )
 from app.services.transaction_service._delete import (
     RowDeletion,
@@ -152,5 +154,6 @@ __all__ = [
     "repays_tracked_purchases",
     "settles_from_entries",
     "undo_credit",
+    "undo_credit_leaves_in_credit",
     "verify_requested_status",
 ]

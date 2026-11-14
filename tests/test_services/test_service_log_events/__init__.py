@@ -16,4 +16,12 @@ fixture surface area small (a single ``_LogCapture`` helper, no
 ad-hoc per-service conftest), and the failure mode is "this specific
 service stopped logging" -- a far more useful signal than a generic
 "the registry is incomplete".
+
+``_LogCapture`` is re-exported here so a test outside this package imports
+the package rather than its private ``_helpers`` module (the remedy plan task
+plan#3949 names for a W9910 into a ``tests/`` helper package).
 """
+
+from tests.test_services.test_service_log_events._helpers import _LogCapture
+
+__all__ = ["_LogCapture"]

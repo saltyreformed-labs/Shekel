@@ -222,6 +222,44 @@ def cash_balance_at(
     return _cash_fold.balances_at(_cash_fold.assembled_fold(account, ctx), [as_of])[as_of]
 
 
+def cash_balance_without_movement(
+    account: Account, ctx: BalanceContext, as_of: date, movement_id: int,
+) -> Decimal:
+    """Return *account*'s cash-flow balance at *as_of* as if one movement were not on it.
+
+    :func:`cash_balance_at` with one input more (plan task plan#3095, ruling
+    plan#3955): the same fold, over the account's walk less the movement
+    (:func:`~._cash_fold.fold_without_movement`).  Undo CC's credit line
+    asks it of the card a row's payment is on: what the card holds once the
+    press has moved the payment off it.  It writes nothing, and stores no
+    what-if on *ctx*: the pass keeps *account*'s real fold, which this
+    reads the walk of, so every other reading of *account* on the pass is
+    the account as it is.
+
+    Args:
+        account: The account the movement is on.  Its kind is NOT consulted.
+        ctx: The read pass (its scenario scopes the fold; its ``as_of`` is the
+            reader's NOW).
+        as_of: The calendar date to value the account at.
+        movement_id: The ``budget.transaction_entries`` row to leave out, a
+            dated movement on *account*.
+
+    Returns:
+        The cent-quantized ``Decimal`` balance at *as_of* without it.
+
+    Raises:
+        BaselineMissingError: When ``scenario`` is None.
+        TypeError: When ``as_of`` is not a civil :class:`datetime.date`.
+        ValueError: When *account*'s walk holds no dated movement
+            *movement_id* (:func:`~._cash_fold.fold_without_movement`).
+    """
+    _require_scenario(ctx)
+    _require_civil_date("cash_balance_without_movement", as_of=as_of)
+    return _cash_fold.balances_at(
+        _cash_fold.fold_without_movement(account, ctx, movement_id), [as_of],
+    )[as_of]
+
+
 def cash_daily_balance_series(
     account: Account,
     ctx: BalanceContext,

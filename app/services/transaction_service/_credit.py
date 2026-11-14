@@ -27,7 +27,10 @@ predicates a fourth settled status would state the fact twice.
 plan#2887: "Paid means paid"): :func:`undo_credit` sets it back to Projected
 through the one status door Status -> Projected takes, and the status seam
 moves its kept payment onto the row's own account as it reverts, so a later
-Paid leaves checking and a later Credit puts it back on the card.
+Paid leaves checking and a later Credit puts it back on the card.  Where the
+card's payoff already sent the money, the card keeps it, and the popover says
+by how much before the press (:func:`undo_credit_leaves_in_credit`, plan task
+plan#3095).
 
 **The press says its day and asks which card** (plan task plan#3056).  The
 popover shows the day ``._card_day.credit_day`` gives and lets the owner type
@@ -52,15 +55,18 @@ status Credit holds its live CC Payback, and Undo CC on it still deletes that
 payback (``credit_workflow.unmark_credit``).  A press on one changes nothing.
 
 Architecture: no Flask imports; reads the row, the owner's cards, the day
-``._card_day`` gives and what a moved payment's matches would withdraw; mutates
-through the settle verb and the status door only; does not commit.
+``._card_day`` gives, what a moved payment's matches would withdraw and, on the
+caller's read pass, the card's balance without the payment; mutates through the
+settle verb and the status door only; does not commit.
 """
 
 from __future__ import annotations
 
 import logging
 from collections.abc import Hashable, Iterable
+from dataclasses import dataclass
 from datetime import date
+from decimal import Decimal
 from typing import TYPE_CHECKING
 
 from app import ref_cache
@@ -69,6 +75,7 @@ from app.exceptions import ValidationError
 from app.models.account import Account
 from app.models.transaction import Transaction
 from app.services.account_projection import is_revolving
+from app.services.balance_at import BalanceContext, cash_balance_without_movement
 from app.services.credit_workflow import get_active_payback, unmark_credit
 from app.services.match_press import Press
 from app.services.movement_account import OwnerAccounts, credit_cards, the_card
@@ -76,6 +83,7 @@ from app.services.settle_day import recorded_settle_day
 from app.services.status_seam import (
     covering_movement_of,
     pending_payment_withdrawals,
+    revert_moves_payment_home,
     settle_day_for_status,
     settled_on_a_card,
 )
@@ -86,6 +94,7 @@ from app.services.transaction_service._status_rules import settled_status_id
 from app.services.transfer_legs import PlanItem, TransferLeg, cell_key
 from app.utils.balance_predicates import is_credit, is_projected
 from app.utils.log_events import BUSINESS, EVT_CREDIT_MARKED, log_event
+from app.utils.money import ZERO
 
 if TYPE_CHECKING:  # pragma: no cover -- annotations only
     from app.services.match_withdrawal import MatchWithdrawal
@@ -224,6 +233,66 @@ def undo_credit(txn: Transaction, *, press: Press | None = None) -> None:
     apply_requested_status(
         txn, ref_cache.status_id(StatusEnum.PROJECTED), press=press,
     )
+
+
+@dataclass(frozen=True)
+class LeftInCredit:
+    """The card a row's Undo CC leaves in credit, and by how much.
+
+    Attributes:
+        card: The card the row's payment is on.
+        figure: What the card would hold, above ``$0.00``.
+    """
+
+    card: Account
+    figure: Decimal
+
+
+def undo_credit_leaves_in_credit(
+    txn: Transaction, ctx: BalanceContext,
+) -> LeftInCredit | None:
+    """Return the card :func:`undo_credit` would leave in credit, or ``None``.
+
+    **Undo CC's credit line** (plan task plan#3095, ruling plan#3955), said
+    beside the press, and beside Status set back to Projected, which is the
+    same act.  The press moves the row's payment off the card
+    (``status_seam.revert_moves_payment_home``, the one answer the press
+    asks too), so what the card holds after it is the card's balance with
+    that payment left out (``balance_at.cash_balance_without_movement``),
+    read at the pass's day as every card balance is.  Where the payoff row
+    already sent the money, the card keeps it: $800 of groceries put on the
+    Visa Jan 3 and Jan 16's $800 payoff marked Paid leave the Visa $800.00
+    in credit after Undo CC.  A payoff row not yet marked has sent nothing:
+    it lands tomorrow at the earliest (ruling R-G), so read today the card
+    without the purchase owes $0.00 and there is no line, and on the days
+    it does land it re-prices to what is then owed, $0.00.  A true-up after
+    the payment holds the card where it was stated.
+
+    The line states the figure and nothing more, decided under R-BAL207: a
+    refund can leave a card in credit too, so it does not say the money was
+    sent for this purchase.
+
+    Args:
+        txn: The row, with ``entries`` loaded or loadable.
+        ctx: The route's read pass for the row's owner.
+
+    Returns:
+        The :class:`LeftInCredit`, or ``None`` when the press takes nothing
+        off a card or leaves the card at or below ``$0.00``.
+
+    Raises:
+        ValueError: From ``status_seam.covering_movement_of``, on a row
+            holding two covering movements.
+        ForeignAccountError: When *ctx* is another owner's pass.
+    """
+    if not revert_moves_payment_home(txn):
+        return None
+    movement = covering_movement_of(txn)
+    card = movement.account
+    figure = cash_balance_without_movement(card, ctx, ctx.as_of, movement.id)
+    if figure <= ZERO:
+        return None
+    return LeftInCredit(card=card, figure=figure)
 
 
 def credit_moves_payment(txn: Transaction, cards: tuple[Account, ...]) -> bool:

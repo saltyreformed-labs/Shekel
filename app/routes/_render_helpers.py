@@ -107,7 +107,9 @@ class RenderAmounts:
     retained: "dict[int | tuple[int, int], Decimal | None]"
 
 
-def fragment_amounts(item: PlanItem) -> RenderAmounts:
+def fragment_amounts(
+    item: PlanItem, *, ctx: BalanceContext | None = None,
+) -> RenderAmounts:
     """Return all three amount maps for ONE fragment's item, a row or a transfer side.
 
     The single-row door onto the amount model (plan step X-au-c2b), for the HTMX
@@ -153,11 +155,21 @@ def fragment_amounts(item: PlanItem) -> RenderAmounts:
 
     Args:
         item: The row or transfer side the fragment renders.
+        ctx: The read pass the caller already opened for the item's owner,
+            when it reads more than this item (the full-edit popover, which
+            reads the card a row's Undo CC leaves, plan task plan#3095), so
+            one render opens one pass; ``None`` opens one here.
 
     Returns:
         A :class:`RenderAmounts` whose three maps hold one entry each, keyed
         by the item's ``cell_key`` for the templates and the entry builders,
         which all index a map.
+
+    Raises:
+        AmountUnresolvable: From the amount model, when *ctx* is another
+            owner's pass: its basis prices that owner's scenario, which the
+            row is not in (``resolve_transaction_amount``; measured for a row
+            at plan task plan#3095).
     """
     # **A SETTLED salary row now costs a projection here, and it did not
     # before** (plan step balance:X-au-d, named by that step's adversarial
@@ -168,8 +180,9 @@ def fragment_amounts(item: PlanItem) -> RenderAmounts:
     # whole pay-period set.  Measured on the 2026-09-02 production clone: 8
     # statements, and one basis, for one row.
     #
-    # It opens its own read pass because a FRAGMENT is handed none: this is the
-    # one-row render path, reached by an HTMX swap that loaded nothing else.  It
+    # It opens its own read pass where its caller hands it none: this is the
+    # one-row render path, reached by an HTMX swap that loaded nothing else
+    # (the full-edit popover, which reads more, hands it its own).  It
     # needs a pass rather than a bare basis because a card's worked-out payment
     # is priced off the pass's fold (plan#2859), and it is opened here, after
     # whatever the door wrote, so it reads that write.  A pass-shaped caller
@@ -178,7 +191,9 @@ def fragment_amounts(item: PlanItem) -> RenderAmounts:
     # about; this is the shape those findings do not cover and the cost is one
     # derivation rather than one per row.
     parent = parent_of(item)
-    basis = BalanceContext.build(parent.user_id).amounts()
+    if ctx is None:
+        ctx = BalanceContext.build(parent.user_id)
+    basis = ctx.amounts()
     return RenderAmounts(
         budgets=amounts_by_key([item], basis),
         settled=settled_amounts_by_key([item]),

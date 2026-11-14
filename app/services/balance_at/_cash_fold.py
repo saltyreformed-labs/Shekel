@@ -112,7 +112,7 @@ Boundary discipline (``CLAUDE.md``): no Flask symbol, no writes; all money is
 """
 
 from collections import OrderedDict
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date
 from decimal import Decimal
 from typing import TYPE_CHECKING
@@ -393,14 +393,96 @@ def assembled_fold(
     )
 
 
+def fold_without_movement(
+    account: Account, ctx: "BalanceContext", movement_id: int,
+) -> AssembledCashFold:
+    """Return *account*'s fold as if one of its movements were not on it.
+
+    **The what-if read Undo CC's credit line asks** (plan task plan#3095,
+    ruling plan#3955): Undo CC moves a row's payment off the card it was put
+    on (``status_seam._covering._move_home``), so what the card holds after
+    the press is this fold with that movement left out of the card's walk.
+    The same fold the card's balance always is (:func:`_fold_walk`), so the
+    card's worked-out payments re-price without the movement, a true-up
+    after it absorbs it, and a payment already marked stays on the card;
+    the row's own plan item is the row's account's after the move, never
+    the card's, so the card's plan does not change.
+
+    **Never stored on the pass**: ``ctx._cash_folds`` holds the account's
+    REAL fold, and every other reading of the account on this pass reads
+    that.  The walk is the memo's, read once, and the what-if replays it
+    less one fact, as the loan's what-if replays its memoized stream
+    (``_loan_stream.what_if_timeline``).
+
+    Args:
+        account: The account the movement is on.  Must belong to
+            ``ctx.user_id`` (:func:`assembled_fold` refuses it otherwise).
+        ctx: The read pass.
+        movement_id: The ``budget.transaction_entries`` row to leave out.
+
+    Returns:
+        A fresh :class:`AssembledCashFold`, held by nothing on *ctx*.
+
+    Raises:
+        ValueError: When *account*'s walk holds no dated movement
+            *movement_id*: a movement on another account, or one with no
+            day, moves nothing here, and a fold that left it out would
+            silently read the account as it is.
+        ForeignAccountError: From :func:`assembled_fold`.
+    """
+    walk = assembled_fold(account, ctx).walk
+    kept = [fact for fact in walk.source_facts if fact.entry_id != movement_id]
+    if len(kept) == len(walk.source_facts):
+        raise ValueError(
+            f"account {account.id}'s walk holds no dated movement "
+            f"{movement_id}, so leaving it out changes nothing: ask with the "
+            f"account the movement is on"
+        )
+    return _fold_walk(
+        account, ctx.amounts(), ctx.as_of, ctx.calendar(),
+        replace(walk, source_facts=kept),
+    )
+
+
 def _assemble(
     account: Account, basis: AmountBasis, as_of: date, calendar: PayCalendar,
 ) -> AssembledCashFold:
     """Walk the account's facts and load its plan -- ONCE, for every reader.
 
     Private since plan step X-i4: :func:`assembled_fold` above is its only
-    caller, so the ``(account, basis, as_of, calendar)`` tuple is constructed in
-    exactly one place, out of one pass, and no other seam module can spell it.
+    caller, so the ``(account, basis, as_of, calendar)`` tuple is taken out of
+    one pass, and no other seam module can spell it.  Since plan task plan#3095
+    it is spelled in a second place in this module, :func:`fold_without_movement`,
+    out of one pass too: that what-if hands the fold of the walk,
+    :func:`_fold_walk`, a walk of its own.
+
+    Args:
+        account: The account to value (see :func:`_fold_walk`).
+        basis: The read pass's amount basis (see :func:`_fold_walk`).
+        as_of: The reader's NOW (see :func:`_fold_walk`).
+        calendar: The owner's pay calendar (see :func:`_fold_walk`).
+
+    Returns:
+        The :class:`AssembledCashFold`.
+
+    Raises:
+        RuntimeError: From :func:`_fold_walk`.
+    """
+    return _fold_walk(
+        account, basis, as_of, calendar,
+        walk_cash_ledger(account.id, basis.scenario_id),
+    )
+
+
+def _fold_walk(
+    account: Account, basis: AmountBasis, as_of: date, calendar: PayCalendar,
+    walk: CashLedgerWalk,
+) -> AssembledCashFold:
+    """Load the account's plan and fold it with *walk* into one running total.
+
+    The body of :func:`_assemble` since plan task plan#3095, which split the
+    walk's LOAD from its fold so the what-if read (:func:`fold_without_movement`)
+    folds a walk less one movement through the same code the real fold runs.
 
     Args:
         account: The account to value.  Its ``id`` scopes the walk and the plan;
@@ -429,6 +511,8 @@ def _assemble(
             carries neither a scenario nor a clock, so passing one alongside
             *basis* and *as_of* reintroduces nothing they could disagree
             about.
+        walk: The account's walk, for *basis*' scenario: the one
+            :func:`_assemble` loads, or that walk less one movement.
 
     Returns:
         The :class:`AssembledCashFold`.
@@ -437,7 +521,6 @@ def _assemble(
         RuntimeError: A planned row names a pay period *calendar* does not
             hold (:meth:`~app.services.pay_calendar.PayCalendar.require_period`).
     """
-    walk = walk_cash_ledger(account.id, basis.scenario_id)
     # No row's WORTH reads the walk since plan step X-f3b (ruling **R-FM**): a
     # purchase carrying a posting day is a movement in the walk itself, so the
     # reservation reads the purchase and the clearing rule is only ever asked

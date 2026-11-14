@@ -12,23 +12,32 @@ move withdraws, and posts them back with the press (rulings R-CC80, R-CC127).
 **The example**: a $800.00 Groceries row on checking in the paycheck holding
 today, dated today, put on the Visa by the Credit press; the Visa's bank line
 for it is matched on the card's statement screen.
+
+**Where the Visa's payoff already sent the money, the card keeps it** (plan task
+plan#3095, ruling plan#3955), and the caption says by how much: the Visa added
+by its door, the $800.00 Groceries in the last paycheck put on it, and this
+paycheck's payoff, which works out the $800.00 owed, marked Paid on its payday.
 """
 
 from datetime import timedelta
 from decimal import Decimal
 
 from app import ref_cache
-from app.enums import StatusEnum
+from app.enums import SettledDayBasisEnum, StatusEnum
 from app.extensions import db
 from app.models.transaction import Transaction
-from app.services import transaction_service
+from app.models.transfer import Transfer
+from app.models.transfer_template import TransferTemplate
+from app.services import transaction_service, transfer_service
 from app.models.statement_match import StatementMatch
+from app.services.balance_at import BalanceContext, cash_balance_at
+from app.services.settle_day import SettleDay
 from app.services.statement_match import accept_match, matched_subjects, release_match
 from app.utils.dates import display_today
 from app.utils.log_events import EVT_CREDIT_UNMARKED
-from tests._cards import add_card
-from tests._test_helpers import add_txn
-from tests.test_services.test_service_log_events._helpers import _LogCapture
+from tests._cards import add_card, add_card_by_its_door
+from tests._test_helpers import add_txn, derived_span, on_both_sides
+from tests.test_services.test_service_log_events import _LogCapture
 from tests.test_routes.test_a_row_on_the_card_is_drawn_as_credit import (
     _TODAY_PERIOD,
     _fresh,
@@ -69,6 +78,50 @@ def _on_the_card(seed_user, periods, *, account=None):
         transaction_service.mark_as_credit(row)
     db.session.commit()
     return card, row
+
+
+def _paid_off_on_the_card(auth_client, seed_user, periods):
+    """The Visa by its door, $800.00 Groceries on it, and this paycheck's payoff Paid.
+
+    The Visa's books open on the last paycheck's first day, owing $0.00; the
+    Groceries row is in that paycheck, dated the day after, and goes on the
+    Visa by Credit.  The door's payoff repeats from this paycheck, whose row
+    works out the $800.00 owed the day before its payday and is marked Paid
+    on that payday, so the Visa reads -800 + 800 = $0.00 today.
+
+    Returns:
+        ``(card, row)``.
+    """
+    last = derived_span(periods[_TODAY_PERIOD - 1]).start_date
+    payday = derived_span(periods[_TODAY_PERIOD]).start_date
+    card = add_card_by_its_door(auth_client, seed_user, owed_on=last)
+    row = add_txn(
+        db.session, seed_user, periods[_TODAY_PERIOD - 1], "Groceries",
+        _EIGHT_HUNDRED, due_date=last + timedelta(days=1),
+    )
+    db.session.commit()
+    transaction_service.mark_as_credit(row)
+    db.session.commit()
+    template = db.session.query(TransferTemplate).filter_by(to_account_id=card.id).one()
+    payoff = db.session.query(Transfer).filter_by(
+        transfer_template_id=template.id, pay_period_id=periods[_TODAY_PERIOD].id,
+    ).one()
+    transfer_service.settle_transfer(
+        payoff.id, payoff.user_id,
+        side_days=on_both_sides(
+            payoff.from_account_id, payoff.to_account_id,
+            SettleDay(day=payday, basis=SettledDayBasisEnum.ENTERED),
+        ),
+    )
+    db.session.commit()
+    assert _card_today(seed_user, card) == Decimal("0.00"), "precondition: paid off"
+    return card, row
+
+
+def _card_today(seed_user, card):
+    """What *card* holds at the end of today, on a fresh pass as a page reads it."""
+    ctx = BalanceContext.build(seed_user["user"].id)
+    return cash_balance_at(card, ctx, ctx.as_of)
 
 
 def _matched_on_the_card(seed_user, card, row):
@@ -158,6 +211,61 @@ class TestThePopoverSaysWhatUndoCcDoes:
 
         assert "Undo CC" in html
         assert f'id="off-card-{row.id}"' not in html
+
+
+class TestTheCaptionSaysWhatTheCardKeeps:
+    """Its last sentence, where the payoff already sent the money."""
+
+    def test_a_payoff_marked_paid_says_the_card_keeps_it(
+        self, auth_client, seed_user, seed_periods_today,
+    ):
+        """Without the Groceries' payment the Visa holds 0 + 800 = $800.00, which it says."""
+        _card, row = _paid_off_on_the_card(auth_client, seed_user, seed_periods_today)
+
+        html = _popover(auth_client, row.id)
+
+        assert _caption(html, row.id) == (
+            "Undo CC, or setting Status back to Projected, takes this off the "
+            "card. After that, Paid takes it from Checking, and Credit puts it "
+            "back on the card. Visa would then be $800.00 in credit."
+        )
+
+    def test_the_press_leaves_the_card_holding_that_figure(
+        self, auth_client, seed_user, seed_periods_today,
+    ):
+        """Undo CC pressed: the Visa reads the caption's $800.00, its payoff kept."""
+        card, row = _paid_off_on_the_card(auth_client, seed_user, seed_periods_today)
+
+        response = auth_client.delete(f"/transactions/{row.id}/unmark-credit")
+
+        assert response.status_code == 200
+        assert _card_today(seed_user, card) == _EIGHT_HUNDRED
+
+    def test_a_matched_line_is_named_and_withdrawing_it_moves_nothing(
+        self, auth_client, seed_user, seed_periods_today,
+    ):
+        """The Visa's GROCERIES line matched: both said, and the press leaves $800.00.
+
+        The press withdraws the match as it moves the payment, and the card's
+        balance reads no match (``cash_ledger.walk_cash_ledger`` walks
+        movements, assertions and the opening), so the card holds what the
+        caption said.
+        """
+        card, row = _paid_off_on_the_card(auth_client, seed_user, seed_periods_today)
+        line = _matched_on_the_card(seed_user, card, row)
+
+        html = _popover(auth_client, row.id)
+        caption = _caption(html, row.id)
+        response = auth_client.delete(
+            f"/transactions/{row.id}/unmark-credit?shown_lines={_undo_cc_shown_lines(html)}",
+        )
+
+        assert "GROCERIES -$800.00" in caption
+        assert caption.endswith("Visa would then be $800.00 in credit.")
+        assert _undo_cc_shown_lines(html) == str(line.id)
+        assert response.status_code == 200
+        assert matched_subjects(card.id).lines == set()
+        assert _card_today(seed_user, card) == _EIGHT_HUNDRED
 
 
 class TestTheUndoCcPress:

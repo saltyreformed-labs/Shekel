@@ -8,5 +8,6 @@ daily issue saying a release is due (``due``, ruling plan#2829) on that code and
 with no App's token; and the alert of a failed run (``alert``), which
 ``.github/workflows/docker-publish.yml``'s weekly rebuild runs too (ruling plan#3724).  Beside
 them, the daily scan of the image production is running and its judge (``scan``, rulings
-plan#3720, plan#3825), which ``quill scan`` runs on this host and no job of the workflow runs:
-the scan's findings stay off GitHub (ruling plan#3785)."""
+plan#3720, plan#3825), with what it saw (``scan_seen``) and the readers each part shares
+(``_scan_data``), which ``quill scan`` runs on this host and no job of the workflow runs: the
+scan's findings stay off GitHub (ruling plan#3785)."""

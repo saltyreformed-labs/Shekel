@@ -45,10 +45,10 @@ after its fix quiet for good.  Applied under R-BAL207: the spec says "once per f
 each day it repeats", and these are the two mechanisms that would break it.
 
 **What a card quotes.**  What the scan found, each value of it checked listable
-(``scan._LISTABLE``), and what a failure said, which can quote a value the image wrote that no
-check passed (``scan._listable``'s refusal), each in a code block fenced past every run of
-backticks in it (:func:`_waits.block`): there it mentions no one, and no line of it holds a
-thing told, as only the lines ending a text do (:func:`_waits.holds`).
+(``tools.update._scan_data._LISTABLE``), and what a failure said, which can quote a value the
+image wrote that no check passed (``_listable``'s refusal there), each in a code block fenced
+past every run of backticks in it (:func:`_waits.block`): there it mentions no one, and no line
+of it holds a thing told, as only the lines ending a text do (:func:`_waits.holds`).
 
 **One fetch, first** (ruling plan#3970).  The door fetches ``dev`` and ``main`` once
 (:func:`_git.fetch`), before the scan reads anything of git, so a checkout that has not

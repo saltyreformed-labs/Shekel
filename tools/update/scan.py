@@ -55,18 +55,18 @@ So :func:`judged` refuses the scan whole (:class:`NotAScan`) where it is not the
 writes, where a fix state, a mark or a rating deciding a match is one Grype does not write (read
 at its pinned v0.121.2, :data:`FIX_STATES`, :func:`_exploited`, :data:`RATINGS`), where a match
 counted for its fix names no version it is fixed in, and where a value a counted match names
-holds a character outside :data:`_LISTABLE`: none can then close a code span it is quoted in,
-mention anyone, or spell a marker that ``quill sync`` reads.  The catalog and the report are
-read so too, and refused where they are not as Grype and the scan's own probe write them.  A
-scan refused is never read as a clean one.
+holds a character outside :data:`tools.update._scan_data._LISTABLE`: none can then close a code
+span it is quoted in, mention anyone, or spell a marker that ``quill sync`` reads.  The catalog
+and the report are read so too (:mod:`tools.update.scan_seen`), and refused where they are not
+as Grype and the scan's own probe write them.  A scan refused is never read as a clean one.
 
 **It imports the standard library alone**, with :mod:`tools.update.app`,
-:mod:`tools.ci.gitcmd` and ``scripts/private_cluster.py``, which do too, so it runs on an
-interpreter given no installed package (ruling plan#3825).
+:mod:`tools.update._scan_data`, :mod:`tools.update.scan_seen`, :mod:`tools.ci.gitcmd` and
+``scripts/private_cluster.py``, which do too, so it runs on an interpreter given no installed
+package (ruling plan#3825).
 """
 from __future__ import annotations
 
-import json
 import os
 import re
 import shlex
@@ -80,6 +80,8 @@ from pathlib import Path
 from scripts import private_cluster
 from tools.ci.gitcmd import MAIN, git, tracking
 from tools.update.app import marker
+from tools.update._scan_data import NotAScan, _listable, _value, parsed
+from tools.update.scan_seen import REPORT, Catalogued, Interpreter, catalogued, reported, seen
 
 #: Grype's ratings, lowest first, as it reads each, ignoring case: ``ParseSeverity``, which reads
 #: any other spelling as unknown (``grype/vulnerability/severity.go``, read 2026-11-13 at
@@ -101,11 +103,6 @@ FIX_STATES = frozenset({FIXED, "not-fixed", "wont-fix", "unknown", ""})
 #: (``cmd/grype/cli/commands/root.go``'s ``dbInfo``, read 2026-11-13 at v0.121.2; Grype writes
 #: no provider at all where it could not read them).
 KEV = "kev"
-#: What each value a counted match names may hold: letters and digits, then those and the marks
-#: the names and versions of Debian's packages, of PEP 440 and of Go's modules use.  No space,
-#: backtick, ``<``, ``>`` or ``@``, so nothing it holds can end a code span it is quoted in,
-#: mention anyone or spell a marker; and no comma, which would part a list of versions.
-_LISTABLE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._+~:!/-]*")
 
 #: The daemon production runs on: the system one, at docker's own default socket, where the
 #: deploy script, which hands docker no daemon, rolls production's container.
@@ -130,29 +127,6 @@ _DIGEST = re.compile(r"sha256:[0-9a-f]{64}")
 REVISION = "org.opencontainers.image.revision"
 #: A commit as that label names it: its whole sha.
 _COMMIT = re.compile(r"[0-9a-f]{40}")
-#: What the catalog says it is: Grype's catalog is a CycloneDX report (ruling plan#3875).
-CATALOG_FORMAT = "CycloneDX"
-#: The property of a catalog's component naming its package's type, as Grype's type names it
-#: (``deb``, ``python``, ``binary``); a component naming none is a file or the operating
-#: system, no package (measured 2026-11-13 on production's image, Grype v0.121.2: 147 of its
-#: 4,964 components name one, each once).
-_KIND = "syft:package:type"
-#: The properties naming each file a package was found at, numbered from 0.
-_LOCATION = re.compile(r"syft:location:[0-9]+:path")
-#: The interpreter as Grype catalogues it, by its type and name: the package its binary
-#: classifier finds at the interpreter's file (measured 2026-11-13 on production's image).
-INTERPRETER = ("binary", "python")
-#: What the image's own python runs (the probe of ``docker-compose.scan.yml``, ruling
-#: plan#3876): one line of JSON, its version, the real path of the file it runs from, its venv
-#: (``sys.prefix``), and what the lock's conditions test of its platform: its implementation,
-#: operating system and machine, with its C library, which names the platform uv is told.
-REPORT = ("import json, os, platform, sys; print(json.dumps({"
-          "'version': platform.python_version(), "
-          "'executable': os.path.realpath(sys.executable), 'prefix': sys.prefix, "
-          "'implementation': sys.implementation.name, 'platform': sys.platform, "
-          "'machine': platform.machine(), 'libc': platform.libc_ver()[0]}))")
-#: A file the report names: an absolute path whose every part :data:`_LISTABLE` could list.
-_EXECUTABLE = re.compile(r"(?:/[A-Za-z0-9._+~-]+)+")
 #: The implementation ``uv tree`` works the lock's set out for, as its ``--python`` names it.
 #: uv evaluates the lock's implementation conditions, and works the set out on an interpreter
 #: it finds for itself, the one ``--python`` names (measured 2026-11-13 at uv 0.13.7: the lock
@@ -211,15 +185,6 @@ SCAN_SECONDS = 1800
 UV_SECONDS = 60
 
 
-class NotAScan(ValueError):
-    """The scanner's answer is no scan as Grype writes one, read with no list of CVEs known to
-    be exploited, holds what a counted match cannot name, or names no commit the scanned image
-    was built from; its catalog, the image's python's report, ``uv tree``'s answer or the
-    Dockerfile's ``uv sync`` is not as written, or names a platform uv cannot be told; or the
-    scan did not see what the image runs (:func:`seen`, :func:`held`); the message says what and
-    where."""
-
-
 class ScanFailed(RuntimeError):
     """The scan could not run: a docker or uv command failed or did not finish, the deploy
     script names no container, the daemon the scanner would run on is not rootless, the image
@@ -273,35 +238,6 @@ class Scanned:
     found: tuple[Counted, ...]
 
 
-@dataclass(frozen=True)
-class Catalogued:
-    """One package Grype's catalog lists (:func:`catalogued`): its ``kind`` (Grype's type, as
-    :class:`Counted`'s), its ``package`` name, its ``version`` and ``paths``, each file it was
-    found at."""
-
-    kind: str
-    package: str
-    version: str
-    paths: frozenset[str]
-
-
-@dataclass(frozen=True)
-class Interpreter:
-    """What the image's own python reports of itself (:func:`reported`): its ``version``;
-    ``executable``, the real path of the file it runs from; ``prefix``, its venv; and its
-    ``implementation`` (``sys.implementation.name``), ``platform`` (``sys.platform``),
-    ``machine`` (``platform.machine``) and ``libc``, its C library (``platform.libc_ver``'s,
-    empty where it names none)."""
-
-    version: str
-    executable: str
-    prefix: str
-    implementation: str
-    platform: str
-    machine: str
-    libc: str
-
-
 #: How the scan runs one docker command: on the daemon given (as ``DOCKER_HOST`` spells it),
 #: with its arguments, the variables added to this process's environment and the seconds it may
 #: take; what it writes on its standard output, which a failure raises
@@ -311,22 +247,6 @@ Docker = Callable[[str, Sequence[str], Mapping[str, str], int], bytes]
 #: take; what it writes on its standard output, which a failure raises :class:`ScanFailed` for
 #: instead.
 Uv = Callable[[Path, Sequence[str], int], bytes]
-
-
-def _value(node: object, key: str, kind: type, where: str):
-    """``node``'s ``key``, which must be a ``kind``; :class:`NotAScan` saying ``where`` when
-    ``node`` is no object or holds no such value."""
-    if not isinstance(node, dict) or not isinstance(value := node.get(key), kind):
-        raise NotAScan(f"{where} holds no {key} that is a {kind.__name__}")
-    return value
-
-
-def _listable(value: object, where: str) -> str:
-    """``value``, a string a counted match names; :class:`NotAScan` when it is none, or holds a
-    character outside :data:`_LISTABLE`."""
-    if not isinstance(value, str) or not _LISTABLE.fullmatch(value):
-        raise NotAScan(f"{where} is {value!r}, which cannot be listed")
-    return value
 
 
 def _rating(record: object, where: str) -> int:
@@ -440,107 +360,6 @@ def revision(scan: object) -> str:
         raise NotAScan(f"the scanned image's label {REVISION} is {commit!r}, which names no "
                        "commit it was built from")
     return commit
-
-
-def parsed(answer: bytes) -> object:
-    """The JSON the scanner's ``answer``, its standard output, holds.
-
-    Raises:
-        NotAScan: the answer holds no UTF-8 JSON.
-    """
-    try:
-        return json.loads(answer.decode("utf-8"))
-    except (UnicodeDecodeError, json.JSONDecodeError) as error:
-        raise NotAScan(f"it is no JSON: {error}") from error
-
-
-def catalogued(written: bytes) -> tuple[Catalogued, ...]:
-    """Each package the catalog the scanner ``written`` lists (its CycloneDX report, ruling
-    plan#3875), in its order: each component naming its package's type (:data:`_KIND`), with
-    each file it was found at.  A version Grype leaves out (CycloneDX's is omitted when empty)
-    is read as an empty one, as Grype writes a match's.
-
-    Raises:
-        NotAScan: ``written`` is no catalog as Grype writes one: no JSON, no CycloneDX report,
-            or a component, or a package's name, version or properties, not as it writes them.
-    """
-    try:
-        catalog = parsed(written)
-    except NotAScan as error:
-        raise NotAScan(f"the scanner's catalog: {error}") from error
-    if not isinstance(catalog, dict) or catalog.get("bomFormat") != CATALOG_FORMAT:
-        raise NotAScan(f"the scanner's catalog is no {CATALOG_FORMAT} report")
-    found = []
-    for index, component in enumerate(_value(catalog, "components", list, "the catalog")):
-        where = f"the catalog's component {index}"
-        if not isinstance(component, dict):
-            raise NotAScan(f"{where} is no object, which Grype does not write")
-        properties = component.get("properties", [])
-        if not (isinstance(properties, list) and all(
-                isinstance(item, dict) and isinstance(item.get("name"), str)
-                and isinstance(item.get("value"), str) for item in properties)):
-            raise NotAScan(f"{where}'s properties are not as Grype writes them")
-        kinds = [item["value"] for item in properties if item["name"] == _KIND]
-        if len(kinds) > 1:
-            raise NotAScan(f"{where} names its package's type {len(kinds)} times")
-        if not kinds:
-            continue
-        if not isinstance(version := component.get("version", ""), str):
-            raise NotAScan(f"{where}'s version is no string, which Grype does not write")
-        found.append(Catalogued(kinds[0], _value(component, "name", str, where), version,
-                                frozenset(item["value"] for item in properties
-                                          if _LOCATION.fullmatch(item["name"]))))
-    return tuple(found)
-
-
-def reported(answer: bytes) -> Interpreter:
-    """What the image's own python reports of itself, its probe's ``answer`` (:data:`REPORT`,
-    ruling plan#3876).  Its C library is read as it stands, an empty one too, which
-    :func:`told` refuses.
-
-    Raises:
-        NotAScan: ``answer`` is no report as the probe writes it, or names a version, a file, a
-            venv, an implementation, an operating system or a machine that cannot be listed.
-    """
-    where = "the image's python's report"
-    try:
-        report = parsed(answer)
-    except NotAScan as error:
-        raise NotAScan(f"{where}: {error}") from error
-    if not _EXECUTABLE.fullmatch(executable := _value(report, "executable", str, where)):
-        raise NotAScan(f"{where} names a file it runs from that cannot be listed")
-    if not _EXECUTABLE.fullmatch(prefix := _value(report, "prefix", str, where)):
-        raise NotAScan(f"{where} names a venv that cannot be listed")
-    return Interpreter(_listable(_value(report, "version", str, where), f"{where}'s version"),
-                       executable, prefix,
-                       *(_listable(_value(report, key, str, where), f"{where}'s {key}")
-                         for key in ("implementation", "platform", "machine")),
-                       _value(report, "libc", str, where))
-
-
-def seen(scan: object, catalog: Sequence[Catalogued], interpreter: Interpreter) -> None:
-    """Refuse ``scan``, Grype's JSON, unless it saw what the image runs (the module's paragraph
-    on what it saw): every package a match names, by its type, name and version, is one
-    ``catalog`` lists, so the matches were made of that catalog; and ``catalog`` lists the
-    interpreter (:data:`INTERPRETER`) at ``interpreter``'s version, found at the file it runs
-    from.
-
-    Raises:
-        NotAScan: a match names a package the catalog does not list, or the catalog does not
-            list the interpreter so.
-    """
-    listed = {(item.kind, item.package, item.version) for item in catalog}
-    for index, match in enumerate(_value(scan, "matches", list, "the scan")):
-        artifact = _value(match, "artifact", dict, f"match {index}")
-        if tuple(artifact.get(key) for key in ("type", "name", "version")) not in listed:
-            raise NotAScan(f"match {index}'s package is none the scanner's catalog lists, so the "
-                           "catalog is not the one its matches were made of")
-    kind, name = INTERPRETER
-    if not any((item.kind, item.package, item.version) == (kind, name, interpreter.version)
-               and interpreter.executable in item.paths for item in catalog):
-        raise NotAScan(f"the scanner's catalog lists no {kind} package {name} at "
-                       f"{interpreter.version} found at {interpreter.executable}, the "
-                       "interpreter the image runs, so the scan did not see it")
 
 
 def _normalized(name: str) -> str:

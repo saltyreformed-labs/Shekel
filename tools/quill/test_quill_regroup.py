@@ -2,7 +2,11 @@
 sync`` pass and a ``quill priority`` run each leave the board grouped, Urgent, then High, Medium,
 Low and the rest, with the developer's order kept inside each group; a dry run writes nothing; a
 second pass moves nothing; a card ``sync`` closes in the same pass is never moved; a clear
-through quill puts the card at the top of the no-Priority group.  Over the in-memory tracker
+through quill puts the card at the top of the no-Priority group; a ``quill file`` filing leaves
+the board grouped too, a new card suggested Urgent or High waiting just under the High cards and
+one suggested Medium or Low at the bottom (ruling plan#4017), a leaf in its split step's place
+(R-BAL179), and a filing run again after a cut places its card again.  The weekly update's card,
+first in the High group (ruling plan#4014), is ``test__waits.py``'s.  Over the in-memory tracker
 (:class:`_fake.FakeTracker`) and the ``code`` fixture's real git; the board's own back-to-back
 move and its read back of several placements over scripted GitHub answers.  The plan itself is
 ``test__regroup.py``'s.
@@ -13,11 +17,11 @@ import pytest
 
 from tools.quill import _git, _sync
 from tools.quill._board_lag import BOARD_WAIT_SECONDS
-from tools.quill._fake import FakeTracker, run, ship, unship
+from tools.quill._fake import FailOnce, FakeTracker, leaf_filing, run, ship, unship
 from tools.quill._regroup import moves
 from tools.quill._regroup_pass import board_cards
 from tools.quill._tracker import BOARD_AFTER, BOARD_TOP, Board, Child
-from tools.quill.setup_tracker import PLAN
+from tools.quill.setup_tracker import FILING, PLAN
 from tools.quill.test__tracker import _ReadBoard
 
 #: The line a move prints, ``{verb}`` "moved" or "would move".
@@ -340,6 +344,118 @@ def test_an_effort_set_moves_nothing(code):
     tracker = _out_of_group()
     assert run(tracker, code, "effort", "plan#4", "--to", "2") == 0
     assert tracker.board.items == [1, 2, 3, 4] and not _board_moves(tracker)
+
+
+# -- quill file ---------------------------------------------------------------------------------
+
+#: The reason each filing below gives for its suggestion.
+_WHY = "A test card's reason: nothing waits on it."
+
+
+def _filing(tmp_path, kind, suggestion):
+    """``quill file`` filing the top-level step, or the question, "New", suggested
+    ``suggestion``, its text written to a file; a step sized at two sessions."""
+    text = tmp_path / "new.md"
+    text.write_text("New work.")
+    sized = ("--effort", "2") if kind == "step" else ()
+    return ("file", kind, "--arc", "balance", "--title", "New", "--body-file", str(text), *sized,
+            "--suggest", suggestion, "--why", _WHY)
+
+
+def _grouped():
+    """A board grouped as the regroup leaves it: Urgent plan#1, High plan#2, Medium plan#3, Low
+    plan#4, and plan#5, which holds no Priority, at the bottom."""
+    tracker = FakeTracker()
+    for number, priority in enumerate(("Urgent", "High", "Medium", "Low", None), start=1):
+        tracker.add(number, priority=priority)
+    return tracker
+
+
+#: Where a new card filed on :func:`_grouped`'s board ends, by its suggestion, and the moves the
+#: board was sent: under the High cards, or at the bottom, where GitHub adds it.
+_WAITS = {
+    "Urgent": ([1, 2, 6, 3, 4, 5], [(6, "PVTI_2")]),
+    "High": ([1, 2, 6, 3, 4, 5], [(6, "PVTI_2")]),
+    "Medium": ([1, 2, 3, 4, 5, 6], []),
+    "Low": ([1, 2, 3, 4, 5, 6], []),
+}
+
+
+@pytest.mark.parametrize("kind", ["step", "question"])
+@pytest.mark.parametrize("suggestion", list(_WAITS))
+def test_a_new_card_waits_by_its_suggestion_under_the_high_cards_or_at_the_bottom(
+        code, tmp_path, capsys, kind, suggestion):
+    """Ruling plan#4017, amending plan#3555: a new step or question suggested Urgent or High goes
+    just under the High cards, above the Medium ones, before its mark comes off; one suggested
+    Medium or Low stays at the bottom, where GitHub adds it.  Either holds no Priority, so the
+    next pass leaves it where it is."""
+    board, moved = _WAITS[suggestion]
+    tracker = _grouped()
+    assert run(tracker, code, *_filing(tmp_path, kind, suggestion)) == 0
+    assert tracker.board.items == board and _board_moves(tracker) == moved
+    assert tracker.writes[-1] == ("unmark", 6)
+    lines = [f"moved on the board after plan#2 (ruling plan#4017): plan#6 [{kind}, balance] New"]
+    assert _regroup_lines(capsys.readouterr().out) == ([f"  {lines[0]}"] if moved else [])
+    assert run(tracker, code, "sync") == 0
+    assert tracker.board.items == board and _board_moves(tracker) == moved
+
+
+def test_a_filing_regroups_the_board_before_it_places_its_card(code, tmp_path, capsys):
+    """A drag left Low plan#2 above Medium plan#3: the filing of a card suggested High sends the
+    regroup's move first, then its card's, just under High plan#1 on the board that move leaves;
+    one suggested Low is the regroup's alone, and stays at the bottom."""
+    for suggestion, board in (("High", [1, 4, 3, 2]), ("Low", [1, 3, 2, 4])):
+        tracker = FakeTracker()
+        for number, priority in ((1, "High"), (2, "Low"), (3, "Medium")):
+            tracker.add(number, priority=priority)
+        assert run(tracker, code, *_filing(tmp_path, "step", suggestion)) == 0
+        assert tracker.board.items == board
+        lines = _regroup_lines(capsys.readouterr().out)
+        assert len(lines) == (2 if suggestion == "High" else 1)
+        assert lines[-1].endswith("(ruling plan#4017): plan#4 [step, balance] New") is (
+            suggestion == "High")
+
+
+def test_a_card_a_person_gave_a_priority_while_filed_is_the_regroups(code, tmp_path):
+    """A filing cut short, its card marked at the bottom, and a person set it Urgent meanwhile:
+    run again, it is ranked, so its suggestion of High places nothing, and the regroup puts it at
+    the end of the Urgent group, not under the High card."""
+    tracker = _grouped()
+    tracker.add(6, title="New", body="New work.", labels=("balance", FILING), effort="2",
+                priority="Urgent")
+    assert run(tracker, code, *_filing(tmp_path, "step", "High")) == 0
+    assert tracker.board.items == [1, 6, 2, 3, 4, 5]
+    assert _board_moves(tracker) == [(6, "PVTI_1")]
+
+
+def test_a_filing_run_again_after_a_cut_places_its_card_again(code, tmp_path):
+    """The move under the High cards fails, the card left marked at the bottom; the same command
+    run again moves it there, then removes the mark, and a run after that writes nothing."""
+    tracker = _grouped()
+    FailOnce(tracker.board, "move")
+    argv = _filing(tmp_path, "step", "High")
+    assert run(tracker, code, *argv) == 2
+    assert tracker.board.items == [1, 2, 3, 4, 5, 6]
+    assert FILING in tracker.cards_by_number[6].labels
+    assert run(tracker, code, *argv) == 0
+    assert tracker.board.items == [1, 2, 6, 3, 4, 5]
+    assert tracker.writes[-2:] == [("board_move", 6, "PVTI_2"), ("unmark", 6)]
+    writes = list(tracker.writes)
+    assert run(tracker, code, *argv) == 0
+    assert tracker.writes == writes
+
+
+def test_a_leaf_is_filed_in_its_split_steps_place_and_the_board_regrouped(code, tmp_path):
+    """R-BAL179: the leaf of High plan#2 goes into its place and plan#2 leaves the board; the
+    regroup that follows keeps it there, since it ranks High through plan#2, and moves the Low
+    card a drag left above the Medium one."""
+    tracker = FakeTracker()
+    for number, priority in ((1, "High"), (2, "High"), (3, "Low"), (4, "Medium")):
+        tracker.add(number, priority=priority)
+    assert run(tracker, code, *leaf_filing(tmp_path, "Leaf", parent="plan#2")) == 0
+    assert tracker.board.items == [1, 5, 4, 3]
+    assert ("board_place", 5, "PVTI_2") in tracker.writes
+    assert [number for number, _ in _board_moves(tracker)] in ([3], [4])
 
 
 # -- the board's back-to-back move and its read back ---------------------------------------------

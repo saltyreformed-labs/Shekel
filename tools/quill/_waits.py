@@ -47,19 +47,19 @@ second home of what their text holds (rule 14).  So a person who deletes a card'
 its text has what the card held filed again at the next pass.  The reads are made only in a pass
 that finds something told.
 
-**The card** (ruling plan#3620) is a step in the :data:`ARC` arc holding Priority High, at the
-top of the board (:attr:`_filing._Filing.top`), so ``quill next`` hands it out after any Urgent
-card and before every other; it holds no Effort, as no session estimated one, and the lane that
-claims it sets one (``quill effort``).  It passes :func:`check.violations` first, as every card
-quill files does, and is filed by ``quill file``'s own writes (:func:`_filing._write`): born
-marked, its mark removed last (R-BAL202).  A card holding a told thing's lines whose filing
-has not finished is finished, found by them (R-BAL186), and none is filed beside it.  Its text,
-and each comment putting a later thing on it, names where the thing was told in a code span,
-which links nothing, so that the private tracker writes no reference into the public
-repository's timeline, as a link there might (unmeasured: the reason, not a measured cost).
-It quotes the title there and the told words in a code block, which mentions no one: the
-queue's comments mentioned the developer until plan#3627, and a title can hold a mention as
-words can, which copied into a card would reach its person from the tracker.
+**The card** (ruling plan#3620) is a step in the :data:`ARC` arc holding Priority High, first in
+the High group, just under the Urgent cards (ruling plan#4014, :attr:`_filing._Filing.first`),
+where ``quill next`` hands it out, after any Urgent card and before every other; it holds no
+Effort, as no session estimated one, and the lane that claims it sets one (``quill effort``).  It
+passes :func:`check.violations` first, as every card quill files does, and is filed by ``quill
+file``'s own writes (:func:`_filing._write`): born marked, its mark removed last (R-BAL202).  A
+card holding a told thing's lines whose filing has not finished is finished, found by them
+(R-BAL186), and none is filed beside it.  Its text, and each comment putting a later thing on it,
+names where the thing was told in a code span, which links nothing, so that the private tracker
+writes no reference into the public repository's timeline, as a link there might (unmeasured: the
+reason, not a measured cost).  It quotes the title there and the told words in a code block, which
+mentions no one: the queue's comments mentioned the developer until plan#3627, and a title can hold
+a mention as words can, which copied into a card would reach its person from the tracker.
 
 Its own module: the command module stands within ten lines of the 1,000 ``too-many-lines``
 allows, and the tracker's within two.
@@ -233,7 +233,7 @@ def edit_refusal(label: str, old: str, new: str) -> str | None:
     the next pass would file that thing again while it is still told (finding 5 of
     plan#3613's review); None when it keeps each one.  ``quill edit``'s refusal
     (``quill._text_refusal``), fail closed: a refusal costs a re-run, a dropped line a second
-    card at the top of the board."""
+    card first in the High group."""
     if not (dropped := holds(old) - holds(new)):
         return None
     lines = "\n  ".join(told_line(*thing) for thing in sorted(dropped))
@@ -299,9 +299,10 @@ def _body(item: Told) -> str:
     return "\n".join([
         f"The weekly update told this on Shekel's {item.where} at {item.when}: `{item.link}`. "
         "The title there, then what was told:", "", *_quoted(item, item.title.strip(), ""), "",
-        "`quill sync` filed this card for it (ruling plan#3619), holding Priority High at the "
-        "top of the board (ruling plan#3620). The words above say what waits; the session "
-        "that claims this card takes it, and sets the card's Effort.", "", *_lines(item)])
+        "`quill sync` filed this card for it (ruling plan#3619), holding Priority High, first in "
+        "the High group (rulings plan#3620, plan#4014). The words above say what waits; the "
+        "session that claims this card takes it, and sets the card's Effort.", "",
+        *_lines(item)])
 
 
 def _later(item: Told) -> str:
@@ -316,7 +317,7 @@ def _later(item: Told) -> str:
 
 def card_draft(item: Told) -> Draft:
     """The card filed for ``item``: a step at the top level, in :data:`ARC`, holding Priority
-    High and no Effort (ruling plan#3620; the module says why)."""
+    High and no Effort (rulings plan#3620, plan#4014; the module says why)."""
     return Draft("step", _title(item), _body(item), (), ARC, priority=HIGH)
 
 
@@ -365,7 +366,7 @@ def _file(tracker: Tracker, item: Told, draft: Draft, earlier: Card | None,
     if dry_run:
         return None
     return _write(tracker, _Filing(draft, None, {}, _NOTHING_READ, None, _NO_MILESTONE,
-                                   top=True), earlier, None).number
+                                   first=True), earlier, None).number
 
 
 def _carry(tracker: Tracker, item: Told, number: int | None, dry_run: bool) -> None:

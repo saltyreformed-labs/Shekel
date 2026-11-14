@@ -109,19 +109,25 @@ def _todo(tracker, *numbers):
     tracker.board.status.update(dict.fromkeys(numbers, "Todo"))
 
 
-def _filed_lines(number, title, where, at, finish=""):
-    """What a pass prints for a card it files: its own line, then the filing's."""
+def _filed_lines(number, title, where, at, moved=None):
+    """What a pass prints for a card it files: its own line, then the filing's, its move first
+    in the High group to ``moved`` (``to the top``, ``after plan#N``) when it makes one (ruling
+    plan#4014)."""
+    move = ("" if moved is None else
+            f"  moved on the board {moved} (ruling plan#4014): plan#{number} [step, tooling] "
+            f"{title}\n")
     return (f"file the update's {where}, told at {at}, which no card holds (ruling plan#3619): "
             f"{title!r}\nfiled plan#{number}\n  plan#{number} [step, tooling] {title}\n"
-            f"{finish}  board: put at the top (ruling plan#3620)\n"
+            f"  board: added at the bottom\n{move}"
             f"  unmarked: plan#{number}'s filing is finished\n")
 
 
-def test_a_comment_no_card_holds_is_filed_once_high_at_the_top(code, capsys):
+def test_a_comment_no_card_holds_is_filed_once_high_first_in_the_high_group(code, capsys):
     """PR 669's comment, whose markers no card holds: a dry run says so and writes nothing; the
     pass files one step in the tooling arc holding Priority High and no Effort, its two markers
-    in its text and the comment's words in a code block, put at the top of the board before its
-    mark comes off; the next pass, reading the card's text, files nothing."""
+    in its text and the comment's words in a code block, put first in the High group before its
+    mark comes off (ruling plan#4014), the top of a board holding no Urgent card, above plan#1,
+    which holds no Priority; the next pass, reading the card's text, files nothing."""
     tracker = FakeTracker()
     tracker.add(1)
     _todo(tracker, 1)
@@ -133,10 +139,11 @@ def test_a_comment_no_card_holds_is_filed_once_high_at_the_top(code, capsys):
         f"(ruling plan#3619): {title!r}\n")
     assert not tracker.writes
     assert run(tracker, code, "sync") == 0
-    assert capsys.readouterr().out == _filed_lines(2, title, "PR 669", "2026-11-06T20:05:54Z")
+    assert capsys.readouterr().out == _filed_lines(2, title, "PR 669", "2026-11-06T20:05:54Z",
+                                                   moved="to the top")
     assert tracker.writes == [
         ("create", 2, "step", title, ("filing", "tooling"), "tooling"),
-        ("board_add", 2), ("board_place", 2, None), ("unmark", 2)]
+        ("board_add", 2), ("board_move", 2, None), ("unmark", 2)]
     card = tracker.cards_by_number[2]
     assert (card.priority, card.effort, card.labels, card.is_open) == (
         "High", None, ("tooling",), True)
@@ -147,9 +154,9 @@ def test_a_comment_no_card_holds_is_filed_once_high_at_the_top(code, capsys):
         f"`{_PULL.format(669)}#issuecomment-6694294810`. The title there, then what was told:",
         "", "```text", "chore(deps): rumdl from 0.2.78 to 0.3.2, waiting for a card", "", words,
         "```", "",
-        "`quill sync` filed this card for it (ruling plan#3619), holding Priority High at the "
-        "top of the board (ruling plan#3620). The words above say what waits; the session that "
-        "claims this card takes it, and sets the card's Effort.", "", *_TWO_LINES])
+        "`quill sync` filed this card for it (ruling plan#3619), holding Priority High, first in "
+        "the High group (rulings plan#3620, plan#4014). The words above say what waits; the "
+        "session that claims this card takes it, and sets the card's Effort.", "", *_TWO_LINES])
     _todo(tracker, 2)
     assert run(tracker, code, "sync") == 0
     assert capsys.readouterr().out == ""
@@ -218,7 +225,8 @@ def test_nothing_told_reads_no_card_and_files_nothing(code, capsys):
 def test_an_unfinished_filing_is_finished_not_filed_again(code, capsys):
     """A card an earlier pass created for the comment, still marked: its Priority dropped and
     off the board, the pass cut short.  The pass finishes it, writing what it lacks, and files
-    no other; ``sync``'s own REPORT of the unfinished filing, made before the pass, exits 1,
+    no other; alone on the board, it is first in the High group where GitHub adds it, so it is
+    not moved.  ``sync``'s own REPORT of the unfinished filing, made before the pass, exits 1,
     and the next ``sync``, reading it finished, exits 0 and writes nothing."""
     tracker = FakeTracker()
     tracker.add(9, body="\n".join(_TWO_LINES), on_board=False, labels=("filing", "tooling"),
@@ -232,10 +240,9 @@ def test_an_unfinished_filing_is_finished_not_filed_again(code, capsys):
         "2026-11-06T20:05:54Z\nfinishing plan#9 [step, tooling] Shekel PR 669: earlier: its "
         f"filing has not finished (it is still marked {FILING!r}), so this command finishes it "
         "rather than filing another (R-BAL186, R-BAL202)\n  its Priority: 'High'\n"
-        "  board: put at the top (ruling plan#3620)\n  unmarked: plan#9's filing is finished\n")
+        "  board: added at the bottom\n  unmarked: plan#9's filing is finished\n")
     assert tracker.writes == [
-        ("set_field", 9, "Priority", "High"), ("board_add", 9), ("board_place", 9, None),
-        ("unmark", 9)]
+        ("set_field", 9, "Priority", "High"), ("board_add", 9), ("unmark", 9)]
     assert 10 not in tracker.cards_by_number
     _todo(tracker, 9)
     assert run(tracker, code, "sync") == 0
@@ -261,6 +268,26 @@ def test_the_alerts_open_issue_is_filed_once_and_no_other_issue(code, capsys):
     _todo(tracker, 1)
     assert run(tracker, code, "sync") == 0
     assert capsys.readouterr().out == ""
+
+
+def test_the_card_goes_first_in_the_high_group_just_under_the_urgent_cards(code, capsys):
+    """Ruling plan#4014, amending plan#3620: on a board holding Urgent plan#1, High plan#2,
+    Medium plan#3 and plan#4, which holds no Priority, the card filed goes just under the Urgent
+    card, above the High one, where ``quill next`` hands it out; the next pass moves nothing."""
+    tracker = FakeTracker()
+    for number, priority in ((1, "Urgent"), (2, "High"), (3, "Medium"), (4, None)):
+        tracker.add(number, priority=priority)
+    _todo(tracker, 1, 2, 3, 4)
+    _rumdl(tracker)
+    title = "Shekel PR 669: chore(deps): rumdl from 0.2.78 to 0.3.2, waiting for a card"
+    assert run(tracker, code, "sync") == 0
+    assert capsys.readouterr().out == _filed_lines(5, title, "PR 669", "2026-11-06T20:05:54Z",
+                                                   moved="after plan#1")
+    assert tracker.board.items == [1, 5, 2, 3, 4]
+    _todo(tracker, 5)
+    assert run(tracker, code, "sync") == 0
+    assert capsys.readouterr().out == ""
+    assert tracker.board.items == [1, 5, 2, 3, 4]
 
 
 def test_two_things_told_are_filed_oldest_first_the_newest_on_top(code, capsys):

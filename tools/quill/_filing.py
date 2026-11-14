@@ -54,6 +54,7 @@ from tools.quill._fields import (
     SUGGESTED_OPTIONS,
 )
 from tools.quill._next import ranked
+from tools.quill._regroup_pass import filing_pass
 from tools.quill._state import (
     OWNED,
     done_tasks,
@@ -84,7 +85,7 @@ from tools.quill.check import (
     takes_suggestion,
     violations,
 )
-from tools.quill.setup_tracker import CHOSEN_LABELS, FILING, ISSUE_FIELDS, TASK, unmarked
+from tools.quill.setup_tracker import CHOSEN_LABELS, FILING, IN_ORDER, ISSUE_FIELDS, TASK, unmarked
 
 
 @dataclass(frozen=True)
@@ -185,8 +186,8 @@ class _Filing:
     (:attr:`claims`) -- both empty with no parent.  ``asked``: for a
     ruling converted from a question, that question as read.  ``milestone``: for a leaf,
     the milestone it is filed in, which its split step gives up (:func:`_leaf_milestone`).
-    ``top``: whether a card going on the board at the top level goes at its top, not its
-    bottom: a card the update's waits file (ruling plan#3620, ``_waits``).
+    ``first``: whether a card going on the board at the top level goes first in the High group,
+    just under the Urgent cards: a card the update's waits file (ruling plan#4014, ``_waits``).
     """
 
     draft: Draft
@@ -195,7 +196,7 @@ class _Filing:
     reads: _git.Reads
     asked: _Asked | None
     milestone: _LeafMilestone
-    top: bool = False
+    first: bool = False
 
     @property
     def shipped(self) -> frozenset[int]:
@@ -314,11 +315,11 @@ def _before(tracker: Tracker, args, filing: _Filing) -> Card | None:
     return before
 
 
-def _place_leaf(tracker: Tracker, leaf: Card, filing: _Filing) -> None:
+def _place_leaf(tracker: Tracker, leaf: Card, filing: _Filing) -> str:
     """Put a leaf where the step it splits sat (R-BAL179), each board write printed as it
     lands: onto the board if it is not on it, moved to its place, and the split step off
-    the board if it is still on it.  A leaf is placed only while its filing is unfinished
-    (R-BAL202), so its move is made again on every run until its last write lands."""
+    the board if it is still on it; its board item.  A leaf is placed only while its filing is
+    unfinished (R-BAL202), so its move is made again on every run until its last write lands."""
     parent = filing.parent
     where = leaf_placement(tracker.board.order(), parent, leaf.number, filing.cards,
                            filing.shipped)
@@ -335,6 +336,7 @@ def _place_leaf(tracker: Tracker, leaf: Card, filing: _Filing) -> None:
     if where.remove is not None:
         tracker.board.remove(where.remove)
         print(f"  board: plan#{parent.number} left it, as a container")
+    return item
 
 
 def _same_filing(tracker: Tracker, draft: Draft, parent: Card | None) -> Card | None:
@@ -888,13 +890,13 @@ def _finish(tracker: Tracker, card: Card, filing: _Filing, before: Card | None) 
     :func:`_findings.hand_on`: a run cut short between a finding's two writes leaves it two
     owners, and the same command run again finishes it), a top-level step's or question's
     board place, or a task's under a step the board holds (:func:`_command.on_board`, rulings
-    plan#1814, plan#1842), at the bottom,
-    where the board's order does not read it, or at the top for a filing that says so
-    (:attr:`_Filing.top`, ruling plan#3620), on every run, before the mark comes off, as no read
-    can tell the tool's move from a person's drag; a task is first placed in its card's order of
-    its tasks, above ``before`` when the filing names one (:func:`_tasks.place`, ruling
-    plan#1868)."""
-    kind, parent = filing.draft.kind, filing.parent
+    plan#1814, plan#1842), at the bottom, where GitHub adds it; then, for a step or question,
+    the regroup's pass (:func:`_regroup_pass.filing_pass`, ruling plan#4012), which puts the
+    weekly update's card first in the High group (:attr:`_Filing.first`, ruling plan#4014) and an
+    undecided card suggested Urgent or High just under the High cards (ruling plan#4017), on every
+    run, before the mark comes off; a task is first placed in its card's order of its tasks,
+    above ``before`` when the filing names one (:func:`_tasks.place`, ruling plan#1868)."""
+    kind, parent, item = filing.draft.kind, filing.parent, card.board_item
     _attach(tracker, card, kind, parent)
     if kind == TASK:
         _tasks.place(tracker, card, parent, before, filing.reads)
@@ -904,7 +906,7 @@ def _finish(tracker: Tracker, card: Card, filing: _Filing, before: Card | None) 
     elif kind == "ruling":
         print("  closed already")
     elif kind == "step" and parent is not None:
-        _place_leaf(tracker, card, filing)
+        item = _place_leaf(tracker, card, filing)
         if (split := filing.milestone.leaf) is not None:
             tracker.set_milestone(parent.number, None)
             print(f"  plan#{parent.number} left milestone #{split}: a split step keeps none")
@@ -914,15 +916,13 @@ def _finish(tracker: Tracker, card: Card, filing: _Filing, before: Card | None) 
                   "holds none (ruling plan#2555)")
         for finding in _findings.owned(tracker, parent.number, filing.shipped):
             _findings.hand_on(tracker, finding, card, parent, prefix="  ")
-    elif on_board(kind, parent) and filing.top:
-        shown = tracker.board.place(card.board_item or tracker.board.add(card), None)
-        print("  board: put at the top (ruling plan#3620)"
-              + ("" if shown else " -- the board has not shown it yet"))
-    elif on_board(kind, parent) and card.board_item is None:
-        tracker.board.add(card)
+    elif on_board(kind, parent) and item is None:
+        item = tracker.board.add(card)
         print("  board: added at the bottom")
     elif on_board(kind, parent):
         print("  board: already on it")
+    if kind in IN_ORDER:
+        filing_pass(tracker, card, item, filing.draft.suggestion, filing.first)
     tracker.unmark(card.number)
     print(f"  unmarked: plan#{card.number}'s filing is finished")
 

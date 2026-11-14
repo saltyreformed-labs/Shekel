@@ -213,9 +213,12 @@ that are not a balance at a date; it held the forward FOLD from plan step
 R16-a, when ``_plan`` passed the line ceiling, until R16-c-1 merged that fold
 into the timeline) -- and ``_plan -> {_plan_definitions,
 _plan_records}``, ``_plan_definitions -> {_plan_records, _resolution,
-_context}``, the second split of ``_plan`` at plan step R16-b-2 (the definition WALK that sums
-every recurring transfer into a loan, and the two RECORD types both halves
-share) -- a DAG with ``_fold`` at the producer floor, so no module imports a
+_context, _definition_walk}``, the second split of ``_plan`` at plan step R16-b-2 (the
+pricing that sums every recurring transfer into a loan, and the two RECORD types both
+halves share), and ``_definition_walk -> _context``, the seam's ONE definition walk
+(plan step pay_calendar:C9: which occurrences a definition's rows have not answered,
+placed and dated, for the loan and the cash tier alike) -- a DAG with ``_fold`` at the
+producer floor, so no module imports a
 sibling that imports it back.  Every loan producer also
 imports ``_resolution`` for the read
 pass's ONE whole-loan read; ``_resolution`` imports only ``_context`` among its

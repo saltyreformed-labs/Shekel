@@ -3,7 +3,7 @@ Shekel Budget App -- Recurrence Engine: ONE regeneration pass, for both engines.
 
 :func:`regenerate_definition` -- what "bring this definition's rows into line
 with its current definition" MEANS -- and the record each engine states to say
-which five acts are its own (:class:`MaintainActs`).  Its decision is read
+which four acts are its own (:class:`MaintainActs`).  Its decision is read
 without the write by :func:`preview_regeneration`, for an edit door grading
 the state a save would leave (plan step ``pay_calendar:C18-a``).
 
@@ -55,6 +55,7 @@ from app.services._recurrence_common import (
     occurrences_to_write,
     rows_this_pass_may_maintain,
 )
+from app.services._template_rows import row_selector_for
 from app.services.recurrence_engine._plan import resolve_generation_plan
 from app.utils.log_events import BUSINESS, log_event
 
@@ -86,7 +87,7 @@ class PassReporting(NamedTuple):
 
 
 class MaintainActs(NamedTuple):
-    """The five acts of a regeneration that belong to ONE engine.
+    """The four acts of a regeneration that belong to ONE engine.
 
     **The seam that made the regenerate path one function instead of two**
     (plan step **balance:X-au-d**).  Everything a regeneration DECIDES was
@@ -99,15 +100,18 @@ class MaintainActs(NamedTuple):
     :func:`regenerate_definition` performs them.  They are the places the two
     engines genuinely differ -- a transaction has one account and a transfer
     has two, a transaction is written alone and a transfer with its shadow
-    pair -- so a SIXTH act appearing here is the signal that something
-    model-shaped has been pushed into the shared body.
+    pair -- so a FIFTH act appearing here is the signal that something
+    model-shaped has been pushed into the shared body.  WHICH table a
+    definition's rows live in was a fifth until plan step ``pay_calendar:C9``
+    (task plan#3939): each engine passed its own ``_selector``, and the balance
+    seam's definition walk needed the same pairing for both kinds, so it is one
+    table now (:func:`~app.services._template_rows.row_selector_for`) that the
+    pass reads for itself.
 
     Attributes:
         reporting: This engine's :class:`PassReporting` -- WHO is performing
             the pass.  First because it names the engine, so a reader meets the
-            identity before the five acts it carries out.
-        selector_for: ``(template, scenario_id) -> TemplateRowSelector`` --
-            which table and which template-FK this engine's fetches ask about.
+            identity before the four acts it carries out.
         derive_for: ``(template, rule, occurrence, period) -> <derived
             fields>`` -- the ONE statement of what a generated row takes from
             its definition, for the occurrence it answers in the paycheck that
@@ -125,7 +129,6 @@ class MaintainActs(NamedTuple):
     """
 
     reporting: PassReporting
-    selector_for: object
     derive_for: object
     owner_records: object
     reattributed: object
@@ -296,10 +299,10 @@ def _decide(acts: MaintainActs, template, schedule, scenario_id, effective_from)
     # makes the RETIRE branch reachable at all.  Equal, not strictly wider, when
     # the rule names every period of the window, which is the ordinary case.
     existing = rows_this_pass_may_maintain(
-        acts.selector_for(template, scenario_id), schedule, effective_from,
+        row_selector_for(template, scenario_id), schedule, effective_from,
     )
     work = classify_maintain_work(
-        acts.selector_for(template, scenario_id), existing,
+        row_selector_for(template, scenario_id), existing,
         plan.placements if plan is not None else (),
         with_records=acts.owner_records(existing),
         reattributed=acts.reattributed(existing, template),

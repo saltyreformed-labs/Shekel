@@ -312,8 +312,8 @@ class TemplateRowSelector(NamedTuple):
     them to trip ``too-many-arguments`` the moment a fetch needed one more.
     Naming the four as one value says what they are: this pass's subject.
 
-    Built ONCE per pass by each engine, which is also what stops a pass mixing
-    one model's column with another's.
+    Built in ``app/`` by :func:`~app.services._template_rows.row_selector_for` alone,
+    the one table from a definition's kind to its rows, so no pass mixes models.
 
     Attributes:
         model: The mapped class to query (``Transaction`` or ``Transfer``).

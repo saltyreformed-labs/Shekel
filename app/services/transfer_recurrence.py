@@ -64,11 +64,11 @@ from app.services.amount_ownership import derived_ownership
 from app.services.balance_at import BalanceContext
 from app.services.definition_unarchive import restored_by_use
 from app.services._recurrence_common import (
-    TemplateRowSelector,
     PlacedRow,
     classify_unruled_work,
     log_resource_access_denied,
 )
+from app.services._template_rows import row_selector_for
 from app.services.recurrence import compute_due_date
 from app.services.recurrence_engine import (
     ConflictReporting,
@@ -91,26 +91,6 @@ from app.utils.log_events import (
 )
 
 logger = logging.getLogger(__name__)
-
-
-def _selector(template, scenario_id):
-    """Name what this engine's row fetches are asking about.
-
-    The transfer engine's half of :class:`TemplateRowSelector`, mirroring
-    ``recurrence_engine._generate._selector`` exactly: the two engines differ
-    in the mapped class and the template foreign-key column and in nothing
-    else, so each names its pair ONCE and every shared fetch takes the value.
-
-    Args:
-        template: The TransferTemplate this pass is generating from.
-        scenario_id: The scenario being written into.
-
-    Returns:
-        The :class:`~app.services._recurrence_common.TemplateRowSelector`.
-    """
-    return TemplateRowSelector(
-        Transfer, Transfer.transfer_template_id, template, scenario_id,
-    )
 
 
 class DerivedTransferFields(NamedTuple):
@@ -431,7 +411,7 @@ def generate_for_template(template, schedule, scenario_id, effective_from=None):
         )
 
     created = create_for_unclaimed_occurrences(
-        _selector(template, scenario_id), plan, _new_row,
+        row_selector_for(template, scenario_id), plan, _new_row,
     )
 
     db.session.flush()
@@ -832,7 +812,7 @@ _PASS = MaintainActs(
         EVT_TRANSFER_RECURRENCE_REGENERATED,
         "Transfer recurrence regenerated for template",
     ),
-    _selector, _derive_row_fields, _rows_holding_owner_records,
+    _derive_row_fields, _rows_holding_owner_records,
     _rows_the_definition_reattributes, _apply_maintain_work,
 )
 

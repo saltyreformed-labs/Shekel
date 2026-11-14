@@ -65,7 +65,7 @@ one question:
     generated back into line with it, and refusing to do so where the owner's
     own records are in the way;
   - ``_pass`` -- what a regeneration IS, for BOTH engines: the transfer engine
-    performs the same pass with its own five acts
+    performs the same pass with its own four acts
     (:class:`~._pass.MaintainActs`), which is why that module and not
     ``_recurrence_common`` is where it lives (see its docstring);
   - ``_conflicts`` -- applying the owner's keep/use decisions afterwards.

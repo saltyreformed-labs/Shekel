@@ -48,7 +48,7 @@ request composes); what still goes round it in ``app/`` (re-read 2026-09-13)
 is two readers that ask no closing question at all -- the write
 door's refusal of the unresolvable and the opening-bound comparison in
 ``loan_recurrence_sync._sync_loan_cadence`` -- and the balance seam's own
-definition walk (``balance_at._plan_definitions``, plan step R16-b-2), which
+definition walk (``balance_at._definition_walk``, plan steps R16-b-2 and C9), which
 must not take this door because the derived stop it would compose is that
 fold's own output (ruling **R-R65**); it reads the pass's memoised resolution
 of the rule under its authored closing alone (:mod:`app.services.recurrence._closing`

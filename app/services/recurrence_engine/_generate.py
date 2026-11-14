@@ -21,10 +21,8 @@ import logging
 
 from app.extensions import db
 from app.models.transaction import Transaction
-from app.services._recurrence_common import (
-    TemplateRowSelector,
-    occurrences_to_write,
-)
+from app.services._recurrence_common import occurrences_to_write
+from app.services._template_rows import row_selector_for
 from app.services.recurrence_engine._pass import create_for_unclaimed_occurrences
 from app.services.recurrence_engine._amounts import _derive_row_fields
 from app.services.recurrence_engine._plan import resolve_generation_plan
@@ -114,7 +112,7 @@ def generate_for_template(template, schedule, scenario_id, effective_from=None):
         return txn
 
     created = create_for_unclaimed_occurrences(
-        _selector(template, scenario_id), plan, _new_row,
+        row_selector_for(template, scenario_id), plan, _new_row,
     )
 
     db.session.flush()
@@ -231,7 +229,7 @@ def rows_to_generate_in_period(template, period_id, scenario_id, *, schedule):
             template, plan.rule, placement.occurrence, placement.period,
         )
         for placement in occurrences_to_write(
-            _selector(template, scenario_id), plan.placements,
+            row_selector_for(template, scenario_id), plan.placements,
         )
     )
 
@@ -306,25 +304,3 @@ def _plan_in_period(template, period_id, scenario_id, schedule):
         placement for placement in plan.placements
         if placement.period.period_id == period_id
     ))
-
-
-def _selector(template, scenario_id):
-    """Name what this engine's row fetches are asking about.
-
-    A one-line binding of :class:`_recurrence_common.TemplateRowSelector` to
-    this engine's model, so ``Transaction`` and ``Transaction.template_id`` are
-    paired in ONE place and the two engines' generate paths run the identical
-    query.  Plan step R4b-2 hoisted the query itself; pay-calendar plan step
-    C2-f3c named the four facts it takes, which is what let the pair stop being
-    repeated at each call.
-
-    Args:
-        template: The TransactionTemplate this pass is generating from.
-        scenario_id: The scenario being written into.
-
-    Returns:
-        The :class:`~app.services._recurrence_common.TemplateRowSelector`.
-    """
-    return TemplateRowSelector(
-        Transaction, Transaction.template_id, template, scenario_id,
-    )

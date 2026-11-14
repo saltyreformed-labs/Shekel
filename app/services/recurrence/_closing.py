@@ -61,9 +61,9 @@ in ``app/`` (census 2026-09-11 on the tree R7d-c-2 shipped on, re-read
 2026-09-13 on R7d-f-2's) is two readers that ask no closing question -- the
 write door's refusal and the opening-bound comparison in
 ``loan_recurrence_sync._sync_loan_cadence`` -- and ONE that goes round it on
-purpose: the balance seam's definition walk (``balance_at._plan_definitions``,
-plan step R16-b-2), which sums every definition paying into a loan under its
-AUTHORED closing alone, because the derived stop is that fold's own output and
+purpose: the balance seam's definition walk (``balance_at._definition_walk``,
+plan steps R16-b-2 and C9), which walks every definition paying into a loan under
+its AUTHORED closing alone, because the derived stop is that fold's own output and
 a fold reading its own answer would be a fixed point (ruling **R-R65**).  So
 since R7d-f-2 "a reader that asks the closing question cannot reach the
 un-narrowed answer" is a claim this module may make, and the seam's walk is

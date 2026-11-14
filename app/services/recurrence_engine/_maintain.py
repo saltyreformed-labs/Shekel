@@ -34,7 +34,6 @@ from app.extensions import db
 from app.models.transaction import Transaction
 from app.models.transaction_entry import TransactionEntry
 from app.services import posting_service
-from app.services.recurrence_engine._generate import _selector
 from app.services.recurrence_engine._amounts import (
     _derive_row_fields,
     _derive_unruled_fields,
@@ -489,6 +488,6 @@ _PASS = MaintainActs(
         logger, "Blocked cross-user recurrence regeneration",
         EVT_RECURRENCE_REGENERATED, "Recurrence regenerated for template",
     ),
-    _selector, _derive_row_fields, _rows_holding_owner_records,
+    _derive_row_fields, _rows_holding_owner_records,
     _no_row_is_reattributed, _apply_maintain_work,
 )

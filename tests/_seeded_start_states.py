@@ -1,24 +1,23 @@
-"""Named seeded start states: the registry, the build into a snapshot, and the lookups.
+"""Named seeded start states: the registry, the one build pass, and the marker reader.
 
 A test declares a world with ``@pytest.mark.seeded_start_state("name")``, and the ``db``
-fixture (:mod:`tests._app_fixtures`) clones its database from that world's snapshot.  The
-module also holds :func:`_refresh_ref_cache_and_jinja_globals`, which a build, the ``db``
+fixture (:mod:`tests._app_fixtures`) clones its database from that world's snapshot,
+which :func:`built_worlds` made with every other world the run declares.  The module
+also holds :func:`_refresh_ref_cache_and_jinja_globals`, which a build, the ``db``
 fixture and ``setup_database`` each call: this is the lowest module all three reach.
 """
 
 import os
+from contextlib import contextmanager
 from datetime import date, datetime
 from decimal import Decimal
 
-import psycopg
 from psycopg import sql
 
 from app.extensions import db as _db
 from tests._worker_database import (
+    _ADMIN_CONNECTION,
     _SNAPSHOT_INFIX,
-    _TEST_DATABASE_PREFIX,
-    _TEST_TEMPLATE_DATABASE,
-    _WORKER_ADMIN_URL,
     _WORKER_DB_NAME,
     _clone_worker_database,
     _drop_worker_database,
@@ -56,20 +55,32 @@ from tests._worker_database import (
 # the sweep's tests are ~2% of the suite's work and the expected saving sits inside a
 # run-to-run variance measured at 18 s.
 #
-# What this seam separates is ISOLATION from CONTENT.  The per-test drop and
-# re-clone is what keeps tests independent and it does not change here: every
-# test still gets its own database and may write to it freely.  What changes is
-# only which database it is cloned FROM.  A world is built once per worker into
-# a snapshot database, and the marker names it:
+# What this seam separates is ISOLATION from CONTENT.  The per-test clone,
+# dropped when its test ends, is what keeps tests independent and it does not
+# change here: every test still gets its own database and may write to it
+# freely.  What changes is only which database it is cloned FROM.  Every world
+# the run's tests declare is built once per worker, in one pass, into a snapshot
+# database of its own, and the marker names it:
 #
 #     @pytest.mark.seeded_start_state("baseline_less_owner")
 #     class TestSomething:
 #         ...
 #
+# **Why no test checks that the copies are separate** (ruling plan#3870).
+# PostgreSQL refuses every way one could leak into another.  No one can
+# connect to a snapshot: it is created with ``ALLOW_CONNECTIONS false``, as the
+# empty template is (``scripts/build_test_template.py``), so a test can write
+# only to its own clone.  A test's clone is dropped when the test ends and
+# created with no drop before it, so a clone that outlived its test makes the
+# next clone under that name refuse (``already exists``) rather than be reused.
+# And a snapshot is created once, with no drop before it, so a second world
+# under the same name, two long names PostgreSQL truncated to one included, is
+# refused at its create rather than overwriting the first.
+#
 # **Why a snapshot database rather than a wider fixture scope.**  A
 # module- or class-scoped fixture cannot hold this state: every test on an
-# xdist worker shares ONE database, so the next test from any OTHER module
-# re-clones it mid-module.  Observed under ``-n 12`` on 2026-08-29 with gw0,
+# xdist worker takes ONE database name, so the next test from any OTHER module
+# replaces it mid-module.  Observed under ``-n 12`` on 2026-08-29 with gw0,
 # gw10 and gw11 each running two modules interleaved -- measured, not inferred
 # from the scheduler's documentation.  ``xdist_group`` pins a group to one
 # worker and does not keep other tests off that worker, so it is not the fix
@@ -77,19 +88,54 @@ from tests._worker_database import (
 #
 # **Why it is never persisted between runs.**  A world holds rows dated from
 # ``display_today()``, so a snapshot kept across midnight -- or across a
-# builder edit -- would be a start state no code describes.  It is built at
-# first use and dropped in ``pytest_sessionfinish``; the name carries the
-# worker DB as its prefix so the bootstrap's existing orphan sweep collects one
-# a SIGKILL left behind.  This is finding **N-385**'s shape (a stored artifact
-# whose stamp says current while its content is not), and the answer there is
-# the same: do not stamp it harder, do not keep it.
+# builder edit -- would be a start state no code describes.  It is built by the
+# session's first declaring test and dropped when the session ends, by the
+# teardown of the ``_seeded_snapshots`` fixture (``tests/_app_fixtures.py``);
+# the name carries the worker DB as its prefix, so the bootstrap's own-name
+# sweep collects one a SIGKILL left behind on a cluster a later session reuses.
+# This is finding **N-385**'s shape (a stored artifact whose stamp says current
+# while its content is not), and the answer there is the same: do not stamp it
+# harder, do not keep it.
 #
-# **A world is built inside the ``db`` fixture, so it CANNOT see an autouse
-# fixture defined in a SUBDIRECTORY conftest, and that is a real limit rather
-# than an oversight.**  ``db`` names the two autouse fixtures beside it in
-# ``tests/_app_fixtures.py`` that a builder needs, which orders them ahead of
-# it; it cannot name a fixture defined below it in the tree, and those sort
-# after ``db`` unconditionally.
+# **Why ONE PASS over every declared world** (plan#2954, ruling plan#3767).  A
+# world used to be built the first time a test asked for it and remembered in a
+# per-process memo, so "built once" was a property of that memo, which only
+# several tests run in order in ONE process could observe -- and keeping them in
+# one process took an ``xdist_group``, the marker pytest 9.2.0 stopped honouring.
+# Now :func:`built_worlds` is the only place a world is built.  It names each
+# declared world once (:func:`declared_worlds`), and it runs inside a
+# session-scoped fixture, which pytest runs once per process: the contract the
+# ``app`` fixture already relies on.  Because it builds every declared world
+# before any declaring test clones one, two worlds that shared a snapshot would
+# fail one world's tests on every run, whatever order the tests run in.  What it
+# costs: a worker that runs any declaring test builds every world the run
+# declares, not only its own; and a builder that raises errors every declaring
+# test on that worker, since pytest keeps a session fixture's error for each
+# later test that asks.  **One session fixture PER WORLD was measured and
+# refused** (2026-11-13, a scratch project): pytest keeps a separate fixture for
+# each module that holds one, so a world's fixture imported into a second module
+# was built twice.
+#
+# **A world is built inside the ``db`` fixture of whichever declaring test
+# reaches it first on the worker, which may be another world's, and that is a
+# real limit rather than an oversight.**  Every world's build sees exactly the
+# fixtures THAT test has set up by then:
+#
+# - ``db`` names the autouse fixture beside it in ``tests/_app_fixtures.py``
+#   that a builder needs, ``disable_hibp_check``, which orders it ahead of
+#   ``db``.  The two-factor key a builder also needs is in the environment
+#   before the app is imported (``tests/conftest.py``).
+# - A function-scoped fixture defined below it in the tree, a SUBDIRECTORY
+#   conftest's autouse one included, sorts after ``db`` unconditionally, so no
+#   build sees it.
+# - A session-, package-, module- or class-scoped fixture active for that test
+#   is set up before every function-scoped one, so the build of each world sees
+#   it, a world declared in another module included.  None of the three
+#   declaring modules (``tests/test_arch/test_a_seeded_start_state_is_built_once.py``
+#   and the two ``tests/test_routes/test_no_baseline_policy/`` sweeps) or their
+#   conftests holds one, read 2026-11-13.
+#
+# So no world may depend on any fixture outside ``tests/_app_fixtures.py``.
 # The live example: ``tests/test_services/conftest.py`` freezes
 # ``pay_period_service.date.today()`` to a fixed day for every test under it.
 # A world declared there would be BUILT on the real clock and then READ by
@@ -115,30 +161,6 @@ from tests._worker_database import (
 # is the same property the per-test clone already depends on for ``ref.*``.
 _SEEDED_STATE_BUILDERS = {}
 
-# Worlds built in THIS process, ``name -> (snapshot database, ids dict)``.
-# Per worker rather than per session because each worker is its own process
-# with its own database; two workers running tests from the same module each
-# build the world once.
-_SEEDED_STATE_SNAPSHOTS = {}
-
-# PostgreSQL truncates an identifier at 63 bytes, so two long world names could
-# silently name ONE snapshot and each would then serve the other's tests.  The
-# refusal is at REGISTRATION -- a name is a constant, so this fires at import
-# for every run, not on the unlucky one that happened to use both worlds.
-_MAX_IDENTIFIER_BYTES = 63
-
-# **The guard measures the LONGEST name the scheme can produce, not this
-# process's.**  Measuring the running worker's name makes the check
-# environment-dependent: on the xdist CONTROLLER, which imports test modules
-# but runs no test, ``_WORKER_DB_NAME`` is ``None`` and the probe would
-# measure the string ``"None"``.  The bound below is the prefix plus the
-# widest worker id xdist can hand out.  It used to take the longer of the
-# configured prefix and the default, because ``TEST_DB_PREFIX`` could make
-# them differ and a name that fitted locally could be refused in CI; that
-# variable is gone (``balance:X-br-4``) and there is one prefix again.
-_WIDEST_WORKER_ID = "gw999"
-_WIDEST_WORKER_DB = f"{_TEST_DATABASE_PREFIX}_{_WIDEST_WORKER_ID}"
-
 
 def register_seeded_state(name, builder):
     """Register a named world tests may declare as their start state.
@@ -162,8 +184,7 @@ def register_seeded_state(name, builder):
         *name*, for the defining module to bind and its markers to read.
 
     Raises:
-        ValueError: The name is already registered to a different builder, or
-            it is long enough that its snapshot identifier would be truncated.
+        ValueError: The name is already registered to a different builder.
     """
     existing = _SEEDED_STATE_BUILDERS.get(name)
     if existing is not None and existing is not builder:
@@ -172,14 +193,6 @@ def register_seeded_state(name, builder):
             f"{existing.__module__}.{existing.__qualname__}. Two worlds under "
             f"one name would share one snapshot database and each would serve "
             f"the other's tests."
-        )
-    widest = f"{_WIDEST_WORKER_DB}{_SNAPSHOT_INFIX}{name}"
-    if len(widest.encode()) > _MAX_IDENTIFIER_BYTES:
-        raise ValueError(
-            f"seeded start state {name!r} needs a snapshot database named up "
-            f"to {widest!r}, which is {len(widest.encode())} bytes -- "
-            f"PostgreSQL truncates at {_MAX_IDENTIFIER_BYTES} and two "
-            f"truncated names would collide. Shorten the world's name."
         )
     _SEEDED_STATE_BUILDERS[name] = builder
     return name
@@ -191,7 +204,7 @@ def _seeded_snapshot_name(name):
     Prefixed with the worker database's own name, which is what lets the
     orphan sweep in :func:`_bootstrap_worker_database` recover a snapshot's
     OWNER and answer "is this in use?" by asking about the owner instead.  A
-    snapshot can never answer that for itself: nothing ever connects to one.
+    snapshot can never answer that for itself: no one can connect to one.
 
     Args:
         name: The world's registered name.
@@ -214,7 +227,7 @@ def _plain_data_or_raise(name, ids):
     """Refuse a builder's return value unless it is a flat dict of scalars.
 
     **Enforced rather than documented**, because the failure it prevents is
-    silent: :func:`seeded_state_for` hands out ``dict(ids)``, a SHALLOW copy,
+    silent: the ``seeded_world`` fixture hands out ``dict(ids)``, a SHALLOW copy,
     so a nested list or dict would be one object shared by every test that
     declared the world -- and a test mutating it would be editing what every
     later test sees, with nothing to point at.
@@ -260,10 +273,12 @@ def _refuse_a_build_the_environment_is_not_ready_for(name):
     refused the suite's own seed password with a message about a data breach,
     naming nothing about ordering.
 
-    **It is a diagnostic, not a guarantee**: it can only name the two the
-    ``db`` fixture already enumerates, and it cannot see an autouse fixture in
-    a SUBDIRECTORY conftest -- those sort after ``db`` and no dependency in
-    the root conftest's fixtures can reach them.  See the block comment above.
+    **It is a diagnostic, not a guarantee**: it can only name the one the
+    ``db`` fixture enumerates, and it cannot see an autouse fixture in a
+    SUBDIRECTORY conftest -- those sort after ``db`` and no dependency in the
+    root conftest's fixtures can reach them.  See the block comment above.
+    The two-factor key a builder also needs is not a fixture's: it is in the
+    environment before the app is imported (``tests/conftest.py``).
 
     Args:
         name: The world's registered name, for the message.
@@ -271,14 +286,9 @@ def _refuse_a_build_the_environment_is_not_ready_for(name):
     Raises:
         RuntimeError: The environment is not the one a fixture would see.
     """
-    missing = []
     if os.environ.get("HIBP_CHECK_ENABLED") != "false":
-        missing.append("disable_hibp_check")
-    if not os.environ.get("TOTP_ENCRYPTION_KEY"):
-        missing.append("set_totp_key")
-    if missing:
         raise RuntimeError(
-            f"the world {name!r} is being built before {' and '.join(missing)} "
+            f"the world {name!r} is being built before disable_hibp_check "
             f"has run, so its builder would see an environment no ordinary "
             f"fixture sees. The `db` fixture must DEPEND on every autouse "
             f"fixture a builder needs -- pytest orders fixtures defined in one "
@@ -289,18 +299,24 @@ def _refuse_a_build_the_environment_is_not_ready_for(name):
 def _build_seeded_snapshot(name, app):
     """Build a world once and freeze it into a snapshot database.
 
-    Runs on the first test that asks for *name* on this worker.  **It makes
-    the database blank itself, below, and that drop-and-clone is load-bearing
-    rather than redundant**: the caller resolves the clone source BEFORE its
-    own drop, so the worker database standing here still holds the previous
-    test's rows.  Deleting those two lines would freeze whatever that test
-    wrote into the world, and every declaring test on this worker would then
-    start from it -- silently, differently per worker, since which test ran
-    before depends on scheduling.  (An earlier draft of this docstring claimed
-    the ``db`` fixture had already blanked it.  It had not.)
+    Called by :func:`built_worlds`, once for each world the run declares, under
+    the first declaring test on this worker, before that test's clone exists.
+    The build takes this worker's database name as its SCRATCH: it clones the
+    empty template under it, builds the world there, freezes the scratch into
+    the snapshot, and drops the scratch however the build ends.  It drops
+    nothing first, so the name must be free: a database standing under it is a
+    clone that outlived its test, and the clone refuses it (``already exists``)
+    rather than build on its rows (ruling plan#3870).  A test that calls this
+    itself drops its own database first.
 
-    The result is frozen with ``CREATE DATABASE ... TEMPLATE``, which is
-    refused while any session holds the source -- hence the dispose before it.
+    The snapshot is created once, with no drop before it and with
+    ``ALLOW_CONNECTIONS false``: a second world whose snapshot takes the same
+    name, two long names PostgreSQL truncated to one included, is refused at
+    its create, and no one can connect to the snapshot to write to it.  It is
+    still a template every declaring test's clone copies.
+
+    The freeze is ``CREATE DATABASE ... TEMPLATE``, which is refused while any
+    session holds the source -- hence the dispose before it.
 
     ``system.audit_log`` is truncated after the build for the reason
     ``scripts/build_test_template.py`` truncates it after seeding the template:
@@ -319,6 +335,8 @@ def _build_seeded_snapshot(name, app):
         KeyError: No builder is registered under *name*.
         RuntimeError: The environment a builder needs is not in place yet, or
             the builder returned something other than plain data.
+        psycopg.errors.DuplicateDatabase: A database already stands under this
+            worker's name, or under the snapshot's.
     """
     try:
         builder = _SEEDED_STATE_BUILDERS[name]
@@ -331,62 +349,56 @@ def _build_seeded_snapshot(name, app):
 
     _refuse_a_build_the_environment_is_not_ready_for(name)
     snapshot = _seeded_snapshot_name(name)
-    # See the docstring: this is what makes the database blank, and it is not
-    # redundant with the caller's own drop.
-    _drop_worker_database(_WORKER_DB_NAME, _WORKER_ADMIN_URL)
-    _clone_worker_database(_WORKER_DB_NAME, _WORKER_ADMIN_URL)
-    with app.app_context():
-        # ``try``/``finally`` so a builder that RAISES still releases this
-        # nested context's session.  Flask-SQLAlchemy scopes a session to the
-        # app context, so the one opened here is not the ``db`` fixture's; a
-        # raise that popped the context without removing it would leave a
-        # session holding an aborted transaction, and the connection it holds
-        # is exactly what the freeze below is refused for.
-        try:
-            _refresh_ref_cache_and_jinja_globals(app)
-            ids = _plain_data_or_raise(name, builder(_db))
-            # The seed's own audit rows are not a test's to see -- same
-            # contract, and same reason, as the template builder's post-seed
-            # TRUNCATE.
-            _db.session.execute(_db.text("TRUNCATE system.audit_log"))
-            _db.session.commit()
-        finally:
-            # ``CREATE DATABASE ... TEMPLATE src`` is refused while any session
-            # holds ``src``; releasing the engine here is what makes the freeze
-            # below legal, exactly as it is for the per-test DROP.
-            _db.session.remove()
-            _db.engine.dispose()
-
-    _drop_worker_database(snapshot, _WORKER_ADMIN_URL)
-    admin_conn = psycopg.connect(_WORKER_ADMIN_URL)
+    _clone_worker_database(_WORKER_DB_NAME)
     try:
-        admin_conn.autocommit = True
-        with admin_conn.cursor() as cur:
+        with app.app_context():
+            # ``try``/``finally`` so a builder that RAISES still releases this
+            # nested context's session.  Flask-SQLAlchemy scopes a session to
+            # the app context, so the one opened here is not the ``db``
+            # fixture's; a raise that popped the context without removing it
+            # would leave a session holding an aborted transaction, and the
+            # connection it holds is exactly what the freeze below is refused
+            # for.
+            try:
+                _refresh_ref_cache_and_jinja_globals(app)
+                ids = _plain_data_or_raise(name, builder(_db))
+                # The seed's own audit rows are not a test's to see -- same
+                # contract, and same reason, as the template builder's
+                # post-seed TRUNCATE.
+                _db.session.execute(_db.text("TRUNCATE system.audit_log"))
+                _db.session.commit()
+            finally:
+                # ``CREATE DATABASE ... TEMPLATE src`` is refused while any
+                # session holds ``src``; releasing the engine here is what
+                # makes the freeze below legal, exactly as it is for the
+                # per-test DROP.
+                _db.session.remove()
+                _db.engine.dispose()
+
+        with _ADMIN_CONNECTION.cursor() as cur:
             cur.execute(
                 sql.SQL(
-                    "CREATE DATABASE {} TEMPLATE {} STRATEGY WAL_LOG"
+                    "CREATE DATABASE {} TEMPLATE {} STRATEGY WAL_LOG "
+                    "ALLOW_CONNECTIONS false"
                 ).format(
                     sql.Identifier(snapshot),
                     sql.Identifier(_WORKER_DB_NAME),
                 )
             )
     finally:
-        admin_conn.close()
+        _drop_worker_database(_WORKER_DB_NAME)
     return snapshot, ids
 
 
-def declared_seeded_state(request):
-    """The world *request*'s test DECLARED, or ``None``.  Builds nothing.
+def declared_seeded_state(node):
+    """The world *node* DECLARED, or ``None``.  Builds nothing.
 
-    Split from :func:`seeded_state_for` because that one BUILDS on a miss, and
-    building drops and re-clones the worker database -- which is correct while
-    the ``db`` fixture is setting a test up, and destroys the database out from
-    under the test anywhere else.  Every reader that only wants to know what
-    was declared calls this instead, so the destructive path has exactly one
-    caller.
+    It only reads a marker, so the build pass asks it of every collected test
+    (:func:`declared_worlds`) and the ``db`` and ``seeded_world`` fixtures ask
+    it of their own test, none of them touching a database.
 
     Args:
-        request: The test's pytest request.
+        node: A collected test (``request.node`` in a fixture).
 
     Returns:
         The declared world's name, or ``None`` when the test declared none.
@@ -394,7 +406,7 @@ def declared_seeded_state(request):
     Raises:
         ValueError: The marker is present but names no world.
     """
-    marker = request.node.get_closest_marker("seeded_start_state")
+    marker = node.get_closest_marker("seeded_start_state")
     if marker is None:
         return None
     if not marker.args:
@@ -402,7 +414,7 @@ def declared_seeded_state(request):
         # ``marker.args[0]`` would report it as an IndexError raised inside
         # this file -- naming neither the test nor the thing it forgot.
         raise ValueError(
-            f"{request.node.nodeid} carries @pytest.mark.seeded_start_state "
+            f"{node.nodeid} carries @pytest.mark.seeded_start_state "
             f"with no world named. Pass one: "
             f"@pytest.mark.seeded_start_state(\"<name>\"); known worlds: "
             f"{sorted(_SEEDED_STATE_BUILDERS)}"
@@ -410,65 +422,70 @@ def declared_seeded_state(request):
     return marker.args[0]
 
 
-def seeded_state_for(request, app):
-    """The world *request*'s test declared, BUILDING it if this worker has none.
+def declared_worlds(items):
+    """The worlds *items* declare, each named ONCE, in sorted order.
 
-    **Call this only while a test's database is being replaced anyway.**  On a
-    miss it drops and re-clones the worker database (see
-    :func:`_build_seeded_snapshot`), which is why the ``db`` fixture is its
-    only caller; anywhere else that would destroy the running test's database.
-    :func:`declared_seeded_state` is the non-destructive question.
+    The one place a run's worlds are named, so the one place "each world is
+    built once" is decided: :func:`built_worlds` builds exactly this list.
+    Sorted so that a run builds its worlds in the same order every time.
 
     Args:
-        request: The test's pytest request, carrying the
-            ``seeded_start_state`` marker.
-        app: The application whose context a first build writes through.
+        items: The collected tests (``session.items``).
 
     Returns:
-        ``(clone_source_database, ids)`` -- the database the test's own copy is
-        cloned from, and the plain-data description of the world in it.  Both
-        are ``(_TEST_TEMPLATE_DATABASE, None)`` for an unmarked test, which is
-        every test that has not adopted this seam.
-    """
-    name = declared_seeded_state(request)
-    if name is None:
-        return _TEST_TEMPLATE_DATABASE, None
-    if name not in _SEEDED_STATE_SNAPSHOTS:
-        _SEEDED_STATE_SNAPSHOTS[name] = _build_seeded_snapshot(name, app)
-    snapshot, ids = _SEEDED_STATE_SNAPSHOTS[name]
-    # A copy per test: the dict is built once and shared, and a test that
-    # mutated it would be editing every later test's view of the world.
-    # ``_plain_data_or_raise`` is what makes a SHALLOW copy sufficient.
-    return snapshot, dict(ids)
-
-
-def seeded_state_ids(name):
-    """The ids of a world already built on this worker.
-
-    Args:
-        name: The world's registered name.
-
-    Returns:
-        A per-test copy of the builder's dict.
+        A list of world names, without repeats.
 
     Raises:
-        KeyError: The world has not been built in this process.
+        ValueError: An item's marker names no world (:func:`declared_seeded_state`).
     """
-    _snapshot, ids = _SEEDED_STATE_SNAPSHOTS[name]
-    return dict(ids)
+    names = {declared_seeded_state(item) for item in items}
+    names.discard(None)
+    return sorted(names)
 
 
-def _drop_seeded_snapshots():
-    """Drop every world this worker built.  Called from session finish.
+@contextmanager
+def built_worlds(items, app):
+    """Build every world *items* declare, in one pass; drop each snapshot on exit.
+
+    **The only place a world is built** (ruling plan#3767): the
+    ``_seeded_snapshots`` fixture runs it once per worker, under the first test
+    whose ``db`` fixture asks for a world.  It must run there, before that
+    test's clone holds the worker's database name, with the worker's engine
+    released and the environment fixtures applied; see
+    :func:`_build_seeded_snapshot` and
+    :func:`_refuse_a_build_the_environment_is_not_ready_for`.
+
+    A build that raises leaves no snapshot behind: the ones built before it are
+    dropped as the error leaves.
+
+    Args:
+        items: The collected tests (``session.items``).
+        app: The application whose context each builder writes through.
+
+    Yields:
+        ``{name: (snapshot_database_name, ids)}`` for every declared world.
+    """
+    worlds = {}
+    try:
+        for name in declared_worlds(items):
+            worlds[name] = _build_seeded_snapshot(name, app)
+        yield worlds
+    finally:
+        _drop_seeded_snapshots(worlds)
+
+
+def _drop_seeded_snapshots(worlds):
+    """Drop the snapshot database of every world in *worlds*.
 
     A world's rows are dated from ``display_today()``, so a snapshot that
     outlived its session would be a start state no code describes.
+
+    Args:
+        worlds: ``{name: (snapshot_database_name, ids)}``, as
+            :func:`built_worlds` yields it.
     """
-    if not _SEEDED_STATE_SNAPSHOTS:
-        return
-    for snapshot, _ids in _SEEDED_STATE_SNAPSHOTS.values():
-        _drop_worker_database(snapshot, _WORKER_ADMIN_URL)
-    _SEEDED_STATE_SNAPSHOTS.clear()
+    for snapshot, _ids in worlds.values():
+        _drop_worker_database(snapshot)
 
 
 # --- Helpers --------------------------------------------------------------
@@ -477,17 +494,19 @@ def _drop_seeded_snapshots():
 def _refresh_ref_cache_and_jinja_globals(app):
     """Re-init ``ref_cache`` and rewrite all ID-derived Jinja globals.
 
-    Called from two places:
+    Called from three places, each against a database just cloned from the
+    template or from a snapshot of it:
 
-      1. ``setup_database`` at session start, once the ref tables
-         have been seeded for the first time.
-      2. The ``db`` fixture, after the per-test TRUNCATE has wiped
-         ``ref.account_types`` (via the new C-28 / F-044 FK to
-         ``auth.users``) and the seed has been re-run.  The new
-         seed assigns fresh IDs from the sequence; the
-         pre-existing Jinja globals would otherwise point at IDs
-         that no longer exist and every template that references
-         one would break.
+      1. ``setup_database`` at session start, against the bootstrap's
+         start-up database.
+      2. The ``db`` fixture, against each test's clone.
+      3. :func:`_build_seeded_snapshot`, against a world's scratch
+         database before its builder runs.
+
+    A clone keeps the template's ref ids (``CREATE DATABASE ... TEMPLATE``
+    preserves them), so each refresh normally finds the ids it already
+    holds; it is what keeps the cached ids and the Jinja globals true if a
+    change to the seed moves one.
 
     Delegates to ``app.jinja_globals.register_ref_id_globals`` --
     the same helper ``create_app`` uses -- so the two call sites

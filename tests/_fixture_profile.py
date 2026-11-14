@@ -23,8 +23,7 @@ from contextlib import contextmanager
 # steps, gated behind ``SHEKEL_TEST_FIXTURE_PROFILE=1`` so the default
 # test path is unaffected.  When the flag is set, each test appends
 # one row to a per-worker CSV in ``tests/.fixture-profile/`` recording
-# elapsed milliseconds for rollback / TRUNCATE main / seed_ref /
-# commit / TRUNCATE audit_log / refresh_ref_cache / call / teardown.
+# elapsed milliseconds for each of the steps below.
 # At session end the aggregator reads every worker CSV and prints a
 # summary table whose shape matches
 # ``docs/audits/test_improvements/test-performance-research.md``
@@ -54,8 +53,6 @@ _FIXTURE_PROFILE_DIR = pathlib.Path(__file__).parent / ".fixture-profile"
 # match the labels in the published baseline so a future reader can
 # diff the two tables cell-for-cell.
 _FIXTURE_PROFILE_STEPS = (
-    "setup_rollback",
-    "setup_drop_db",
     "setup_clone_template",
     "setup_refresh_ref_cache",
     "call",
@@ -66,19 +63,19 @@ _FIXTURE_PROFILE_STEPS = (
 # pass.  Kept beside _FIXTURE_PROFILE_STEPS so future edits stay in
 # sync.  Phase 3b replaced ``setup_truncate_main`` /
 # ``setup_seed_ref`` / ``setup_commit_after_seed`` with
-# ``setup_drop_db`` + ``setup_clone_template``; the published
-# baseline comparison in
+# ``setup_drop_db`` + ``setup_clone_template``.  plan#2954 (ruling
+# plan#3870) moved the drop to the test's teardown, so ``teardown``
+# now times the release AND the drop, and ``setup_drop_db`` went
+# with the setup ``setup_rollback`` and engine release, which
+# guarded that drop; a fixture setup total read against the
+# published baseline in
 # ``docs/audits/test_improvements/test-performance-implementation-plan.md``
-# remains diff-able per-step because the surviving step keys
-# (``setup_rollback``, ``setup_refresh_ref_cache``, ``call``,
-# ``teardown``) and their labels are unchanged.
+# lacks the drop that baseline counted.
 _FIXTURE_PROFILE_LABELS = {
-    "setup_rollback": "rollback",
-    "setup_drop_db": "DROP DATABASE WITH (FORCE)",
     "setup_clone_template": "CREATE DATABASE TEMPLATE STRATEGY WAL_LOG",
     "setup_refresh_ref_cache": "refresh_ref_cache",
     "call": "Test body (call)",
-    "teardown": "Teardown",
+    "teardown": "Teardown: release + DROP (FORCE)",
 }
 
 # Per-worker CSV path.  ``PYTEST_XDIST_WORKER`` is ``"gw0"``,

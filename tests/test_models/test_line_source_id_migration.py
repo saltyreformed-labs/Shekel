@@ -114,7 +114,6 @@ def _sighting_ids():
     ))
 
 
-@pytest.mark.xdist_group("line_source_id_ddl")
 class TestTheRoundTrip:
     """Head -> down -> up, over every shape the downgrade treats differently."""
 
@@ -196,7 +195,6 @@ class TestTheRoundTrip:
         ) == [(1,)]
 
 
-@pytest.mark.xdist_group("line_source_id_ddl")
 class TestTheRefusals:
     """Each direction refuses the state the other side cannot hold, and lists it."""
 

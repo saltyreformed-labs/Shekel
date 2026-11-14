@@ -7,21 +7,16 @@ which keeps only this shard's share and reports the rest as deselected.  Unset,
 nothing is deselected: a local run is the whole suite, as it always was.
 
 **The shards partition the suite BY CONSTRUCTION.**  An item's shard is a
-function of that item alone -- a stable hash of its key -- never its position
-in a list.  A position-based split (round-robin over sorted ids) is only a
+function of that item alone -- a stable hash of its node id -- never its
+position in a list.  A position-based split (round-robin over sorted ids) is only a
 partition while every job collects the identical list; one extra item in one
 job shifts every index after it, and the shift both runs some tests twice and
 runs others nowhere, with every job green.  Here an item the other jobs do not
 collect lands in exactly one shard anyway, and no other item moves.
 
-**An ``xdist_group`` is kept whole.**  The marker is a CO-LOCATION contract, not
-only a lock on cluster state: ``test_a_seeded_start_state_is_built_once.py``
-asserts facts about its group's whole session, and the first measured split
-(one hash per node id, round 2 of X-gy's runner A/B on 2026-09-22) scattered
-that group across shards and failed it closed.  So a grouped item is keyed by
-its group, every member shares one key, and the whole group lands on one shard
--- where ``--dist=loadgroup`` puts it on one worker exactly as an unsharded
-run does.
+**No test needs another on its shard** (plan#2954).  Each test's rows are in
+its own clone of the template, so any item may run in any shard.  This module
+once kept each ``xdist_group`` whole on one shard; the suite has none now.
 
 **The hash is SHA-256, not ``hash()``.**  Python salts ``str`` hashing per
 process (``PYTHONHASHSEED``), so ``hash()`` would give every CI job a different
@@ -72,34 +67,11 @@ def parse_shard(spec):
     return index, total
 
 
-def shard_key(item):
-    """Return what ``item`` is sharded by: its ``xdist_group``, else its node id.
-
-    The group name is read exactly as pytest-xdist reads it for
-    ``--dist=loadgroup`` -- the marker's first argument, else its ``name``
-    keyword, else ``"default"`` -- and an item carrying several groups is
-    keyed by all of them, as xdist names it.
-
-    Args:
-        item: A collected pytest item.
-
-    Returns:
-        The string the item's shard is derived from.
-    """
-    groups = sorted({
-        mark.args[0] if mark.args else mark.kwargs.get("name", "default")
-        for mark in item.iter_markers("xdist_group")
-    })
-    if groups:
-        return "xdist_group:" + "_".join(groups)
-    return item.nodeid
-
-
 def shard_of(key, total):
     """Return the shard, in ``range(total)``, that ``key`` belongs to.
 
     Args:
-        key: A :func:`shard_key` value.
+        key: An item's node id.
         total: The number of shards.
 
     Returns:
@@ -125,7 +97,7 @@ def apply_shard(config, items, spec):
     index, total = parse_shard(spec)
     keep, drop = [], []
     for item in items:
-        (keep if shard_of(shard_key(item), total) == index else drop).append(item)
+        (keep if shard_of(item.nodeid, total) == index else drop).append(item)
     if drop:
         config.hook.pytest_deselected(items=drop)
         items[:] = keep

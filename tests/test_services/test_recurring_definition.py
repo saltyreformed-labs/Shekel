@@ -21,6 +21,7 @@ import pytest
 from app.models.pay_period import PayPeriod
 from app.services import balance_at
 from app.services.balance_at import BalanceContext
+from app.services.cash_ledger import books_start
 from app.services.recurrence import (
     EMPTY,
     INDEFINITE,
@@ -36,15 +37,17 @@ from app.services.recurrence import (
     recurrence_spec,
     resolved_recurrence,
 )
-# Imported as a MODULE so the resolve-once control below patches the name the
-# read door resolves at CALL time; patching this file's imported name would
-# leave the composition calling the real one.
-from app.services.recurrence import _reading
-# The same reason, one memo over: the pass walks a resolved recurrence through
-# the name ITS module imported (plan step R7d-f-2), so the walk-once control
-# patches ``_recurrence_memos.occurrence_walk`` (the module of the context's
-# mixin since ruling R-BAL146).
-from app.services.balance_at import _recurrence_memos
+# Pylint: ``shekel-private-module-import`` -- imported as a MODULE so the
+# resolve-once control below patches the name the read door resolves at CALL
+# time; patching this file's imported name would leave the composition calling
+# the real one, and the package's public surface exports no module to patch.
+from app.services.recurrence import _reading  # pylint: disable=shekel-private-module-import
+# Pylint: ``shekel-private-module-import`` -- the same reason, one memo over:
+# the pass walks a resolved recurrence through the name ITS module imported
+# (plan step R7d-f-2), so the walk-once control patches
+# ``_recurrence_memos.occurrence_walk`` (the module of the context's mixin
+# since ruling R-BAL146).
+from app.services.balance_at import _recurrence_memos  # pylint: disable=shekel-private-module-import
 from app.services.balance_at import is_standing_loan_payment
 from app.services.recurring_definition import (
     read_definition,
@@ -152,11 +155,12 @@ def _second_transfer_into(seed_user, db_session, loan):
     return first, second
 
 
+@pytest.mark.usefixtures("seed_periods")
 class TestWhatTheDoorComposes:
     """The derived stop reaches the resolved value, or is honestly absent."""
 
     def test_a_definition_with_no_rule_does_not_repeat(
-        self, app, db, seed_user, seed_periods,
+        self, app, db, seed_user,
     ):
         """``None`` means "does not repeat", passed through unchanged.
 
@@ -182,10 +186,10 @@ class TestWhatTheDoorComposes:
             assert resolved_definition(tpl, ctx) is None
             reading = read_definition(tpl, ctx)
             assert reading.resolved is None
-            assert reading.placements == ()
+            assert len(reading.placements) == 0
 
-    def test_a_destination_that_is_not_a_loan_carries_NO_derived_stop(
-        self, app, db, seed_user, seed_periods,
+    def test_a_destination_that_is_not_a_loan_carries_no_derived_stop(
+        self, app, db, seed_user,
     ):
         """The 41-of-46 case, and ``None`` here is an answer rather than a gap.
 
@@ -207,7 +211,7 @@ class TestWhatTheDoorComposes:
             assert resolved.closing.authored == NEVER_ENDS
 
     def test_an_expense_template_pays_into_no_account_at_all(
-        self, app, db, seed_user, seed_periods,
+        self, app, db, seed_user,
     ):
         """A ``TransactionTemplate`` has no destination, so it has no stop.
 
@@ -224,8 +228,8 @@ class TestWhatTheDoorComposes:
 
             assert resolved.closing.derived is None
 
-    def test_a_LOAN_payment_carries_the_loans_derived_payoff(
-        self, app, db, seed_user, seed_periods,
+    def test_a_loan_payment_carries_the_loans_derived_payoff(
+        self, app, db, seed_user,
     ):
         """The whole point: the stop is ASKED for, never read off a column.
 
@@ -247,7 +251,7 @@ class TestWhatTheDoorComposes:
             assert resolved.closing.derived == ClosesOn(on=date(2028, 7, 1))
 
     def test_a_stored_stop_on_the_standing_payment_is_the_owners_word(
-        self, app, db, seed_user, seed_periods,
+        self, app, db, seed_user,
     ):
         """Ruling **R-R82** (plan step R7d-g): the column is the owner's word, and it binds.
 
@@ -301,8 +305,8 @@ class TestWhatTheDoorComposes:
                 "the owner's stop did not bind the walk: a cache arm survived R7d-g"
             )
 
-    def test_a_NULL_column_composes_no_authored_bound_and_the_payoff_binds(
-        self, app, db, seed_user, seed_periods,
+    def test_a_null_column_composes_no_authored_bound_and_the_payoff_binds(
+        self, app, db, seed_user,
     ):
         """The state every live loan payment is in since the R7d-g migration.
 
@@ -332,11 +336,12 @@ class TestWhatTheDoorComposes:
             assert max(narrowed) > date(2027, 1, 1)
 
 
+@pytest.mark.usefixtures("seed_periods")
 class TestTheNarrowingReachesTheWalk:
     """A composed value nobody walks under would look identical from outside."""
 
-    def test_the_loans_life_TRUNCATES_the_occurrences(
-        self, app, db, seed_user, seed_periods,
+    def test_the_loans_life_truncates_the_occurrences(
+        self, app, db, seed_user,
     ):
         """The rule names occurrences past the payoff; the walk stops at it.
 
@@ -376,8 +381,8 @@ class TestTheNarrowingReachesTheWalk:
                 "the loan is the only thing that can"
             )
 
-    def test_an_EARLIER_authored_bound_still_binds(
-        self, app, db, seed_user, seed_periods,
+    def test_an_earlier_authored_bound_still_binds(
+        self, app, db, seed_user,
     ):
         """ANDed, never substituted -- the direction that costs money.
 
@@ -436,8 +441,8 @@ class TestTheNarrowingReachesTheWalk:
             )
             assert describe(resolved).stops == "until Mar 01, 2027"
 
-    def test_a_loan_that_closed_before_its_first_firing_names_NOTHING(
-        self, app, db, seed_user, seed_periods,
+    def test_a_loan_that_closed_before_its_first_firing_names_nothing(
+        self, app, db, seed_user,
     ):
         """The EMPTY window, and the cell that must not name its date.
 
@@ -470,7 +475,7 @@ class TestTheNarrowingReachesTheWalk:
             reading = read_definition(tpl, ctx)
 
             assert reading.resolved.closing.derived == EMPTY
-            assert reading.placements == ()
+            assert len(reading.placements) == 0
             assert describe(reading.resolved).stops == "never runs"
 
 
@@ -516,10 +521,11 @@ class TestWhatTheDoorRefuses:
             assert not ctx.calendar().periods
 
             assert resolved_definition(tpl, ctx) is None
-            assert read_definition(tpl, ctx).placements == ()
+            assert len(read_definition(tpl, ctx).placements) == 0
 
-    def test_a_cross_owner_pairing_is_REFUSED_before_the_loan_is_folded(
-        self, app, db, seed_user, second_user, seed_periods,
+    @pytest.mark.usefixtures("seed_periods")
+    def test_a_cross_owner_pairing_is_refused_before_the_loan_is_folded(
+        self, app, db, seed_user, second_user,
     ):
         """The order inside the door is graded, not merely described.
 
@@ -541,11 +547,12 @@ class TestWhatTheDoorRefuses:
                 resolved_definition(tpl, foreign)
 
 
+@pytest.mark.usefixtures("seed_periods")
 class TestTheDoorResolvesTheRuleOnce:
     """One rule, one resolution per pass -- ``CLAUDE.md`` rule 14's ONE WALK."""
 
     def test_a_loan_payment_resolves_its_rule_exactly_once(
-        self, app, db, seed_user, seed_periods, monkeypatch,
+        self, app, db, seed_user, monkeypatch,
     ):
         """The resolver TAKES the resolved recurrence; it does not re-derive it.
 
@@ -580,6 +587,7 @@ class TestTheDoorResolvesTheRuleOnce:
             )
 
 
+@pytest.mark.usefixtures("seed_periods")
 class TestTheDoorWalksTheDefinitionOnce:
     """One composed meaning, one walk per pass (plan step R7d-f-2, row N-513).
 
@@ -606,7 +614,7 @@ class TestTheDoorWalksTheDefinitionOnce:
         return calls
 
     def test_reading_one_definition_twice_walks_it_once(
-        self, app, db, seed_user, seed_periods, monkeypatch,
+        self, app, db, seed_user, monkeypatch,
     ):
         """The second ``read_definition`` on a pass is memo hits end to end."""
         with app.app_context():
@@ -631,7 +639,7 @@ class TestTheDoorWalksTheDefinitionOnce:
             )
 
     def test_two_definitions_with_one_composed_meaning_share_one_walk(
-        self, app, db, seed_user, seed_periods, monkeypatch,
+        self, app, db, seed_user, monkeypatch,
     ):
         """Keyed by the VALUE: what the walk cannot tell apart, the memo does not.
 
@@ -663,7 +671,7 @@ class TestTheDoorWalksTheDefinitionOnce:
             assert len(calls) == 1
 
     def test_two_definitions_with_different_stops_walk_twice(
-        self, app, db, seed_user, seed_periods, monkeypatch,
+        self, app, db, seed_user, monkeypatch,
     ):
         """The composed CLOSING is part of the key, so a loan's stop misses.
 
@@ -671,11 +679,20 @@ class TestTheDoorWalksTheDefinitionOnce:
         cadence family but not a closing -- the loan's carries the derived
         payoff -- so they are two values and two walks.  The control that
         says the key is the COMPOSED value and not the spec alone.
+
+        The loan originates on the day Goal's books start, so the two books
+        floors agree and the closing is the one thing telling them apart: a
+        loan payment's floor is the loan's origination (ruling plan#3954,
+        task plan#4087), where it was the loan's opening record, which the
+        fixtures date the same day as Goal's.
         """
         with app.app_context():
-            loan = _loan(seed_user, db.session)
             savings = create_account_of_type(
                 seed_user, db.session, "Savings", name="Goal",
+            )
+            loan = _loan(
+                seed_user, db.session,
+                origination_date=books_start(savings.id).opened_on,
             )
             payment = make_loan_payment_template(
                 db.session, seed_user, loan, cadence=EVERY_PERIOD,
@@ -699,7 +716,7 @@ class TestTheDoorWalksTheDefinitionOnce:
             assert len(calls) == 2
 
     def test_a_reauthored_rule_misses_the_memo_on_the_same_pass(
-        self, app, db, seed_user, seed_periods, monkeypatch,
+        self, app, db, seed_user, monkeypatch,
     ):
         """Ruling R-R73's property, carried to the walk.
 
@@ -736,7 +753,7 @@ class TestTheDoorWalksTheDefinitionOnce:
             )
 
     def test_the_readings_horizon_is_the_passes_calendars(
-        self, app, db, seed_user, seed_periods,
+        self, app, db, seed_user,
     ):
         """Row N-514's half at this door: the reading carries how far it reached."""
         with app.app_context():
@@ -751,11 +768,12 @@ class TestTheDoorWalksTheDefinitionOnce:
             assert reading.horizon is not None
 
 
+@pytest.mark.usefixtures("seed_periods")
 class TestTheDoorAgreesWithItsOwnParts:
     """The composition equals its pieces, so neither can drift alone."""
 
     def test_the_reading_places_exactly_what_the_walk_places(
-        self, app, db, seed_user, seed_periods,
+        self, app, db, seed_user,
     ):
         """``read_definition`` IS ``resolved_definition`` plus the walk.
 
@@ -780,7 +798,7 @@ class TestTheDoorAgreesWithItsOwnParts:
             )
 
     def test_the_authored_half_is_the_rules_own_stored_bound(
-        self, app, db, seed_user, seed_periods,
+        self, app, db, seed_user,
     ):
         """The door narrows; it does not re-author.
 
@@ -813,11 +831,12 @@ class TestTheDoorAgreesWithItsOwnParts:
             assert resolved.closing.authored == EndsOnDate(on=date(2027, 3, 1))
 
 
+@pytest.mark.usefixtures("seed_periods")
 class TestTheDerivedStopIsMeasuredInTheCallersPass:
     """One pass in, one answer out -- the read clock is never this module's."""
 
     def test_the_passes_as_of_selects_which_crossing_answers(
-        self, app, db, seed_user, seed_periods,
+        self, app, db, seed_user,
     ):
         """Two passes over ONE loan answer two stops, and the pass decides which.
 
@@ -858,4 +877,3 @@ class TestTheDerivedStopIsMeasuredInTheCallersPass:
                 f"read before the true-up the loan still owes, so its stop is "
                 f"a forward payoff, not {still_owing.on}"
             )
-

@@ -298,7 +298,7 @@ class ResolvedRecurrence:  # pylint: disable=too-many-instance-attributes
             **Read it through :attr:`month_coordinate`**, as *nominal_day*.
             :func:`resolve` carries :class:`RecurrenceSpec`'s verbatim, and
             ``budget.recurrence_rules.weekday_reading`` stores it.
-        books_opened_on: The latest governing ``opened_on`` across every
+        books_opened_on: The latest day the books start across every
             account the definition moves money in, or ``None`` for no
             floor (ruling **R-PC85**, plan step ``pay_calendar:C18-a``).  **The
             opening end's mirror of :attr:`closing`**: the rule says when it

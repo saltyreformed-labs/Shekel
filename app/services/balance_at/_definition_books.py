@@ -21,12 +21,17 @@ bill stating the same cadence over the same accounts.
 **Why this is a fact about ACCOUNTS and never about the rule.**  A rule's
 ``starts_on`` is its first occurrence (ruling **R-R16**) -- the rhythm's
 anchor and, for a rule that begins in the future, its start -- and it is
-authored.  "Not before my account's books" is stored once, in
-``budget.account_openings``, and it is RESTATED: on the production clone this
-was measured on, the Van Loan's opening moved 2026-05-21 -> 2026-04-22.  A
-copy of it on the rule would be a second home needing a reconciler
+authored.  "Not before my account's books" is where the account's books
+START (``cash_ledger.books_start``; card plan#2436, ruling **plan#3954**): a
+configured loan's origination, from its terms, and every other account's
+governing ``budget.account_openings`` row, which is RESTATED.  A copy of
+either on the rule would be a second home needing a reconciler
 (``CLAUDE.md`` rule 14); reading it here, on every pass, is what makes the
-bound follow a restatement with nothing to keep in step.
+bound follow a restatement with nothing to keep in step.  Until plan task
+plan#4087 this read the opening record for a loan too, so a recurring
+transfer into a loan whose record a migration dated years after its
+origination dropped every occurrence between the two days, though the
+loan's balance and every movement into it start at the origination.
 
 **Why it is a module of its own**: ``_context.py`` stood within a hundred
 lines of pylint's 1,000-line ceiling at this step (the next merge crossed it,
@@ -44,7 +49,7 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from datetime import date
 
-from app.services.cash_ledger import governing_account_opening
+from app.services.cash_ledger import books_start
 from app.services.pay_calendar import PayCalendar
 from app.services.recurrence import (
     RecurrenceSpec,
@@ -75,7 +80,7 @@ class DefinitionBooks:
     stating one cadence share a resolution only when BOTH agree.
 
     Attributes:
-        opened_on: The latest governing opening among the accounts the
+        opened_on: The latest books start among the accounts the
             definition moves money in (:func:`definition_books_opened_on`),
             or ``None`` for no floor.
         is_envelope: The definition's ``is_envelope`` (ruling **R-PC89**):
@@ -152,7 +157,7 @@ def definition_books(
 
 
 def row_books_opened_on(row: object, memo: "dict[int, date | None]") -> date | None:
-    """Return the LATEST governing opening among the accounts *row* sits on.
+    """Return the LATEST books start among the accounts *row* sits on.
 
     Ruling **R-PC99** (developer 2026-09-23, the C18-a round-6 review's H1):
     a planned row is judged against the books of the account it SITS ON as
@@ -174,8 +179,8 @@ def row_books_opened_on(row: object, memo: "dict[int, date | None]") -> date | N
             restates, which then stands in for that account's own opening.
 
     Returns:
-        The latest governing ``opened_on``, or ``None`` when no account the
-        row sits on carries an opening.
+        The latest books start, or ``None`` when the books of no account
+        the row sits on start anywhere.
     """
     return definition_books_opened_on(definition_money_accounts(row), memo)
 
@@ -239,17 +244,22 @@ def money_account_columns(model) -> tuple:
 def definition_books_opened_on(
     account_ids: tuple[int, ...], memo: "dict[int, date | None]",
 ) -> date | None:
-    """Return the LATEST governing opening day among *account_ids*.
+    """Return the LATEST day the books start among *account_ids*.
 
     The floor a definition's occurrences start above: a transfer moves money
     in both of its accounts, so neither's books may be written below, and the
-    later opening is the binding one.  Each account's day is read once per
-    pass through *memo* -- the caller's -- so a render resolving many
-    definitions over one account pays one read.
+    later start is the binding one.  Each account's day is where its books
+    start (:func:`~app.services.cash_ledger.books_start`, ruling
+    **plan#3954**): a configured loan's origination, every other account's
+    governing opening record -- the day every movement into it is judged by,
+    in Python and in the database alike.  It is read once per pass through
+    *memo* -- the caller's -- so a render resolving many definitions over one
+    account pays one read.
 
-    **An account with no opening record contributes no floor**, the
-    disposition ``budget.assert_movement_after_books_open`` takes for the same
-    state: every account gets one at creation and a migration backfilled the
+    **An account whose books start nowhere contributes no floor** -- one that
+    is no configured loan and carries no opening record -- the disposition
+    ``budget.assert_movement_after_books_open`` takes for the same state:
+    every account gets a record at creation and a migration backfilled the
     rest, so it is a broken invariant, and the READ side already refuses it
     loudly (``cash_ledger.account_opening_fact`` raises), so it is not
     re-raised here on an unrelated path.
@@ -262,14 +272,14 @@ def definition_books_opened_on(
         memo: The pass's ``account_id -> opened_on`` memo, filled here.
 
     Returns:
-        The latest governing ``opened_on``, or ``None`` when no named account
-        carries an opening (or none is named).
+        The latest books start, or ``None`` when no named account's books
+        start anywhere (or none is named).
     """
     days = []
     for account_id in account_ids:
         if account_id not in memo:
-            opening = governing_account_opening(account_id)
-            memo[account_id] = None if opening is None else opening.opened_on
+            start = books_start(account_id)
+            memo[account_id] = None if start is None else start.opened_on
         if memo[account_id] is not None:
             days.append(memo[account_id])
     return max(days, default=None)

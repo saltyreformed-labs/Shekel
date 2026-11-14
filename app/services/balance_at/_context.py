@@ -320,10 +320,10 @@ class BalanceContext(RecurrenceMemosMixin):  # pylint: disable=too-many-instance
             is; every stored value is a ``BooksWalk``, and empty halves are a
             legitimate answer (a definition its destination closed before it
             ever fires), so membership rather than truthiness is the test.
-        _books_opened_on: ``account_id -> governing opened_on`` (plan step
-            ``pay_calendar:C18-a``): the books floor :meth:`resolved_for`
+        _books_opened_on: ``account_id -> the day its books start`` (plan
+            step ``pay_calendar:C18-a``): the books floor :meth:`resolved_for`
             attaches, one read per account per pass; ``None`` is a memoized
-            "no opening record".  Keyed by rows, so stale after a restatement
+            "they start nowhere".  Keyed by rows, so stale after a restatement
             inside the pass -- the convention :meth:`resolved_recurrence_of`
             states for its row-keyed siblings.
     """

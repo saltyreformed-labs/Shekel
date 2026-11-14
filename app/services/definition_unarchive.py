@@ -106,11 +106,10 @@ from dataclasses import dataclass, replace
 from datetime import date
 from typing import NamedTuple
 
-from sqlalchemy import false, func, or_, select
+from sqlalchemy import Date, false, func, or_, select
 
 from app.extensions import db
 from app.models.account import Account
-from app.models.account_opening import AccountOpening
 from app.models.pay_period import PayPeriod
 from app.models.transaction import Transaction
 from app.models.transaction_template import TransactionTemplate
@@ -122,7 +121,7 @@ from app.services.balance_at import (
     definition_money_accounts,
     row_books_opened_on,
 )
-from app.services.cash_ledger import governing_account_opening
+from app.services.cash_ledger import books_start
 from app.services.pay_calendar import FiledRow, PayCalendar
 from app.services.recurrence import ResolvedRecurrence, occurrence_walk
 from app.services.recurring_definition import resolved_rule_of
@@ -473,15 +472,28 @@ def _could_be_held(model, user_id: int, memo: dict):
 
     A row's own day is its due day or its paycheck's LAST day, which falls on
     or after the paycheck's start; and no books a row of the owner's can sit
-    on open after the latest of the owner's account openings and any day
-    *memo* holds (a restatement's candidate).  So a row due after that day
-    in a paycheck starting after it is never held -- a bound the query
-    filters by, never a books floor.  **It reads the STORED columns, and a
-    row an edit's regeneration rewrites is still never wrongly dropped**:
-    rewritten, it sits on its definition's accounts on the day its walk
-    names for an occurrence the books did not drop, so as a bill it is
+    on start after the latest day any of the owner's accounts' books start
+    and any day *memo* holds (a restatement's candidate).  So a row due after
+    that day in a paycheck starting after it is never held -- a bound the
+    query filters by, never a books floor.  **It reads the STORED columns,
+    and a row an edit's regeneration rewrites is still never wrongly
+    dropped**: rewritten, it sits on its definition's accounts on the day its
+    walk names for an occurrence the books did not drop, so as a bill it is
     never held, and as an envelope its own day is still the last day of the
     paycheck it keeps, which starts no later.
+
+    **Each account's start is the database's own statement of it**,
+    ``budget.account_books_opened_on`` (plan task plan#3960): a configured
+    loan's origination, every other account's governing opening record --
+    what :func:`~app.services.cash_ledger.books_start` answers in Python,
+    which :func:`own_day_held` reads, over the same two halves of "a
+    configured loan".  A criterion asks the SQL tier's statement as
+    ``cash_ledger.earliest_matched_line_day`` asks the constraint's row set,
+    rather than spelling the day again.  Until plan task plan#4087 this took
+    ``MAX(account_openings.opened_on)``, which a loan originating after
+    every opening record outran: a still-Projected row on such a loan, due
+    on or before its origination, was never loaded, so the unarchive
+    restored it inside the loan's books.
 
     Args:
         model: ``Transaction`` or ``Transfer``.
@@ -492,8 +504,9 @@ def _could_be_held(model, user_id: int, memo: dict):
         The criterion, for ``query.filter``.
     """
     latest = (
-        select(func.max(AccountOpening.opened_on))
-        .join(Account, Account.id == AccountOpening.account_id)
+        select(func.max(
+            func.budget.account_books_opened_on(Account.id, type_=Date),
+        ))
         .where(Account.user_id == user_id)
         .scalar_subquery()
     )
@@ -853,8 +866,8 @@ def books_named(holder, books_opened_on: date) -> str:
             :class:`~app.models.transaction.Transaction` or
             :class:`~app.models.transfer.Transfer` row, or a rewrite (a value
             of ``RegenerationPreview.rewrites``, :func:`own_day_held`).
-        books_opened_on: The governing opening day of at least one of the
-            accounts *holder* names.
+        books_opened_on: The day the books start (:func:`_opened_on`) of at
+            least one of the accounts *holder* names.
 
     Returns:
         Each such account's name in the possessive, joined by ``and``.
@@ -872,9 +885,16 @@ def _possessive(account_ids: tuple, books_opened_on: date) -> str:
 
 
 def _opened_on(account_id: int) -> date | None:
-    """Return *account_id*'s governing opening day, or ``None`` for no record."""
-    opening = governing_account_opening(account_id)
-    return None if opening is None else opening.opened_on
+    """Return the day *account_id*'s books start, or ``None`` when they start nowhere.
+
+    The day the floor and :func:`own_day_held` compare
+    (:func:`~app.services.cash_ledger.books_start`): a configured loan's
+    origination, every other account's governing opening record.  A sentence
+    names the accounts whose day this is, so it must be the same day those
+    readers took, or a loan's books would be named by nobody.
+    """
+    start = books_start(account_id)
+    return None if start is None else start.opened_on
 
 
 __all__ = [

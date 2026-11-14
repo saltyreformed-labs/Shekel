@@ -380,8 +380,8 @@ def first_row_below_the_books(
         walks: The definitions to ask about, each as the save would leave it.
         books_memo: The ``account_id -> opened_on`` memo the second question
             reads the books where a row sits through; a restatement's holds
-            its candidate day.  ``None`` reads every account's governing
-            opening.
+            its candidate day.  ``None`` reads where every account's books
+            start (``cash_ledger.books_start``).
         sitting_on: The account a restatement restates: only the rows
             sitting on it are asked the second question there, since its
             books are the only ones the restatement moves.  ``None``
@@ -650,7 +650,7 @@ def first_row_an_opening_strands(
     an archived one included, whose hidden rows its unarchive would bring
     back (ruling **R-PC93**) -- is walked with the books it would have if the
     account opened on *opened_on*: the later of that day and the
-    definition's OTHER accounts' governing openings
+    start days of the definition's OTHER accounts' books
     (:func:`~app.services.balance_at.definition_books`, the candidate
     standing in for this account's own), composed by the ONE composition
     (:func:`~app.services.balance_at.resolved_with_books`).  That walk is

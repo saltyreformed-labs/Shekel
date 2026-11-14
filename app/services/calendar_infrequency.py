@@ -17,6 +17,9 @@ answer -- and neither has a second home.
 Pure apart from :func:`badge_cadence`, which is the one function here that
 reads the database, and reads only the owner's cadence.
 """
+from app.models.recurrence_rule import RecurrenceRule
+from app.models.transaction_template import TransactionTemplate
+from app.services.balance_at import EstimatedFlow
 from app.services.pay_calendar import PayCadence, PayCalendarError, cadence_for
 from app.services.recurrence import cadence_of
 from app.services.transfer_legs import PlanItem
@@ -37,7 +40,9 @@ _INFREQUENT_BELOW_PER_YEAR = MONTHS_PER_YEAR
 
 
 def badge_cadence(
-    user_id: int, transactions: list[PlanItem],
+    user_id: int,
+    transactions: list[PlanItem],
+    estimated: "list[EstimatedFlow]",
 ) -> PayCadence | None:
     """Return the owner's pay cadence, or ``None`` when nothing can be badged.
 
@@ -57,7 +62,10 @@ def badge_cadence(
     a guarantee.*  An owner with
     no transactions therefore cannot reach :func:`is_infrequent` at all, and
     is the only owner for whom this answers ``None``.  The type says
-    "unreadable BECAUSE unread" rather than "unknown".
+    "unreadable BECAUSE unread" rather than "unknown".  An ESTIMATED
+    occurrence (plan step ``pay_calendar:C9``, task plan#3945) repeats as its
+    row would, and sits on a paycheck past the last saved one, so its owner
+    has a saved period and the same guarantee.
 
     Args:
         user_id: The owner whose calendar is being built.
@@ -65,10 +73,12 @@ def badge_cadence(
             leaf ``balance:X-bi-6-1b`` transfer legs, which never repeat
             (``TransferLeg.recurs`` is ``False``: a transfer's rule is its
             own definition's, not a transaction rule).
+        estimated: The estimated occurrences this build will badge past the
+            last saved paycheck (:func:`estimate_is_infrequent`).
 
     Returns:
         The owner's :class:`~app.services.pay_calendar.PayCadence`, or ``None``
-        when no row in this build repeats.
+        when nothing in this build repeats.
 
     Raises:
         PayCalendarError: The owner has a repeating row and no resolvable
@@ -83,11 +93,11 @@ def badge_cadence(
             below) rather than reading one a caller hands it -- so the refusal
             is its own to make and belongs in its own signature.
     """
-    if not any(txn.recurs for txn in transactions):
+    if not any(txn.recurs for txn in transactions) and not any(
+        _estimate_recurs(flow) for flow in estimated
+    ):
         return None
     return cadence_for(user_id)
-
-
 
 
 def is_infrequent(
@@ -137,14 +147,84 @@ def is_infrequent(
     """
     if not txn.recurs:
         return False
-    rule = txn.template.recurrence_rule
+    return _rule_is_infrequent(
+        txn.template.recurrence_rule, pay_cadence, f"transaction {txn.id}",
+    )
+
+
+def estimate_is_infrequent(
+    flow: EstimatedFlow, pay_cadence: PayCadence | None,
+) -> bool:
+    """Check whether an estimated occurrence's definition fires less often than monthly.
+
+    The badge :func:`is_infrequent` gives the row the occurrence would become
+    (plan step ``pay_calendar:C9``, task plan#3945): a transaction template's
+    by its rule, and a transfer template's never, as its leg never repeats.
+
+    Args:
+        flow: The estimated occurrence past the last saved paycheck.
+        pay_cadence: How often the owner is paid, or ``None`` when this build
+            had nothing to badge (:func:`badge_cadence`).
+
+    Returns:
+        Whether the badge applies.
+
+    Raises:
+        RecurrenceResolutionError: As :func:`is_infrequent`.
+        PayCalendarError: As :func:`is_infrequent`.
+    """
+    if not _estimate_recurs(flow):
+        return False
+    return _rule_is_infrequent(
+        flow.template.recurrence_rule, pay_cadence,
+        f"template {flow.template.id}'s estimated occurrence",
+    )
+
+
+def _estimate_recurs(flow: EstimatedFlow) -> bool:
+    """Return whether the row an estimated occurrence would become repeats.
+
+    A transaction template's row does: the tier walks only templates carrying
+    a recurrence rule.  A transfer template's is drawn as a LEG, which never
+    repeats (``TransferLeg.recurs``).
+
+    Args:
+        flow: The estimated occurrence.
+
+    Returns:
+        ``True`` for a transaction template's occurrence.
+    """
+    return isinstance(flow.template, TransactionTemplate)
+
+
+def _rule_is_infrequent(
+    rule: RecurrenceRule, pay_cadence: PayCadence | None, subject: str,
+) -> bool:
+    """Return whether *rule* fires fewer than :data:`_INFREQUENT_BELOW_PER_YEAR` times a year.
+
+    The one statement of the badge, for a row's definition and an estimated
+    occurrence's alike.
+
+    Args:
+        rule: The definition's recurrence rule.
+        pay_cadence: How often the owner is paid, or ``None``.
+        subject: What carries the rule, for the refusal's message.
+
+    Returns:
+        Whether the badge applies.
+
+    Raises:
+        RecurrenceResolutionError: The rule names a pattern this application
+            does not model.
+        PayCalendarError: *pay_cadence* is ``None``.
+    """
     if pay_cadence is None:
         raise PayCalendarError(
-            f"transaction {txn.id} has a recurrence rule but this calendar "
-            f"build resolved no pay cadence.  A transaction carries a NOT "
-            f"NULL pay_period_id, so its owner has a period and therefore a "
-            f"cadence; reaching here means the build was told it had no rows "
-            f"to badge and then found one."
+            f"{subject} has a recurrence rule but this calendar build "
+            f"resolved no pay cadence.  A repeating item sits on a pay "
+            f"period, so its owner has one and therefore a cadence; reaching "
+            f"here means the build was told it had nothing to badge and then "
+            f"found something."
         )
     cadence = cadence_of(rule)
     return cadence.occurrences_per_year(pay_cadence) < (
@@ -152,4 +232,4 @@ def is_infrequent(
     )
 
 
-__all__ = ["badge_cadence", "is_infrequent"]
+__all__ = ["badge_cadence", "estimate_is_infrequent", "is_infrequent"]

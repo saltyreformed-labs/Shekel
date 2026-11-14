@@ -150,8 +150,10 @@ def paydays_in_month_through(
     deduction skips and ``== 1`` for the first a 12-per-year one is taken on --
     two predicates that were two independent scans of a caller-supplied period
     list until plan step **balance:X-bh-1**.  Asked at a month's LAST day the
-    length is how many paydays that month holds, which is what the analytics
-    year overview flags as a three-paycheck month.
+    length is how many paydays that month holds, which the analytics year
+    overview flags as a three-paycheck month through
+    :func:`projection_paydays_in_month_through`, this search without its
+    backward half.
 
     One rule rather than two is load-bearing rather than tidy: the engine and
     the year overview disagreed about the same month before this step, because
@@ -185,32 +187,32 @@ def paydays_in_month_through(
     return _paydays_between(calendar, _month_opens(day), day)
 
 
-def saved_paydays_in_month_through(
+def projection_paydays_in_month_through(
     calendar: PayCalendar, day: date,
 ) -> "tuple[date, ...]":
-    """Return the RECORDED paydays of *day*'s month falling on or before it.
+    """Return the paydays of *day*'s month on or before it that a FORWARD projection holds.
 
-    :func:`paydays_in_month_through`'s bounded twin, over the same month span
-    and the same search -- what differs is the SET, and each name says which
-    one it means.  This one counts only paydays the app HOLDS; that one
-    continues the owner's rhythm past the schedule's horizon.
+    :func:`paydays_in_month_through` without its backward half, over the same
+    month span and the same search: the saved paydays, and the owner's rhythm
+    continued past the schedule's horizon, but never the rhythm stepped back
+    below the first payday (:meth:`~._calendar.PayCalendar.opening_bound`),
+    where no paycheck is projected.
 
     **Two sets rather than two rules, and the distinction is the developer's
     ruling balance:R-IB.**  The paycheck engine needs the total answer: a
     paycheck it cannot place would take ordinal 0, and 0 silently drops a
     12-per-year deduction and takes a 24-per-year one on a third paycheck.
-    The analytics month card needs the bounded one, because everything else on
-    that card -- its income, its expenses, its net, its month-end balance -- is
-    folded from SAVED periods, so a projected payday would appear beside a
-    ``$0.00`` net and an unmoved balance.  Measured 2026-08-30 on the
-    developer's own data before the bound went in: 29 month cards, 2028-08
+    The analytics month card needs the paydays it holds money for, so that a
+    payday never appears beside a ``$0.00`` net and an unmoved balance.
+    Measured 2026-08-30 on the developer's own data, when the card's money
+    stopped at the horizon and its count did not: 29 month cards, 2028-08
     through 2030-12, read "3 paychecks, income ``$0.00``, balance
-    ``$9,539.92``".
-
-    **The bound comes OFF when the cash tier projects** -- ledger row
-    **N-394**, which is what pairs the two halves of that card rather than
-    silencing one of them.  Until then this is where the card says how far its
-    own evidence reaches.
+    ``$9,539.92``".  This counted the SAVED paydays alone until plan step
+    ``pay_calendar:C9`` (task plan#3945, closing ledger row **N-394**): the
+    cash tier now estimates every projected paycheck, so the card's money
+    runs forward as far as this count does.  Nothing estimates a paycheck
+    before the first saved one (ruling plan#3932), so the backward half
+    still has no money beside it.
 
     Args:
         calendar: The owner's schedule.
@@ -218,10 +220,14 @@ def saved_paydays_in_month_through(
             upper bound within that month.
 
     Returns:
-        The recorded paydays, ascending.  Empty for a month the saved schedule
-        opens no period in, which is a real answer.
+        The paydays, ascending.  Empty for a month before the first payday,
+        and for a month a long cadence opens no paycheck in, which are real
+        answers.
     """
-    return paydays_between(calendar.periods, _month_opens(day), day)
+    opening = calendar.opening_bound()
+    if opening is None:
+        return ()
+    return _paydays_between(calendar, max(_month_opens(day), opening), day)
 
 
 def _month_opens(day: date) -> date:
@@ -627,5 +633,5 @@ __all__ = [
     "first_paycheck_at",
     "paydays_in_month_through",
     "paydays_in_year_before",
-    "saved_paydays_in_month_through",
+    "projection_paydays_in_month_through",
 ]

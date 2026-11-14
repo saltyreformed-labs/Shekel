@@ -21,7 +21,10 @@ from app.models.transaction_template import TransactionTemplate
 from app.services import cash_ledger, recurrence_engine
 from app.services.balance_at import BalanceContext
 from app.services.generation_schedule import GenerationSchedule
-from app.services.pay_calendar import PayCalendar, saved_paydays_in_month_through
+from app.services.pay_calendar import (
+    PayCalendar,
+    projection_paydays_in_month_through,
+)
 from tests._made_up_federal import made_up_credits, made_up_federal
 from tests._test_helpers import (
     make_cadence_rule,
@@ -413,14 +416,16 @@ class TestAWindowMustBelongToTheOwner:
             target = seed_periods[4]
 
             whole = GenerationSchedule.for_period_ids(ctx, {target.id})
-            # Through ``saved_paydays_in_month_through`` since plan step
-            # balance:X-bh-2, which deleted ``earliest_start_in_month`` as
-            # unreached in ``app/`` (ledger row N-396).  The SAVED twin, not
-            # the total one: this asks what the recorded February holds, and
-            # the rhythm's backward half would answer about a month the record
+            # Through the card's twin since plan step balance:X-bh-2, which
+            # deleted ``earliest_start_in_month`` as unreached in ``app/``
+            # (ledger row N-396), and ``projection_paydays_in_month_through``
+            # since task plan#3945 retired the saved one.  Not the total
+            # count: this asks what the recorded February holds, and the
+            # rhythm's backward half would answer about a month the record
             # opens inside -- a different question from the one the premise
-            # states.
-            assert saved_paydays_in_month_through(
+            # states.  Neither calendar below has a horizon before 02-28, so
+            # the forward continuation adds no February payday to either.
+            assert projection_paydays_in_month_through(
                 whole.calendar, date(2026, 2, 28),
             )[0] == seed_periods[3].start_date != target.start_date, (
                 "the premise: February's FIRST payday is not the target's"
@@ -461,7 +466,7 @@ class TestAWindowMustBelongToTheOwner:
             narrowed = GenerationSchedule.for_period_ids(
                 narrowed_ctx, {target.id},
             )
-            assert saved_paydays_in_month_through(
+            assert projection_paydays_in_month_through(
                 narrowed.calendar, date(2026, 2, 28),
             ) == (target.start_date,), (
                 "the control: the slice thinks the target IS February's first"

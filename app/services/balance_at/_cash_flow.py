@@ -40,6 +40,7 @@ from app.utils.money import round_money
 from ._context import BalanceContext
 
 from . import _cash_day_facts, _cash_fold
+from ._cash_estimate import EstimatedFlow, past_the_last_saved_paycheck
 from ._inputs import _require_scenario
 
 _ONE_DAY = timedelta(days=1)
@@ -280,6 +281,55 @@ def cash_daily_balance_series(
 
     folded = _cash_fold.balances_at(_cash_fold.assembled_fold(account, ctx), days)
     return OrderedDict((day, folded[day]) for day in days)
+
+
+def cash_estimated_flows(
+    account: Account,
+    ctx: BalanceContext,
+    first_day: date,
+    last_day: date,
+) -> "list[EstimatedFlow]":
+    """Return the account's estimated occurrences attributed to a day in the range.
+
+    The ESTIMATED tier's occurrences one at a time, past the last saved
+    paycheck (plan step ``pay_calendar:C9``, task plan#3945): the analytics
+    month card lists them where it lists a row, so its day entries and the
+    balance line under them read the one list this pass's cash fold folds
+    (:meth:`~._cash_estimate.EstimatedCashTier.flows_through`).  Each is placed
+    on the day a written row would be, its attribution day; its cash lands
+    there too unless ruling R-G's ``as_of + 1`` floor lifts it, which past the
+    last saved paycheck happens only on a pass dated past a projected payday.
+
+    Args:
+        account: The account whose estimated tier to read.  Its kind is NOT
+            consulted; must be session-attached.
+        ctx: The read pass's :class:`~app.services.balance_at.BalanceContext`.
+        first_day: Inclusive first day of the range.
+        last_day: Inclusive last day of the range.
+
+    Returns:
+        The :class:`~._cash_estimate.EstimatedFlow` records attributed within
+        the range, in the tier's order; empty for a range inside the saved
+        schedule, which assembles no fold and walks nothing.
+
+    Raises:
+        BaselineMissingError: When ``ctx`` carries no scenario.
+        TypeError: When ``first_day`` / ``last_day`` are not civil
+            :class:`datetime.date` values -- a ``datetime`` INCLUDED.
+        AmountUnresolvable: When a definition states no price for an
+            occurrence -- exactly where its written row would refuse.
+    """
+    _require_scenario(ctx)
+    _require_civil_date(
+        "cash_estimated_flows", first_day=first_day, last_day=last_day,
+    )
+    if not past_the_last_saved_paycheck(ctx, last_day):
+        return []
+    estimate = _cash_fold.assembled_fold(account, ctx).estimate
+    return [
+        flow for flow in estimate.flows_through(last_day)
+        if flow.attributed_on >= first_day
+    ]
 
 
 def cash_daily_facts_series(

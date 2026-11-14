@@ -95,7 +95,11 @@ kill.
   day on or before NOW the books hold a record (a settled row or a
   true-up), which is where the bank comparison's drawn days end when the
   records run past the last statement line (finding BAL-651, rulings
-  plan#2346, plan#2399 and plan#2400).
+  plan#2346, plan#2399 and plan#2400).  :func:`cash_estimated_flows` is no
+  balance either: the cash fold's ESTIMATED occurrences past the last saved
+  paycheck one at a time (:class:`EstimatedFlow`), which the analytics month
+  card lists where it lists a row (task plan#3945), read off the list the
+  fold itself folds.
 * The ASSERTION REPLAY (:func:`assertion_corrections`, its record
   :class:`CashAnchorCorrection`) is published for the LEDGER, which is not a
   screen: each assertion's balance just before it and the jump it booked, over
@@ -265,6 +269,7 @@ All three classify asset-vs-liability through the one
 
 from ._assertions import CashAnchorCorrection, assertion_corrections
 from ._cash_day_facts import CashDayFacts, CashDaySeries
+from ._cash_estimate import EstimatedFlow
 from ._cash_flow import (
     CashAnchorHistory,
     CashAnchorRow,
@@ -274,6 +279,7 @@ from ._cash_flow import (
     cash_balance_map,
     cash_daily_balance_series,
     cash_daily_facts_series,
+    cash_estimated_flows,
     cash_last_record_on,
     records_balance_at,
 )
@@ -386,6 +392,7 @@ __all__ = [
     "CashOutstandingDifference",
     "CashDayFacts",
     "CashDaySeries",
+    "EstimatedFlow",
     "GridBalanceView",
     "GridColumn",
     "GridRowFlags",
@@ -407,6 +414,7 @@ __all__ = [
     "cash_balance_map",
     "cash_daily_balance_series",
     "cash_daily_facts_series",
+    "cash_estimated_flows",
     "cash_last_record_on",
     "cash_outstanding_difference",
     "confirmed_view",

@@ -34,16 +34,36 @@ Pure: no database, no clock, no Flask.  Every fact arrives as an argument.
 from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
+from typing import NamedTuple
 
-from app.services.calendar_infrequency import is_infrequent
+from app.models.transfer_template import TransferTemplate
+from app.services.balance_at import EstimatedFlow
+from app.services.calendar_infrequency import estimate_is_infrequent, is_infrequent
 from app.services.pay_calendar import PayCadence
-from app.services.transfer_legs import PlanItem, cell_key
+from app.services.transfer_legs import PlanItem, cell_key, leg_label
 
 # Day cells show at most this many named flow lines; any beyond collapse to
 # a single "+N more" line whose residual net is computed in the service
 # (templates never do money math).  The locked calendar anatomy fixes this
 # at three (income first, then expenses by descending magnitude).
 MAX_VISIBLE_DAY_FLOWS = 3
+
+
+class EstimateKey(NamedTuple):
+    """An estimated occurrence's identity on a calendar day, where no row's id exists.
+
+    Attributes:
+        table: The definition's table, ``transaction_templates`` or
+            ``transfer_templates``: a template id is unique only within one.
+        template_id: The definition's id.
+        occurrence: The date its rule names.
+        account_id: The account whose side of it the day shows.
+    """
+
+    table: str
+    template_id: int
+    occurrence: date
+    account_id: int
 
 
 @dataclass(frozen=True)
@@ -68,13 +88,15 @@ class DayEntry:  # pylint: disable=too-many-instance-attributes
             account id)`` since leaf ``balance:X-bi-6-1b``, where the
             calendar draws a transfer as a leg of its parent rather than as
             the shadow row whose id this carried (as ``transaction_id``).
+            An estimated occurrence past the last saved paycheck has no row,
+            and is an :class:`EstimateKey` (task plan#3945).
         amount: What the item is WORTH, SIGNED.  **It can be negative for an
             expense** since ruling **bank_import:R-II**: a settled envelope is
             worth the sum of its entries, and a merchant refund is a negative
             one.  Every reader here states which way it takes that sign.
     """
 
-    item_key: int | tuple[int, int]
+    item_key: int | tuple[int, int] | EstimateKey
     name: str
     amount: Decimal
     is_income: bool
@@ -139,16 +161,82 @@ def build_day_entry(
         amount=amount,
         is_income=txn.is_income,
         is_paid=bool(txn.status and txn.status.is_settled),
-        # **A MAGNITUDE, deliberately**: "large" asks how big the movement is,
-        # so a refund of $500 is as large as a charge of $500.  The same
-        # reading :func:`order_for_display` takes, and the opposite of the two
-        # FIGURES below.
-        is_large=abs(amount) >= threshold,
+        is_large=_is_large(amount, threshold),
         is_infrequent=is_infrequent(txn, pay_cadence),
         category_group=txn.category.group_name if txn.category else None,
         category_item=txn.category.item_name if txn.category else None,
         due_date=txn.due_date,
     )
+
+
+def build_estimated_day_entry(
+    flow: EstimatedFlow,
+    threshold: Decimal,
+    pay_cadence: PayCadence | None,
+) -> DayEntry:
+    """Create a DayEntry from an estimated occurrence past the last saved paycheck.
+
+    The entry the row the occurrence would become would make (plan step
+    ``pay_calendar:C9``, task plan#3945; ruling plan#3930: priced as its row
+    would be).  A generated row takes its definition's name and category
+    (``recurrence_engine._amounts``, ``transfer_recurrence``), and a
+    transfer's is drawn as a leg named from its endpoints
+    (:func:`~app.services.transfer_legs.leg_label`).  It is never paid: no
+    row exists to settle.
+
+    Args:
+        flow: The occurrence, the account whose side it is, and its worth
+            (:func:`~app.services.balance_at.cash_estimated_flows`).
+        threshold: Amount at or above which an item is large.
+        pay_cadence: The owner's pay cadence for the infrequent badge, or
+            ``None`` when nothing in this build repeats.
+
+    Returns:
+        A frozen DayEntry dataclass.
+    """
+    template = flow.template
+    if isinstance(template, TransferTemplate):
+        expense, income = leg_label(template.from_account, template.to_account)
+        name = income if flow.is_income else expense
+    else:
+        name = template.name
+    amount = flow.priced.cash
+    unwritten = flow.priced.unwritten
+    return DayEntry(
+        item_key=EstimateKey(
+            table=type(template).__tablename__,
+            template_id=template.id,
+            occurrence=unwritten.occurrence,
+            account_id=flow.account_id,
+        ),
+        name=name,
+        amount=amount,
+        is_income=flow.is_income,
+        is_paid=False,
+        is_large=_is_large(amount, threshold),
+        is_infrequent=estimate_is_infrequent(flow, pay_cadence),
+        category_group=template.category.group_name if template.category else None,
+        category_item=template.category.item_name if template.category else None,
+        due_date=unwritten.due_date,
+    )
+
+
+def _is_large(amount: Decimal, threshold: Decimal) -> bool:
+    """Return whether an item's worth is at or above the large threshold.
+
+    **A MAGNITUDE, deliberately**: "large" asks how big the movement is, so a
+    refund of $500 is as large as a charge of $500.  The same reading
+    :func:`order_for_display` takes, and the opposite of the two FIGURES
+    below.
+
+    Args:
+        amount: What the item is worth, signed.
+        threshold: The large threshold.
+
+    Returns:
+        Whether the item is large.
+    """
+    return abs(amount) >= threshold
 
 
 def order_for_display(entries: list[DayEntry]) -> None:

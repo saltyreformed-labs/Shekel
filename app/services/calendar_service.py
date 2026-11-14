@@ -15,36 +15,26 @@ from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
 
-from sqlalchemy.orm import joinedload
-
 from app.models.account import Account
-from app.models.transaction import Transaction
-from app.models.transaction_template import TransactionTemplate
 from app.models.user import UserSettings
-from app.services import balance_at, cash_ledger
+from app.services import balance_at
 from app.services.account_resolver import resolve_analytics_cash_flow_set
 from app.services.calendar_day_flows import (
     MAX_VISIBLE_DAY_FLOWS,
     DayEntry,
     DayOverflow,
     build_day_entry,
+    build_estimated_day_entry,
     day_overflow,
     fold_income_expense,
     order_for_display,
 )
 from app.services.calendar_infrequency import badge_cadence
-from app.services.cash_flow_set import (
-    CashFlowSet,
-    Paychecks,
-    PlanScope,
-    StatusBand,
-    load_plan_items,
-)
+from app.services.calendar_items import SpanItems, span_items
 from app.services.pay_calendar import (
     DerivedPeriod,
     PayCadence,
-    PeriodWindow,
-    saved_paydays_in_month_through,
+    projection_paydays_in_month_through,
 )
 from app.services.balance_at import BalanceContext
 from app.services.transfer_legs import PlanItem, cell_key
@@ -207,6 +197,14 @@ def get_month_detail(  # pylint: disable=too-many-arguments
     month-end balance, large/infrequent flags, and -- when ``today`` is
     supplied -- the daily running-balance projection (:class:`DailyView`).
 
+    **Past the owner's last saved paycheck the entries are ESTIMATED**
+    (plan step ``pay_calendar:C9``, task plan#3945, closing ledger row
+    **N-394**): no row exists there, so each recurring definition's
+    occurrence sits where its row would, read off the cash folds the balance
+    line folds (:func:`~app.services.calendar_items.span_items`), and the
+    payday markers count those paychecks too.  The card listed nothing there
+    before, beside a balance that moved.
+
     **The rows are the paycheck's across the owner's CASH-FLOW SET since plan
     step ``credit_card:CC-4-3``** (ruling ``R-CC16``): the primary grid
     account plus its active cards, read through the one clause every
@@ -284,24 +282,16 @@ def get_month_detail(  # pylint: disable=too-many-arguments
     first_day = date(year, month, 1)
     last_day = date(year, month, calendar.monthrange(year, month)[1])
 
-    # ONE resolution of "which paychecks does this month touch", threaded into
-    # both consumers (plan step C2-f1).  This line and the transaction load
-    # below each issued the same ``get_overlapping_periods(user_id, first_day,
-    # last_day)`` twice per render, so one request held two answers to one
-    # question -- ledger row **P36**'s shape.  The pass's own calendar answers
-    # it once.
-    periods = balance_ctx.calendar().overlapping(first_day, last_day)
-    items = _query_transactions_for_range(
-        cash_flow, balance_ctx.scenario_id, periods,
-    )
+    # ONE resolution of the month's paychecks and their items, threaded into
+    # every consumer (plan step C2-f1; :class:`~app.services.calendar_items
+    # .SpanItems` carries what it collapsed).
+    items = span_items(cash_flow, balance_ctx, first_day, last_day)
 
     ctx = _MonthBuildContext(
-        year=year, account=cash_flow.balance, periods=periods,
-        transactions=items,
-        contributions=_contributions(items, balance_ctx),
+        year=year, account=cash_flow.balance, items=items,
         large_threshold=large_threshold,
         balance_ctx=balance_ctx, today=today,
-        pay_cadence=badge_cadence(user_id, items),
+        pay_cadence=badge_cadence(user_id, items.transactions, items.estimated),
     )
     return _build_month_summary(month, ctx)
 
@@ -349,18 +339,13 @@ def get_year_overview(
     first_day = date(year, 1, 1)
     last_day = date(year, 12, 31)
     # ONE resolution, threaded -- see ``get_month_detail`` for what C2-f1 collapsed.
-    periods = balance_ctx.calendar().overlapping(first_day, last_day)
-    items = _query_transactions_for_range(
-        cash_flow, balance_ctx.scenario_id, periods,
-    )
+    items = span_items(cash_flow, balance_ctx, first_day, last_day)
 
     ctx = _MonthBuildContext(
-        year=year, account=cash_flow.balance, periods=periods,
-        transactions=items,
-        contributions=_contributions(items, balance_ctx),
+        year=year, account=cash_flow.balance, items=items,
         large_threshold=large_threshold,
         balance_ctx=balance_ctx, today=None,
-        pay_cadence=badge_cadence(user_id, items),
+        pay_cadence=badge_cadence(user_id, items.transactions, items.estimated),
     )
     months = [_build_month_summary(m, ctx) for m in range(1, 13)]
 
@@ -377,139 +362,6 @@ def get_year_overview(
 
 
 # ── Internal helpers ────────────────────────────────────────────────
-
-
-def _contributions(items: list[PlanItem], balance_ctx: BalanceContext) -> dict:
-    """Return ``{cell_key: what the item is WORTH}`` over a build's items.
-
-    ONE :func:`~app.services.cash_ledger.contributions_by_key` call over
-    every item, keyed by :func:`~app.services.transfer_legs.cell_key` and
-    valued by each item's parent (ruling **plan#1983**) -- an ``int`` and a
-    tuple cannot collide, so one dict serves both shapes and the day fold
-    indexes it with one expression.  It merged a row map with its leg twin's
-    (leaf ``balance:X-bi-6-1b``) until that ruling.  It reads the pass's ONE
-    basis (plan step X-au-c2b).
-
-    Args:
-        items: The build's plan items, :func:`_query_transactions_for_range`'s
-            list.
-        balance_ctx: The read pass.
-
-    Returns:
-        The map, covering every item.
-    """
-    return cash_ledger.contributions_by_key(items, balance_ctx.amounts())
-
-
-def _query_transactions_for_range(
-    cash_flow: CashFlowSet,
-    scenario_id: int,
-    periods: PeriodWindow,
-) -> list[PlanItem]:
-    """Load the plan items filed under every period of *periods*.
-
-    **The items are the PAYCHECK's across the owner's cash-flow set --
-    checking and its cards -- not one account's** (developer ruling
-    ``credit_card:R-CC16``, plan step CC-4-3), and since leaf
-    ``balance:X-bi-6-1b`` (ruling **R-BAL86**) they are the set's OWN rows
-    plus one LEG per transfer, read off the parent in ``budget.transfers``
-    rather than off a shadow row: :func:`~app.services.cash_flow_set
-    .own_rows_clause` selects every member's plan rows and no shadow, and
-    each transfer the set touches is drawn from the side
-    :func:`~app.services.cash_flow_set.leg_accounts_shown` names (ruling
-    ``R-CC23``: once, from the balance line's side, when both endpoints are
-    members) -- an expense leg on checking's calendar, an income leg on the
-    card's, exactly the two shadow rows' types.  It was
-    ``Transaction.account_id == account_id``, which dropped the phone bill
-    that lives on the card from the month it is due in; then the
-    paycheck-rows clause, which carried the near-side shadow in as a row.
-
-    **It TAKES the window rather than resolving one** (plan step C2-f1).  Both
-    callers already hold the answer -- they render it as the period strip --
-    and each recomputed it here from the same three arguments, so a render
-    carried two answers to "which paychecks does this span touch" with nothing
-    holding them equal: ledger row **P36**'s shape inside one module, answered
-    as ruling R-Q and plan step C2-c answered it for the balance seam.
-
-    Fetches by PERIOD MEMBERSHIP -- all balance-contributing rows whose
-    ``pay_period_id`` is one of *periods* -- NOT by raw ``due_date``.  This is
-    the basis the clamped
-    :meth:`~app.services.pay_calendar.DerivedPeriod.attribution_day` display
-    rule and the daily balance producer both use: a transaction is attributed
-    to a day inside its own pay period, so the day cell that renders it and the
-    balance line that steps for it share one period-anchored day.  A ``due_date`` that
-    strays outside its period (the reason the prior query needed a second
-    due-date-in-range path) is pulled back to the period boundary by the
-    clamp; fetching by membership means such a row is still loaded for the
-    month its period lands in and is never dropped.  ``_get_display_day``
-    then filters each loaded row to the single month its clamped attribution
-    date falls in, so a period straddling two months splits its rows across
-    them without double-counting.
-
-    **The calendar's scope, stated once** (plan step **plan#2130**): the set,
-    the scenario, these paychecks, balance-contributing, every type -- which
-    :func:`~app.services.cash_flow_set.load_plan_items` turns into the rows'
-    query and the transfers' alike, the rows in id order then the sides.  The
-    row query carried no ``ORDER BY`` until that step, so two ROWS of one
-    type and one magnitude on one day, which
-    :func:`~app.services.calendar_day_flows.order_for_display` does not tell
-    apart, were listed in whatever order the planner returned them.
-
-    Eager-loads category, status, template -> recurrence_rule, and
-    pay_period on the rows to prevent N+1 queries downstream; the transfers
-    carry the loader's own.
-
-    Per F-3 / HIGH-02 / W-065, the item set is constrained by
-    :func:`~app.utils.balance_predicates.balance_contributing_clause`
-    (``is_deleted=False AND status_id NOT IN (Credit, Cancelled)``), the
-    :attr:`~app.services.cash_flow_set.StatusBand.BALANCE_CONTRIBUTING` band
-    the loader states once over ``Transaction`` for the rows and ``Transfer``
-    for the legs' parents, rather than the prior inline
-    ``is_deleted=False``-only gate.  This is the locked Choice-2 semantic
-    from ``remediation_follow_up_plan.md`` Section 2: calendar day cells
-    display realized payments at their settled date, so the predicate
-    is "balance-contributing" (Projected + Settled, excludes Credit and
-    Cancelled) -- intentionally wider than the grid period subtotal's
-    Projected-only predicate.  The two surfaces diverge by design.
-
-    **``user_id`` is gone, so OWNER SCOPING is a precondition on the caller
-    rather than a filter here** -- stated because an unstated one is how a
-    scoping check goes missing.  Both callers take *cash_flow* from
-    ``resolve_analytics_cash_flow_set(user_id, ...)``, whose every member
-    passed the owner's admission test, and *periods* off a
-    ``BalanceContext`` built for that same owner, so both keys are already
-    theirs.
-
-    Args:
-        cash_flow: The owner's cash-flow set, whose members' items to load;
-            the CALLER owns its ownership check.
-        scenario_id: The budget scenario the items live in.
-        periods: The pay periods the span touches, resolved once by the caller
-            off its own ``BalanceContext``, which is what scopes them.
-
-    Returns:
-        The plan items: the matching
-        :class:`~app.models.transaction.Transaction` rows by id, then the
-        legs of the matching transfers, their records not pre-loaded
-        (ruling **plan#2136**).
-    """
-    return load_plan_items(
-        PlanScope(
-            cash_flow=cash_flow,
-            scenario_id=scenario_id,
-            window=Paychecks(tuple(p.period_id for p in periods)),
-            band=StatusBand.BALANCE_CONTRIBUTING,
-            expenses_only=False,
-        ),
-        (
-            joinedload(Transaction.category),
-            joinedload(Transaction.status),
-            joinedload(Transaction.template).joinedload(
-                TransactionTemplate.recurrence_rule,
-            ),
-            joinedload(Transaction.pay_period),
-        ),
-    )
 
 
 def _assign_transactions_to_days(
@@ -534,8 +386,9 @@ def _assign_transactions_to_days(
     are summarized in :class:`DayOverflow` (count plus signed residual net).
 
     **Which items count is the SQL's alone** (F-3 / W-065's locked Choice-2
-    predicate, in :func:`_query_transactions_for_range`, the one query whose
-    items this folds).  Every item was re-checked here against
+    predicate, in :func:`~app.services.calendar_items
+    .query_transactions_for_range`, the one query whose rows and legs this
+    folds).  Every item was re-checked here against
     :func:`~app.utils.balance_predicates.is_balance_contributing` until ruling
     **plan#2262** deleted that -- the remediation's belt-and-suspenders, a
     second statement of the predicate over items the SQL had already
@@ -558,10 +411,11 @@ def _assign_transactions_to_days(
     states one tier down.
 
     Args:
-        ctx: The build's :class:`_MonthBuildContext` -- its ``transactions``,
-            their ``contributions``, the ``year``, the ``large_threshold`` and
-            the ``pay_cadence``.  ``contributions`` is indexed with ``[]``: a
-            row missing from it is a build that priced a different set, and a
+        ctx: The build's :class:`_MonthBuildContext` -- its ``items`` (the
+            ``transactions``, their ``contributions`` and the ``estimated``
+            occurrences), the ``year``, the ``large_threshold`` and the
+            ``pay_cadence``.  ``contributions`` is indexed with ``[]``: a row
+            missing from it is a build that priced a different set, and a
             default would be a fabricated figure in a day cell.
         month: Target calendar month (1-12).
     """
@@ -573,9 +427,9 @@ def _assign_transactions_to_days(
     # The spans the rows were SELECTED by, keyed for PLACEMENT (plan step
     # C2-f1): the fetch was by membership of this very window, so the indexing
     # below is total by construction rather than by luck.
-    spans = {period.period_id: period for period in ctx.periods}
+    spans = {period.period_id: period for period in ctx.items.periods}
 
-    for txn in ctx.transactions:
+    for txn in ctx.items.transactions:
         key = cell_key(txn)
         if key in seen:
             continue
@@ -587,9 +441,19 @@ def _assign_transactions_to_days(
 
         seen.add(key)
         entry = build_day_entry(
-            txn, ctx.contributions[key], threshold, ctx.pay_cadence,
+            txn, ctx.items.contributions[key], threshold, ctx.pay_cadence,
         )
         day_map[display_day].append(entry)
+
+    # Past the last saved paycheck, each estimated occurrence sits where its
+    # row would: its attribution day, the rule ``_get_display_day`` reads for
+    # a row.  No row answers one, so nothing here can be counted twice.
+    for flow in ctx.items.estimated:
+        display_day = _day_in_month(flow.attributed_on, month, ctx.year)
+        if display_day is not None:
+            day_map[display_day].append(
+                build_estimated_day_entry(flow, threshold, ctx.pay_cadence),
+            )
 
     # The three day-level readings of one amount live together in
     # :mod:`~app.services.calendar_day_flows`, which is where the rule that
@@ -611,12 +475,14 @@ def _assign_transactions_to_days(
 
 
 @dataclass(frozen=True)
-class _MonthBuildContext:  # pylint: disable=too-many-instance-attributes
+class _MonthBuildContext:
     """The pre-queried data and config shared across a year's month summaries.
 
-    ``get_year_overview`` resolves the cash-flow set, scenario, overlapping
-    periods, and transaction set once and builds twelve summaries from
-    them, varying only the month (``get_month_detail`` builds one).
+    ``get_year_overview`` resolves the cash-flow set and the span's items
+    (:class:`~app.services.calendar_items.SpanItems`: its periods, their rows
+    and legs, what each is worth, and the occurrences estimated past the last
+    saved paycheck) once and builds twelve summaries from them, varying only
+    the month (``get_month_detail`` builds one).
     ``account`` is the set's BALANCE line -- the member whose running
     balance, month-end figure and name the summaries carry; the rows were
     selected across the whole set before this context was built, so the set
@@ -631,38 +497,16 @@ class _MonthBuildContext:  # pylint: disable=too-many-instance-attributes
     balance-series read runs and ``MonthSummary.daily`` stays ``None``.
 
     ``pay_cadence`` is the owner's, for the infrequent badge, and is ``None``
-    exactly when no row in this build repeats -- see
+    exactly when nothing in this build repeats -- see
     :func:`~app.services.calendar_infrequency.badge_cadence`.
 
-    ``transactions`` are the build's plan ITEMS -- rows and, since leaf
-    ``balance:X-bi-6-1b``, transfer legs -- and ``contributions`` is what
-    each of them is WORTH, resolved ONCE for the whole build (plan step
-    X-au-c2) and keyed by :func:`~app.services.transfer_legs.cell_key`.  It
-    travels beside the rows
-    rather than being recomputed per month because the year overview builds
-    twelve summaries from one row set, and the salary producer behind it runs
-    the paycheck engine over the owner's entire pay-period set (finding
-    **N-228**) -- so a per-month valuation would run it twelve times for one
-    answer.  It is a field of this context rather than a second argument for
-    the reason :class:`~app.services.cash_ledger.AmountBasis` gives one tier
-    down: the rows and their prices are one fact, and two arguments are two
-    things a caller can mismatch.
-
-    Pylint: ``too-many-instance-attributes`` (9/7) -- these nine ARE one
-    calendar build's inputs, read as a flat unit by
-    :func:`_build_month_summary` and its helpers, with no cohesive sub-group to
-    nest: the year scopes the query and the account the balance line, the
-    periods, transactions and their contributions are its result, and the
-    threshold, context, clock and cadence are four independent per-build
-    settings.  Mirrors
-    :class:`DayEntry`'s 10/7 here.
+    Seven fields, where it was ten until task plan#3945 moved the four the
+    span's items are into one record.
     """
 
     year: int
     account: Account
-    periods: PeriodWindow
-    transactions: list[PlanItem]
-    contributions: dict
+    items: SpanItems
     large_threshold: int
     balance_ctx: BalanceContext
     today: date | None
@@ -678,8 +522,8 @@ def _build_month_summary(month: int, ctx: _MonthBuildContext) -> MonthSummary:
 
     Args:
         month: Target calendar month (1-12).
-        ctx: The year/account/periods/transactions/threshold/scenario
-            shared across the build (see :class:`_MonthBuildContext`).
+        ctx: The year/account/items/threshold/pass shared across the build
+            (see :class:`_MonthBuildContext`).
 
     Returns:
         A MonthSummary for the target month.
@@ -705,10 +549,13 @@ def _build_month_summary(month: int, ctx: _MonthBuildContext) -> MonthSummary:
     # scans of ``ctx.periods`` before it, the second of which
     # (``_detect_third_paycheck_months``) rebuilt a whole-year set per card AND
     # was a second implementation of what ``paycheck_calculator`` asks to
-    # decide a 24-per-year deduction's cadence.  The SAVED half, because this
-    # card's money is -- ruling **balance:R-IB** and ledger row **N-394** carry
-    # why, and ``saved_paydays_in_month_through`` states it beside its twin.
-    month_paydays = saved_paydays_in_month_through(
+    # decide a 24-per-year deduction's cadence.  The paydays this card holds
+    # money for (ruling **balance:R-IB**): saved, and projected past the last
+    # saved one since task plan#3945 gave those paychecks their estimated
+    # entries, but never the rhythm before the first payday, where nothing is
+    # estimated.  ``projection_paydays_in_month_through`` states it beside its
+    # twin.
+    month_paydays = projection_paydays_in_month_through(
         ctx.balance_ctx.calendar(),
         date(ctx.year, month, calendar.monthrange(ctx.year, month)[1]),
     )
@@ -911,8 +758,26 @@ def _get_display_day(
         The day of *target_month* to render the row on, or ``None`` when its
         attribution date falls in another month.
     """
-    landing = period.attribution_day(txn.due_date)
-    if landing.month == target_month and landing.year == target_year:
+    return _day_in_month(
+        period.attribution_day(txn.due_date), target_month, target_year,
+    )
+
+
+def _day_in_month(landing: date, month: int, year: int) -> int | None:
+    """Return *landing*'s day of the month when it falls in *month* of *year*, else ``None``.
+
+    The one month filter a row and an estimated occurrence are both placed
+    through, so neither is drawn in a month its attribution day is not in.
+
+    Args:
+        landing: The item's attribution day.
+        month: The month being rendered.
+        year: Its year.
+
+    Returns:
+        The day of the month, or ``None`` for a day in another month.
+    """
+    if landing.month == month and landing.year == year:
         return landing.day
     return None
 

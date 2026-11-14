@@ -35,7 +35,7 @@ from app.services.pay_calendar import (
     PayCalendarError,
     paydays_in_month_through,
     paydays_in_year_before,
-    saved_paydays_in_month_through,
+    projection_paydays_in_month_through,
 )
 
 
@@ -558,38 +558,45 @@ class TestTheBackwardRhythmAndItsFloor:
         assert paydays_in_year_before(empty, date(2026, 6, 1)) == ()
 
 
-class TestSavedPaydaysInMonthThrough:
-    """The bounded twin: only the paydays the app HOLDS (**balance:R-IB**).
+class TestProjectionPaydaysInMonthThrough:
+    """The card's twin: the paydays a FORWARD projection holds (**balance:R-IB**).
 
-    The analytics month card reads this one, because everything else on that
-    card folds from saved periods.  **It absorbed the questions
-    ``earliest_start_in_month`` used to answer** when plan step
-    **balance:X-bh-2** deleted that producer as unreached (ledger row
-    **N-396**): its length-1 case IS "when does this month's first paycheck
-    land", over the same set.  *Four of the five moved cleanly and the fifth
-    -- a month holding exactly ONE payday -- was missed, which an adversarial
-    review of the same step caught; it is the first case below.*
+    The analytics month card reads this one, because it shows a payday only
+    where it holds money for it: the saved paydays, and since task plan#3945
+    the rhythm continued past the horizon, where the cash tier estimates each
+    paycheck, but never the rhythm stepped back below the first payday, where
+    nothing is estimated.  It counted the SAVED paydays alone until that task.
+    **It absorbed the questions ``earliest_start_in_month`` used to answer**
+    when plan step **balance:X-bh-2** deleted that producer as unreached
+    (ledger row **N-396**): its length-1 case IS "when does this month's
+    first paycheck land".  *Four of the five moved cleanly and the fifth -- a
+    month holding exactly ONE payday -- was missed, which an adversarial
+    review of the same step caught; it is the third case below.*  The month
+    the record opens in is graded on the card itself
+    (``test_third_paycheck_and_year.py``).
     """
 
-    def test_it_counts_only_what_the_schedule_records(self):
-        """The twin's whole difference, at the one day it shows.
+    def test_it_never_counts_the_rhythm_before_the_first_payday(self):
+        """The twin's whole difference from the engine's count.
 
-        December 2025 holds two paydays of the owner's rhythm and none of the
-        app's record, and this is the producer that says so.
+        December 2025 holds two paydays of the owner's stated rhythm and none
+        a forward projection reaches: the record opens 2026-01-02.
         """
         calendar = _calendar(26, history_opens_on=date(2025, 1, 1))
 
-        assert saved_paydays_in_month_through(calendar, date(2025, 12, 31)) == ()
+        assert projection_paydays_in_month_through(
+            calendar, date(2025, 12, 31),
+        ) == ()
         assert paydays_in_month_through(calendar, date(2025, 12, 31)) != ()
 
     def test_the_first_payday_of_a_month_holding_two(self):
         """January 2026 opens on the 2nd; February on the 13th."""
         calendar = _calendar(26)
 
-        assert saved_paydays_in_month_through(
+        assert projection_paydays_in_month_through(
             calendar, date(2026, 1, 31),
         )[0] == date(2026, 1, 2)
-        assert saved_paydays_in_month_through(
+        assert projection_paydays_in_month_through(
             calendar, date(2026, 2, 28),
         )[0] == date(2026, 2, 13)
 
@@ -604,7 +611,7 @@ class TestSavedPaydaysInMonthThrough:
         """
         calendar = _calendar(3, opening=date(2026, 1, 5), cadence=21)
 
-        assert saved_paydays_in_month_through(
+        assert projection_paydays_in_month_through(
             calendar, date(2026, 2, 28),
         ) == (date(2026, 2, 16),)
 
@@ -617,44 +624,52 @@ class TestSavedPaydaysInMonthThrough:
         calendar = _calendar(3, cadence=45)
 
         assert calendar.period_containing(date(2026, 3, 31)) is not None
-        assert saved_paydays_in_month_through(calendar, date(2026, 3, 31)) == ()
+        assert projection_paydays_in_month_through(
+            calendar, date(2026, 3, 31),
+        ) == ()
 
-    def test_a_month_past_the_horizon_is_empty_and_NOT_projected(self):
-        """The bound this producer exists for (**N-394**).
+    def test_a_month_past_the_horizon_counts_the_projected_paydays(self):
+        """Past the record the rhythm continues, as the cash tier does (**N-394**).
 
-        Three paydays from 2026-01-02 reach 2026-02-13, so June 2026 is past
-        the record.  Its unbounded twin projects there and this one must not:
-        the month card's income, expenses and balance all fold from saved
-        periods, so a projected payday would appear beside a ``$0.00`` net.
+        Three paydays from 2026-01-02 reach 2026-01-30, so the saved horizon
+        is 2026-02-12 and June 2026 is past it.  Continued every 14 days from
+        01-30 the rhythm reaches 06-05 and 06-19 in June, and each is a
+        paycheck the cash tier estimates, so the card counts both.  The saved
+        count this replaced read ``()`` here.
         """
         calendar = _calendar(3)
 
-        assert saved_paydays_in_month_through(calendar, date(2026, 6, 30)) == ()
-        assert paydays_in_month_through(calendar, date(2026, 6, 30)) != ()
+        assert projection_paydays_in_month_through(
+            calendar, date(2026, 6, 30),
+        ) == (date(2026, 6, 5), date(2026, 6, 19))
+        assert paydays_in_month_through(calendar, date(2026, 6, 30)) == (
+            date(2026, 6, 5), date(2026, 6, 19),
+        )
 
     def test_both_halves_of_the_month_key_are_read(self):
         """One careless filter would confuse the same month in another year."""
-        # ``history_opens_on`` is ``None`` because this producer does not read
-        # it: an argument that reads as load-bearing and is not is the same
-        # defect as a control that cannot fire.
+        # ``history_opens_on`` is ``None``: no backward half, so the two
+        # Januaries differ only by year.
         calendar = PayCalendar.from_paydays(
             [(30, date(2025, 1, 9)), (31, date(2026, 1, 23))],
             (era_of(date(2025, 1, 9), 14),), user_id=1, history_opens_on=None,
         )
 
-        assert saved_paydays_in_month_through(
+        assert projection_paydays_in_month_through(
             calendar, date(2025, 1, 31),
         ) == (date(2025, 1, 9),)
-        assert saved_paydays_in_month_through(
+        assert projection_paydays_in_month_through(
             calendar, date(2026, 1, 31),
         ) == (date(2026, 1, 23),)
 
-    def test_an_empty_calendar_records_no_paydays(self):
-        """No saved payday means nothing recorded, which is a real answer."""
+    def test_an_empty_calendar_holds_no_paydays(self):
+        """No saved payday means no first payday to project from, a real answer."""
         empty = PayCalendar.from_paydays([], eras_of([], 14), user_id=1, history_opens_on=None,
         )
 
-        assert saved_paydays_in_month_through(empty, date(2026, 1, 31)) == ()
+        assert projection_paydays_in_month_through(
+            empty, date(2026, 1, 31),
+        ) == ()
 
 
 class TestTheEngineRefusesAPaydayItsCalendarCannotPlace:

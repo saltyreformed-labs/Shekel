@@ -18,7 +18,7 @@ from tests._test_helpers import (
     rhythm_of,
 )
 from app.services.balance_at import BalanceContext
-from app.services.calendar_service import _query_transactions_for_range
+from app.services.calendar_items import query_transactions_for_range
 
 from ._helpers import _add_transaction
 
@@ -105,7 +105,7 @@ class TestEdgeCases:
 class TestATransferIsALegOfItsParent:
     """The calendar draws a transfer as a LEG read off its parent (leaf X-bi-6-1b).
 
-    ``_query_transactions_for_range`` answers the set's OWN rows -- no
+    ``query_transactions_for_range`` answers the set's OWN rows -- no
     shadow -- then one leg per transfer the set touches, on the side the
     set shows, as one list (plan step plan#2130), and the day fold prices a
     leg through ``contributions_by_key`` keyed by ``cell_key``.  The money
@@ -151,7 +151,7 @@ class TestATransferIsALegOfItsParent:
             ctx = BalanceContext.build(seed_user["user"].id)
             periods = ctx.calendar().overlapping(date(2026, 1, 1), date(2026, 1, 31))
 
-            on_checking = _query_transactions_for_range(
+            on_checking = query_transactions_for_range(
                 CashFlowSet.single(checking), ctx.scenario_id, periods,
             )
             assert [cell_key(item) for item in on_checking] == [
@@ -160,7 +160,7 @@ class TestATransferIsALegOfItsParent:
             assert on_checking[0].name == "Rent"
             assert on_checking[1].is_income is False
 
-            on_savings = _query_transactions_for_range(
+            on_savings = query_transactions_for_range(
                 CashFlowSet.single(savings), ctx.scenario_id, periods,
             )
             assert [cell_key(item) for item in on_savings] == [

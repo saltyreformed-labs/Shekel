@@ -94,6 +94,7 @@ from app.models.account import Account
 from app.models.pay_period import PayPeriod
 from app.models.transaction import Transaction
 from app.models.transfer import Transfer
+from app.models.transfer_template import TransferTemplate
 from app.services.transfer_legs import (
     PlanItem,
     PlanParent,
@@ -291,7 +292,9 @@ def own_rows_clause(cash_flow: CashFlowSet):
     return Transaction.account_id.in_(cash_flow.member_ids)
 
 
-def leg_accounts_shown(cash_flow: CashFlowSet, transfer: Transfer) -> tuple[int, ...]:
+def leg_accounts_shown(
+    cash_flow: CashFlowSet, transfer: Transfer | TransferTemplate,
+) -> tuple[int, ...]:
     """Return the accounts whose leg of *transfer* the set draws (ruling **R-CC23**).
 
     The ONE reader-facing spelling of the rule (the row spelling,
@@ -317,9 +320,16 @@ def leg_accounts_shown(cash_flow: CashFlowSet, transfer: Transfer) -> tuple[int,
     :func:`~app.services.transfer_legs.leg_of` refuses as a leg the transfer
     has no side on -- a 500 on the grid).
 
+    **A recurring transfer's DEFINITION is asked the same question** (plan
+    step ``pay_calendar:C9``, task plan#3945): past the last saved paycheck
+    the analytics calendar draws an estimated occurrence of a transfer
+    template where its written transfer's leg would be drawn, and the two
+    endpoint columns are the template's.
+
     Args:
         cash_flow: The set.
-        transfer: A transfer the caller loaded.
+        transfer: A transfer the caller loaded, or the recurring transfer
+            template an estimated occurrence is of.
 
     Returns:
         The account ids to draw a leg for: one (the usual case), or none.

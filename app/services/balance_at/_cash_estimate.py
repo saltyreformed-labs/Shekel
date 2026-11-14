@@ -53,7 +53,8 @@ walked so far re-walks that definition once to the new day.  The modelled
 fold's contribution tier reads the same walk for the transfers into an
 investment account (:meth:`EstimatedCashTier.transfers_in_by_payday`, task
 plan#3943), so its annual limit and its employer match count the figure the
-account is credited.
+account is credited.  The analytics month card reads each occurrence itself
+(:class:`EstimatedFlow`, task plan#3945), from the same list the day nets fold.
 
 Boundary discipline (``CLAUDE.md``): no Flask symbol, no writes; all money is
 :class:`~decimal.Decimal`.  Seam-PRIVATE.
@@ -113,6 +114,49 @@ class PricedOccurrence(NamedTuple):
 
     unwritten: UnwrittenOccurrence
     cash: Decimal
+
+
+class EstimatedFlow(NamedTuple):
+    """One estimated occurrence as it moves one account's money.
+
+    The record the tier's day nets fold (:meth:`EstimatedCashTier
+    .day_nets_through`) and a reader showing the occurrences themselves reads
+    (:func:`~app.services.balance_at.cash_estimated_flows`, the analytics month
+    card, task plan#3945), so the card's day entries and the balance beside
+    them are one list read twice.
+
+    Attributes:
+        account_id: The account whose money it moves.
+        template: The recurring definition it is an occurrence of.
+        priced: The occurrence, placed and dated, and its worth as a magnitude.
+        is_income: Whether it moves money INTO the account: a transaction
+            template's when the template is income, a transfer template's on
+            its destination side.
+    """
+
+    account_id: int
+    template: "TransactionTemplate | TransferTemplate"
+    priced: PricedOccurrence
+    is_income: bool
+
+    @property
+    def signed(self) -> Decimal:
+        """The worth, signed for the account: money in positive."""
+        return self.priced.cash if self.is_income else -self.priced.cash
+
+    @property
+    def attributed_on(self) -> date:
+        """The day its row would be attributed to: its due date clamped into its paycheck.
+
+        The rule a written row's day is placed by
+        (:meth:`~app.services.pay_calendar.DerivedPeriod.attribution_day`).
+        Ruling R-G lands its CASH no earlier than ``as_of + 1``, which
+        :meth:`EstimatedCashTier.day_nets_through` applies; past the last
+        saved paycheck that floor binds only on a pass dated past a projected
+        payday.
+        """
+        unwritten = self.priced.unwritten
+        return unwritten.period.attribution_day(unwritten.due_date)
 
 
 @dataclass(frozen=True)
@@ -278,6 +322,26 @@ def _loan_payments(
     ]
 
 
+def past_the_last_saved_paycheck(ctx: BalanceContext, last_day: date) -> bool:
+    """Return whether *last_day* falls after the owner's last saved paycheck ends.
+
+    The one test of whether the estimated tier can hold anything by
+    *last_day*: an estimate sits on a projected paycheck, and is attributed
+    to a day inside it, so a range ending at or before the saved horizon
+    holds none.  Asked before anything is walked or assembled, so a read
+    inside the saved schedule issues no query for the definitions.
+
+    Args:
+        ctx: The read pass whose calendar states the horizon.
+        last_day: The last day a reader asks about.
+
+    Returns:
+        ``True`` when the calendar has a horizon and *last_day* is after it.
+    """
+    horizon = ctx.calendar().horizon()
+    return horizon is not None and last_day > horizon
+
+
 def _recurring_transaction_templates(
     account_id: int, user_id: int,
 ) -> list[TransactionTemplate]:
@@ -337,20 +401,49 @@ class EstimatedCashTier:
             "tuple[list[TransactionTemplate], list[TransferTemplate]] | None"
         ) = None
 
-    def day_nets_through(self, last_day: date) -> "dict[date, Decimal]":
-        """Return ``{day: net}`` for every estimated occurrence landing by *last_day*.
+    def flows_through(self, last_day: date) -> list[EstimatedFlow]:
+        """Return every estimated occurrence attributed to a day on or before *last_day*.
 
-        Empty, with nothing walked, when *last_day* is at or before both the
-        last saved paycheck's end and the pass's ``as_of``: an estimate sits
-        on a projected paycheck, so it lands no earlier than that paycheck's
-        first day, and no earlier than ``as_of + 1`` (ruling R-G).
+        Empty, with nothing walked, when *last_day* is at or before the last
+        saved paycheck's end: an estimate sits on a projected paycheck, and
+        its attribution day is inside that paycheck.
 
         **The walk reaches the END of the paycheck holding *last_day*.**  An
         occurrence is placed on the paycheck containing it or the first one
-        starting on or after it, so its paycheck ends on or after it; its row
-        lands inside that paycheck or later.  A row landing by *last_day* is
-        therefore on the paycheck holding *last_day* or an earlier one, and
-        its occurrence falls on or before that paycheck's end.
+        starting on or after it, so its paycheck ends on or after it.  An
+        occurrence attributed by *last_day* is therefore on the paycheck
+        holding *last_day* or an earlier one, and falls on or before that
+        paycheck's end.
+
+        Args:
+            last_day: The last day the reader asks about.
+
+        Returns:
+            The flows: the account's transaction templates by id, then its
+            transfer templates by id, each definition's ascending by
+            occurrence.
+
+        Raises:
+            AmountUnresolvable: When a definition states no price for an
+                occurrence -- exactly where its written row would refuse.
+        """
+        if not past_the_last_saved_paycheck(self.ctx, last_day):
+            return []
+        through = self.ctx.calendar().span_containing(last_day).end_date
+        return [
+            flow for flow in self._flows(through)
+            if flow.attributed_on <= last_day
+        ]
+
+    def day_nets_through(self, last_day: date) -> "dict[date, Decimal]":
+        """Return ``{day: net}`` for every estimated occurrence landing by *last_day*.
+
+        A fold of :meth:`flows_through`, each flow landing on its attribution
+        day clamped up to ``as_of + 1`` (ruling R-G), the rule
+        :func:`~._cash_fold._cash_plan` applies to a row.  A flow landing by
+        *last_day* is attributed by it, since its landing is never earlier.
+        Empty, with nothing walked, when *last_day* is at or before the pass's
+        ``as_of`` as well.
 
         Args:
             last_day: The last day a reader of the fold samples.
@@ -364,20 +457,14 @@ class EstimatedCashTier:
             AmountUnresolvable: When a definition states no price for an
                 occurrence -- exactly where its written row would refuse.
         """
-        calendar = self.ctx.calendar()
-        horizon = calendar.horizon()
-        if horizon is None or last_day <= max(horizon, self.ctx.as_of):
+        if last_day <= self.ctx.as_of:
             return {}
-        through = calendar.span_containing(last_day).end_date
         not_before = self.ctx.as_of + _ONE_DAY
         nets: "dict[date, Decimal]" = {}
-        for signed, unwritten in self._signed_occurrences(through):
-            lands_on = max(
-                unwritten.period.attribution_day(unwritten.due_date),
-                not_before,
-            )
+        for flow in self.flows_through(last_day):
+            lands_on = max(flow.attributed_on, not_before)
             if lands_on <= last_day:
-                nets[lands_on] = nets.get(lands_on, _ZERO_MONEY) + signed
+                nets[lands_on] = nets.get(lands_on, _ZERO_MONEY) + flow.signed
         return nets
 
     def transfers_in_by_payday(self, last_day: date) -> "dict[date, Decimal]":
@@ -413,11 +500,9 @@ class EstimatedCashTier:
             AmountUnresolvable: When a definition states no price for an
                 occurrence -- exactly where its written row would refuse.
         """
-        calendar = self.ctx.calendar()
-        horizon = calendar.horizon()
-        if horizon is None or last_day <= horizon:
+        if not past_the_last_saved_paycheck(self.ctx, last_day):
             return {}
-        through = calendar.span_containing(last_day).end_date
+        through = self.ctx.calendar().span_containing(last_day).end_date
         _transactions, transfers = self._loaded_definitions()
         totals: "dict[date, Decimal]" = {}
         for template in transfers:
@@ -429,38 +514,35 @@ class EstimatedCashTier:
                     totals[payday] = totals.get(payday, _ZERO_MONEY) + priced.cash
         return totals
 
-    def _signed_occurrences(
-        self, through: date,
-    ) -> "list[tuple[Decimal, UnwrittenOccurrence]]":
-        """Return every occurrence through *through* the account's definitions owe, signed.
+    def _flows(self, through: date) -> list[EstimatedFlow]:
+        """Return every occurrence through *through* the account's definitions owe.
 
         Args:
             through: The last occurrence day to cover.
 
         Returns:
-            ``(signed cash, occurrence)`` per occurrence: a transaction
-            template's added when it is income and subtracted otherwise, a
-            transfer template's subtracted on the side it leaves and added on
-            the side it enters.
+            One :class:`EstimatedFlow` per occurrence: a transaction
+            template's into the account when it is income, a transfer
+            template's into the account on the side it enters.
         """
         transactions, transfers = self._loaded_definitions()
         income_type_id = ref_cache.txn_type_id(TxnTypeEnum.INCOME)
-        signed: "list[tuple[Decimal, UnwrittenOccurrence]]" = []
+        flows: list[EstimatedFlow] = []
         for template in transactions:
-            direction = 1 if template.transaction_type_id == income_type_id else -1
-            signed.extend(
-                (direction * priced.cash, priced.unwritten)
+            is_income = template.transaction_type_id == income_type_id
+            flows.extend(
+                EstimatedFlow(self.account.id, template, priced, is_income)
                 for priced in priced_occurrences(
                     template, self.ctx, through=through,
                 )
             )
         for template in transfers:
-            direction = -1 if template.from_account_id == self.account.id else 1
-            signed.extend(
-                (direction * priced.cash, priced.unwritten)
+            is_income = template.to_account_id == self.account.id
+            flows.extend(
+                EstimatedFlow(self.account.id, template, priced, is_income)
                 for priced in self._transfer_occurrences(template, through)
             )
-        return signed
+        return flows
 
     def _transfer_occurrences(
         self, template: TransferTemplate, through: date,
@@ -507,7 +589,9 @@ class EstimatedCashTier:
 
 __all__ = [
     "EstimatedCashTier",
+    "EstimatedFlow",
     "PricedOccurrence",
     "PricedWalk",
+    "past_the_last_saved_paycheck",
     "priced_occurrences",
 ]

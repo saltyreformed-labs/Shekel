@@ -29,7 +29,7 @@ class TestBalanceContributingPredicate:
 
     Locks the post-Commit-10 (follow-up) behaviour so a future change
     that drops the predicate from the SQL filter in
-    ``_query_transactions_for_range`` fails loud with a concrete
+    ``calendar_items.query_transactions_for_range`` fails loud with a concrete
     arithmetic divergence rather than a silent display regression.  C10-2
     sees that directly since ruling plan#2262 deleted the Python re-check in
     ``_assign_transactions_to_days``, which hid the SQL filter from it; C10-4,

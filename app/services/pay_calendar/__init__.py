@@ -128,7 +128,7 @@ from ._rhythm import (
     first_paycheck_at,
     paydays_in_month_through,
     paydays_in_year_before,
-    saved_paydays_in_month_through,
+    projection_paydays_in_month_through,
 )
 from ._searches import (
     FiledRow,
@@ -180,7 +180,7 @@ __all__ = [
     "period_by_id",
     "previous_payday",
     "projected_payday",
-    "saved_paydays_in_month_through",
+    "projection_paydays_in_month_through",
     "schedule_for",
     "scheduled_payday",
     "validate_eras",

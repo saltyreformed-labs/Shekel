@@ -26,12 +26,16 @@ later date; the one that cannot is said to be a guard, not a control.
 from datetime import date
 from decimal import Decimal
 
+from app.models.transfer_template import TransferTemplate
 from app.services.balance_at import _asset_fold, _cash_estimate
 from tests._test_helpers import (
     generate_transfer_of,
+    make_cadence_rule,
     make_salary_profile,
     make_transfer_template,
+    state_template_price,
 )
+from tests.oracles.recurrence_baseline import MONTHLY
 
 from ._helpers import (
     _ctx,
@@ -322,3 +326,56 @@ class TestTheBaseCountsTheEstimatedTransfers:
             account, _ctx(seed_user, as_of), date(2026, 6, 30), params, feed,
         ) == Decimal("2286.96")
         assert walks == [template.id]
+
+    def test_a_transfer_due_mid_paycheck_is_matched_on_its_paychecks_payday(
+        self, db, seed_user, seed_periods,
+    ):
+        """A monthly $300.00 transfer due on the 10th counts on the payday of the paycheck holding it.
+
+        The base is read by payday, so an estimated transfer files under the
+        payday of the paycheck its row would live in, as a written transfer
+        does, never under the day it is due.  The match of the case above:
+        50% of the employee total, capped at 6% of $3,019.23, which is
+        ``round(3019.23 * 0.06) = $181.15``, beside a $100.00 deduction.  A
+        payday with no transfer contributes ``100.00 + round(100.00 * 0.50)
+        = $150.00``.  The paycheck 06-05 .. 06-18 holds the 06-10 transfer,
+        so its payday sees ``100.00 + 300.00 = $400.00`` and contributes
+        ``100.00 + round(min(400.00, 181.15) * 0.50) = 100.00 + 90.58 =
+        $190.58``.
+
+        No transfer row is written, so the nine saved paydays contribute
+        ``9 * $150.00 = $1,350.00`` through the horizon (the saved
+        occurrences are generation's to write, not the estimate's).  Through
+        2026-06-30 the projected paydays 05-22, 06-05 and 06-19 add
+        ``150.00 + 190.58 + 150.00 = $490.58``: $1,840.58.  Filed under its
+        due day, 06-10, the transfer matches no payday and the total reads
+        ``1,350.00 + 3 * 150.00 = $1,800.00``.
+        """
+        account = _401k(
+            seed_user, seed_periods[0], Decimal("20000.00"),
+            opened_on=date(2026, 1, 2),
+            employer_type="match", match_pct=Decimal("0.5000"),
+            match_cap_pct=Decimal("0.0600"),
+        )
+        _salaried_deduction(seed_user, account, "100.00")
+        transfer = TransferTemplate(
+            user_id=seed_user["user"].id,
+            from_account_id=seed_user["account"].id,
+            to_account_id=account.id,
+            name="To the 401(k)",
+        )
+        db.session.add(transfer)
+        db.session.flush()
+        state_template_price(transfer, Decimal("300.00"))
+        make_cadence_rule(transfer, MONTHLY, fires_on_day=10)
+        db.session.commit()
+        params = _params_for(account)
+        feed = _feed_for(seed_user, account, params)
+        as_of = date(2026, 3, 1)
+
+        assert _contributed_through(
+            account, _ctx(seed_user, as_of), _HORIZON, params, feed,
+        ) == Decimal("1350.00")
+        assert _contributed_through(
+            account, _ctx(seed_user, as_of), date(2026, 6, 30), params, feed,
+        ) == Decimal("1840.58")

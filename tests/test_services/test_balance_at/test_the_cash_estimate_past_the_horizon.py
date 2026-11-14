@@ -25,6 +25,7 @@ from app.services.balance_at import (
     BalanceContext,
     cash_balance_at,
     cash_daily_balance_series,
+    cash_daily_facts_series,
     loan_closing_date,
 )
 from app.services.balance_at import _cash_estimate
@@ -50,6 +51,11 @@ _HORIZON = date(2026, 5, 21)
 
 # The last day the cases read.
 _LAST_DAY = date(2026, 7, 31)
+
+# A read pass dated past two projected paydays (05-22 and 06-05): the state of
+# an owner whose saved schedule has stopped growing (rolling generation off, or
+# a schedule nobody has topped up).
+_LATE_AS_OF = date(2026, 6, 10)
 
 
 def _a_month_of_bills(seed_user):
@@ -146,6 +152,86 @@ class TestCheckingPastTheHorizon:
         at_june_end = cash_balance_at(checking, read_ctx, date(2026, 6, 30))
 
         assert at_june_end - at_horizon == Decimal("3900.00")
+
+
+class TestAnEstimateCannotHaveAlreadyHappened:
+    """Ruling R-G on an estimate: it lands no earlier than the day after the pass's as-of.
+
+    Every other case here reads a pass dated inside the saved schedule, where
+    that floor never binds.  It binds once the pass is dated past a projected
+    payday.
+    """
+
+    def test_what_is_owed_by_the_as_of_lands_the_day_after(
+        self, seed_user, seed_periods,
+    ):
+        """On a pass dated 2026-06-10, everything owed by then lands on 06-11.
+
+        Owed by 06-10, each attributed to a day already gone: the 05-22 and
+        06-05 paychecks less their transfers, +$1,800.00 each, and the 06-01
+        rent, -$1,500.00.  They land together on 06-11:
+        1,800.00 - 1,500.00 + 1,800.00 = +$2,100.00.  The later ones land on
+        their own days, as on any pass: 06-19, 07-03, 07-17 and 07-31 at
+        +$1,800.00, and 07-01 at -$1,500.00.  Net through 07-31:
+        2,100.00 + 4 x 1,800.00 - 1,500.00 = $7,800.00, the figure the pass
+        dated 03-01 reads, since what is owed does not depend on the day it
+        is read.
+
+        The day facts carry it as ``estimated``: zero on every day through the
+        as-of, so a reader comparing past days against the bank's record
+        ignores it as it ignores ``planned``, and each day's four components
+        sum to that day's move.
+        """
+        _a_month_of_bills(seed_user)
+        checking = seed_user["account"]
+        ctx = BalanceContext.build(checking.user_id, _LATE_AS_OF)
+
+        facts = cash_daily_facts_series(
+            checking, ctx, _HORIZON, _LAST_DAY,
+        ).facts
+
+        balances = {day: fact.balance for day, fact in facts.items()}
+        assert _moves(balances) == {
+            date(2026, 6, 11): Decimal("2100.00"),
+            date(2026, 6, 19): Decimal("1800.00"),
+            date(2026, 7, 1): Decimal("-1500.00"),
+            date(2026, 7, 3): Decimal("1800.00"),
+            date(2026, 7, 17): Decimal("1800.00"),
+            date(2026, 7, 31): Decimal("1800.00"),
+        }
+        assert balances[_LAST_DAY] - balances[_HORIZON] == Decimal("7800.00")
+        through_the_as_of = [day for day in facts if day <= _LATE_AS_OF]
+        assert {day: facts[day].estimated for day in through_the_as_of} == (
+            dict.fromkeys(through_the_as_of, Decimal("0.00"))
+        )
+        assert facts[date(2026, 6, 11)].estimated == Decimal("2100.00")
+        days = list(facts)
+        for yesterday, today in zip(days, days[1:]):
+            fact = facts[today]
+            assert fact.balance - facts[yesterday].balance == (
+                fact.recorded + fact.asserted + fact.planned + fact.estimated
+            ), today
+
+    def test_a_read_ending_on_the_as_of_walks_nothing(
+        self, seed_user, seed_periods,
+    ):
+        """Checking at 2026-06-10, on the pass dated that day, reads its opening.
+
+        The read ends past the last saved paycheck but not past the as-of,
+        so nothing estimated can land by it, and the tier answers without
+        walking any definition.  The opening is checking's balance at the
+        horizon on a pass dated 03-01, flat through the saved schedule
+        (:class:`TestNothingAtOrBeforeTheHorizonMoves`).
+        """
+        _a_month_of_bills(seed_user)
+        checking = seed_user["account"]
+        opening = cash_balance_at(
+            checking, BalanceContext.build(checking.user_id, _AS_OF), _HORIZON,
+        )
+        ctx = BalanceContext.build(checking.user_id, _LATE_AS_OF)
+
+        assert cash_balance_at(checking, ctx, _LATE_AS_OF) == opening
+        assert not ctx.estimates
 
 
 class TestNothingAtOrBeforeTheHorizonMoves:
@@ -268,6 +354,44 @@ class TestThePayerStopsAtTheLoansPayoff:
         assert loan_closing_date(loan, ctx) == date(2026, 7, 1)
         assert _moves(series) == {
             date(2026, 5, 1): Decimal("-1000.00"),
+            date(2026, 6, 1): Decimal("-1000.00"),
+            date(2026, 7, 1): Decimal("-1000.00"),
+        }
+
+    def test_a_payment_unwritten_inside_the_saved_schedule_is_the_loans_alone(
+        self, seed_user, seed_periods,
+    ):
+        """With no row for the 05-01 payment, the loan counts it and checking does not pay it.
+
+        The loan and payment above, but the 05-01 payment's row is never
+        written.  It sits in the saved paycheck 04-24 .. 05-07, where the
+        saved rows are checking's plan (ruling plan#3932), so the estimate
+        debits only the occurrences on PROJECTED paychecks: -$1,000.00 on
+        06-01 and on 07-01, and nothing on 05-01.  The loan's own plan
+        prices the unwritten occurrence (ruling R-R64), so its payoff is
+        still 07-01: $3,000.00 - 3 x $1,000.00 = $0.00.  Debiting checking
+        for the loan's whole plan would move it -$1,000.00 on 05-01 as well.
+        """
+        loan = create_loan_account(
+            seed_user, db.session, name="Van Loan",
+            principal=Decimal("3000.00"), rate=Decimal("0.00000"), term=3,
+            origination_date=date(2026, 4, 1), payment_day=1,
+        )
+        make_loan_payment_template(
+            db.session, seed_user, loan, amount="1000.00",
+            derive_from_loan=False,
+        )
+        db.session.commit()
+        as_of = date(2026, 4, 15)
+        checking = seed_user["account"]
+        ctx = BalanceContext.build(checking.user_id, as_of)
+
+        series = cash_daily_balance_series(
+            checking, ctx, as_of + timedelta(days=1), date(2026, 12, 31),
+        )
+
+        assert loan_closing_date(loan, ctx) == date(2026, 7, 1)
+        assert _moves(series) == {
             date(2026, 6, 1): Decimal("-1000.00"),
             date(2026, 7, 1): Decimal("-1000.00"),
         }

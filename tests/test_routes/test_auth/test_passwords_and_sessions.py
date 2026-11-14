@@ -2,7 +2,7 @@
 password form's strength meter and toggle.
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 from app.extensions import db
 from app.models.user import User
@@ -84,7 +84,7 @@ class TestSessionManagement:
     """Tests for session invalidation functionality."""
 
     def test_invalidate_sessions(self, app, auth_client, seed_user):
-        """POST /invalidate-sessions sets session_invalidated_at on user."""
+        """POST /invalidate-sessions sets trusts_ended_at on user."""
         with app.app_context():
             before = datetime.now(timezone.utc)
             response = auth_client.post(
@@ -98,7 +98,7 @@ class TestSessionManagement:
             # Reload user from database.
             user = db.session.get(User, seed_user["user"].id)
             # Verify timestamp is recent, not just non-null (audit section 43 smell fix).
-            assert before <= user.session_invalidated_at <= after
+            assert before <= user.trusts_ended_at <= after
 
     def test_invalidate_sessions_current_session_survives(self, app, auth_client, seed_user):
         """Current session remains valid after invalidation."""
@@ -110,29 +110,8 @@ class TestSessionManagement:
             response = auth_client.get("/security", follow_redirects=False)
             assert response.status_code == 200
 
-    def test_stale_session_rejected(self, app, db, seed_user):
-        """load_user() returns None for sessions created before invalidation.
-
-        Tests the load_user callback directly with a simulated stale
-        session.
-        """
-        user = seed_user["user"]
-        user.session_invalidated_at = datetime.now(timezone.utc)
-        db.session.flush()
-
-        # Simulate a request with a stale _session_created_at.
-        with app.test_request_context():
-            from flask import session as flask_session  # pylint: disable=import-outside-toplevel
-            flask_session["_session_created_at"] = (
-                datetime.now(timezone.utc) - timedelta(hours=1)
-            ).isoformat()
-
-            from app.extensions import login_manager  # pylint: disable=import-outside-toplevel
-            loaded_user = login_manager._user_callback(str(user.id))
-            assert loaded_user is None
-
     def test_password_change_invalidates_sessions(self, app, auth_client, seed_user):
-        """Password change sets session_invalidated_at."""
+        """Password change sets trusts_ended_at."""
         with app.app_context():
             before = datetime.now(timezone.utc)
             auth_client.post("/change-password", data={
@@ -145,7 +124,7 @@ class TestSessionManagement:
             # Reload user from database.
             user = db.session.get(User, seed_user["user"].id)
             # Verify timestamp is recent, not just non-null (audit section 43 smell fix).
-            assert before <= user.session_invalidated_at <= after
+            assert before <= user.trusts_ended_at <= after
 
     def test_invalidate_sessions_requires_login(self, app, client):
         """POST /invalidate-sessions without login redirects to login."""

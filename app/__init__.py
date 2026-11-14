@@ -10,7 +10,7 @@ import importlib
 import os
 from datetime import datetime, timedelta, timezone
 
-from flask import Flask, request, session as flask_session
+from flask import Flask, current_app, request, session as flask_session
 
 from app.config import CONFIG_MAP
 from app.context_processors import register_context_processors
@@ -30,7 +30,6 @@ from app.utils.logging_config import setup_logging
 from app.utils.session_helpers import (
     SESSION_LAST_ACTIVITY_KEY,
     session_stamp,
-    sign_in_created_at,
     sign_in_is_live,
 )
 
@@ -113,29 +112,23 @@ def create_app(config_name=None, *, init_ref_cache=True):
         """Load a user by ID for Flask-Login session hydration.
 
         Returns None (forcing re-login) for any of:
-          * No sign-in of THIS user stamped the session: none at all, or
-            another user's, as a remember-cookie restore lands on
-            (plan#2173; ``sign_in_created_at`` in session_helpers), or its
-            ``_session_created_at`` is missing or cannot be read (not
-            ISO-8601, or naive), which no sign-in writes (plan#3157).
           * Unknown user ID.
           * Deactivated user (``is_active=False``).
-          * Session created before the most recent
-            ``session_invalidated_at`` bump (commit C-08 -- F-002,
-            F-003, F-032).
           * Session whose last activity is older than
             ``IDLE_TIMEOUT_MINUTES`` or absent (commit C-10 -- F-006).
-          * Session whose sign-in is ``KNOWN_LIFETIME`` old or more, or
-            unstamped, however active (ruling plan#3069;
-            ``sign_in_is_live`` in session_helpers), so a browser that is
-            signed in is a known one.
+          * Session whose token names no live sign-in record of THIS user
+            (``sign_in_is_live`` in session_helpers), the one rule for
+            whether a session is signed in (rulings plan#3925, plan#3927):
+            a sign-out deleted its record, this one or every one of the
+            user's; it carries no token; its token is another user's, as a
+            remember-cookie restore onto that user's session carries
+            (plan#2173); or its sign-in is ``KNOWN_LIFETIME`` old or more,
+            however active (ruling plan#3069), so a browser that is signed
+            in is a known one.
 
         A None return triggers Flask-Login's "logged out" flow on the
         next request, redirecting to the configured ``login_view``.
         """
-        session_created = sign_in_created_at(user_id)
-        if session_created is None:
-            return None
         user = db.session.get(User, int(user_id))
         if user is None:
             return None
@@ -151,23 +144,21 @@ def create_app(config_name=None, *, init_ref_cache=True):
         # balance:X-bn; pinned by tests/test_routes/test_xbn_sign_in_lock.py).
         if not user.is_active:
             return None
-        # Check whether this session was created before the most recent
-        # "log out all sessions" or password change event.  A creation stamp
-        # in the future passes, as any stamp at or after the bump does:
-        # forging one needs SECRET_KEY, with which any stamp can be minted.
-        invalidated_at = user.session_invalidated_at
-        if invalidated_at is not None and session_created < invalidated_at:
-            return None
-        # The two checks the session's own stamps answer, one refusal.
+        # The session's own stamp, then its record, one refusal.
         # Idle timeout (commit C-10 / F-006): reject the session if
         # ``_session_last_activity_at`` is older than
         # ``IDLE_TIMEOUT_MINUTES``.  See ``_idle_session_is_fresh``
         # docstring for the per-state policy (missing -> stale,
         # malformed/naive -> stale, future-dated -> fresh,
         # within-window -> fresh, beyond-window -> stale).  The
-        # sign-in's lifetime (ruling plan#3069): reject it once its
-        # sign-in is ``KNOWN_LIFETIME`` old, however active.
-        if not _idle_session_is_fresh(app) or not sign_in_is_live(user_id):
+        # sign-in's record (ruling plan#3925): reject the session once a
+        # sign-out deleted it, or its sign-in is ``KNOWN_LIFETIME`` old,
+        # however active (ruling plan#3069).  Asked last, as the one check
+        # that reads the database for the session itself.  A save asks it
+        # again once it holds its owner's write lock, so one whose sign-in
+        # ended during the wait is turned away too (app.db_transaction,
+        # ruling plan#4070).
+        if not _idle_session_is_fresh() or not sign_in_is_live(user.id):
             return None
         return user
 
@@ -407,9 +398,18 @@ def _register_blueprints(app):
         app.register_blueprint(getattr(module, f"{name}_bp"))
 
 
-def _idle_session_is_fresh(app):
+def _idle_session_is_fresh():
     """Return True iff ``_session_last_activity_at`` is within the
     configured ``IDLE_TIMEOUT_MINUTES`` window.
+
+    The window is the serving app's (``flask.current_app``), as the stamp
+    is its session's, and never an app this module captured: every
+    :func:`create_app` registers its ``load_user`` on the one module-level
+    ``login_manager``, which keeps only the last, so a loader that judged
+    by the app it was built with judged every other app's sessions by that
+    app's window (plan#2171's review, measured in the suite: a test that
+    built a second app left the session app's 24-hour window refused at 13
+    hours).  Production builds one app per worker, where the two agree.
 
     Fail-closed for unparseable input (commit C-10 / F-006).  False
     is returned -- never an exception -- for any of:
@@ -448,13 +448,6 @@ def _idle_session_is_fresh(app):
         any cookie value; rejecting future timestamps adds no
         defensive value beyond the signature itself.
 
-    Args:
-        app: The Flask application instance whose
-            ``IDLE_TIMEOUT_MINUTES`` config value drives the
-            comparison.  Passed in (not pulled from
-            ``flask.current_app``) so the helper is testable in a
-            request context bound to a specific app.
-
     Returns:
         bool: True if the session may continue; False if ``load_user``
             must reject it.
@@ -469,7 +462,7 @@ def _idle_session_is_fresh(app):
         # or (with SECRET_KEY compromise) a forged cookie.  Treat as
         # fresh -- see docstring for the threat-model rationale.
         return True
-    threshold = timedelta(minutes=app.config["IDLE_TIMEOUT_MINUTES"])
+    threshold = timedelta(minutes=current_app.config["IDLE_TIMEOUT_MINUTES"])
     return elapsed <= threshold
 
 

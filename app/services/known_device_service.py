@@ -10,29 +10,25 @@ names, by its id), record a finished
 sign-in or re-confirm (each gives the browser a new token and clears its
 count), count a wrong guess, list a user's trusted devices, and forget one.
 Beside them, :func:`device_named_by` picks a browser's device out of a list
-already read, so the token's hash is spelled in this module alone.
+already read, so no caller spells the token's hash; how a token is made and
+hashed is :mod:`app.utils.bearer_tokens`'s alone.
 
 **Each standing is stated once**: :func:`_known`, a finished sign-in less than
-:data:`~app.models.known_device.KNOWN_LIFETIME` ago, and :func:`_trusted`, a
-trust less than :data:`~app.models.known_device.TRUST_LIFETIME` old and not
-before its user's ``session_invalidated_at``.  Ending a trust is that comparison
-and nothing else: every writer of ``session_invalidated_at`` ends every trust of
-that user without a write here.  "Not before" is the session rule's own boundary
-(``app.utils.session_helpers``): a device trusted at the very instant of a bump
-survives it, as a session created at that instant does.  Being known reads no
-bump, by ruling plan#2997, so that none of those acts can leave the owner's
-browsers refused by a lock a stranger holds shut.
+:data:`~app.utils.sign_in_lifetimes.KNOWN_LIFETIME` ago, and :func:`_trusted`, a
+trust less than :data:`~app.utils.sign_in_lifetimes.TRUST_LIFETIME` old and not
+before its user's ``trusts_ended_at``.  Ending a trust is that comparison
+and nothing else: the one sign-out-everywhere act
+(``app.services.sign_in_service.sign_out_everywhere``, ruling plan#3927), the
+column's one writer, ends every trust of that user without a write here.  A
+device trusted at the very instant of the act is not before it, and survives.
+Being known reads no such act, by ruling plan#2997, so that none of them can
+leave the owner's browsers refused by a lock a stranger holds shut.
 
 **The clock is the process's**, ``datetime.now(timezone.utc)``, read once per
-act: the same clock the sign-in stamps and most ``session_invalidated_at``
-writers use.  A finished sign-in's instant is its caller's, handed to
-:func:`record_sign_in`, because the session's sign-in stamp is written from
-the same instant (ruling plan#3069).  Two writers (the owner's companion password reset and
-deactivation, ``app/routes/settings.py``) use the database's ``now()``, which
-is the moment their transaction BEGAN, not the moment it commits: a device
-trusted while such a request runs is not before the bump and survives it, as a
-session started then does.  On one host the database's clock and the
-process's are one clock.
+act: the same clock the sign-in's record and every sign-out-everywhere act
+use.  A finished sign-in's instant is its caller's, handed to
+:func:`record_sign_in`, because the sign-in's own record is written from the
+same instant (ruling plan#3069).
 
 Architecture:
   - No Flask imports.  Takes plain ids and strings, returns rows or the token.
@@ -40,8 +36,6 @@ Architecture:
     database transaction boundary.
 """
 
-import hashlib
-import secrets
 from collections.abc import Mapping
 from datetime import datetime, timezone
 from typing import NamedTuple
@@ -50,17 +44,10 @@ from sqlalchemy import ColumnElement, and_, delete, or_, select, tuple_
 
 from app.exceptions import NotFoundError
 from app.extensions import db
-from app.models.known_device import (
-    KNOWN_LIFETIME,
-    TRUST_LIFETIME,
-    USER_AGENT_MAX_LENGTH,
-    KnownDevice,
-)
+from app.models.known_device import USER_AGENT_MAX_LENGTH, KnownDevice
 from app.models.user import User
-
-
-#: Bytes of randomness in a device token: 256 bits (ruling plan#2406).
-_TOKEN_BYTES = 32
+from app.utils.bearer_tokens import new_token, token_hash
+from app.utils.sign_in_lifetimes import KNOWN_LIFETIME, TRUST_LIFETIME
 
 
 class BrowserStanding(NamedTuple):
@@ -75,27 +62,11 @@ class BrowserStanding(NamedTuple):
     trusted: bool
 
 
-def _token_hash(token: str) -> str:
-    """Return the stored form of *token*: its SHA-256 as lowercase hex.
-
-    No salt and no stretching, because the token is 256 random bits: there is
-    no dictionary to search, so a fast hash loses nothing a slow one would
-    keep, and it lets the lookup find the row by an index.
-
-    Args:
-        token: The browser's token, as the cookie carries it.
-
-    Returns:
-        Sixty-four lowercase hex digits.
-    """
-    return hashlib.sha256(token.encode("utf-8")).hexdigest()
-
-
 def _known(now: datetime) -> ColumnElement[bool]:
     """Return the ONE statement of when a browser is known, as SQL.
 
     Its last finished sign-in is strictly after *now* less
-    :data:`~app.models.known_device.KNOWN_LIFETIME`, so a browser thirty days
+    :data:`~app.utils.sign_in_lifetimes.KNOWN_LIFETIME`, so a browser thirty days
     old to the second is a stranger.  The bound is computed here, in Python,
     for the reason :func:`_trusted` gives.  The negation is exact, because
     ``last_signed_in_at`` is NOT NULL.
@@ -113,8 +84,8 @@ def _trusted(now: datetime) -> ColumnElement[bool]:
     """Return the ONE statement of when a device is trusted, as SQL.
 
     Trusted while it was trusted strictly after *now* less
-    :data:`~app.models.known_device.TRUST_LIFETIME` (so a device thirty days
-    old to the second is dead), AND its user's ``session_invalidated_at`` is
+    :data:`~app.utils.sign_in_lifetimes.TRUST_LIFETIME` (so a device thirty days
+    old to the second is dead), AND its user's ``trusts_ended_at`` is
     NULL or not later than the device's ``trusted_at``.  The age bound is
     computed here, in Python, where subtracting a ``timedelta`` is exact;
     adding the lifetime as an SQL interval would count calendar days in the
@@ -131,16 +102,16 @@ def _trusted(now: datetime) -> ColumnElement[bool]:
     Returns:
         A boolean clause over ``auth.known_devices``.
     """
-    invalidated_at = (
-        select(User.session_invalidated_at)
+    trusts_ended_at = (
+        select(User.trusts_ended_at)
         .where(User.id == KnownDevice.user_id)
         .scalar_subquery()
     )
     return and_(
         KnownDevice.trusted_at > now - TRUST_LIFETIME,
         or_(
-            invalidated_at.is_(None),
-            KnownDevice.trusted_at >= invalidated_at,
+            trusts_ended_at.is_(None),
+            KnownDevice.trusted_at >= trusts_ended_at,
         ),
     )
 
@@ -175,7 +146,7 @@ def _the_known_browsers(now: datetime, tokens: Mapping[int, str]) -> ColumnEleme
     """
     return and_(
         tuple_(KnownDevice.user_id, KnownDevice.token_hash).in_(
-            [(user_id, _token_hash(token)) for user_id, token in tokens.items()]
+            [(user_id, token_hash(token)) for user_id, token in tokens.items()]
         ),
         _known(now),
     )
@@ -395,11 +366,11 @@ def _renew(device: KnownDevice) -> str:
         The new token.  This is the only place it exists: the row holds its
         hash.
     """
-    new_token = secrets.token_urlsafe(_TOKEN_BYTES)
-    device.token_hash = _token_hash(new_token)
+    token = new_token()
+    device.token_hash = token_hash(token)
     device.failed_login_count = 0
     db.session.flush()
-    return new_token
+    return token
 
 
 def count_failed_attempt(device: KnownDevice, threshold: int) -> bool:
@@ -472,9 +443,9 @@ def device_named_by(
     """
     if token is None:
         return None
-    token_hash = _token_hash(token)
+    hashed = token_hash(token)
     return next(
-        (device for device in devices if device.token_hash == token_hash),
+        (device for device in devices if device.token_hash == hashed),
         None,
     )
 

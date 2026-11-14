@@ -12,12 +12,14 @@ of the 2026-04-15 security remediation plan:
 
   * F-035 (CWE-613): ``PERMANENT_SESSION_LIFETIME`` defaulted to
     Flask's 31-day fallback.  Closed by an explicit 12-hour default
-    in ``BaseConfig`` (env-overridable via ``SESSION_LIFETIME_HOURS``).
-    Note this cap only bites on a ``permanent`` session; the app
-    keeps sessions non-permanent so Flask-Login ``strong`` session
-    protection (F-038 / C-07) still wipes the session on identifier
-    drift, so the effective bound on an open session is the idle
-    timeout (F-006 above, graded in ``test_idle_timeout.py``).
+    in ``BaseConfig`` (env-overridable via ``SESSION_LIFETIME_HOURS``),
+    which Flask applies to every session cookie, permanent or not: the
+    activity hook re-signs the cookie on each signed-in request, so it
+    was a second 12-hour idle rule beside F-006's.  Since ruling
+    plan#3926 it is ``KNOWN_LIFETIME``, the thirty days a session lasts
+    after its sign-in (ruling plan#3069), so it never cuts in first and
+    the idle timeout is the one idle rule (graded in
+    ``test_idle_timeout.py``, ``TestTheOneIdleRule``).
 
   * F-045 (CWE-306): no step-up re-auth for high-value operations.
     Closed by the ``fresh_login_required`` decorator in

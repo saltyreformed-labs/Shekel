@@ -1,8 +1,12 @@
-"""C-10's configuration tests (F-035): the built-in defaults of the session lifetime, the idle
-timeout and the fresh-login window, and each one's environment override.
+"""C-10's configuration tests (F-035): Flask's cookie age, which every configuration sets from the
+thirty days a session lasts, and the built-in defaults of the idle timeout and the fresh-login
+window, with each one's environment override.
 """
 
-from datetime import timedelta
+import pytest
+
+from app.config import CONFIG_MAP
+from app.utils.sign_in_lifetimes import KNOWN_LIFETIME
 
 from ._helpers import _C10_ENV_VARS, _reload_config_with_clean_env, _restore_config_module
 
@@ -12,8 +16,25 @@ from ._helpers import _C10_ENV_VARS, _reload_config_with_clean_env, _restore_con
 # ---------------------------------------------------------------------------
 
 
+class TestFlasksCookieAge:
+    """Flask's cookie age is the thirty days a session lasts (ruling plan#3926)."""
+
+    @pytest.mark.parametrize("config_name", sorted(CONFIG_MAP))
+    def test_every_config_sets_it_from_known_lifetime(self, config_name):
+        """``PERMANENT_SESSION_LIFETIME`` is ``KNOWN_LIFETIME`` itself, in every configuration.
+
+        The same object, not an equal one: a second spelling of thirty days
+        agrees with the first only until one of them moves.  Flask refuses a
+        session cookie signed longer ago than this, permanent or not, so
+        anything shorter is an idle rule of its own beside
+        ``IDLE_TIMEOUT_MINUTES``, as its old 12-hour default was.  No
+        environment variable sets it, so there is no override to clear.
+        """
+        assert CONFIG_MAP[config_name].PERMANENT_SESSION_LIFETIME is KNOWN_LIFETIME
+
+
 class TestC10ConfigDefaults:
-    """The three C-10 config defaults are baked into ``BaseConfig``.
+    """The two C-10 config defaults the environment can move are baked into ``BaseConfig``.
 
     Each test stubs ``load_dotenv`` and clears the matching env var
     before reloading ``app.config``, so the assertion measures the
@@ -27,21 +48,6 @@ class TestC10ConfigDefaults:
     import BaseConfig directly see the env-driven values they
     expect.
     """
-
-    def test_session_lifetime_default_is_12_hours(self, monkeypatch):
-        """``PERMANENT_SESSION_LIFETIME`` defaults to 12 hours (F-035).
-
-        Without this explicit default the cookie would carry Flask's
-        31-day fallback and a stolen browser profile would have a
-        month of valid auth.
-        """
-        try:
-            reloaded = _reload_config_with_clean_env(monkeypatch)
-            assert reloaded.BaseConfig.PERMANENT_SESSION_LIFETIME == (
-                timedelta(hours=12)
-            )
-        finally:
-            _restore_config_module()
 
     def test_idle_timeout_default_is_12_hours(self, monkeypatch):
         """``IDLE_TIMEOUT_MINUTES`` defaults to 720 (12h).
@@ -77,25 +83,6 @@ class TestC10ConfigDefaults:
 
 class TestC10ConfigEnvOverride:
     """Env vars override the C-10 defaults at module import time."""
-
-    def test_session_lifetime_hours_env_override(self, monkeypatch):
-        """``SESSION_LIFETIME_HOURS=N`` is honoured."""
-        try:
-            # pylint: disable=import-outside-toplevel
-            import importlib
-            import dotenv
-            from app import config as config_module
-            monkeypatch.setattr(dotenv, "load_dotenv", lambda *_a, **_k: None)
-            monkeypatch.setenv("SESSION_LIFETIME_HOURS", "48")
-            for var in _C10_ENV_VARS:
-                if var != "SESSION_LIFETIME_HOURS":
-                    monkeypatch.delenv(var, raising=False)
-            reloaded = importlib.reload(config_module)
-            assert reloaded.BaseConfig.PERMANENT_SESSION_LIFETIME == (
-                timedelta(hours=48)
-            )
-        finally:
-            _restore_config_module()
 
     def test_idle_timeout_minutes_env_override(self, monkeypatch):
         """``IDLE_TIMEOUT_MINUTES=N`` is honoured."""

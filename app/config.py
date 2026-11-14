@@ -7,10 +7,11 @@ builds based on the FLASK_ENV environment variable.
 """
 
 import os
-from datetime import timedelta
 
 from dotenv import load_dotenv
 from sqlalchemy.pool import NullPool
+
+from app.utils.sign_in_lifetimes import KNOWN_LIFETIME
 
 # Load .env file if present (development convenience).
 load_dotenv()
@@ -163,32 +164,35 @@ class BaseConfig:
     # radius for a stolen session cookie or a forgotten signed-in
     # browser.  See audit findings F-006, F-035, F-045 / commit C-10.
 
-    # Hard cap on the lifetime of a permanent (logged-in) session
-    # cookie.  Flask's default is 31 days, which is too generous for a
-    # money app: a stolen browser profile would carry valid auth for a
-    # month with no further interaction required.  12 hours covers a
-    # normal work day.  Operators can override via SESSION_LIFETIME_HOURS
-    # in .env -- the range is intentionally wide to support short-lived
-    # test envs and longer-lived dev shells.  NOTE: this cap only bites
-    # on a ``permanent`` session, and the app deliberately leaves sessions
-    # non-permanent so Flask-Login's ``strong`` session protection
-    # (F-038 / C-07) keeps wiping the session on IP / User-Agent drift
-    # -- a permanent session is exempt from that wipe.  The effective
-    # bounds on an open session are therefore IDLE_TIMEOUT_MINUTES below
-    # and KNOWN_LIFETIME after its sign-in however active (ruling
-    # plan#3069, ``app/models/known_device.py``), not this value.
-    # Nothing signs a browser back in once its session
-    # cookie is gone: plan#2173 deleted "Remember me", whose cookie could
-    # not be revoked (ruling plan#2406).
-    PERMANENT_SESSION_LIFETIME = timedelta(
-        hours=int(os.getenv("SESSION_LIFETIME_HOURS", "12"))
-    )
+    # The oldest session cookie Flask will open: KNOWN_LIFETIME, the thirty
+    # days a session lasts after its sign-in, however active (rulings
+    # plan#3069, plan#3926).  Flask refuses a cookie signed longer ago than
+    # this whether or not the session is permanent (its
+    # ``SecureCookieSessionInterface.open_session`` hands it to itsdangerous
+    # as ``max_age``), and the activity hook in ``app/__init__.py`` re-signs
+    # the cookie on every signed-in request, so whatever this is set to is an
+    # idle limit.  Its old setting, ``SESSION_LIFETIME_HOURS`` (12), was a
+    # second idle rule beside IDLE_TIMEOUT_MINUTES: a longer idle window
+    # still signed a browser out after 12 hours.  At KNOWN_LIFETIME it never
+    # cuts in first: a signed-in session's cookie is signed no earlier than
+    # its sign-in, so one older than this is a sign-in past its thirty days,
+    # which ``load_user`` refuses by its record.  The bounds on an open
+    # session are Shekel's own, IDLE_TIMEOUT_MINUTES below and the thirty
+    # days.  Not read from the environment: the thirty days are a ruling,
+    # not a deployment's choice.  Sessions stay non-permanent, so the cookie
+    # still ends with the browser and Flask-Login's ``strong`` session
+    # protection (F-038 / C-07) keeps wiping the session on IP / User-Agent
+    # drift, which a permanent session is exempt from.  Nothing signs a
+    # browser back in once its session cookie is gone: plan#2173 deleted
+    # "Remember me", whose cookie could not be revoked (ruling plan#2406).
+    PERMANENT_SESSION_LIFETIME = KNOWN_LIFETIME
 
     # Maximum gap between authenticated requests before ``load_user``
-    # rejects the session.  This is a single-owner budget app holding
-    # only account balances and budget items -- no bank links, no
-    # account numbers, no PII beyond an email -- reached only behind
-    # full authentication.  The unattended-access blast radius of a
+    # rejects the session: the one idle rule, since Flask's cookie age
+    # above never cuts in first (ruling plan#3926).  This is a single-owner
+    # budget app holding only account balances and budget items -- no bank
+    # links, no account numbers, no PII beyond an email -- reached only
+    # behind full authentication.  The unattended-access blast radius of a
     # stale-but-still-open browser is therefore low, and a short idle
     # window mostly punishes the legitimate owner: a 30-minute timeout
     # bounced them back to a full password + MFA login whenever they

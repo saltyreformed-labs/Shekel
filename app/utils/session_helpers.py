@@ -1,26 +1,19 @@
 """Shekel Budget App -- Session lifecycle helpers.
 
-Two cooperating concerns live in this module:
+What a signed-in session carries, which ``load_user`` and
+``fresh_login_required`` consult on every authenticated request (commit
+C-10 -- F-006, F-035, F-045), and the acts that end one.
 
-  1. Force-invalidate every session for a given user EXCEPT the one
-     making the current request (commit C-08 -- F-002, F-003, F-032).
-  2. Stamp the three lifecycle timestamps that ``load_user`` and
-     ``fresh_login_required`` consult on every authenticated request
-     (commit C-10 -- F-006, F-035, F-045).
+What the session carries
+------------------------
 
-Lifecycle timestamps
---------------------
+Each signed-in session carries, in the signed session cookie:
 
-Each authenticated session carries three timestamps in the signed
-session cookie:
-
-  * ``_session_created_at`` (``SESSION_CREATED_AT_KEY``) -- the moment
-    the session was established (or refreshed after a credential
-    change).  ``load_user`` rejects the session if this value is
-    strictly older than the database-side
-    ``users.session_invalidated_at``, which is how
-    :func:`invalidate_other_sessions` makes parallel sessions
-    self-terminate.
+  * ``_session_token`` (``SESSION_TOKEN_KEY``) -- the token naming its
+    sign-in's record on the server (ruling plan#3925,
+    ``app.services.sign_in_service``).  ``load_user`` refuses a session
+    whose token names no live record of the user it loads
+    (:func:`sign_in_is_live`).
 
   * ``_session_last_activity_at``
     (``SESSION_LAST_ACTIVITY_KEY``) -- the moment of the most
@@ -35,37 +28,36 @@ session cookie:
     :func:`~app.utils.auth_helpers.fresh_login_required` decorator
     uses this to gate high-value operations: any value older than
     ``FRESH_LOGIN_MAX_AGE_MINUTES`` redirects to ``/reauth`` (F-045).
-    Set on initial login, on the password leg of MFA verify, on
-    successful ``/reauth``, and on ``change_password`` -- every code
-    path that requires the user to type a password.
+    Set on a sign-in, on a successful ``/reauth`` and on a password
+    change -- every code path that requires the user to type a password.
 
-Beside them the session carries ``_session_user_id``
-(``SESSION_USER_ID_KEY``): the id of the user whose sign-in wrote the
-stamps, and ``_signed_in_at`` (``SESSION_SIGNED_IN_AT_KEY``): the moment of
-that sign-in, which nothing after it moves.
+**A session is live exactly while its sign-in's record is** (rulings
+plan#3925, plan#3927).  The cookie is signed, but a copy of it is as good as
+the original, so the server holds a row per finished sign-in and only
+deleting the row ends the session.  Signing out deletes this browser's
+(:func:`end_this_sign_in`), and every act that signs a user out everywhere
+deletes all of theirs, through the one act
+(``app.services.sign_in_service.sign_out_everywhere``).  The two a signed-in
+browser presses, "Log out all other sessions" and Change password, keep that
+browser signed in under a new token (:func:`end_every_other_sign_in`, ruling
+plan#4010), so every copy of its old cookie dies with the rest.  Nothing on
+the account and nothing else in the cookie can keep a session alive past its
+record.
 
-**A session ends** :data:`~app.models.known_device.KNOWN_LIFETIME` **after
-its sign-in, however active** (ruling plan#3069).  The sign-in renews the
-browser's record from the same instant, so a browser that is signed in is a
-known one (plan#2772), unless ten wrong guesses on its cookie, its own or a
-copy's, removed its record.
-``_signed_in_at`` is that bound's own stamp because ``_session_created_at``
-cannot be: Change password, "log out all other sessions", turning two-factor
-off and a backup-code sign-in each move ``_session_created_at`` to now, so
-that the session which pressed it stays past the bump it writes, and none of
-them renews the browser's record.  ``load_user`` reads the sign-in through
-:func:`sign_in_is_live`.
+**A session ends** :data:`~app.utils.sign_in_lifetimes.KNOWN_LIFETIME` **after
+its sign-in, however active** (ruling plan#3069), read from the row's
+``signed_in_at``, which nothing after the sign-in moves: the act that keeps
+the pressing browser replaces its record's token and not its instant.  The
+sign-in renews the browser's record from the same instant, so a browser that
+is signed in is a known one (plan#2772), unless ten wrong guesses on its
+cookie, its own or a copy's, removed its record.
 
 **A session is signed in only by the app's own sign-in, and only as the
 user that sign-in named** (plan#2173, finding S-02 of the 2026-10-29
-security review).  Every sign-in writes the user stamp, the sign-in stamp
-and the three timestamps in the request that calls ``login_user``
-(:func:`stamp_login_session`, from ``_complete_sign_in``, the one
-``login_user`` site).  ``load_user`` reads ``_session_created_at`` only
-through :func:`sign_in_created_at`, which answers ``None`` unless the user
-stamp is the user being loaded and the stamp can be read, and refuses the
-session then; it reads a session without ``_session_last_activity_at`` as
-stale.
+security review).  The sign-in's record holds its user, and ``load_user``
+asks for a live record of the user it loads, so a token from another user's
+sign-in signs nobody in.  It reads a session without
+``_session_last_activity_at`` as stale.
 
 What the rule exists to refuse is Flask-Login's remember-me restore.  A
 "Remember me" cookie is the same ``<id>|HMAC(SECRET_KEY, id)`` value for
@@ -73,20 +65,20 @@ every remembered sign-in, and Flask-Login honours it whether or not the
 app ever issues one again: whenever the loader refuses the session's own
 user, or the session names none, Flask-Login writes the cookie's user id
 into the CURRENT session and calls the loader again.  That session may be
-empty, or it may be another user's, refused for that user but still
-carrying that user's timestamps, which would pass for the cookie's user.
-Before the user stamp both happened: a copied cookie signed a browser in
-past every "log out all sessions" (the 2026-10-29 review), and then, with
-the timestamps required, a copied cookie riding another user's
-signed-out or deactivated session signed in as the cookie's user (the
-2026-10-31 review of plan#2173, measured).  Flask-Login's own
-``_user_id`` cannot say whose sign-in wrote the stamps, because the
-restore rewrites it; the user stamp is written by the app's sign-in
-alone.  The rule refuses every such cookie ever issued, with no
-``SECRET_KEY`` rotation (ruling plan#2406, which also deleted the
-checkbox).
+empty, carrying no token, or it may be another user's, refused for that
+user but still carrying that user's token and timestamps, which would pass
+for the cookie's user were the token not asked whose sign-in it named.
+Before plan#2173 both happened: a copied cookie signed a browser in past
+every "log out all sessions" (the 2026-10-29 review), and then, with the
+timestamps required, a copied cookie riding another user's signed-out or
+deactivated session signed in as the cookie's user (the 2026-10-31 review
+of plan#2173, measured).  Flask-Login's own ``_user_id`` cannot say whose
+sign-in the session was, because the restore rewrites it; the record's
+user is written by the app's sign-in alone.  The rule refuses every such
+cookie ever issued, with no ``SECRET_KEY`` rotation (ruling plan#2406,
+which also deleted the checkbox).
 
-The three keys are deliberately distinct.  An idle-but-not-stale
+The two timestamps are deliberately distinct.  An idle-but-not-stale
 session can still complete a benign GET (``_session_last_activity_at``
 keeps refreshing as the user clicks around), but a high-value POST
 will demand a re-auth even on an actively-used session if more than
@@ -96,70 +88,20 @@ entry.
 Stamping helpers
 ----------------
 
-The four ``stamp_*`` helpers below own the only writes to those
-keys outside ``load_user`` / the ``before_request`` hook.  Each maps
-to a single semantic event so the caller cannot accidentally write
-the wrong subset:
+The two ``stamp_*`` helpers below own the only writes to those keys
+outside ``load_user`` / the ``before_request`` hook and the two acts that
+end or renew this browser's sign-in.  Each maps to a single semantic event
+so the caller cannot accidentally write the wrong subset:
 
   * :func:`stamp_login_session` -- a finished sign-in (the password POST
     with no code owed, a successful MFA verify, a trusted device's
-    password).  Writes the user stamp, the sign-in stamp and all three
-    timestamps, the set :func:`login_session_stamps` names.
+    password).  Writes the sign-in's token and both timestamps, the set
+    :func:`login_session_stamps` names.
 
-  * :func:`stamp_password_change` -- a password change on an existing
-    session.  Writes all three timestamps and leaves the user stamp and
-    the sign-in stamp alone, because a password change is not a sign-in.
-
-  * :func:`stamp_reauth_session` -- ``/reauth`` success on an
-    existing session.  Writes activity + fresh; ``_session_created_at``
-    stays at its original value so any earlier session that pre-dates
-    a future ``invalidate_other_sessions`` call still gets caught.
-
-  * :func:`stamp_session_refresh` -- ``/invalidate-sessions`` where
-    the user did not actually re-authenticate.  Writes created +
-    activity; ``_fresh_login_at`` stays untouched so a stale
-    fresh-login window does not silently extend.
-
-Invalidate-other-sessions mechanism
------------------------------------
-
-The user record carries ``session_invalidated_at``, a timezone-aware
-column updated whenever the user's other sessions must be terminated.
-On every request, ``load_user`` in ``app/__init__.py`` rejects any
-session whose cookie-side ``_session_created_at`` is strictly older
-than the database-side ``session_invalidated_at``.
-
-``invalidate_other_sessions`` writes a single ``now`` timestamp to
-both fields atomically (commit, then refresh the cookie), so:
-
-  * Every other live session for the user has a strictly older
-    ``_session_created_at`` and is rejected on its next request.
-  * The session making this request has ``_session_created_at`` equal
-    to ``session_invalidated_at`` -- the strict less-than comparison
-    in ``load_user`` is False, so the current session survives.
-
-Caller contract for :func:`invalidate_other_sessions`
------------------------------------------------------
-
-  * The caller must have already committed any state change that
-    motivates the invalidation (its one caller's: the backup-code list
-    a consumed code shortened).  The helper commits its own write
-    of ``session_invalidated_at`` and would inadvertently flush any
-    in-flight session state with it.
-
-  * The helper requires an active Flask request context because it
-    refreshes the session cookie via ``flask.session``.  Calling it
-    outside a request context is a programming error -- it will
-    surface as a ``RuntimeError`` from Flask, not a silent no-op.
-
-  * The helper assumes ``user`` is the same identity authenticated on
-    the current request.  Passing a different user would invalidate
-    that user's sessions but refresh the WRONG cookie -- the caller's
-    session would still be rejected on the next request.  Documented
-    here rather than enforced at runtime: ``flask_login.current_user``
-    is a request-local proxy and importing it into this module would
-    couple the helper to the auth blueprint's request lifecycle for
-    no defensive gain.
+  * :func:`stamp_reauth_session` -- the user typed their password again on
+    a signed-in session: a successful ``/reauth``, or a password change.
+    Writes activity + fresh; the token stays, so neither is a sign-in and
+    neither restarts the thirty days.
 
 Audit references: F-002, F-003, F-006, F-032, F-035, F-045 (commits
 C-08 and C-10 of the 2026-04-15 security remediation plan).  See
@@ -168,18 +110,13 @@ these helpers, and ``app/__init__.py:load_user`` for the read paths.
 """
 from __future__ import annotations
 
-import logging
 from datetime import datetime, timezone
 
 from flask import session as flask_session
 
 from app.extensions import db
-from app.models.known_device import KNOWN_LIFETIME
 from app.models.user import User
-from app.utils.log_events import AUTH, EVT_OTHER_SESSIONS_INVALIDATED, log_event
-
-
-logger = logging.getLogger(__name__)
+from app.services import sign_in_service
 
 
 # Session-cookie keys consumed by ``load_user``,
@@ -188,14 +125,12 @@ logger = logging.getLogger(__name__)
 # every test that pokes at the cookie share a single source of truth;
 # a typo on any one key would silently break the lifecycle invariant
 # it gates.
-SESSION_CREATED_AT_KEY = "_session_created_at"
 SESSION_LAST_ACTIVITY_KEY = "_session_last_activity_at"
 FRESH_LOGIN_AT_KEY = "_fresh_login_at"
-SESSION_USER_ID_KEY = "_session_user_id"
-SESSION_SIGNED_IN_AT_KEY = "_signed_in_at"
+SESSION_TOKEN_KEY = "_session_token"
 
 
-def login_session_stamps(now: datetime, user_id: int) -> dict[str, str]:
+def login_session_stamps(now: datetime, token: str) -> dict[str, str]:
     """Return the stamps a sign-in writes, keyed by session key.
 
     The one statement of WHICH keys a new sign-in carries:
@@ -205,22 +140,20 @@ def login_session_stamps(now: datetime, user_id: int) -> dict[str, str]:
     reaches both.
 
     Args:
-        now: Single timezone-aware UTC datetime for the sign-in stamp and
-            all three timestamps.
-        user_id: The ``auth.users.id`` being signed in.
+        now: Single timezone-aware UTC datetime for both timestamps: the
+            instant the sign-in's record holds.
+        token: The token
+            :func:`~app.services.sign_in_service.record_sign_in` returned
+            for this sign-in's record.
 
     Returns:
-        ``{key: value}``: ``_session_user_id`` as the id's string, the
-        spelling Flask-Login hands ``load_user`` (``User.get_id()``), and
-        ``_signed_in_at``, ``_session_created_at``,
+        ``{key: value}``: ``_session_token`` as the token, and
         ``_session_last_activity_at`` and ``_fresh_login_at`` as ISO
         timestamps.
     """
     iso = now.isoformat()
     return {
-        SESSION_USER_ID_KEY: str(user_id),
-        SESSION_SIGNED_IN_AT_KEY: iso,
-        SESSION_CREATED_AT_KEY: iso,
+        SESSION_TOKEN_KEY: token,
         SESSION_LAST_ACTIVITY_KEY: iso,
         FRESH_LOGIN_AT_KEY: iso,
     }
@@ -254,103 +187,136 @@ def session_stamp(key: str) -> datetime | None:
     return None if stamped.tzinfo is None else stamped
 
 
-def _stamped_as(user_id: str) -> bool:
-    """Return whether the app's own sign-in of *user_id* wrote this session's stamps.
+def session_token() -> str | None:
+    """Return this session's sign-in token, or ``None``.
 
-    The module docstring says why Flask-Login's own ``_user_id`` cannot
-    answer this.
-
-    Args:
-        user_id: The id Flask-Login asks ``load_user`` for, as a string.
-
-    Returns:
-        True when the session's user stamp is *user_id*.
-    """
-    return flask_session.get(SESSION_USER_ID_KEY) == user_id
-
-
-def sign_in_created_at(user_id: str) -> datetime | None:
-    """Return this session's ``_session_created_at`` for *user_id*, or ``None``.
-
-    The ONE door ``load_user`` reads ``_session_created_at`` through: it
-    answers only when the app's own sign-in of *user_id* wrote the session's
-    stamps, so a session another user's sign-in stamped, or none did, reads
-    as never signed in.  The stamp is read by :func:`session_stamp`, so a
-    stamp that is missing, not ISO-8601 or naive reads the same way: "sign
-    in again", never a 500.
-
-    Args:
-        user_id: The id Flask-Login asks ``load_user`` for, as a string.
+    The one read of ``_session_token``.  ``None``, never an exception, for a
+    session carrying none and for a value that is not a string, which no
+    sign-in writes: ``flask.session`` is signed but not encrypted, so no value
+    the app never wrote may answer with a 500 (as :func:`session_stamp`).
 
     Returns:
-        The session's ``_session_created_at`` as a timezone-aware datetime
-        when its user stamp is *user_id* and the stamp can be read, else
-        ``None``.
+        The token :func:`stamp_login_session` or
+        :func:`end_every_other_sign_in` wrote, or ``None``.
 
     Raises:
         RuntimeError: No active Flask request context.
     """
-    if not _stamped_as(user_id):
-        return None
-    return session_stamp(SESSION_CREATED_AT_KEY)
+    token = flask_session.get(SESSION_TOKEN_KEY)
+    return token if isinstance(token, str) else None
 
 
-def sign_in_is_live(user_id: str) -> bool:
-    """Return True while this session's sign-in of *user_id* is young enough.
+def sign_in_is_live(user_id: int) -> bool:
+    """Return True while this session's token names a live sign-in of *user_id*.
 
-    The ONE door ``load_user`` reads ``_signed_in_at`` through.  A session
-    ends :data:`~app.models.known_device.KNOWN_LIFETIME` after its sign-in,
-    however active (ruling plan#3069), at the boundary the browser's record
-    keeps (``app.services.known_device_service._known``): a sign-in thirty
-    days old to the second is too old.  The record's ``last_signed_in_at`` is
-    the same instant, so the session ends when its browser stops being known.
+    The ONE door the session's sign-in is read through, and the one rule for
+    whether a session is signed in (rulings plan#3925, plan#3927): the
+    server's record answers, never the cookie, so a session whose record a
+    sign-out deleted is refused however good its cookie looks.  ``load_user``
+    asks it, and a signed-in request asks it again once it holds its owner's
+    write lock, since a sign-out can end the record while the request waits
+    (:mod:`app.db_transaction`, ruling plan#4070).
+    The record is live for :data:`~app.utils.sign_in_lifetimes.KNOWN_LIFETIME`
+    after its sign-in, however active (ruling plan#3069), at the boundary the
+    browser's record keeps: a sign-in thirty days old to the second is too old
+    (``app.services.sign_in_service._live``).
 
-    False for a session whose user stamp is not *user_id* (as
-    :func:`sign_in_created_at`), and for a sign-in stamp that is missing or
-    cannot be read (:func:`session_stamp`): every session signed in before
-    this stamp existed is one, and is signed out once.  A stamp in the future
-    is live: a backwards clock jump moves the record's age the same way, as
-    the idle check in ``app/__init__.py`` forgives the same jump.
+    False for a session carrying no token, which every session signed in
+    before the record existed is, so each is signed out once; and for a token
+    naming another user's sign-in, which is what a remember-me restore onto
+    another user's session would carry (plan#2173).
 
     Args:
-        user_id: The id Flask-Login asks ``load_user`` for, as a string.
+        user_id: The ``auth.users.id`` being loaded.
 
     Returns:
-        True when the session's sign-in of *user_id* is less than
-        :data:`~app.models.known_device.KNOWN_LIFETIME` ago.
+        True when :func:`session_token` names a live record of *user_id*.
 
     Raises:
         RuntimeError: No active Flask request context.
     """
-    if not _stamped_as(user_id):
-        return False
-    signed_in = session_stamp(SESSION_SIGNED_IN_AT_KEY)
-    return (
-        signed_in is not None
-        and datetime.now(timezone.utc) - signed_in < KNOWN_LIFETIME
+    return sign_in_service.is_live(
+        user_id, session_token(), datetime.now(timezone.utc),
     )
 
 
-def stamp_login_session(now: datetime, user_id: int) -> None:
-    """Stamp the user, the sign-in and every lifecycle timestamp on a sign-in.
+def end_this_sign_in() -> None:
+    """End this session's sign-in on the server, then drop its token.
+
+    What ``/logout`` does before Flask-Login clears its own keys (ruling
+    plan#3925): the record goes first, committed, so every copy of this
+    cookie is refused from the commit on.  The token leaves the cookie only
+    after the commit: a commit that failed with the token already gone would
+    leave this browser unable to name the record a retry must delete, while
+    the copies stayed signed in.
+
+    A session carrying no token deletes nothing and commits nothing new.
+
+    Raises:
+        RuntimeError: No active Flask request context.
+        sqlalchemy.exc.SQLAlchemyError: The delete or its commit failed.  The
+            token stays in the cookie, so signing out again can end it.
+    """
+    sign_in_service.end_sign_in(session_token())
+    db.session.commit()
+    flask_session.pop(SESSION_TOKEN_KEY, None)
+
+
+def end_every_other_sign_in(user: User, now: datetime) -> None:
+    """End every sign-in of *user* but this browser's, and every trust; commit.
+
+    What "Log out all other sessions" and Change password do (rulings
+    plan#3927, plan#4010), through the one act
+    (:func:`~app.services.sign_in_service.sign_out_everywhere`): every other
+    browser's session is refused at its next request, and this browser's
+    sign-in goes on under a new token, with its thirty days unchanged, so a
+    copy of this browser's cookie taken before is refused too.
+
+    The commit carries whatever the caller staged before it, so a password
+    change's new hash and its security event land with the act or not at all.
+    The new token reaches the cookie only after the commit, as a sign-in's
+    does: a commit that failed leaves the old record and the old token, so
+    this browser stays signed in and the act can be pressed again.
+
+    *user* must be the user signed in on this request: the token kept is this
+    session's, and naming any other user would keep none of theirs and sign
+    this browser out.
+
+    Args:
+        user: The signed-in :class:`~app.models.user.User`, persistent.
+        now: The act's instant, which every trust ends at.
+
+    Raises:
+        RuntimeError: No active Flask request context.
+        sqlalchemy.exc.SQLAlchemyError: The act or its commit failed.  The
+            cookie is not changed.
+    """
+    token = sign_in_service.sign_out_everywhere(
+        user, keeping=session_token(), now=now,
+    )
+    db.session.commit()
+    flask_session[SESSION_TOKEN_KEY] = token
+
+
+def stamp_login_session(now: datetime, token: str) -> None:
+    """Stamp the sign-in's token and every lifecycle timestamp on a sign-in.
 
     Use only where a sign-in finishes: ``_complete_sign_in``, the one
     ``login_user`` site (every ``/login`` and ``/mfa/verify`` that signs a
     user in).  A password change re-authenticates without signing in, and
-    stamps through :func:`stamp_password_change`.  Every stamp shares a
+    stamps through :func:`stamp_reauth_session`.  Every stamp shares a
     single ``now`` value so a later subtraction against
     ``datetime.now(timezone.utc)`` cannot accidentally distinguish them.
 
     Args:
-        now: Single timezone-aware UTC datetime to write into the sign-in
-            stamp and all three timestamps: the instant the browser's
-            record was renewed at, so the session ends when the record
-            stops being known.  Reusing one value (rather than calling
-            :func:`datetime.now` for each) avoids microsecond drift
-            between the writes that an audit comparison would see as
-            clock skew.
-        user_id: The ``auth.users.id`` this sign-in is for, written as
-            the session's user stamp (:func:`sign_in_created_at`).
+        now: Single timezone-aware UTC datetime to write into both
+            timestamps: the instant the browser's record was renewed at
+            and the sign-in's record holds.  Reusing one value (rather
+            than calling :func:`datetime.now` for each) avoids microsecond
+            drift between the writes that an audit comparison would see
+            as clock skew.
+        token: The token of this sign-in's record
+            (:func:`~app.services.sign_in_service.record_sign_in`).
 
     Raises:
         RuntimeError: No active Flask request context (raised by
@@ -359,47 +325,19 @@ def stamp_login_session(now: datetime, user_id: int) -> None:
             were called from a CLI command or a background job by
             mistake.
     """
-    flask_session.update(login_session_stamps(now, user_id))
-
-
-def stamp_password_change(now: datetime) -> None:
-    """Stamp a password change on the session that made it.
-
-    The change bumps the user's ``session_invalidated_at`` to *now*, so
-    ``_session_created_at`` moves to *now* for this session to survive the
-    bump while every other one is refused.  The user just typed their
-    current password, so ``_fresh_login_at`` restarts the step-up window,
-    and the request is activity.  It is not a sign-in: the user stamp and
-    the sign-in stamp stay as they are, so a password change does not
-    restart the thirty days a session lasts (ruling plan#3069), as it
-    renews no browser's record.
-
-    Args:
-        now: The single instant the change's bump and these three stamps
-            share.
-
-    Raises:
-        RuntimeError: No active Flask request context.
-    """
-    iso = now.isoformat()
-    flask_session[SESSION_CREATED_AT_KEY] = iso
-    flask_session[SESSION_LAST_ACTIVITY_KEY] = iso
-    flask_session[FRESH_LOGIN_AT_KEY] = iso
+    flask_session.update(login_session_stamps(now, token))
 
 
 def stamp_reauth_session(now: datetime) -> None:
-    """Stamp activity and fresh-login on a successful ``/reauth``.
+    """Stamp activity and fresh-login when the user types their password again.
 
-    The session continues -- ``_session_created_at`` deliberately
-    stays at its original value so any earlier parallel session that
-    pre-dates a future :func:`invalidate_other_sessions` call still
-    gets caught.  Writing a fresh ``_session_created_at`` here would
-    make ``/reauth`` a covert "promote my session past every prior
-    invalidation point" button.
-
-    Use only on the ``/reauth`` success branch (commit C-10).  A sign-in
-    (login, MFA verify) calls :func:`stamp_login_session` instead, and a
-    password change :func:`stamp_password_change`.
+    On the ``/reauth`` success branch (commit C-10), and on a password
+    change, which checks the current password the same way: the user just
+    proved who they are, so ``_fresh_login_at`` restarts the step-up window,
+    and the request is activity.  Neither is a sign-in, so the token stays
+    and the session's thirty days run on from its own sign-in (ruling
+    plan#3069).  A sign-in (login, MFA verify) calls
+    :func:`stamp_login_session` instead.
 
     Args:
         now: Single timezone-aware UTC datetime to write into both
@@ -412,111 +350,3 @@ def stamp_reauth_session(now: datetime) -> None:
     iso = now.isoformat()
     flask_session[SESSION_LAST_ACTIVITY_KEY] = iso
     flask_session[FRESH_LOGIN_AT_KEY] = iso
-
-
-def stamp_session_refresh(now: datetime) -> None:
-    """Refresh ``_session_created_at`` after a no-re-auth invalidation.
-
-    Use on the ``/invalidate-sessions`` route, which bumps the user's
-    ``session_invalidated_at`` so every parallel session is rejected
-    on its next request.  The current session needs its
-    ``_session_created_at`` advanced past the new invalidation point
-    so it survives -- the same trick :func:`invalidate_other_sessions`
-    uses internally -- but ``_fresh_login_at`` deliberately stays
-    untouched: the user did not actually re-authenticate, only
-    pressed a "log everyone else out" button while already signed in.
-    Updating fresh-login here would let the same UI extend the
-    high-value-operation grace window indefinitely without ever
-    re-typing a password.
-
-    ``_session_last_activity_at`` is also refreshed because the user
-    just performed an authenticated action; the ``before_request``
-    hook would do the same on the very next request anyway, but
-    writing it here keeps every cookie write atomic with the DB
-    write that motivated it.
-
-    Args:
-        now: Single timezone-aware UTC datetime to write into both
-            updated keys.
-
-    Raises:
-        RuntimeError: No active Flask request context.
-    """
-    iso = now.isoformat()
-    flask_session[SESSION_CREATED_AT_KEY] = iso
-    flask_session[SESSION_LAST_ACTIVITY_KEY] = iso
-
-
-def invalidate_other_sessions(user: User, reason: str) -> None:
-    """Invalidate every session for ``user`` except the one on this request.
-
-    Stamps ``user.session_invalidated_at`` to ``datetime.now(UTC)``,
-    commits, then refreshes the request's session cookie so this
-    session survives the bump.  See module docstring for the
-    cookie-vs-DB comparison the bump targets.
-
-    Args:
-        user: The :class:`~app.models.user.User` whose other sessions
-            must be terminated.  Must be a persistent ORM instance --
-            the helper writes through SQLAlchemy and commits the
-            current session.  Must also be the same identity
-            authenticated on the current request, or the wrong cookie
-            will be refreshed (see module docstring).
-        reason: Short machine-readable label for the audit log, as its
-            one caller's ``"backup_code_consumed"``.  Required, non-empty
-            -- a blank reason defeats the audit trail this helper exists
-            to produce.
-
-    Raises:
-        ValueError: ``user`` is None, or ``reason`` is empty/None.
-            Raised before any DB or session mutation so the caller's
-            state is unchanged on misuse.
-        RuntimeError: No active Flask request context (raised by
-            ``flask.session`` on access).
-        sqlalchemy.exc.SQLAlchemyError: The commit of
-            ``session_invalidated_at`` failed.  The session cookie is
-            NOT updated in this case -- the existing cookie remains
-            valid against the un-bumped DB column, which is the safe
-            default (no surprise logouts on transient DB errors).
-
-    Side effects:
-        * Writes ``user.session_invalidated_at`` and commits.
-        * Updates ``flask.session[SESSION_CREATED_AT_KEY]``.  Does NOT
-          touch ``SESSION_LAST_ACTIVITY_KEY`` or ``FRESH_LOGIN_AT_KEY``
-          -- those are owned by :func:`stamp_login_session` /
-          :func:`stamp_reauth_session` and are the caller's
-          responsibility when the invalidation happens alongside a
-          re-auth event (e.g. the backup-code branch of
-          ``/mfa/verify`` already calls ``stamp_login_session`` before
-          this helper, so no second write is needed here).
-        * Emits a structured ``other_sessions_invalidated`` audit log
-          event tagged with ``reason`` and ``user_id``.
-    """
-    if user is None:
-        raise ValueError(
-            "invalidate_other_sessions requires a User instance; got None"
-        )
-    if not reason:
-        raise ValueError(
-            "invalidate_other_sessions requires a non-empty reason "
-            f"for the audit log; got {reason!r}"
-        )
-
-    # Single ``now`` so the DB column and the cookie carry the
-    # identical timestamp.  load_user compares ``cookie < db`` with
-    # strict less-than, so equality lets the current session survive
-    # while every earlier session is rejected.  Reusing one value
-    # also avoids a 2nd datetime.now() call drifting microseconds
-    # into the future and accidentally invalidating this session if
-    # the comparison ever changes to <=.
-    now = datetime.now(timezone.utc)
-    user.session_invalidated_at = now
-    db.session.commit()
-
-    flask_session[SESSION_CREATED_AT_KEY] = now.isoformat()
-
-    log_event(
-        logger, logging.INFO, EVT_OTHER_SESSIONS_INVALIDATED, AUTH,
-        "Other sessions invalidated",
-        user_id=user.id, reason=reason,
-    )

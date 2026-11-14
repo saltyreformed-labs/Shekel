@@ -119,7 +119,7 @@ class TestTheColumnsAreWhatTheRulingSaid:
 
         No ``expires_at`` column (``KnownDevice.trust_expires_at`` is derived
         from ``trusted_at``) and no ``revoked`` flag (ending a trust is the
-        user's ``session_invalidated_at``): each would be a stored copy of a
+        user's ``trusts_ended_at``): each would be a stored copy of a
         derived fact with nothing to keep it true.  No ``locked_until``: ten
         wrong passwords delete the row (ruling plan#2996).
         """

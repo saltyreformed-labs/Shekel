@@ -20,6 +20,7 @@ from cryptography.fernet import Fernet, MultiFernet
 
 from app.extensions import db
 from app.models.user import MfaConfig, User
+from app.services import sign_in_service
 from app.utils.digit_strings import is_ascii_digits
 
 
@@ -481,8 +482,8 @@ def clear_mfa_material(mfa_config: MfaConfig) -> None:
 
     Mutates the row in place and does NOT commit -- the clear joins
     the caller's transaction so it lands atomically with the caller's
-    own bookkeeping (the reset's ``session_invalidated_at`` bump, which
-    its caller commits).
+    own bookkeeping (the reset's sign-out of every session and trust,
+    which its caller commits).
 
     Args:
         mfa_config: The user's MfaConfig row to scrub.
@@ -523,14 +524,14 @@ def reset_two_factor(user: User) -> bool:
     owner's "Reset two-factor" on Settings > Companions does for a companion,
     stated once so the two cannot drift.  It clears every piece of stored MFA
     material and disables the row (:func:`clear_mfa_material`), and in the
-    same transaction bumps the user's ``session_invalidated_at`` on the
-    process clock, so every session of theirs ends and every trusted device
-    of theirs is forgotten: a device is trusted only while it was trusted at
-    or after that column (``app.services.known_device_service``), and a reset
-    is exactly when a trust the old authenticator vouched for must die,
-    or a browser trusted under it would skip the code of the one enrolled
-    after.  Every account must have two-factor (plan#3452), so the login gate
-    then holds the user at setup from their next sign-in.
+    same transaction signs the user out everywhere by the one act
+    (:func:`~app.services.sign_in_service.sign_out_everywhere`, ruling
+    plan#3927), keeping no browser: every session of theirs ends and every
+    trusted device of theirs is forgotten.  A reset is exactly when a trust
+    the old authenticator vouched for must die, or a browser trusted under it
+    would skip the code of the one enrolled after.  Every account must have
+    two-factor (plan#3452), so the login gate then holds the user at setup
+    from their next sign-in.
 
     A row already disabled but still carrying material (an orphaned secret
     from a manual database change, an interrupted disable, or an abandoned
@@ -554,5 +555,7 @@ def reset_two_factor(user: User) -> bool:
     ):
         return False
     clear_mfa_material(mfa_config)
-    user.session_invalidated_at = datetime.now(timezone.utc)
+    sign_in_service.sign_out_everywhere(
+        user, keeping=None, now=datetime.now(timezone.utc),
+    )
     return True

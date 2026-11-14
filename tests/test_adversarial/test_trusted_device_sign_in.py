@@ -323,7 +323,7 @@ class TestWhatTheCookieCannotDo:
 
 
 class TestWhatForgetsTheDevice:
-    """Every writer of ``session_invalidated_at`` forgets it, and so do thirty days."""
+    """Every sign-out everywhere forgets it (ruling plan#3927), and so do thirty days."""
 
     def test_a_sign_out_of_all_sessions(self, app, seed_user):
         """"Log out all other sessions", then the next sign-in asks the code."""
@@ -383,7 +383,8 @@ class TestWhatForgetsTheDevice:
     ):
         """The owner sets the companion a new password: her device asks the code.
 
-        One of the two writers on the database's clock (``now()``).
+        It used the database's clock (``now()``) before the one act moved
+        every writer onto the process's (ruling plan#3927).
         """
         companion_id = seed_companion["user"].id
         enable_mfa(db.session, companion_id)
@@ -415,9 +416,8 @@ class TestWhatForgetsTheDevice:
     ):
         """Deactivated and reactivated: her device asks the code.
 
-        The other writer on the database's clock.  Reactivation writes nothing
-        to ``session_invalidated_at``, so the deactivation's bump is what the
-        next sign-in meets.
+        Reactivation writes nothing to ``trusts_ended_at``, so the
+        trusts the deactivation ended stay ended at the next sign-in.
         """
         companion_id = seed_companion["user"].id
         enable_mfa(db.session, companion_id)

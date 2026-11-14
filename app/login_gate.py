@@ -48,7 +48,10 @@ behaviour: an anonymous POST with no token still meets the CSRF refusal
 first, and an anonymous flood on a route is still counted against the rate
 ceiling before it is bounced, exactly as when the check ran inside the view
 (a flood on NO route is limiter-exempt, as it was when Flask answered 404).
-It
+It sits after the owner's write lock too, whose hook asks a signed-in
+command's sign-in again once the lock is held and answers one that ended
+during the wait as this gate answers a signed-out request, before the gate
+runs (:mod:`app.db_transaction`, ruling plan#4070).  It
 also sits BEFORE the session-activity stamp, and that half is a pin rather
 than a safeguard: the stamp writes only for an authenticated session, so
 nothing would differ if the gate followed it -- when the check lived on the

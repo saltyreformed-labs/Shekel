@@ -9,36 +9,38 @@ expiry -- and Flask-Login restores a session from one on any request that
 carries it, whether or not the app ever issues one again.  Whenever the
 loader refuses the session's own user, or the session names none, the restore
 writes the cookie's user id into the CURRENT session and calls ``load_user``
-again.  On an empty session the ``session_invalidated_at`` check, which ran
-only when ``_session_created_at`` was present, never ran: measured on the real
-app on 2026-10-29, a client sending only a copied cookie stayed signed in
+again.  On an empty session the check of the account's sign-out time, which
+ran only when ``_session_created_at`` was present, never ran: measured on the
+real app on 2026-10-29, a client sending only a copied cookie stayed signed in
 after "log out all sessions", three requests of three.
 
 Deleting the checkbox could not reach a cookie already copied, so
-``load_user`` now refuses any session no sign-in of the loaded user stamped
-(``app.utils.session_helpers.sign_in_created_at``) and reads a session without
-``_session_last_activity_at`` as stale.  The user stamp is the half a first
-fix lacked: with the timestamps alone, a copied cookie riding ANOTHER user's
-refused session (signed out elsewhere, or deactivated) borrowed that user's
-timestamps and was signed in as the cookie's user (the 2026-10-31 review,
-measured three of three).  These tests drive the real app: a cookie minted
-exactly as Flask-Login minted every remember cookie is refused alone, before
-and after a sign-out of all sessions, and on another user's refused session;
-a signed-in session that loses a stamp is signed out; and so is one whose
-``_session_created_at`` cannot be read, never answered with a 500.
+``load_user`` refuses any session no sign-in of the loaded user started, and
+reads a session without ``_session_last_activity_at`` as stale.  Since rulings
+plan#3925 and plan#3927 what says which sign-in started it is the record its
+token names, which holds its user
+(``app.utils.session_helpers.sign_in_is_live``): an empty session carries no
+token, and another user's carries a token of that user's.  The user is the
+half a first fix lacked: with the timestamps alone, a copied cookie riding
+ANOTHER user's refused session (signed out elsewhere, or deactivated) borrowed
+that user's timestamps and was signed in as the cookie's user (the 2026-10-31
+review, measured three of three).  These tests drive the real app: a cookie
+minted exactly as Flask-Login minted every remember cookie is refused alone,
+before and after a sign-out of all sessions, and on another user's refused
+session; and a signed-in session that loses its activity stamp is signed out.
 """
 
 import pytest
 from flask_login.config import COOKIE_NAME
 from flask_login.utils import decode_cookie, encode_cookie
 
-from app.utils.session_helpers import (
-    SESSION_CREATED_AT_KEY,
-    SESSION_LAST_ACTIVITY_KEY,
-    SESSION_USER_ID_KEY,
-)
+from app.extensions import db
+from app.models.sign_in import SignIn
+from app.utils.bearer_tokens import token_hash
+from app.utils.session_helpers import SESSION_LAST_ACTIVITY_KEY
 from tests._other_user_fixtures import SEED_SECOND_USER_EMAIL, SEED_SECOND_USER_PASSWORD
 from tests._seed_owner_fixtures import OWNERS_PAGE, SEED_USER_EMAIL, SEED_USER_PASSWORD
+from tests._session_copies import token_of
 from tests._two_factor_sign_in import sign_in_from_a_trusted_browser
 
 
@@ -105,14 +107,14 @@ class TestARememberCookieSignsNobodyIn:
     """A remember-me cookie alone never reaches a signed-in page."""
 
     def test_refused_with_no_sign_out_on_record(self, app, seed_user):
-        """With ``session_invalidated_at`` never set, the cookie is refused.
+        """With ``trusts_ended_at`` never set, the cookie is refused.
 
-        The case the old loader had no answer for at all: nothing to compare
-        against, and no ``_session_created_at`` to compare.  Repeated, because
-        an attacker who discards the response's session cookie arrives with an
+        The case the loader before plan#2173 had no answer for at all: nothing
+        to compare against, and no stamp to compare.  Repeated, because an
+        attacker who discards the response's session cookie arrives with an
         empty session every time.
         """
-        assert seed_user["user"].session_invalidated_at is None
+        assert seed_user["user"].trusts_ended_at is None
         for _ in range(3):
             remembered = _remembered_client(app, seed_user["user"].id)
             _assert_signed_out(remembered.get("/dashboard"))
@@ -123,13 +125,13 @@ class TestARememberCookieSignsNobodyIn:
         """After "log out all other sessions", the cookie is still refused.
 
         The sign-out runs through the real route from a signed-in client, so
-        ``session_invalidated_at`` is set exactly as the owner's click sets
+        ``trusts_ended_at`` is set exactly as the owner's click sets
         it; the case the review measured signing in three requests of three.
         """
         response = auth_client.post("/invalidate-sessions")
         assert response.status_code == 302
-        assert seed_user["user"].session_invalidated_at is not None, (
-            "Setup failed: the sign-out did not stamp session_invalidated_at"
+        assert seed_user["user"].trusts_ended_at is not None, (
+            "Setup failed: the sign-out did not stamp trusts_ended_at"
         )
         for _ in range(3):
             remembered = _remembered_client(app, seed_user["user"].id)
@@ -152,6 +154,12 @@ class TestACookieOnAnotherUsersRefusedSessionSignsNobodyIn:
     user on that same session.  No case needs a control that the session is
     refused for its own user: were it not, the page would answer 200 as that
     user and the signed-out assertion would fail.
+
+    The refusal that decides differs.  In the three cases after a sign-out
+    or a deactivation, the act deleted B's record, so the token B's session
+    carries names no live sign-in of anyone's.  Only in
+    :meth:`test_another_users_live_sign_in` is B's record live, so there the
+    record's user is what refuses A (``sign_in_service.is_live``).
     """
 
     @pytest.mark.usefixtures("seed_second_user")
@@ -172,12 +180,14 @@ class TestACookieOnAnotherUsersRefusedSessionSignsNobodyIn:
     ):
         """A signs out of every session, then B signs in: still refused.
 
-        The order the review measured: A's ``session_invalidated_at`` is OLDER
-        than B's ``_session_created_at``, so the timestamp comparison passes
-        for A on B's session, and only the user stamp refuses it.
+        The order the review measured, when A's sign-out was a time on A's
+        account OLDER than B's session, so a timestamp comparison passed for A
+        on B's session.  No time on A's account is read now: B's own sign-out
+        everywhere deleted the record B's session's token names, so the
+        session is live for no one, A included.
         """
         assert auth_client.post("/invalidate-sessions").status_code == 302
-        assert seed_user["user"].session_invalidated_at is not None
+        assert seed_user["user"].trusts_ended_at is not None
         browser = _signed_in_client(app, SEED_SECOND_USER_EMAIL, SEED_SECOND_USER_PASSWORD)
         elsewhere = _signed_in_client(app, SEED_SECOND_USER_EMAIL, SEED_SECOND_USER_PASSWORD)
         assert elsewhere.post("/invalidate-sessions").status_code == 302
@@ -207,87 +217,56 @@ class TestACookieOnAnotherUsersRefusedSessionSignsNobodyIn:
         for _ in range(3):
             _assert_signed_out(companion_client.get("/dashboard"))
 
-    def test_the_sign_in_stamps_its_user(self, app, seed_user):
-        """The real sign-in writes the user stamp, as the id's string."""
+    def test_another_users_live_sign_in(self, app, seed_user, seed_second_user):
+        """B is refused while B's record is live; A's cookie on B's session is refused.
+
+        The case the record's user decides: the restore asks the loader for A
+        on a session whose token names a live record, B's.  B is made
+        inactive by a write of the column alone, a state no act leaves
+        (deactivation deletes her records in the same transaction), standing
+        for any refusal of B's own that leaves B's record live.
+        """
+        second = seed_second_user["user"]
+        browser = _signed_in_client(app, SEED_SECOND_USER_EMAIL, SEED_SECOND_USER_PASSWORD)
+        second.is_active = False
+        db.session.commit()
+        record = db.session.query(SignIn).filter_by(
+            token_hash=token_hash(token_of(browser)),
+        ).one_or_none()
+        assert record is not None and record.user_id == second.id, (
+            "Setup failed: B's session does not name a live record of B's"
+        )
+
+        browser.set_cookie(COOKIE_NAME, _minted_cookie(app, seed_user["user"].id))
+
+        for _ in range(3):
+            _assert_signed_out(browser.get("/dashboard"))
+
+    def test_the_sign_ins_record_holds_its_user(self, app, seed_user):
+        """The real sign-in's token names a record of the user it signed in.
+
+        That record's user is what refuses the cookie's user on another
+        user's session whose record is live
+        (:meth:`test_another_users_live_sign_in`, ``sign_in_service.is_live``).
+        """
         browser = _signed_in_client(app, SEED_USER_EMAIL, SEED_USER_PASSWORD)
 
-        with browser.session_transaction() as sess:
-            assert sess[SESSION_USER_ID_KEY] == str(seed_user["user"].id)
+        record = db.session.query(SignIn).filter_by(
+            token_hash=token_hash(token_of(browser)),
+        ).one()
+        assert record.user_id == seed_user["user"].id
 
 
 class TestASessionMissingAStampIsSignedOut:
-    """A signed-in session that loses either stamp is no longer signed in."""
+    """A signed-in session that loses its activity stamp is no longer signed in.
 
-    def test_no_session_created_at(self, auth_client):
-        """Without ``_session_created_at`` the session is refused."""
-        assert auth_client.get("/dashboard").status_code == 200
-        with auth_client.session_transaction() as sess:
-            del sess[SESSION_CREATED_AT_KEY]
-        _assert_signed_out(auth_client.get("/dashboard"))
+    One without its sign-in's token is refused too
+    (``tests/test_adversarial/test_a_session_ends_with_its_sign_in.py``).
+    """
 
     def test_no_session_last_activity_at(self, auth_client):
         """Without ``_session_last_activity_at`` the session is stale."""
         assert auth_client.get("/dashboard").status_code == 200
         with auth_client.session_transaction() as sess:
             del sess[SESSION_LAST_ACTIVITY_KEY]
-        _assert_signed_out(auth_client.get("/dashboard"))
-
-    def test_no_user_stamp(self, auth_client):
-        """Without ``_session_user_id`` the session is refused.
-
-        The shape of every session signed in before the stamp existed.
-        """
-        assert auth_client.get("/dashboard").status_code == 200
-        with auth_client.session_transaction() as sess:
-            del sess[SESSION_USER_ID_KEY]
-        _assert_signed_out(auth_client.get("/dashboard"))
-
-
-class TestASessionWhoseCreationStampCannotBeReadIsSignedOut:
-    """A ``_session_created_at`` no sign-in writes signs the session out (plan#3157).
-
-    Before ``load_user`` read the stamp through ``session_stamp``, it parsed
-    the stamp itself, and only to compare it with ``session_invalidated_at``:
-    with a sign-out of all sessions on record, a malformed stamp raised
-    ``ValueError`` and a naive one ``TypeError`` (a 500), and with none on
-    record the stamp was never parsed and the session passed.  Each stamp is
-    driven both ways.
-    """
-
-    @pytest.mark.parametrize(
-        "stamp",
-        [
-            pytest.param("not-a-timestamp", id="malformed"),
-            pytest.param("2026-03-01T12:00:00", id="naive"),
-        ],
-    )
-    @pytest.mark.parametrize(
-        "sign_out_on_record",
-        [
-            pytest.param(False, id="no-sign-out-on-record"),
-            pytest.param(True, id="a-sign-out-on-record"),
-        ],
-    )
-    def test_signed_out_and_not_a_500(
-        self, auth_client, seed_user, stamp, sign_out_on_record,
-    ):
-        """The session answers a signed-in page before, and is bounced after.
-
-        The sign-out is the owner's own click on this session, so
-        ``session_invalidated_at`` is set as the real route sets it and this
-        session survives it until its stamp is replaced: the page's 200 after
-        the click is the control that the bounce is the stamp's alone.
-        """
-        if sign_out_on_record:
-            assert auth_client.post("/invalidate-sessions").status_code == 302
-            assert seed_user["user"].session_invalidated_at is not None, (
-                "Setup failed: the sign-out did not stamp session_invalidated_at"
-            )
-        else:
-            assert seed_user["user"].session_invalidated_at is None
-        assert auth_client.get("/dashboard").status_code == 200, (
-            "Setup failed: the session is not signed in before its stamp changes"
-        )
-        with auth_client.session_transaction() as sess:
-            sess[SESSION_CREATED_AT_KEY] = stamp
         _assert_signed_out(auth_client.get("/dashboard"))

@@ -22,7 +22,6 @@ from flask_login import current_user
 from marshmallow import ValidationError as MarshmallowValidationError
 
 from app.extensions import db
-from app.models.known_device import TRUST_LIFETIME
 from app.schemas.validation import ChangePasswordSchema, ReauthSchema
 from app.services import auth_service, known_device_service
 from app.exceptions import AuthError, ValidationError
@@ -51,11 +50,8 @@ from app.utils.security_events import (
     banner_visible_for,
     record_security_event,
 )
-from app.utils.session_helpers import (
-    stamp_password_change,
-    stamp_reauth_session,
-    stamp_session_refresh,
-)
+from app.utils.session_helpers import end_every_other_sign_in, stamp_reauth_session
+from app.utils.sign_in_lifetimes import TRUST_LIFETIME
 
 logger = logging.getLogger(__name__)
 
@@ -106,32 +102,29 @@ def change_password():
             current_user, current_password, new_password,
             device=_known_device(current_user),
         )
-        db.session.commit()
-        # Invalidate all other sessions after password change.  A
-        # single ``now`` value flows into both the DB column and
-        # every cookie key so the strict-less-than comparison in
-        # ``load_user`` accepts this session and rejects every
-        # parallel one.  ``stamp_password_change`` ALSO refreshes
-        # ``_fresh_login_at``: the user just typed their current
-        # password, so this counts as a step-up re-auth and the
-        # five-minute fresh-login window restarts here.  It is not a
-        # sign-in, so the session's thirty days run on from its own
-        # (ruling plan#3069).
+        # Every other session ends after a password change, and every
+        # trust, by the one act (ruling plan#3927); this browser stays
+        # signed in under a new token, so a copy of its cookie is refused
+        # too (ruling plan#4010).  The act commits the new password with it,
+        # so the password never changes without them.  The user just typed
+        # their current password, so this counts as a step-up re-auth and
+        # the five-minute fresh-login window restarts here.  It is not a
+        # sign-in, so the session's thirty days run on from its own (ruling
+        # plan#3069).
         #
         # The same ``now`` is also written to the security-event
         # columns (audit F-091 / C-16) so the "was this you?" banner
         # uses the identical timestamp the audit_log row carries --
         # an analyst correlating the two cannot see drift between
         # the password-change moment and the banner-trigger moment.
-        # The stamp lives BEFORE the second commit so both writes
-        # land in one transaction.
+        # The event is staged BEFORE the act's commit so every write
+        # lands in one transaction.
         now = datetime.now(timezone.utc)
-        current_user.session_invalidated_at = now
         record_security_event(
             current_user, SecurityEventKind.PASSWORD_CHANGED, now=now,
         )
-        db.session.commit()
-        stamp_password_change(now)
+        end_every_other_sign_in(current_user, now)
+        stamp_reauth_session(now)
         log_event(logger, logging.INFO, EVT_PASSWORD_CHANGED, AUTH,
                   "Password changed", user_id=current_user.id)
         flash("Password changed successfully.", "success")
@@ -150,22 +143,18 @@ def change_password():
 
 @auth_bp.route("/invalidate-sessions", methods=["POST"])
 def invalidate_sessions():
-    """Invalidate all sessions for the current user except the current one.
+    """Sign the current user out of every browser but this one, and end every trust.
 
-    Sets session_invalidated_at to now, which causes load_user() to
-    reject any session created before this timestamp.  The current
-    session is refreshed via :func:`stamp_session_refresh` so that
-    ``_session_created_at`` advances past the new invalidation point
-    (and survives the loader's strict-less-than check).
+    The one act (ruling plan#3927, :func:`~app.utils.session_helpers.end_every_other_sign_in`)
+    deletes every other sign-in's record, so each of those sessions is refused
+    at its next request, and this browser's sign-in goes on under a new token,
+    so a copy of its cookie is refused too (ruling plan#4010).
     ``_fresh_login_at`` is deliberately left untouched: the user
     pressed a "log everyone else out" button without re-typing a
     password, so the step-up re-auth window must NOT silently
     extend.
     """
-    now = datetime.now(timezone.utc)
-    current_user.session_invalidated_at = now
-    db.session.commit()
-    stamp_session_refresh(now)
+    end_every_other_sign_in(current_user, datetime.now(timezone.utc))
     log_event(logger, logging.INFO, EVT_SESSIONS_INVALIDATED, AUTH,
               "All sessions invalidated", user_id=current_user.id)
     flash(

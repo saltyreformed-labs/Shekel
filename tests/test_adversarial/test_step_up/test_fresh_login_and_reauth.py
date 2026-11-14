@@ -14,8 +14,10 @@ from app.extensions import db
 from app.models.account import Account
 from app.services import mfa_service
 from app.services.mfa_service import TotpVerificationResult
-from app.utils.session_helpers import FRESH_LOGIN_AT_KEY, SESSION_CREATED_AT_KEY
+from app.utils.bearer_tokens import token_hash
+from app.utils.session_helpers import FRESH_LOGIN_AT_KEY
 from tests._seed_owner_fixtures import SEED_USER_PASSWORD, log_in_seed_user
+from tests._session_copies import sign_ins_of, token_of
 from tests._two_factor_sign_in import code_now, two_factor_secret_of
 
 
@@ -421,44 +423,32 @@ class TestReauthRoute:
                 assert stamped >= before
 
 
-class TestReauthDoesNotRefreshSessionCreatedAt:
-    """``/reauth`` MUST NOT touch ``_session_created_at``.
+class TestReauthIsNotASignIn:
+    """``/reauth`` MUST NOT touch the session's sign-in.
 
-    The motivation: writing _session_created_at on /reauth would
-    silently promote the session past every prior
-    invalidate_other_sessions bump.  An attacker who hijacked a
-    session and then used /reauth would be immune to the user's
-    later "log out all sessions" click.  The stamp_reauth_session
-    helper is structurally split from stamp_login_session for
-    exactly this reason; this test locks down the contract end-to-
-    end.
+    The motivation: a re-confirm is not a sign-in (ruling plan#3069), so it
+    neither renews the session's token nor records a new sign-in, whose
+    thirty days would start again.  The stamp_reauth_session helper is
+    structurally split from stamp_login_session for exactly this reason;
+    this test locks down the contract end-to-end.
     """
 
-    def test_reauth_does_not_advance_session_created_at(
+    def test_reauth_leaves_the_token_and_the_record(
         self, app, auth_client, seed_user,
     ):
-        """``_session_created_at`` is unchanged across a successful reauth."""
+        """The session's token, and the user's one record, are unchanged."""
         with app.app_context():
-            with auth_client.session_transaction() as sess:
-                before_created = sess.get(SESSION_CREATED_AT_KEY)
-            assert before_created is not None, (
-                "Setup error: auth_client login must stamp "
-                "_session_created_at."
-            )
+            user_id = seed_user["user"].id
+            before = token_of(auth_client)
+            assert sign_ins_of(user_id) == {token_hash(before)}
 
             resp = auth_client.post(
-                "/reauth", data=_reauth_form(seed_user["user"].id),
+                "/reauth", data=_reauth_form(user_id),
             )
             assert resp.status_code == 302
 
-            with auth_client.session_transaction() as sess:
-                after_created = sess.get(SESSION_CREATED_AT_KEY)
-            assert after_created == before_created, (
-                "/reauth must NOT update _session_created_at; doing "
-                "so would let an attacker bypass the next "
-                "invalidate_other_sessions bump.  Got "
-                f"before={before_created!r} after={after_created!r}."
-            )
+            assert token_of(auth_client) == before
+            assert sign_ins_of(user_id) == {token_hash(before)}
 
 
 class TestPasswordChangeRefreshesFreshLogin:

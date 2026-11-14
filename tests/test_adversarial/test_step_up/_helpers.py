@@ -9,13 +9,14 @@ own code (``tests._two_factor_sign_in.two_factor_secret_of``).
 
 
 # Env vars that BaseConfig consults at class-definition time for the
-# three C-10 defaults (the fourth, the remember-me cookie's lifetime, went
-# with "Remember me" at plan#2173).  The TestPermanentSessionLifetime suite clears
-# every entry here and reloads ``app.config`` so the assertions
+# C-10 defaults: the idle timeout and the fresh-login window.  The session
+# lifetime's, ``SESSION_LIFETIME_HOURS``, went when Flask's cookie age
+# became ``KNOWN_LIFETIME`` (ruling plan#3926), and the remember-me
+# cookie's with "Remember me" at plan#2173.  The config tests clear
+# every entry here and reload ``app.config`` so the assertions
 # measure the BUILT-IN defaults rather than whatever the developer
 # happens to have in their local .env.
 _C10_ENV_VARS = (
-    "SESSION_LIFETIME_HOURS",
     "IDLE_TIMEOUT_MINUTES",
     "FRESH_LOGIN_MAX_AGE_MINUTES",
 )

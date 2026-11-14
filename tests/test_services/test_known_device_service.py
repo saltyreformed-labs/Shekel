@@ -5,7 +5,7 @@ device skips only the two-factor code, and
 :mod:`app.services.known_device_service` holds the record's acts.  Every
 boundary here is exact, to the second, because the predicate is the whole of
 revocation: a device is live while it was trusted less than thirty days ago
-AND not before its user's ``session_invalidated_at``.
+AND not before its user's ``trusts_ended_at``.
 
 **The clock is frozen, not approximated.**  The service reads
 ``datetime.now(timezone.utc)`` once per act, and this directory's autouse
@@ -207,12 +207,12 @@ class TestTrustingADevice:
 
         Ruling plan#2997: no bump ends a browser's known standing, so the bump
         leaves its row for the age to purge.  The row no longer holds a live
-        trust; that half is :class:`TestTheInvalidation`'s.
+        trust; that half is :class:`TestTheEndOfTrusts`'s.
         """
         user = seed_user["user"]
         token = acts.trust(_T0, user.id)
         before = _device_of(db, token).id
-        user.session_invalidated_at = _T0 + _ONE_DAY
+        user.trusts_ended_at = _T0 + _ONE_DAY
         db.session.flush()
 
         new = _device_of(db, acts.trust(_T0 + 3 * _ONE_DAY, user.id)).id
@@ -274,16 +274,16 @@ class TestTheThirtyDays:
         assert _device_of(db, token).trust_expires_at == _T0 + _THIRTY_DAYS
 
 
-class TestTheInvalidation:
-    """Not before the user's ``session_invalidated_at``: the session rule's boundary."""
+class TestTheEndOfTrusts:
+    """Not before the user's ``trusts_ended_at``: the boundary every sign-out everywhere moves."""
 
     @pytest.mark.parametrize(
-        ("invalidated_after_trust", "live"),
+        ("ended_after_trust", "live"),
         [
             # The bump a second AFTER the trust: trusted before it, dead.
             (_ONE_SECOND, False),
-            # At the same instant: not before it, live (the strict
-            # less-than ``load_user`` applies to a session's created stamp).
+            # At the same instant: not before it, live, as the service's
+            # module docstring says.
             (timedelta(0), True),
             # A second BEFORE the trust: trusted after it, live.
             (-_ONE_SECOND, True),
@@ -291,12 +291,12 @@ class TestTheInvalidation:
         ids=["trusted-before", "trusted-at", "trusted-after"],
     )
     def test_a_device_trusted_before_the_bump_is_forgotten(
-        self, app, db, acts, seed_user, invalidated_after_trust, live,
+        self, app, db, acts, seed_user, ended_after_trust, live,
     ):
         """Trusted at T0, the bump at T0 + offset, judged a day later."""
         user = seed_user["user"]
         token = acts.trust(_T0, user.id)
-        user.session_invalidated_at = _T0 + invalidated_after_trust
+        user.trusts_ended_at = _T0 + ended_after_trust
         db.session.flush()
         moment = _T0 + _ONE_DAY
 
@@ -311,9 +311,9 @@ class TestTheInvalidation:
             assert listed == []
 
     def test_no_bump_ever_leaves_the_device_live(self, app, db, acts, seed_user):
-        """A NULL ``session_invalidated_at`` forgets nothing."""
+        """A NULL ``trusts_ended_at`` forgets nothing."""
         user = seed_user["user"]
-        assert user.session_invalidated_at is None
+        assert user.trusts_ended_at is None
         token = acts.trust(_T0, user.id)
 
         assert acts.find(_T0 + _ONE_DAY, user.id, token) is not None
@@ -324,7 +324,7 @@ class TestTheInvalidation:
         """The predicate reads the device's OWN user's column."""
         user_id = seed_user["user"].id
         token = acts.trust(_T0, user_id)
-        seed_second_user["user"].session_invalidated_at = _T0 + _ONE_SECOND
+        seed_second_user["user"].trusts_ended_at = _T0 + _ONE_SECOND
         db.session.flush()
 
         assert acts.find(_T0 + _ONE_DAY, user_id, token) is not None

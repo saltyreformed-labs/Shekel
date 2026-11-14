@@ -79,11 +79,15 @@ class User(UserMixin, TimestampMixin, db.Model):
         db.Boolean, nullable=False, default=True,
         server_default=db.text("true"),
     )
-    # Timestamp of most recent "log out all sessions" or password change event.
-    # The user loader compares this against the session creation time to reject stale sessions,
-    # and a trusted device made before it is trusted no longer
-    # (app/services/known_device_service.py, plan#2173).
-    session_invalidated_at = db.Column(db.DateTime(timezone=True), nullable=True)
+    # The instant of this user's most recent sign-out everywhere: a device
+    # trusted before it is trusted no longer
+    # (app/services/known_device_service.py, plan#2173).  Its one writer is
+    # app.services.sign_in_service.sign_out_everywhere (ruling plan#3927),
+    # which ends the user's sessions by deleting their sign-in records, so no
+    # session is judged by this column: ending trusts is its one job, and its
+    # name says so (ruling plan#3952).  NULL until the first such act: no
+    # trust has ended.
+    trusts_ended_at = db.Column(db.DateTime(timezone=True), nullable=True)
     role_id = db.Column(
         db.Integer,
         db.ForeignKey("ref.user_roles.id", ondelete="RESTRICT"),

@@ -69,7 +69,15 @@ def board_cards(tracker: Tracker, numbers: Iterable[int]) -> dict[int, Card]:
     Raises:
         TrackerError: when a step above one of them does not exist (:func:`_command.with_cards`).
     """
-    cards = tracker.cards(numbers)
+    return _with_steps_above(tracker, tracker.cards(numbers))
+
+
+def _with_steps_above(tracker: Tracker, cards: dict[int, Card]) -> dict[int, Card]:
+    """``cards`` with every step above each, each read by its number (:func:`_state.above`).
+
+    Raises:
+        TrackerError: when one of them does not exist (:func:`_command.with_cards`).
+    """
     while wanted := {card.parent for card in cards.values()} - {None, *cards}:
         with_cards(tracker, cards, wanted)
     return cards
@@ -168,6 +176,11 @@ def filing_pass(tracker: Tracker, card: Card, item: str, first: bool, added: boo
     """``quill file``'s regroup (ruling plan#4012) once ``card``, a step or question it files, is
     on the board as ``item``, over the board's order, its cards (:func:`board_cards`) and the
     suggestions (:func:`pending_suggestions`) read now, each line indented under the filing's.
+    ``card`` is read as linked under the step its ``parent`` names, a leaf's split step, or
+    under none, whatever a read just after its link shows, as :func:`priority_pass` reads the
+    Priority it just set: a read lagging the link would read a leaf as a top-level step no
+    Priority ranks and move it out of its split step's place (R-BAL179; the review's L4,
+    plan#3906), and ``_tracker`` waits for no such read, seen not to lag in one sample.
     With ``added``, this run put it on the board, at the bottom, so an order read that does not
     list it yet lags that add and is planned with it there (this module's docstring); a leaf
     placed in its split step's place, or a card an earlier run put on the board, is planned where
@@ -177,7 +190,9 @@ def filing_pass(tracker: Tracker, card: Card, item: str, first: bool, added: boo
     order = tracker.board.order()
     if added and card.number not in dict(order):
         order.append((card.number, item))
-    cards = board_cards(tracker, [number for number, _ in order])
+    cards = tracker.cards([*(number for number, _ in order), card.number])
+    cards[card.number] = replace(cards[card.number], parent=card.parent)
+    cards = _with_steps_above(tracker, cards)
     held = pending_suggestions(tracker, (number for number, _ in order), cards)
     sent = (_placing(order, cards, held, card.number, item) if first
             else _planned(order, cards, held))

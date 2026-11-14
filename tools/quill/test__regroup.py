@@ -473,6 +473,14 @@ def test_a_paused_card_at_the_end_of_its_group_stays_at_that_end():
     assert _after(rows) == ([1, 3, 4, 2, 5], [Move(2, "PVTI_2", (4, "PVTI_4"))])
 
 
+def test_a_paused_card_at_the_end_of_its_group_stays_there_as_a_card_joins_the_group():
+    """A paused card between High plan#1 and Medium plan#3 sits at the end of the High rows:
+    High plan#4, below the Medium card, moves up above the paused card, which stays at the end
+    of the High rows (ruling plan#4015; the review's L2, plan#3906)."""
+    rows = [_card(1, HIGH), _card(2, ON_HOLD), _card(3, MEDIUM), _card(4, HIGH)]
+    assert _after(rows) == ([1, 4, 2, 3], [Move(4, "PVTI_4", (1, "PVTI_1"))])
+
+
 def test_a_paused_card_at_the_bottom_stays_at_the_end_of_its_group():
     """A paused card at the bottom, under the last High card, stays under it when a Medium card
     above them moves: of the two single moves, the one keeping the High card in place, and the

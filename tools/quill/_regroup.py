@@ -80,7 +80,7 @@ from itertools import groupby, takewhile
 from operator import itemgetter
 from typing import NamedTuple
 
-from tools.quill._fields import HIGH, RANKS, URGENT
+from tools.quill._fields import HIGH, RANKS
 from tools.quill._next import ranked, turn
 from tools.quill._state import held_at
 from tools.quill._tracker import Card
@@ -88,10 +88,11 @@ from tools.quill._tracker import Card
 #: The group of a card no Priority ranks on which quill's suggestion of Urgent or High is
 #: pending (:data:`_WAITS`): it waits just under the High cards (rulings plan#4017, plan#4096).
 _WAITING = "waiting"
-#: The suggestions that put a card no Priority ranks in :data:`_WAITING`.
-_WAITS = (URGENT, HIGH)
 #: Where :data:`_WAITING` falls among ``quill next``'s ranks: just after High.
 _AFTER_HIGH = RANKS.index(HIGH) + 1
+#: The suggestions that put a card no Priority ranks in :data:`_WAITING`: the ranks above it,
+#: Urgent and High.
+_WAITS = RANKS[:_AFTER_HIGH]
 #: The board's groups, top first, a card's group (:func:`_group`) its index here (rulings
 #: plan#4016, plan#4096): ``quill next``'s ranks (:data:`_fields.RANKS`) with :data:`_WAITING`
 #: just after High, then None, every other card no Priority ranks.
@@ -140,13 +141,14 @@ def undecided(numbers: Iterable[int], cards: Mapping[int, Card]) -> list[int]:
 
 def _group(number: int, cards: Mapping[int, Card], places: Mapping[int, int],
            suggested: Mapping[int, str]) -> int:
-    """Card ``number``'s group on the board, its index in :data:`_GROUPS`: its rank as ``quill
-    next`` reads it (:func:`_next.turn`, ``places`` the board's rows), or, when no Priority
-    ranks it, :data:`_WAITING` for a suggestion ``suggested`` holds of Urgent or High and the
-    last group for any other or none.  ``cards`` holds the card and every step above it."""
-    rank = turn(number, cards, places).group
-    if rank < len(RANKS):
-        return _GROUPS.index(RANKS[rank])
+    """Card ``number``'s group on the board, its index in :data:`_GROUPS`: when a Priority ranks
+    it (:func:`_next.ranked`, as :func:`undecided` reads it), its rank as ``quill next`` reads it
+    (:func:`_next.turn`, ``places`` the board's rows); else :data:`_WAITING` for a suggestion
+    ``suggested`` holds of Urgent or High and the last group for any other or none.  ``cards``
+    holds the card and every step above it, and the regroup may move it (:func:`movable`), so
+    nothing pauses it and a Priority that ranks it is one of ``quill next``'s ranks."""
+    if ranked(cards[number], cards):
+        return _GROUPS.index(RANKS[turn(number, cards, places).group])
     return _GROUPS.index(_WAITING if suggested.get(number) in _WAITS else None)
 
 

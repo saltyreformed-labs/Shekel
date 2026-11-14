@@ -9,8 +9,9 @@ of the no-Priority group, and a card set Low at the bottom goes above it (findin
 ``quill file`` filing leaves the board grouped too, a new card suggested Urgent or High waiting
 under the High cards and one suggested Medium or Low at the bottom, a card it just added and an
 order read does not list yet planned at the bottom, a leaf in its split step's place (R-BAL179),
-and a filing run again after a cut places its card again; the weekly update's card is left out
-of the moves and placed first in the High group after them (ruling plan#4014), which
+though a read lags its link, and a filing run again after a cut places its card again; the
+weekly update's card is left out of the moves and placed first in the High group after them,
+and placed again when a move goes above it (ruling plan#4014), which
 ``test__waits.py`` drives through ``sync``.  Over the in-memory tracker
 (:class:`_fake.FakeTracker`) and the ``code`` fixture's real git; the board's own back-to-back
 move and its read back of several placements over scripted GitHub answers, and the fake
@@ -509,6 +510,23 @@ def test_a_leaf_the_order_read_does_not_list_yet_keeps_its_split_steps_place(
     assert tracker.board.items == [1, 7, 6, 4] and not _board_moves(tracker)
 
 
+def test_a_leaf_a_read_shows_unlinked_yet_keeps_its_split_steps_place(code, tmp_path, monkeypatch):
+    """The leaf of High plan#2 goes into its place, above High plan#6, and every read of it by its
+    number lags its link: the pass reads it under plan#2, as its filing linked it, so it ranks
+    High and moves nothing, where reading it as a top-level step no Priority ranks would move it
+    to the bottom (R-BAL179; the review's L4, plan#3906)."""
+    tracker = FakeTracker()
+    for number, priority in ((1, "High"), (2, "High"), (6, "High"), (4, "Medium")):
+        tracker.add(number, priority=priority)
+    read = tracker.cards
+    monkeypatch.setattr(tracker, "cards", lambda numbers: {
+        number: replace(card, parent=None) if number == 7 else card
+        for number, card in read(numbers).items()})
+    assert run(tracker, code, *leaf_filing(tmp_path, "Leaf", parent="plan#2")) == 0
+    assert tracker.cards_by_number[7].parent == 2 and tracker.cards([7])[7].parent is None
+    assert tracker.board.items == [1, 7, 6, 4] and not _board_moves(tracker)
+
+
 def test_the_updates_card_is_left_out_of_the_moves_and_placed_first_in_high_after_them(capsys):
     """Ruling plan#4014: the weekly update's card, High plan#4, at the bottom on a board a drag
     left Low plan#2 above Medium plan#3: the regroup's move over the board without it is sent
@@ -521,6 +539,20 @@ def test_the_updates_card_is_left_out_of_the_moves_and_placed_first_in_high_afte
     assert tracker.board.items == [1, 4, 3, 2]
     assert _regroup_lines(capsys.readouterr().out) == [
         "  " + _moved(3, "after plan#1"), "  " + _moved(4, "after plan#1", ruling="plan#4014")]
+
+
+def test_the_updates_card_first_in_high_is_placed_again_when_a_move_goes_above_it(capsys):
+    """Ruling plan#4014: the weekly update's card, High plan#9, first in High under Urgent plan#1
+    already, on a board a drag left High plan#3 under Medium plan#2: the regroup moves plan#3
+    under plan#1, above the card, so the card is placed again, under plan#1, and ends first in
+    High, where leaving it would end it second (the review's L1, plan#3906)."""
+    tracker = FakeTracker()
+    for number, priority in ((1, "Urgent"), (9, "High"), (2, "Medium"), (3, "High")):
+        tracker.add(number, priority=priority)
+    filing_pass(tracker, tracker.cards_by_number[9], "PVTI_9", True, False)
+    assert tracker.board.items == [1, 9, 3, 2]
+    assert _regroup_lines(capsys.readouterr().out) == [
+        "  " + _moved(3, "after plan#1"), "  " + _moved(9, "after plan#1", ruling="plan#4014")]
 
 
 def test_a_card_a_person_gave_a_priority_while_filed_is_the_regroups(code, tmp_path):

@@ -28,7 +28,7 @@ since the tool's rename).
 from __future__ import annotations
 
 import argparse
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from tools.ci.arcs import ARCS
@@ -892,10 +892,10 @@ def _finish(tracker: Tracker, card: Card, filing: _Filing, before: Card | None) 
     board place, or a task's under a step the board holds (:func:`_command.on_board`, rulings
     plan#1814, plan#1842), at the bottom, where GitHub adds it; then, for a step or question,
     the regroup's pass (:func:`_regroup_pass.filing_pass`, rulings plan#4012, plan#4096), which
-    groups it by its suggestion like every card and puts the weekly update's card first in the
-    High group (:attr:`_Filing.first`, ruling plan#4014), on every run, before the mark comes
-    off; a task is first placed in its card's order of its tasks, above ``before`` when the
-    filing names one (:func:`_tasks.place`, ruling plan#1868)."""
+    groups it by its suggestion like every card, a leaf as linked under its split step, and puts
+    the weekly update's card first in the High group (:attr:`_Filing.first`, ruling plan#4014),
+    on every run, before the mark comes off; a task is first placed in its card's order of its
+    tasks, above ``before`` when the filing names one (:func:`_tasks.place`, ruling plan#1868)."""
     kind, parent, item, added = filing.draft.kind, filing.parent, card.board_item, False
     _attach(tracker, card, kind, parent)
     if kind == TASK:
@@ -922,7 +922,8 @@ def _finish(tracker: Tracker, card: Card, filing: _Filing, before: Card | None) 
     elif on_board(kind, parent):
         print("  board: already on it")
     if kind in IN_ORDER:
-        filing_pass(tracker, card, item, filing.first, added)
+        linked = replace(card, parent=parent.number) if kind == "step" and parent else card
+        filing_pass(tracker, linked, item, filing.first, added)
     tracker.unmark(card.number)
     print(f"  unmarked: plan#{card.number}'s filing is finished")
 

@@ -29,9 +29,10 @@ door production uses, and the same five properties survive the move:
 1. **The lock is taken, and taken BEFORE the owner's data is read.**  A lock
    acquired after the read serialises nothing -- the loser has already read the
    same pre-state.  Graded as strongly as the design allows: every statement
-   the request issues before the lock names no table but ``auth.users`` and
-   ``ref.user_roles`` -- the signed-in user's row and the role row joined to
-   it, read to sign the request in (the check is by TABLE, not by row) -- and
+   the request issues before the lock names no table but ``auth.users``,
+   ``ref.user_roles`` and ``auth.sign_ins`` -- the signed-in user's row, the
+   role row joined to it and whether the session's sign-in record is live,
+   read to sign the request in (the check is by TABLE, not by row) -- and
    the door's own reads (the ledger, the governing assertion, the opening, the
    movements) are asserted to happen at all, so the ordering cannot pass over
    a run that read nothing.
@@ -85,10 +86,13 @@ from tests._test_helpers import (
     took_advisory_lock,
 )
 
-#: What a statement issued BEFORE the owner's lock may touch: the signed-in
-#: user's row (and the role row joined to it), read to sign the request in.
-#: Anything else before the lock is a read the lock does not cover.
-_READABLE_BEFORE_THE_LOCK = ("auth.users", "ref.user_roles")
+#: What a statement issued BEFORE the owner's lock may touch, all of it read to
+#: sign the request in: the signed-in user's row (and the role row joined to
+#: it), and whether the session's sign-in record is live, asked as one EXISTS
+#: so no record is loaded (``app.services.sign_in_service.is_live``, ruling
+#: plan#4068).  The lock is keyed on the signed-in user's owner, so neither can
+#: follow it.  Anything else before the lock is a read the lock does not cover.
+_READABLE_BEFORE_THE_LOCK = ("auth.users", "ref.user_roles", "auth.sign_ins")
 
 #: The application's schemas: a ``schema.table`` word in a statement names a
 #: table only when its first part is one of these.
@@ -201,8 +205,8 @@ class TestASaveLocksBeforeItReadsTheOwnersData:
         The door's compare-then-append (ruling R-EQ) and the reconcile it
         reaches (the account anchor sync) are both read-modify-writes, so both
         of their reads are named, and every statement before the lock is
-        checked to name no table but the two a sign-in reads (the user's row
-        and the role row joined to it).
+        checked to name no table but the three a sign-in reads (the user's
+        row, the role row joined to it and the sign-in's record).
         """
         assert seed_periods_today
         with app.app_context():

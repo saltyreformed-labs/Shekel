@@ -94,9 +94,12 @@ statement: the page's own work was **eight** statements either way, and the
 machinery around it was **seven** and is now **two** -- one ``SET
 TRANSACTION`` and one user load.  (Eleven rather than ten in total for the
 first GET after a POST, on both sides, because that one inherits an open
-transaction and pays the refusal probe; the saving is the same.)  With the
-rate limiter on, a signed-in browser that sends its device cookie pays one
-more, the limits' read of its record's id (:mod:`app.rate_limits`).
+transaction and pays the refusal probe; the saving is the same.)  Since
+plan#2171 a signed-in request pays a third, the check of whether its sign-in
+record is live (:func:`app.services.sign_in_service.is_live`): three, measured
+2026-11-14 on the same ``GET /settings``.  With the rate limiter on, a
+signed-in browser that sends its device cookie pays one more, the limits'
+read of its record's id (:mod:`app.rate_limits`).
 ``request_started`` is sent by ``Flask.full_dispatch_request``
 immediately before ``preprocess_request``, which is what runs the
 before-request hooks, so a receiver there precedes every one of them by
@@ -727,7 +730,10 @@ def _lock_the_open_transaction(user_id: "int | None", owner_id: "int | None") ->
     The only rows that transaction has read before the lock are *user_id*'s
     own, loaded to sign the request in or to find the account, and the role
     row joined to it (``User.role``, ``lazy="joined"``: the same statement);
-    at ``/login``, also which users the browser's cookies name known records
+    wherever the session names a user, whether its sign-in record is live,
+    asked through ``load_user`` as one EXISTS
+    (:func:`app.services.sign_in_service.is_live`), so no record is loaded
+    (ruling plan#4068); at ``/login``, also which users the browser's cookies name known records
     of, read as user ids alone
     (:func:`app.services.known_device_service.known_to`), so no record is
     loaded; and on a signed-in request, for the rate limits, which record the

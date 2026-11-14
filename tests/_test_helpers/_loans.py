@@ -509,14 +509,13 @@ def create_loan_account(
     # origination forward -- which is before the wall clock in every fixture
     # here.
     #
-    # Origination alone was measured too tight.  An installment may be settled
-    # EARLY, before the loan closes, and the developer ruled that legitimate:
-    # ``test_balance_at.test_loan_origination.TestLoanNotYetOriginated`` pays a
-    # 2026-05-01 installment on 2026-03-10 against a loan originating
-    # 2026-04-15, which is the ONE shape in which the origination guard is the
-    # guard doing the work.  So the bound is the earliest of the origination,
-    # the assertion and the owner's calendar, which is what the shared helper
-    # already computes.
+    # Once the terms below exist, this record decides nothing: a configured
+    # loan's books open on its origination (ruling plan#3954), and money moved
+    # on or before that day is refused (ruling plan#4040; it said an
+    # installment settled before the loan closes was legitimate until then).
+    # The record is still opened this early because the account exists before
+    # its terms, as at the setup door, and until they are written its record
+    # is the boundary the account is judged by.
     open_books_before_the_first_assertion(
         db_session, account, also_before=origination_date,
     )

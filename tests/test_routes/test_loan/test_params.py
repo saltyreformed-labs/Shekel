@@ -7,8 +7,6 @@ import re
 from datetime import date
 from decimal import Decimal
 
-import pytest
-
 from app.models.loan_params import LoanParams
 from app.models.loan_features import RateHistory
 from app.models.ref import AccountType
@@ -432,44 +430,24 @@ class TestRecordTrackingStartRoute:
             (e.anchor_date, e.anchor_balance) for e in events
         }
 
-    @pytest.mark.parametrize(
-        ("paid_on", "period_index", "offered", "absent", "accepted_on"), [
-            # Before the Feb 27 origination, and ON it: no date this door
-            # accepts comes before the payment.
-            (date(2026, 2, 19), 3,
-             b"No tracking start can come before that payment, since the loan "
-             b"originated on Feb 27, 2026; use Record balance",
-             b"Choose a date before", None),
-            (date(2026, 2, 27), 4,
-             b"No tracking start can come before that payment, since the loan "
-             b"originated on Feb 27, 2026; use Record balance",
-             b"Choose a date before", None),
-            # The day after: this door records a tracking start ON the
-            # origination day, so Feb 27 is still a date it accepts -- and
-            # following the flash there records one (the setup door's gap is
-            # its own: there the origination day states nothing).
-            (date(2026, 2, 28), 4,
-             b"Choose a date before Feb 28, 2026, or use Record balance",
-             b"No tracking start can come before that payment",
-             date(2026, 2, 27)),
-        ],
-    )
-    def test_offers_an_earlier_date_only_when_this_door_accepts_one(
+    def test_offers_the_origination_day_when_the_payment_is_the_day_after(
         self, auth_client, seed_user, db, seed_periods,
-        paid_on, period_index, offered, absent, accepted_on,
     ):
-        """This door offers an earlier date only where it accepts one; else Record balance alone.
+        """A payment the day after the origination leaves the origination day to offer.
 
-        The door accepts dates from the origination on, so where the
-        payment's money moved on or before the origination the flash cannot
-        ask for an earlier date: it offers Record balance alone.  $500 moves
-        into an account before its loan is set up with an origination of Feb
-        27 and no stated balance (the payment guard, ruling R-C, has no loan
-        terms to compare against until then); a Mar 1 tracking start is
-        refused and appends nothing.  A payment the day after the origination
-        still leaves the origination day, so that flash offers it, and a
-        tracking start posted there is recorded.
+        $500 moves into an account on Feb 28, before its loan is set up with
+        an origination of Feb 27 and no stated balance (the payment guard,
+        ruling R-C, has no loan terms to compare against until then); a Mar 1
+        tracking start is refused and appends nothing.  This door records a
+        tracking start ON the origination day, so the flash offers Feb 27, and
+        a tracking start posted there is recorded (the setup door's gap is its
+        own: there the origination day states nothing).  A payment ON or
+        before the origination never reaches this door: setting the loan up
+        over it is refused (ruling plan#4040), its books opening on its
+        origination.
         """
+        paid_on, period_index = date(2026, 2, 28), 4
+        accepted_on = date(2026, 2, 27)
         loan_type = db.session.query(AccountType).filter_by(name="Auto Loan").one()
         acct = account_service.create_account(
             account_service.AccountSpec(
@@ -509,25 +487,27 @@ class TestRecordTrackingStartRoute:
             follow_redirects=True,
         )
         assert resp.status_code == 200
-        assert offered in resp.data
-        assert absent not in resp.data
+        assert (
+            b"Choose a date before Feb 28, 2026, or use Record balance"
+            in resp.data
+        )
+        assert b"No tracking start can come before that payment" not in resp.data
         db.session.expire_all()
         assert self._tracking_start_events(db.session, acct) == []
 
-        if accepted_on is not None:
-            followed = auth_client.post(
-                f"/accounts/{acct.id}/loan/tracking-start",
-                data={
-                    "anchor_date": accepted_on.isoformat(),
-                    "anchor_balance": "29000.00",
-                },
-            )
-            assert followed.status_code == 302
-            db.session.expire_all()
-            assert [
-                (e.anchor_date, e.anchor_balance)
-                for e in self._tracking_start_events(db.session, acct)
-            ] == [(accepted_on, Decimal("29000.00"))]
+        followed = auth_client.post(
+            f"/accounts/{acct.id}/loan/tracking-start",
+            data={
+                "anchor_date": accepted_on.isoformat(),
+                "anchor_balance": "29000.00",
+            },
+        )
+        assert followed.status_code == 302
+        db.session.expire_all()
+        assert [
+            (e.anchor_date, e.anchor_balance)
+            for e in self._tracking_start_events(db.session, acct)
+        ] == [(accepted_on, Decimal("29000.00"))]
 
     def test_a_projected_payment_does_not_refuse(
         self, auth_client, seed_user, db, seed_periods,

@@ -768,29 +768,27 @@ class TestLoanSetup:
             for anchor_date, balance, _ in self._stored_anchors(db, account)
         ] == [(date(2026, 3, 16), Decimal("25000.00"))]
 
-    @pytest.mark.parametrize(("paid_on", "period_index"), [
-        (date(2026, 2, 19), 3),  # before the Feb 27 origination
-        (date(2026, 2, 27), 4),  # ON the origination day
-        (date(2026, 2, 28), 4),  # the day after: no day falls between them
-    ])
     def test_setup_asks_for_the_origination_day_when_no_later_day_comes_before_the_payment(
-        self, auth_client, seed_user, db, seed_periods, paid_on, period_index,
+        self, auth_client, seed_user, db, seed_periods,
     ):
-        """A payment before, on, or the day after the origination leaves the origination day.
+        """A payment the day after the origination leaves the origination day.
 
-        $500 moves into the account before its loan is set up with an
-        origination of Feb 27 (the payment guard, ruling R-C, has no loan
-        terms to compare against until then): on Feb 19, on Feb 27 itself, or
-        on Feb 28.  In each case no day falls strictly between the
-        origination and the payment, so every stated day that would record a
-        tracking start is on or after the payment, and one before the
-        origination is refused as pre-origination: the sentence asks for the
-        origination day itself -- which states nothing beyond the original
+        $500 moves into the account on Feb 28, before its loan is set up with
+        an origination of Feb 27 (the payment guard, ruling R-C, has no loan
+        terms to compare against until then).  No day falls strictly between
+        the origination and the payment, so every stated day that would
+        record a tracking start is on or after the payment, and one before
+        the origination is refused as pre-origination: the sentence asks for
+        the origination day itself -- which states nothing beyond the original
         amount -- and names Record balance for the correction, rather than
         asking for "a date before" the payment, which would send the owner
         to the origination day without saying the stated balance is then
         dropped.  Following it configures the loan with no tracking start.
+        A payment ON or before the origination is refused at setup instead
+        (ruling plan#4040): the loan's books open on its origination, so that
+        money is already inside its opening.
         """
+        paid_on, period_index = date(2026, 2, 28), 4
         account = self._unconfigured_auto_loan(
             seed_user, db, "Paid Around Its Origination", opened_on=date(2026, 1, 2),
         )

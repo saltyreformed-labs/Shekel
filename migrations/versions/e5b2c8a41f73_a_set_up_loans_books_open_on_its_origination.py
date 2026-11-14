@@ -56,7 +56,7 @@ accepts for a loan whose origination precedes its opening record, which is
 both production loans.  Task plan#3964 gives both tiers one producer; the two
 land in one pull request.
 
-Review: Claude Opus 5.5, 2026-11-13 -- it drops and recreates the EIGHT books
+Review: the developer, 2026-11-13 (ruling plan#4039) -- it drops and recreates the EIGHT books
 boundary constraint triggers (three of them new here:
 ``ck_books_open_after_loan_terms``, ``ck_books_open_after_account_retype``,
 ``ck_books_open_after_type_retype``), it REPLACES the body of

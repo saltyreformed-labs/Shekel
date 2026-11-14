@@ -99,8 +99,10 @@ limit_request_field_size = 8190
 # Shared mode (deploy/docker-compose.prod.yml):  the externally-
 #   managed shared nginx and the app meet on the pinned
 #   ``shekel-frontend`` bridge (172.32.0.0/24); the override env
-#   block sets FORWARDED_ALLOW_IPS to that CIDR.  cloudflared is on
-#   that bridge too, so the list covers it as well.
+#   block sets FORWARDED_ALLOW_IPS to that CIDR.  The CIDR also
+#   holds the bridge's gateway, so it trusts more than nginx alone;
+#   plan#3922 narrows it to nginx's pinned address.  cloudflared is
+#   not on this bridge (ruling plan#3942).
 #
 # Local-only invocations of ``gunicorn --config gunicorn.conf.py``
 # (rare; ``flask run`` is the dev path) must export

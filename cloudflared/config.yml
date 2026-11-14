@@ -32,8 +32,9 @@
 #            tunnel --config /etc/cloudflared/config.yml run shekel
 #
 #   4. Run it as a service container from the host compose stack,
-#      attached to the bridge that carries the reverse proxy
-#      (shared mode: shekel-frontend; see deploy/README.md).
+#      attached to a bridge it shares with the reverse proxy alone
+#      (shared mode: edge-tunnel, ruling plan#3942; see
+#      deploy/README.md).
 #
 #   A bare-host install (cloudflared binary + service manager) also
 #   works with this same file; adjust the config path accordingly.
@@ -68,8 +69,8 @@ credentials-file: /root/.cloudflared/<TUNNEL_ID>.json
 # Bind the cloudflared Prometheus metrics endpoint to loopback only.
 # The default behaviour binds 0.0.0.0:2000 inside the container, which
 # is reachable from every other peer on whatever Docker bridge
-# cloudflared is attached to (homelab and shekel-frontend in the
-# maintainer's deployment).  An attacker landing in any sibling
+# cloudflared is attached to (edge-tunnel, with nginx and Alloy, in
+# the maintainer's deployment).  An attacker landing in any sibling
 # container could poll /metrics for tunnel health, request counts,
 # and connection state -- operational data that should not leak
 # laterally even within the trusted homelab subnet.
@@ -112,9 +113,10 @@ ingress:
   #
   # Shared mode (operator's homelab):
   #   cloudflared runs as a Docker container on the
-  #   ``shekel-frontend`` bridge and the shared /opt/docker/nginx
-  #   container is also on that bridge.  Replace ``localhost:80``
-  #   with ``nginx:80`` (Docker DNS resolves the service name).
+  #   ``edge-tunnel`` bridge, which it shares with the shared
+  #   /opt/docker/nginx container (and Alloy) alone, ruling
+  #   plan#3942.  Replace ``localhost:80`` with ``nginx:80``
+  #   (Docker DNS resolves the service name).
   #   Example shared-mode rule:
   #
   #     - hostname: <DOMAIN>
@@ -127,7 +129,7 @@ ingress:
     originRequest:
       # Nginx listens on plain HTTP -- no TLS on the origin.
       # cloudflared and Nginx are colocated on loopback (bundled
-      # mode) or on the dedicated shekel-frontend bridge (shared
+      # mode) or on the dedicated edge-tunnel bridge (shared
       # mode), so the cleartext hop is bounded to a single trust
       # zone -- there is no path through which a network adversary
       # can intercept it.  Audit finding F-061 (bundled mode) /

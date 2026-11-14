@@ -341,10 +341,11 @@ Spot-check the merged config:
 
 When ready to recreate the stack:
 
-    # (a) Recreate the shared Nginx + cloudflared to pick up the
-    #     shekel-frontend network attachment from /opt/docker/docker-compose.yml.
+    # (a) Recreate the shared Nginx to pick up the shekel-frontend
+    #     network attachment from /opt/docker/docker-compose.yml.
+    #     cloudflared is not on that bridge (ruling plan#3942).
     cd /opt/docker
-    docker compose up -d nginx cloudflared
+    docker compose up -d nginx
 
     # (b) Validate Nginx is happy with the new vhost before reload.
     docker exec nginx nginx -t

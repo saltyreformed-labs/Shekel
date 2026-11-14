@@ -107,12 +107,13 @@ docker network create shekel-frontend \
     --subnet 172.32.0.0/24
 ```
 
-The shared `/opt/docker/nginx` and `/opt/docker/cloudflared` containers must also join
-`shekel-frontend` (in addition to the `homelab` network they already use). Edit
-`/opt/docker/docker-compose.yml` and add the service-level `networks:` and the file-level
-`networks: shekel-frontend: external: true` block, then `docker compose up -d nginx cloudflared` to
-recreate them. The detailed step list is in `deploy/docker-compose.prod.yml` under "OPERATOR
-PRE-FLIGHT".
+The shared `/opt/docker/nginx` container must also join `shekel-frontend` (in addition to the
+networks it already uses). Edit `/opt/docker/docker-compose.yml` and add the service-level
+`networks:` entry and the file-level `networks: shekel-frontend: external: true` block, then
+`docker compose up -d nginx` to recreate it. The detailed step list is in
+`deploy/docker-compose.prod.yml` under "OPERATOR PRE-FLIGHT". `/opt/docker/cloudflared` does NOT
+join `shekel-frontend`: it reaches nginx over a bridge of its own, `edge-tunnel`, shared with nginx
+and Alloy alone, and nginx trusts `CF-Connecting-IP` from its one address there (ruling plan#3942).
 
 `/opt/docker/cloudflared/config.yml` must also be updated so the Shekel ingress rule routes through
 `http://nginx:80` instead of straight at `http://shekel-prod-app:8000` (audit finding F-063 closed

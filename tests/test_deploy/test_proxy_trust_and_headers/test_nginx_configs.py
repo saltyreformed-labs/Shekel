@@ -166,10 +166,12 @@ class TestSharedNginxRealIpAndTokens:
     def test_set_real_ip_from_shared_frontend_subnet(
         self, conf_text: str
     ) -> None:
-        """The shared Nginx must trust the ``shekel-frontend``
-        bridge subnet (where cloudflared meets it after the F-063
-        WAN-path fix).  Trusting only this CIDR keeps a co-tenant on
-        the homelab bridge from forging CF-Connecting-IP.
+        """The shared Nginx still trusts the ``shekel-frontend``
+        bridge subnet, which C-33 meant to carry cloudflared's traffic.
+        Measured on 2026-11-13 it never did (plan#2181): cloudflared
+        reached nginx over homelab, and the subnet admits only the
+        bridge gateway and the app.  plan#2169 removes the entry and
+        changes this expectation (CLAUDE.md rule 5).
         """
         assert (
             f"set_real_ip_from {SHARED_FRONTEND_CIDR};" in conf_text

@@ -334,13 +334,14 @@ CASH_LEDGER_NON_PRODUCERS = frozenset({
     # here sums a movement.
     "books_start",
     "required_books_start",
-    # ``_books`` (X-f3c-2b, N-378; X-f3c-2b-2a; X-f3c-2b-2b, N-383) -- FIVE
-    # REFUSALS stating the books boundary, each returning nothing, plus the
-    # three DAYS they bound against.
+    # ``_books`` (X-f3c-2b, N-378; X-f3c-2b-2a; X-f3c-2b-2b, N-383; card
+    # plan#2436) -- SIX REFUSALS stating the books boundary, each returning
+    # nothing, plus the three DAYS they bound against.
     # (It read "FOUR ... two DAYS" until the counts were taken against the
     # module: it states five ``reject_*`` and three ``earliest_*``, and its
     # own docstring says so.  A count in a ruling is a claim like any
-    # other.)  A
+    # other.  The sixth, ``reject_loan_start_on_or_after_records``, is the
+    # loan setup door's, task plan#4090.)  A
     # refusal compares ONE date against a stored row, and "may this day be
     # recorded" is the opposite direction from "what is held at T"; the
     # readers are a bare ``MIN`` over a date column, public because the
@@ -365,6 +366,12 @@ CASH_LEDGER_NON_PRODUCERS = frozenset({
     "reject_books_open_on_or_after_matched_lines",
     "earliest_matched_line_day",
     "reject_books_open_on_or_after_movements",
+    # ``reject_loan_start_on_or_after_records`` (card plan#2436, task
+    # plan#4090) reads ``earliest_recorded_movement_day`` and
+    # ``earliest_matched_line_day``, compares each against a loan's submitted
+    # origination and returns nothing: the restatement refusals' two bounds,
+    # asked from the loan setup door.
+    "reject_loan_start_on_or_after_records",
     # ``reject_line_before_books_open`` (X-f3c-2b-2b) takes a LOADED
     # opening rather than an account id, which is the one shape difference
     # in this group and does not change the ruling: it is handed the fact

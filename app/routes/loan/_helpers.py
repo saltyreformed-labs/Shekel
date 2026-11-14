@@ -116,9 +116,10 @@ def render_loan_setup(
 
     **A refused POST the form itself can remedy comes back exactly as typed**
     (review 7c of plan step recurrence:R16-c-2): the schema's refusal, the
-    term cap's, the pre-origination one and the tracking-start one each pass
-    the POST's own form as *submitted*, and every field the template draws
-    reads its posted string from it.  Until then a refusal re-rendered the
+    term cap's, the pre-origination one, the loan's start one (card
+    plan#2436) and the tracking-start one each pass the POST's own form as
+    *submitted*, and every field the template draws reads its posted string
+    from it.  Until then a refusal re-rendered the
     defaults below over a blank form, so an owner who followed a refusal by
     changing only the date re-submitted the prefilled balance instead of the
     one typed -- measured: a prefilled ``0.00`` configured a loan owing

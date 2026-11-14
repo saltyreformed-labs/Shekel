@@ -220,9 +220,11 @@ def record_settle_day(
     would otherwise be free to leave.
 
     **It refuses a day the account's books do not reach** (plan step X-f3c-2b,
-    finding **N-378**).  An opening equity is the balance at the CLOSE of
-    ``budget.account_openings.opened_on``, so a movement dated on or before
-    that day is already inside it and the fold would carry it a second time.
+    finding **N-378**).  Where the books start holds the balance at the CLOSE
+    of its day -- an opening record's ``opened_on``, or a configured loan's
+    origination (card plan#2436, ruling **plan#3954**;
+    :func:`app.services.cash_ledger.books_start`) -- so a movement dated on or
+    before that day is already inside it and would be counted a second time.
     Asked BEFORE either column is assigned, so a refused call leaves the row
     untouched -- the same ordering
     :func:`app.services.status_seam.apply_status_change` keeps for its own
@@ -246,8 +248,8 @@ def record_settle_day(
             which is what a revert, a cancel and an emptied date box each mean.
 
     Raises:
-        ValidationError: When *settle_day*'s day is on or before the account's
-            opening day (from
+        ValidationError: When *settle_day*'s day is on or before the day the
+            account's books start (from
             :func:`app.services.cash_ledger.reject_movement_before_books_open`).
     """
     if settle_day is None:

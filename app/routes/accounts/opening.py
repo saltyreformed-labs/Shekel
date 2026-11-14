@@ -79,8 +79,10 @@ logger = logging.getLogger(__name__)
 #: The refusal an amortizing account's restatement gets, shared by the card
 #: (which is not rendered at all) and the POST (which answers it).  A loan's
 #: opening is ``LoanParams.original_principal`` and nothing reads its
-#: ``budget.account_openings`` row while the loan is configured, so a door here
-#: would report success and move no figure -- the twin of
+#: ``budget.account_openings`` row while the loan is configured: its books
+#: start on its origination, the answer every reader of a books start asks
+#: ``cash_ledger.books_start`` for (card plan#2436).  So a door here would
+#: report success and move no figure -- the twin of
 #: ``_door_meaning.LOAN_ANCHOR_REFUSAL`` one fact over.
 LOAN_OPENING_REFUSAL = (
     "A loan's opening is its original principal, recorded with the loan's "

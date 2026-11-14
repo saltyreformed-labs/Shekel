@@ -263,6 +263,7 @@ from ._books import (
     reject_books_open_on_or_after_matched_lines,
     reject_books_open_on_or_after_movements,
     reject_line_before_books_open,
+    reject_loan_start_on_or_after_records,
     reject_movement_before_books_open,
 )
 from ._events import (
@@ -365,6 +366,7 @@ __all__ = [
     "transfer_template_pricing_load_options",
     "valuation_load_options",
     "reject_line_before_books_open",
+    "reject_loan_start_on_or_after_records",
     "reject_movement_before_books_open",
     "required_books_start",
     "settled_amounts_by_key",

@@ -785,8 +785,9 @@ class TestLoanSetup:
         to the origination day without saying the stated balance is then
         dropped.  Following it configures the loan with no tracking start.
         A payment ON or before the origination is refused at setup instead
-        (ruling plan#4040): the loan's books open on its origination, so that
-        money is already inside its opening.
+        (ruling plan#4040; ``test_a_loans_start_is_refused_on_its_records.py``):
+        the loan's books open on its origination, so that money is already
+        inside its opening.
         """
         paid_on, period_index = date(2026, 2, 28), 4
         account = self._unconfigured_auto_loan(
@@ -906,20 +907,27 @@ class TestLoanSetup:
         parser.feed(page.decode())
         return parser.values, parser.checked
 
-    @pytest.mark.parametrize(("stated_on", "term", "refusal"), [
+    @pytest.mark.parametrize(("stated_on", "term", "originated", "refusal"), [
         # The schema's: a stated day after today (2026-03-20).
-        ("2026-03-21", "60", b"Please correct the highlighted errors"),
+        ("2026-03-21", "60", "2025-01-01",
+         b"Please correct the highlighted errors"),
         # The term cap's: over the Auto Loan type's 120 months.
-        ("2026-03-01", "121", b"Term cannot exceed 120 months"),
+        ("2026-03-01", "121", "2025-01-01", b"Term cannot exceed 120 months"),
         # The pre-origination one: a stated day before the origination.
-        ("2024-12-31", "60", b"Balance date cannot be before the loan"),
+        ("2024-12-31", "60", "2025-01-01",
+         b"Balance date cannot be before the loan"),
         # The tracking-start one (ruling R-R115): on or after the Feb 27
         # payment.
-        ("2026-03-01", "60",
+        ("2026-03-01", "60", "2025-01-01",
          b"A payment into this loan already moved money on Feb 27"),
+        # The loan's start one (card plan#2436, ruling plan#4040): an
+        # origination on the Feb 27 payment's own day.
+        ("2026-03-01", "60", "2026-02-27",
+         b"This loan cannot start on 2026-02-27"),
     ])
     def test_a_refused_setup_comes_back_as_typed(
-        self, auth_client, seed_user, db, seed_periods, stated_on, term, refusal,
+        self, auth_client, seed_user, db, seed_periods, stated_on, term,
+        originated, refusal,
     ):
         """Every refusal the form itself can remedy re-renders every field as typed.
 
@@ -944,7 +952,8 @@ class TestLoanSetup:
         )
         db.session.commit()
         typed = {
-            **self._setup_form(stated_on), "term_months": term, "is_arm": "true",
+            **self._setup_form(stated_on, origination_date=originated),
+            "term_months": term, "is_arm": "true",
         }
 
         resp = auth_client.post(

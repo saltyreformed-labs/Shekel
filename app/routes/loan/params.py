@@ -11,6 +11,7 @@ handlers that flash and return to the dashboard.
 """
 
 import logging
+from collections.abc import Mapping
 from datetime import date, timedelta
 from decimal import Decimal
 
@@ -19,7 +20,7 @@ from flask_login import current_user
 
 from app import ref_cache
 from app.enums import InterestAccrualConventionEnum
-from app.exceptions import TrackingStartRefused
+from app.exceptions import TrackingStartRefused, ValidationError
 from app.extensions import db
 from app.models.account import Account
 from app.models.loan_features import RateHistory
@@ -36,7 +37,7 @@ from app.routes.loan._helpers import (
     _update_schema,
     render_loan_setup,
 )
-from app.services import loan_anchor_service, loan_posting_service
+from app.services import cash_ledger, loan_anchor_service, loan_posting_service
 from app.services.anchor_service import AnchorTrueUpOutcome
 from app.utils.account_validation import (
     INVALID_COLLATERAL_LINK,
@@ -94,6 +95,14 @@ def create_params(account_id):
     (:func:`_stage_stated_balance_or_refuse`).  That
     refusal rolls the write back and THEN re-renders, as the schedule doors
     do (``routes/pay_periods.py``).
+
+    **An origination on or after a day the account already records money
+    moving, or has matched a bank line on, is refused before anything is
+    written** (card plan#2436, rulings **plan#3954** and **plan#4040**;
+    :func:`_setup_refusal`): the terms move the account's books start to the
+    origination, and a loan's original amount is what it owed at the end of
+    that day, so the money would be counted twice.  No stated day can
+    remedy it, which is why it is asked before the stated balance is.
     """
     account = get_or_404(Account, account_id)
     if account is None:
@@ -117,7 +126,7 @@ def create_params(account_id):
 
     data = _create_schema.load(request.form)
 
-    refusal = _setup_refusal(data, account_type)
+    refusal = _setup_refusal(account, data, account_type)
     if refusal is not None:
         flash(refusal, "danger")
         return render_loan_setup(account, account_type, request.form)
@@ -286,11 +295,13 @@ def _stage_stated_balance_or_refuse(
     return None
 
 
-def _setup_refusal(data, account_type):
+def _setup_refusal(
+    account: Account, data: Mapping[str, object], account_type: AccountType,
+) -> str | None:
     """Return the sentence refusing a schema-valid setup submission, or ``None``.
 
-    The two rules the schema cannot state because each reads something beyond
-    the fields themselves:
+    The three rules the schema cannot state because each reads something
+    beyond the fields themselves:
 
     * the account TYPE's term cap (``ref.account_types.max_term_months``; the
       schema's universal 600 is the outer bound);
@@ -301,9 +312,23 @@ def _setup_refusal(data, account_type):
       loan that HAS originated: one originating after today has no date on or
       before today that could satisfy it, and asserts nothing.  Today is the
       DISPLAY day, the civil day the owner is typing on, the same day the
-      form's date defaulted to.
+      form's date defaulted to;
+    * the loan's START (card plan#2436, rulings **plan#3954** and
+      **plan#4040**).  The terms move the account's books start to
+      ``origination_date``, so an origination on or after a day the account
+      already records money moving, or has matched a bank line on, would put
+      that money inside the loan's original amount.  Payments can be recorded
+      before a loan is set up, so this is an ordinary case, and the database
+      refuses it at COMMIT with no sentence; the refusal is
+      :func:`app.services.cash_ledger.reject_loan_start_on_or_after_records`.
+      It is asked last, after the two rules that read only the fields.
+
+    Asked before anything is written, so a refusal leaves nothing to roll
+    back.
 
     Args:
+        account: The loan :class:`Account` being configured, owned by the
+            current user (``create_params`` resolved it by owner).
         data: The schema-loaded setup form.
         account_type: The account's :class:`AccountType` row.
 
@@ -319,6 +344,12 @@ def _setup_refusal(data, account_type):
             "Balance date cannot be before the loan's origination "
             f"date ({origination_date.isoformat()})."
         )
+    try:
+        cash_ledger.reject_loan_start_on_or_after_records(
+            account.id, origination_date,
+        )
+    except ValidationError as refused:
+        return str(refused)
     return None
 
 

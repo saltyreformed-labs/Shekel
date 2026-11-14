@@ -32,16 +32,22 @@ either side:
   unbounded by the rule above, which is every investment, retirement and
   property account in production.  Reproduced on the developer's own Roth IRA,
   it fabricated ``$22,809.02`` of investment return and discarded the opening
-  the owner had just stated.
+  the owner had just stated;
+* a LOAN may not be set up as starting on or after a day its account already
+  records money moving or has matched a bank line on --
+  :func:`reject_loan_start_on_or_after_records`, the sentence the loan setup
+  door gets (card plan#2436, rulings **plan#3954** and **plan#4040**).  The
+  terms move the account's books start to the loan's origination, so that
+  money would be inside the loan's original amount.
 
-**They are five questions about one COMPARISON, and the comparison is stated
+**They are six questions about one COMPARISON, and the comparison is stated
 once** -- :func:`~app.utils.books_boundary.books_hold`, which every refusal
 here asks and nothing here re-spells.  It is defined in that pure leaf since
 plan step ``pay_calendar:C18-a`` (ruling **R-PC85**), because the recurrence
 walk asks it too and may not import this package; it is imported here and
-re-exported through ``cash_ledger`` under its old name.  Each reads a
+re-exported through ``cash_ledger`` under its old name.  Each bound reads a
 different table to answer it, so the QUERIES cannot be collapsed; the test
-that decides them can, and leaving it open-coded five times
+that decides them can, and leaving it open-coded six times
 is how the ``<`` / ``<=`` distinction ruling **R-HG** turns on comes to differ
 between two of them.  That is why they are read together: "two statements of
 one rule that differ silently is the failure this arc names as its own root
@@ -75,7 +81,7 @@ makes "the service refuses what the database refuses" true by construction
 rather than by two authors agreeing.
 
 Services-boundary discipline (``CLAUDE.md`` Architecture): plain data in, plain
-values out; no Flask symbol, no writes, no clock read.  The five REFUSALS
+values out; no Flask symbol, no writes, no clock read.  The six REFUSALS
 raise :class:`~app.exceptions.ValidationError` and do nothing else; the three
 day readers and the one predicate beside them return a value and raise nothing.
 """
@@ -513,6 +519,73 @@ def reject_books_open_on_or_after_matched_lines(
         "row that explains the line.  Open the books on a day before it, or "
         "undo that match first."
     )
+
+
+def reject_loan_start_on_or_after_records(account_id: int, day: date) -> None:
+    """Refuse setting up *account_id*'s loan as starting on or after its records.
+
+    The OPENING side of the boundary at the loan setup door
+    (``routes/loan/params.create_params``; card plan#2436, ruling
+    **plan#3954**).  Setting up a loan's terms moves its books start to the
+    loan's origination (:func:`~._openings.books_start`), and a loan's full
+    amount is what it owed at the CLOSE of that day (ruling **plan#4040**), so
+    money recorded on or before it is already inside that amount.  Payments
+    can be recorded into an account before its loan is set up, which is why
+    the door asks this before it writes anything.
+
+    **The same two bounds the restatement door asks, read the same way**:
+    :func:`earliest_recorded_movement_day` and
+    :func:`earliest_matched_line_day`, the database constraint's own row sets,
+    compared by :func:`books_hold`.  The database refuses the same state when
+    the terms are inserted (``ck_books_open_after_loan_terms``), so this is
+    what stops an owner meeting that refusal at COMMIT with no sentence.  It
+    is not the restatement twins asked again because their sentences say "open
+    the books", and a loan has no books an owner opens: its start is the
+    origination date on the form.
+
+    **Movements first, then matched lines**, the order the database reports
+    them in (``opening_infrastructure._openings._openings_predicates_for``):
+    only the first failure is named, so which is asked first decides which
+    repair the owner is sent to.
+
+    It is asked under ``no_autoflush`` for the reason its twins are: the
+    caller has staged nothing yet, and a flush here could only emit some
+    other half-written row of the caller's.
+
+    Args:
+        account_id: The account being set up as a loan.  Assumed already
+            scoped to the acting user by the caller: the message names the
+            account's own earliest recorded day.
+        day: The loan's origination date, as submitted.
+
+    Raises:
+        ValidationError: When the account records money moving, or has
+            matched a bank line, on or before *day*.  A 400: the day arrives
+            from a date box, and the message names both the offending value
+            and the bound it broke.
+    """
+    with db.session.no_autoflush:
+        moved_on = earliest_recorded_movement_day(account_id)
+        matched_on = earliest_matched_line_day(account_id)
+    if moved_on is not None and not books_hold(day, moved_on):
+        raise ValidationError(
+            f"This loan cannot start on {day.isoformat()}: this account "
+            f"already records money moving on {moved_on.isoformat()}, and a "
+            "loan's original amount is what it owed at the end of its first "
+            "day -- so that money would be counted twice.  Enter an "
+            f"origination date before {moved_on.isoformat()}, or re-date the "
+            "movement first."
+        )
+    if matched_on is not None and not books_hold(day, matched_on):
+        raise ValidationError(
+            f"This loan cannot start on {day.isoformat()}: you have matched a "
+            f"bank line your bank posted on {matched_on.isoformat()} in this "
+            "account, and a loan's original amount is what it owed at the end "
+            "of its first day -- so that money would be counted twice, once "
+            "in the loan's amount and once in the row that explains the "
+            f"line.  Enter an origination date before {matched_on.isoformat()}, "
+            "or undo that match first."
+        )
 
 
 def earliest_assertion_day(account_id: int) -> "date | None":

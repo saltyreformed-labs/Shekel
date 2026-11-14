@@ -95,8 +95,13 @@ class AmortizingAccountOpeningError(ValueError):
     ``budget.account_openings`` row -- every account does, because the fold
     falls through to it for an amortizing account with no
     :class:`~app.models.loan_params.LoanParams` -- and **nothing reads it while
-    the loan is configured**.  A door that wrote there would report success and
-    move no figure, which is the silent no-op this arc exists to delete.
+    the loan is configured**: its balance starts from its terms, and its books
+    start on its origination (card plan#2436, ruling **plan#3954**), the
+    answer every reader of a books start asks the one producer for
+    (:func:`app.services.cash_ledger.books_start`;
+    ``budget.account_books_opened_on`` in SQL).  A door that wrote there would
+    report success and move no figure, which is the silent no-op this arc
+    exists to delete.
 
     The twin of :class:`~app.services.anchor_service.AmortizingAccountAnchorError`,
     and refused for the same reason at the same layer: a loan's balance is

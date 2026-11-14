@@ -62,9 +62,12 @@ falls through to the replay over this fold.  That state is ordinary (create a
 Mortgage, do not finish the loan-params form), so a loan without a row would
 raise on a live screen.  With every account carrying one, absence is
 unreachable and :func:`app.services.cash_ledger.account_opening_fact` refuses it
-rather than falling back to a fabricated ``$0.00``.  A CONFIGURED loan never
-reads its row: its opening is ``LoanParams.original_principal``, materialised
-by ``loan_loaders.synthesize_origination_anchor``.
+rather than falling back to a fabricated ``$0.00``.  A CONFIGURED loan's row
+is read by nothing: its balance starts from ``LoanParams.original_principal``,
+materialised by ``loan_loaders.synthesize_origination_anchor``, and its books
+start on its ``origination_date`` (card plan#2436, ruling **plan#3954**), the
+answer every reader of a books start asks the one producer for
+(``cash_ledger.books_start``; ``budget.account_books_opened_on`` in SQL).
 
 **It carries the DAY as well as the amount, and fixing only the amount would
 have left half of defect 1 alive.**  ``opened_on`` is the civil day the books
@@ -100,6 +103,9 @@ merely refused is :mod:`app.opening_infrastructure`: deferrable constraint
 triggers over ``budget.transactions``, ``budget.transaction_entries`` and this
 table, so the rule holds in BOTH directions -- an opening cannot be restated
 FORWARD past a movement either -- and against a writer nobody enumerated.
+**A configured loan is bounded by its origination instead** (card plan#2436):
+the boundary asks where an account's books START, and this row is where they
+start for every account but a configured loan.
 
 **Append-only, latest governs -- the same shape as its two siblings.**
 :class:`~app.models.account.AccountAnchorHistory` records what a bank said and
@@ -127,9 +133,12 @@ and why ``id`` alone is monotone under the owner's write lock.
 
 Reads: :func:`app.services.cash_ledger.account_opening_fact`, and its
 non-raising twin :func:`app.services.cash_ledger.governing_account_opening` for
-the write door.  **Writes: ONE function in ``app/``**,
-:func:`app.services.opening_service.stage_account_opening` -- reached by
-``account_service.create_account`` for the origination and by
+the write door; and, for where an account's books start,
+:func:`app.services.cash_ledger.books_start` and its raising twin
+``required_books_start`` (``budget.account_books_opened_on`` in SQL), which
+read it for every account but a configured loan.  **Writes: ONE function in
+``app/``**, :func:`app.services.opening_service.stage_account_opening` --
+reached by ``account_service.create_account`` for the origination and by
 ``opening_service.apply_opening_restatement`` for an owner correcting the
 figure, both ``user_declared``.  That single-writer shape is ruling **R-ES**
 applied to this table (plan step X-f3c-2b-2a): the did-this-change compare and

@@ -20,6 +20,8 @@ from datetime import date, timedelta
 from decimal import Decimal
 from types import SimpleNamespace
 
+import pytest
+
 from app.routes.loan._helpers import band_chart_dates
 from app.services.cash_ledger._loan_installment import _installment_cash
 from app.services.loan_ledger import (
@@ -32,6 +34,7 @@ from app.services.loan_ledger import (
 )
 from app.services.loan_ledger._charges import contract_charges
 from app.services.installment_calendar import (
+    final_installment_date,
     first_installment_date,
     installment_after,
     installment_dates,
@@ -42,6 +45,11 @@ from tests.oracles.loan_monthly_composition import accrual_charge, rate_period
 
 _ZERO = Decimal("0.00")
 _RATE = Decimal("0.06")          # $50.00 a month on $10,000.00
+_PRINCIPAL = Decimal("10000.00")
+#: The 360 months the hand-stated rate period amortizes over
+#: (``tests.oracles.loan_monthly_composition.rate_period``), so a calendar
+#: and its periods describe one loan.
+_TERM_MONTHS = 360
 
 
 def _calendar(
@@ -49,10 +57,12 @@ def _calendar(
     payment_day: int = 1,
     periods=None,
 ) -> LoanCalendar:
-    """A loan's contract terms: one 6% rate period and no escrow unless stated."""
+    """A loan's terms: $10,000.00 over 360 months, one 6% period, no escrow unless stated."""
     return LoanCalendar(
         origination_date=origination,
         payment_day=payment_day,
+        term_months=_TERM_MONTHS,
+        original_principal=_PRINCIPAL,
         periods=periods if periods is not None else [
             rate_period(_RATE, start_date=origination),
         ],
@@ -106,6 +116,50 @@ class TestInstallmentDates:
         assert installment_dates(date(2026, 1, 30), 30, date(2026, 3, 30)) == [
             date(2026, 2, 28), date(2026, 3, 30),
         ]
+
+
+class TestFinalInstallmentDate:
+    """The term's last installment is the term-th date the one calendar rule lists."""
+
+    def test_a_due_day_of_31_ends_on_the_31st_after_a_february(self):
+        """Originated Dec 31, 2026, due the 31st, 3 months: Jan 31, Feb 28, Mar 31.
+
+        The last is the 31st, not the 28th a month step from the clamped
+        February would keep.
+        """
+        assert final_installment_date(date(2026, 12, 31), 31, 3) == date(2027, 3, 31)
+
+    def test_a_term_ending_in_february_ends_on_its_last_day(self):
+        """Two months from Dec 31, 2026: Feb 28, 2027; from Dec 31, 2027: leap Feb 29."""
+        assert final_installment_date(date(2026, 12, 31), 31, 2) == date(2027, 2, 28)
+        assert final_installment_date(date(2027, 12, 31), 31, 2) == date(2028, 2, 29)
+
+    def test_a_one_month_term_ends_on_the_first_installment(self):
+        """Term 1: the last installment is the first, the month after origination."""
+        assert final_installment_date(date(2026, 1, 15), 1, 1) == first_installment_date(
+            date(2026, 1, 15), 1,
+        ) == date(2026, 2, 1)
+
+    @pytest.mark.parametrize("origination", [date(2026, 12, 31), date(2027, 1, 31)])
+    @pytest.mark.parametrize("payment_day", [1, 15, 28, 29, 30, 31])
+    @pytest.mark.parametrize("term_months", [1, 2, 13, 14, 360])
+    def test_it_is_the_term_th_date_installment_dates_lists(
+        self, origination, payment_day, term_months,
+    ):
+        """Listed through the last installment, the calendar holds exactly the term.
+
+        Every due day crosses the Februaries a term reaches: from Dec 31,
+        2026 the leap Feb 29, 2028 is the 14th installment; from Jan 31, 2027
+        the FIRST installment is a February (the 28th for a day past it), so
+        a month step from it, which keeps its clamp, ends a day 29-31 loan off
+        its due day.  A date an installment early or late lists one date too
+        few or too many; one in the right month but off the due day ends on
+        another date.
+        """
+        final = final_installment_date(origination, payment_day, term_months)
+        listed = installment_dates(origination, payment_day, final)
+        assert len(listed) == term_months
+        assert listed[-1] == final
 
 
 class TestContractCharges:
@@ -573,6 +627,8 @@ class TestAPaymentIsPricedOnItsInterval:
         return LoanCalendar(
             origination_date=self._ORIGINATION,
             payment_day=22,
+            term_months=_TERM_MONTHS,
+            original_principal=_PRINCIPAL,
             periods=periods if periods is not None else [
                 rate_period(_RATE, start_date=self._ORIGINATION,
                             period_pi=Decimal("200.00")),

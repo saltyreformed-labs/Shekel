@@ -55,6 +55,7 @@ Usage::
 import hashlib
 import inspect
 from collections import Counter
+from dataclasses import fields
 from datetime import date, timedelta
 from decimal import Decimal
 from types import SimpleNamespace
@@ -125,14 +126,30 @@ class _Digest:
         return f"PURE {self.name:<34} n={self.count:>10} {self.hash.hexdigest()}"
 
 
+#: The note the price sweep's periods describe: period 0 amortizes over 360
+#: months, and $33,358.00 at 6% over 360 is the sweep's $200.00 level P&I.  The
+#: sweep's latest due date is 790 days out, installment 26, so no answer reaches
+#: the term's last installment and neither figure can move a digest.
+_SWEEP_NOTE = {"term_months": 360, "original_principal": Decimal("33358.00")}
+
+
 def _price(origination, payment_day, periods, lines, due, period_start, extra):
-    """The derive-mode installment price, on whichever signature this tree has."""
+    """The derive-mode installment price, on whichever signature this tree has.
+
+    A tree whose ``LoanCalendar`` carries the note's term and amount lent
+    (plan step recurrence:R16-f) is handed :data:`_SWEEP_NOTE`; a tree before
+    it, the R25 base and branch this harness compares, has neither field.
+    """
     params = list(inspect.signature(_loan_installment._installment_cash).parameters)
     if params[0] == "calendar":
         from app.services.loan_ledger import LoanCalendar  # pylint: disable=import-outside-toplevel
+        note = {
+            name: value for name, value in _SWEEP_NOTE.items()
+            if name in {field.name for field in fields(LoanCalendar)}
+        }
         calendar = LoanCalendar(
             origination_date=origination, payment_day=payment_day,
-            periods=periods, escrow_lines=lines,
+            periods=periods, escrow_lines=lines, **note,
         )
         return _loan_installment._installment_cash(
             calendar, due, period_start, extra,

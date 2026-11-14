@@ -240,9 +240,12 @@ class TestEachChargeCarriesItsWindow:
         loan crosses two Februaries (2027's 28th; 2028's leap 29th).
         """
         origination = date(2026, 12, 31)
+        note = _params()
         calendar = LoanCalendar(
             origination_date=origination,
             payment_day=payment_day,
+            term_months=note.term_months,
+            original_principal=note.original_principal,
             periods=[rate_period(Decimal("0.06"), start_date=origination)],
             escrow_lines=[],
         )
@@ -258,9 +261,12 @@ class TestEachChargeCarriesItsWindow:
         Not on the origination date: one calendar month, the window
         ``MONTHLY_1_12`` charges for (see ``accrual_window``).
         """
+        note = _params()
         calendar = LoanCalendar(
             origination_date=_ORIGINATION,
             payment_day=1,
+            term_months=note.term_months,
+            original_principal=note.original_principal,
             periods=[rate_period(Decimal("0.06"), start_date=_ORIGINATION)],
             escrow_lines=[],
         )
@@ -285,10 +291,13 @@ class TestEveryWalkHandsTheProducerTheLoansConvention:
         and Apr 1 (the first installment falls the month after origination),
         each opening on the due day before it: the windows abut.
         """
+        params = _params()
         calendar = LoanCalendar(
-            origination_date=_ORIGINATION,
-            payment_day=1,
-            periods=loan_resolver.resolve_periods(_params(), _origination_rate()),
+            origination_date=params.origination_date,
+            payment_day=params.payment_day,
+            term_months=params.term_months,
+            original_principal=params.original_principal,
+            periods=loan_resolver.resolve_periods(params, _origination_rate()),
             escrow_lines=[],
         )
         stream = with_contract_charges(

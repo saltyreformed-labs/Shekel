@@ -15,8 +15,10 @@ stored** (plan step recurrence:R16-c-2; the developer, ruling on the design:
 *"I don't want any second copy or anything stored that can go stale especially
 if it can be derived"*).  The list of a loan's installments enumerates it; the
 installment a date falls in inverts it with month arithmetic rather than a
-search over a list; the first installment is its first term; and the due date
-on or after a pay period's start reads the same clamp from that month.  Until
+search over a list; the first installment is its first term, and the last
+its term-th (:func:`final_installment_date`, plan step recurrence:R16-f); and
+the due date on or after a pay period's start reads the same clamp from that
+month.  Until
 that step the rule was written out by hand in the loan rate engine (the month
 step and the due-date fallback) beside the one clamp; the payoff and refinance
 calculators' own month step and clamp went at plan step recurrence:R25, which
@@ -230,6 +232,36 @@ def installment_dates(
             through,
         )
     ]
+
+
+def final_installment_date(
+    origination_date: date, payment_day: int, term_months: int,
+) -> date:
+    """Return the date of a loan's LAST contractual installment, number *term_months*.
+
+    The term-th date :func:`installment_dates` lists: the grid it enumerates,
+    from :func:`first_installment_date`'s month, stepped to the term-th
+    month and landed with the one clamp, so a loan due the 31st whose term
+    ends in March ends on the 31st whatever Februaries it crossed.  It is the
+    installment the contract's last payment closes the loan on (plan step
+    recurrence:R16-f), counted from ORIGINATION: a loan tracked from a
+    mid-life balance keeps the note's last installment, because the term is
+    the note's, not the tracking's.  Made-up figures, a loan from 2026-12-31
+    due the 31st over 3 months: Jan 31, Feb 28, and the last, Mar 31.
+
+    Args:
+        origination_date: The loan's immutable
+            :attr:`~app.models.loan_params.LoanParams.origination_date`.
+        payment_day: The loan's contractual day-of-month due day, 1-31.
+        term_months: The loan's
+            :attr:`~app.models.loan_params.LoanParams.term_months`, at least 1
+            (``ck_loan_params_term_months``).
+
+    Returns:
+        The last installment's due date.
+    """
+    first = first_installment_date(origination_date, payment_day)
+    return clamped_day(month_ordinal(first) + term_months - 1, payment_day)
 
 
 def installment_of(

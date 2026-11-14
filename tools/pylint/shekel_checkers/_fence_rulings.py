@@ -445,13 +445,17 @@ _FENCED_MODULE_RULINGS = {
             "walk_loan_ledgers",
             # A loan's CONTRACT TERMS (plan step recurrence:R25, ruling
             # R-R105): ``build_loan_calendar`` returns the loan's
-            # ``LoanCalendar`` -- its origination, due day, rate periods and
-            # escrow lines, built from the rows its caller loaded since plan
-            # task plan#2649 -- and ``LoanCalendars`` is the read pass's memo of
-            # it, whose ``loan_params_of`` / ``loan_calendar_of`` methods hand
-            # back the loan's ``LoanParams`` row and that same calendar.  Terms, not a
-            # balance: nothing in them is a figure owed on any date, and the
-            # charges built from them are ``contract_charges``' ruling below.
+            # ``LoanCalendar`` -- its origination, due day, term, amount lent,
+            # rate periods and escrow lines, built from the rows its caller
+            # loaded since plan task plan#2649 -- and ``LoanCalendars`` is the
+            # read pass's memo of it, whose ``loan_params_of`` /
+            # ``loan_calendar_of`` methods hand back the loan's ``LoanParams``
+            # row and that same calendar.  Terms, not a balance: the amount
+            # lent (plan step recurrence:R16-f) is the note's face figure off
+            # the ``LoanParams`` column, the same row these doors already hand
+            # back whole, and what stands on any date is the walk's, whose
+            # opening assertion is synthesized from that column; the charges
+            # built from the terms are ``contract_charges``' ruling below.
             "build_loan_calendar",
             "loan_calendar_of",
             "loan_params_of",

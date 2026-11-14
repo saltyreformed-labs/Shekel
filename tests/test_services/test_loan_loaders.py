@@ -488,6 +488,8 @@ class TestTheOneAnchorChronology:
                     loan_ledger.LoanCalendar(
                         origination_date=params.origination_date,
                         payment_day=params.payment_day,
+                        term_months=params.term_months,
+                        original_principal=params.original_principal,
                         periods=loan_resolver.resolve_periods(
                             params, loan_loaders.load_rate_changes(loan.id),
                         ),

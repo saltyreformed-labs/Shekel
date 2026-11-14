@@ -840,6 +840,8 @@ class TestTheOutcomeIsTheRecord:
             resets=[_reset(date(2026, 1, 1), "10000.00")],
             calendar=LoanCalendar(
                 origination_date=date(2026, 1, 1), payment_day=1,
+                term_months=period.term_months_at_start,
+                original_principal=_PRINCIPAL,
                 periods=[period], escrow_lines=[],
             ),
         )

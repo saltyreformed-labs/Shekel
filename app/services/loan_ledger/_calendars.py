@@ -51,7 +51,9 @@ def build_loan_calendar(
 ) -> LoanCalendar:
     """Return the loan's :class:`._charges.LoanCalendar`, built from its rows.
 
-    The note's origination and due day off *params*, its rate periods
+    The note's origination, due day, term and amount lent off *params*
+    (the term and the amount since plan step recurrence:R16-f, so the terms
+    name the contract's last installment), its rate periods
     (:func:`app.services.loan_resolver.resolve_periods` over the loan's rate
     history) and its escrow lines with their full version history.  It reads
     the loan's TERMS and never its payment rows, so pricing a payment cannot
@@ -79,6 +81,8 @@ def build_loan_calendar(
     return LoanCalendar(
         origination_date=params.origination_date,
         payment_day=params.payment_day,
+        term_months=params.term_months,
+        original_principal=params.original_principal,
         periods=loan_resolver.resolve_periods(params, rate_changes),
         escrow_lines=escrow_lines,
     )

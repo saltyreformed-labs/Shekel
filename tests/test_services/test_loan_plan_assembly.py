@@ -511,8 +511,11 @@ def test_the_extension_returns_to_the_due_day_after_a_short_month():
     stepped a month count from the last row until then, which kept the clamp:
     2027-03-28, 2027-04-28, and so on for the loan's whole extension.
     """
+    # A 13-month note from Jan 31, 2026: its last installment is the
+    # contract's last row, Feb 28, 2027.
     calendar = LoanCalendar(
         origination_date=date(2026, 1, 31), payment_day=31,
+        term_months=13, original_principal=_PRINCIPAL,
         periods=[], escrow_lines=[],
     )
     contractual = [SimpleNamespace(payment_date=date(2027, 2, 28))]

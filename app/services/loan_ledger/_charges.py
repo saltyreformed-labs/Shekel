@@ -142,9 +142,22 @@ class LoanCalendar:
     stream's charges from these terms (:func:`contract_charges`, through the
     stream's last event), for the posted ledger's facts and for a screen's
     facts plus plan alike, and the forward plan carries this value rather than
-    a charge list of its own.  Nothing here is a balance or a payment: the
-    note's day, its day-of-month, the rates it charges and the escrow it
+    a charge list of its own.  Nothing here is a payment, and nothing is a
+    balance on any date a walk reads: the note's day, its day-of-month, its
+    term and the amount it lent, the rates it charges and the escrow it
     impounds.
+
+    **The term and the amount lent name the contract's END** (plan step
+    recurrence:R16-f, the root-cause check on plan#1249): with them the
+    terms say which installment is the last
+    (:func:`~app.services.installment_calendar.final_installment_date`, the
+    term-th date the one calendar rule lists), which only the contractual
+    projection's own walk could name before.  The amount lent is the note's
+    face figure, read off the same column the walk's opening assertion is
+    synthesized from (:func:`app.services.loan_loaders.load_loan_anchor_facts`),
+    so it is that column read twice and never a second stored balance: what
+    stands on the origination day is the opening FACT's, which the walk
+    replays, not this.
 
     Attributes:
         origination_date: The loan's immutable
@@ -152,6 +165,16 @@ class LoanCalendar:
             first installment falls the month after it
             (:func:`~app.services.installment_calendar.installment_dates`).
         payment_day: The loan's contractual day-of-month due day, 1-31.
+        term_months: The loan's
+            :attr:`~app.models.loan_params.LoanParams.term_months`, at least 1
+            (``ck_loan_params_term_months``): how many installments the
+            contract bills, so its last is the term-th from the first
+            (:func:`~app.services.installment_calendar.final_installment_date`),
+            counted from origination whatever day tracking started.
+        original_principal: The loan's immutable
+            :attr:`~app.models.loan_params.LoanParams.original_principal`,
+            above ``0.00`` (``ck_loan_params_orig_principal``): the amount
+            the note lent on its origination date.
         periods: The loan's rate periods
             (:func:`app.services.loan_resolver.resolve_periods`).
         escrow_lines: The loan's escrow lines with their full version history
@@ -161,6 +184,8 @@ class LoanCalendar:
 
     origination_date: date
     payment_day: int
+    term_months: int
+    original_principal: Decimal
     periods: Sequence[RatePeriod]
     escrow_lines: Sequence
 

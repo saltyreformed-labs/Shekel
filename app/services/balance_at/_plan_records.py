@@ -19,7 +19,7 @@ from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
 
-from app.services.loan_ledger import LoanCalendar
+from app.services.loan_ledger import ClosingCash, LoanCalendar
 
 
 @dataclass(frozen=True)
@@ -58,8 +58,11 @@ class PlannedPayment:
         cash: The cash this payment moves -- what the amount model resolves for
             a PLANNED row, or what it would resolve for the row an ESTIMATED
             occurrence has not written yet
-            (:func:`~app.services.cash_ledger.definition_cash`), or the
-            contract's own installment for a loan with no definition.
+            (:func:`~app.services.cash_ledger.definition_cash`), or, for a
+            loan with no definition, the contract's own installment, the
+            term's last a closing payment
+            (:attr:`~app.services.loan_ledger.ClosingCash.WHAT_CLOSES_THE_LOAN`,
+            ruling **plan#3982**) the replay resolves as it walks.
             Escrow-INCLUSIVE as the owner pays it, which is why the charge it
             clears is backed out of principal rather than added to it.
         is_estimated: ``True`` for an occurrence or contractual installment
@@ -69,7 +72,7 @@ class PlannedPayment:
 
     due_date: date
     effective_date: date
-    cash: Decimal
+    cash: Decimal | ClosingCash
     is_estimated: bool
 
 

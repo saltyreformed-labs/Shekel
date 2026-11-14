@@ -393,8 +393,12 @@ class TestALoanGoalReReadsItsStart:
         """An archived debt has no projection; its goal reads 12,000 owed, 0.00%.
 
         Not ``$0.00`` owed and "met".  Nothing is planned or paid, so its plan
-        is the contract from the next due day after 04-15: $500 on 05-01
-        (11,500) and $500 on 06-01 (11,000), the goal's projected date.
+        is its contract line (ruling plan#3982): the 02-01, 03-01 and 04-01
+        installments, missed by the 04-15 read, count on 04-16 at $500 each
+        (ruling plan#3983), so it owes 10,500 then, under the goal's 11,000 on
+        the goal's projected date.  Until plan step recurrence:R16-f the plan
+        billed no missed installment, and the date was 06-01 ($500 on 05-01
+        and 06-01).
         """
         with app.app_context():
             loan = _zero_rate_loan(seed_user)
@@ -409,7 +413,7 @@ class TestALoanGoalReReadsItsStart:
             assert gd.shown_balance == Decimal("12000.00")
             assert gd.start_owed == Decimal("12000.00")
             assert gd.progress_pct == Decimal("0.00")
-            assert gd.trajectory.projected_completion_date == date(2026, 6, 1)
+            assert gd.trajectory.projected_completion_date == date(2026, 4, 16)
 
 
 class TestTheProjectedDateIsTheTilesFirstDayUnder:
@@ -447,9 +451,14 @@ class TestTheProjectedDateIsTheTilesFirstDayUnder:
 
         A $1,000 payment is PLANNED for 03-01 and still unpaid on 03-20: the
         fold counts it from the day after the read (ruling D1), 03-21, so its
-        tile first shows 11,000 then -- the date the goal names -- while its
-        due date is past.  The seam's positions grade it: 12,000 on 03-20,
-        11,000 on 03-21.
+        tile first shows under 11,000 then -- the date the goal names -- while
+        its due date is past.  The loan has no recurring payment, so its plan
+        is its contract line beside the record (ruling plan#3982): the 02-01
+        installment, missed and covered by no record, is billed the day after
+        the read too, at its $500 (ruling plan#3983), and the planned $1,000
+        covers 03-01's.  The seam's positions grade it: 12,000 on 03-20,
+        10,500 on 03-21 (it read 11,000 until plan step recurrence:R16-f,
+        when the plan billed no missed installment).
         """
         with app.app_context():
             loan = _zero_rate_loan(seed_user)
@@ -469,7 +478,7 @@ class TestTheProjectedDateIsTheTilesFirstDayUnder:
             assert crossing == date(2026, 3, 21)
             owed = balance_at.positions(loan, ctx, [today, crossing])
             assert owed[today] == Decimal("12000.00")
-            assert owed[crossing] == Decimal("11000.00")
+            assert owed[crossing] == Decimal("10500.00")
 
     def test_a_card_crosses_on_the_first_day_of_the_period_that_gets_it_under(
         self, app, db, seed_user, seed_periods,

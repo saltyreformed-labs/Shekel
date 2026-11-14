@@ -3,15 +3,17 @@
 Plan step **C6a** (``docs/audits/balance_architecture/README.md``).  Companion to
 ``test_loan_plan_forward_oracle.py`` (which pins the fold ARITHMETIC by hand): this
 pins the ASSEMBLY -- that :func:`app.services.balance_at._plan.loan_plan` turns a
-loan's projected transfer shadows into PLANNED records and fills every FUTURE
-contractual slot no record covers with an ESTIMATED one, out to payoff, while never
-synthesizing a strictly-PAST installment (the B-9 fix: a missed installment with no
-record pays nothing).
+loan's projected transfers into PLANNED records and, for a loan with no recurring
+payment, fills every installment its contract still bills that no record covers
+with an ESTIMATED one, the term's last closing the loan (ruling **plan#3982**: the
+plan is the contract line), a missed installment billed the day after the read
+(rulings **plan#3983**, **plan#4029**).  Until plan step recurrence:R16-f it never
+synthesized a strictly-PAST installment (B-9's "a missed installment with no record
+pays nothing") and carried sixty level payments past the term (finding N-16).
 """
 
 from datetime import date
 from decimal import Decimal
-from types import SimpleNamespace
 
 import pytest
 
@@ -19,18 +21,14 @@ from app import ref_cache
 from app.enums import StatusEnum
 from app.models.escrow_line import EscrowComponentVersion
 from app.models.loan_features import RateHistory
-from app.services import loan_loaders, transfer_service
+from app.services import balance_at, transfer_service
 from app.services.balance_at._plan import (
-    _PAYOFF_EXTENSION_MONTHS,
-    _extension_dates,
+    _window_end,
     loan_plan,
     memoized_plan,
 )
 from tests.oracles.loan_forward_fold import fold_forward
 from app.services.balance_at._loan_stream import loan_timeline
-from app.services.balance_at._resolution import (
-    contractual_schedule_from_origination,
-)
 from app.services.balance_at import BalanceContext
 from app.services.balance_at._memoize import _memoize_once
 from app.exceptions import ForeignAccountError
@@ -43,7 +41,7 @@ from tests._test_helpers import (
     last_covered_day,
 )
 from app.models.amount_ownership import AmountOwnership
-from app.services.loan_ledger import LoanCalendar
+from app.services.loan_ledger import ClosingCash, LoanCalendar
 
 #: The read instant for the early-settled-payment case ONLY -- deliberately
 #: later than the module-wide :data:`_AS_OF` below, because that case is about a
@@ -54,14 +52,17 @@ from app.services.loan_ledger import LoanCalendar
 _EARLY_SETTLE_AS_OF = date(2026, 5, 25)
 
 # A short amortizing loan so the whole contractual schedule is enumerable:
-# $12,000 at 6% over 6 months, originated 2026-01-01, due on the 1st.
+# $12,000 at 6% over 6 months, originated 2026-01-01, due on the 1st; its
+# level P&I is $2,035.15.
 _PRINCIPAL = Decimal("12000.00")
 _RATE = Decimal("0.06")
 _TERM = 6
 _ORIGINATION = date(2026, 1, 1)
+_LEVEL = Decimal("2035.15")
 # Read the loan mid-life: installments due 02-01, 03-01, 04-01 are PAST; 05-01,
-# 06-01, 07-01 are FUTURE.  No recurring payment is configured, so every future
-# slot is ESTIMATED and every past one -- unpaid, no record -- pays nothing.
+# 06-01, 07-01 are FUTURE.  No recurring payment is configured, so the plan is
+# the contract line: every installment ESTIMATED, the three missed ones billed
+# the day after the read (rulings plan#3982, plan#3983).
 _AS_OF = date(2026, 4, 15)
 
 
@@ -76,100 +77,126 @@ def _configured_loan(seed_user, db):
     return account, ctx
 
 
-def test_a_loan_with_no_recurring_payment_is_all_estimated_future_installments(
+def test_a_loan_with_no_recurring_payment_is_planned_as_its_contract_line(
     seed_user, db,
 ):
-    """No projected records -> every FUTURE contractual installment is ESTIMATED,
+    """No projected records -> the plan is the contract line, its last installment closing.
 
-    followed by the post-contractual extension (C8c / N-16).
+    Ruling **plan#3982**.  Nothing is paid, so the contract still bills every
+    installment after the opening, each ESTIMATED at the level $2,035.15:
+    02-01, 03-01 and 04-01, missed before the 04-15 read, count from 04-16
+    (ruling **plan#3983**); 05-01 and 06-01 count on their own dates; and
+    07-01, the term's last, is a closing payment the replay resolves to
+    whatever the loan then owes.  Nothing follows it.  Until the ruling this
+    plan held 05-01, 06-01 and 07-01 alone, the last at the from-origination
+    schedule's residual row, then sixty level payments past the term
+    (finding N-16), which a loan with no recurring payment no longer has.
     """
     account, ctx = _configured_loan(seed_user, db)
 
-    plan = loan_plan(account, ctx)
-    payments = plan.payments
+    payments = loan_plan(account, ctx).payments
 
-    # The contractual schedule the ESTIMATED tier draws from, for cross-checking.
-    contractual = contractual_schedule_from_origination(
-        account.loan_params, loan_loaders.load_rate_changes(account.id),
-    )
-    future_rows = [row for row in contractual if row.payment_date >= _AS_OF]
-
-    # Every plan entry is ESTIMATED (no records exist).
-    assert payments, "a configured loan must project a forward plan"
     assert all(payment.is_estimated for payment in payments)
-
-    # The plan splits into the future CONTRACTUAL installments then the EXTENSION.
-    plan_due = [p.due_date for p in payments]
-    contractual_due = plan_due[:len(future_rows)]
-    extension_due = plan_due[len(future_rows):]
-
-    # The contractual prefix is exactly 05-01, 06-01, 07-01 -- the PAST installments
-    # (02-01, 03-01, 04-01) are absent: a missed installment is not synthesized.
-    assert contractual_due == [r.payment_date for r in future_rows]
-    assert contractual_due == [
-        date(2026, 5, 1), date(2026, 6, 1), date(2026, 7, 1),
+    assert [(p.due_date, p.effective_date, p.cash) for p in payments] == [
+        (date(2026, 2, 1), date(2026, 4, 16), _LEVEL),
+        (date(2026, 3, 1), date(2026, 4, 16), _LEVEL),
+        (date(2026, 4, 1), date(2026, 4, 16), _LEVEL),
+        (date(2026, 5, 1), date(2026, 5, 1), _LEVEL),
+        (date(2026, 6, 1), date(2026, 6, 1), _LEVEL),
+        (date(2026, 7, 1), date(2026, 7, 1), ClosingCash.WHAT_CLOSES_THE_LOAN),
     ]
-    # Past the contractual payoff (07-01) the tier EXTENDS with the level payment
-    # for _PAYOFF_EXTENSION_MONTHS months (C8c), so a loan behind schedule can clear
-    # a few months late instead of reporting no payoff.
-    assert len(extension_due) == _PAYOFF_EXTENSION_MONTHS
-    assert extension_due[0] == date(2026, 8, 1)  # one month past the contractual last
-    # The extension pays the level P&I -- equal to a NON-last contractual
-    # installment's payment (05-01 here; no standing extra) -- not the reduced
-    # absorbed amount of the final contractual row.
-    first_extension = payments[len(future_rows)]
-    assert first_extension.cash == future_rows[0].payment
-    # The CONTRACTUAL ESTIMATED cash is the contractual P&I, escrow-free; the
-    # effective date is the due date (all future, so the as_of + 1d clamp is a no-op).
-    for payment, row in zip(payments, future_rows):
-        assert payment.cash == row.payment
-        assert payment.effective_date == payment.due_date
     # The escrow is the ACCRUAL's since plan step R16-a: a month impounds it, not
     # a payment.  This loan escrows nothing, and the charge calendar is the
     # CONTRACT's (ruling R-R71; since plan step recurrence:R16-c-2 every
     # installment from origination through the timeline's last event, read off
-    # the one timeline, ruling R-R100), whether or not a payment lands in it,
-    # so the three MISSED months (02-01, 03-01, 04-01) are charged too, then
-    # every month the payments occupy.
+    # the one timeline, ruling R-R100): the contract's six installments, the
+    # last of them the timeline's last event.
     charges = loan_timeline(account, ctx).stream.charges
     assert all(charge.escrow == Decimal("0.00") for charge in charges)
-    assert [charge.on_date for charge in charges] == (
-        [row.payment_date for row in contractual] + extension_due
-    )
+    assert [charge.on_date for charge in charges] == [
+        date(2026, 2, 1), date(2026, 3, 1), date(2026, 4, 1),
+        date(2026, 5, 1), date(2026, 6, 1), date(2026, 7, 1),
+    ]
 
 
-def test_missed_installments_with_no_record_do_not_pay_the_loan_down(seed_user, db):
-    """The B-9 fix at the plan level: an unpaid past installment reduces nothing."""
+def test_missed_installments_are_billed_the_day_after_the_read(seed_user, db):
+    """A missed installment pays the loan down from the day after the read.
+
+    Rulings **plan#3983** and **plan#4029**, through ruling **plan#3982**: a
+    loan with no recurring payment is planned as its contract line, which
+    bills an installment nothing paid the day after the read and splits it as
+    if paid on its due date.  Nothing is paid and the read is 04-15, so the
+    balance is the full $12,000.00 through the read, and on 04-16 the three
+    missed installments count at once.  Until plan step recurrence:R16-f this
+    case pinned B-9's rule for such a loan, that a missed installment with no
+    record pays nothing: the balance held through 04-30 and the 05-01 payment
+    faced four months of standing interest ($10,204.85 after it).
+    """
     account, ctx = _configured_loan(seed_user, db)
     plan = loan_plan(account, ctx)
 
-    # Nothing has been paid, so the confirmed present is the full opening balance.
-    seed = _PRINCIPAL
     folded = fold_forward(
-        seed, _ORIGINATION, plan,
-        # as_of, then a date past the missed 04-01 installment but before the
-        # first FUTURE one (05-01), then the first real paydown.
-        [_AS_OF, date(2026, 4, 30), date(2026, 5, 1)],
+        _PRINCIPAL, _ORIGINATION, plan,
+        [_AS_OF, date(2026, 4, 16), date(2026, 5, 1)],
     )
 
-    # The three missed installments (02-01, 03-01, 04-01) never happened, so the
-    # balance is still the full $12,000 -- not paid down three installments as the
-    # old schedule walk did (finding B-9).
     assert folded[_AS_OF] == _PRINCIPAL
-    assert folded[date(2026, 4, 30)] == _PRINCIPAL
-    # Only the first FUTURE installment (05-01) begins to pay it down.
-    assert folded[date(2026, 5, 1)] < _PRINCIPAL
-    # Concretely, and since plan step R16-b-2 the missed months ACCRUE
-    # (ruling R-R71: a skipped month owes its interest whichever side of today
-    # it is on): interest = round(12000 * 0.06 / 12) = 60.00 for each of
-    # 02-01, 03-01, 04-01 and 05-01, four months standing when the first
-    # payment lands; principal = contractual P&I - 240.00.  It was P&I - 60.00
-    # while the three missed months charged nothing (B-9's holds-flat, which
-    # this test used to pin and which the ruling repealed).
-    first = plan.payments[0]
-    expected = _PRINCIPAL - (first.cash - Decimal("240.00"))
-    assert expected == Decimal("10204.85")
-    assert folded[date(2026, 5, 1)] == expected
+    # Each missed installment splits on its own month's interest
+    # (balance x 0.06 / 12, rounded once):
+    #   02-01: 60.00 interest, 1,975.15 principal -> 10,024.85
+    #   03-01: 50.12 interest, 1,985.03 principal ->  8,039.82
+    #   04-01: 40.20 interest, 1,994.95 principal ->  6,044.87
+    assert folded[date(2026, 4, 16)] == Decimal("6044.87")
+    #   05-01: 30.22 interest, 2,004.93 principal ->  4,039.94
+    assert folded[date(2026, 5, 1)] == Decimal("4039.94")
+
+
+def test_a_loan_paid_500_short_is_planned_to_close_on_its_balloon(
+    seed_user, db, monkeypatch, seed_periods,
+):
+    """Ruling plan#3982's example: $12,000 at 6% over 12 months, $500 short in February.
+
+    The level payment is $1,032.80, and Feb 1 settled $532.80.  The loan has
+    no recurring payment, so its plan is its contract line: Mar 1 through
+    Dec 1 at $1,032.80, then Jan 1, 2027, the term's last, closing the loan
+    for $1,560.98 -- the $500.00 shortfall grown at 0.5% a month for eleven
+    months on top of the on-schedule last payment
+    (``test_the_contract_line``'s hand-stated twin).  The derived payoff is
+    that installment.  Until the ruling the plan paid the from-origination
+    schedule's last row there, $1,032.78, then sixty level payments past
+    the term, and cleared it on Feb 1, 2027.  Read Feb 20, after the
+    settlement (today moves with it, since the settle door refuses a day
+    that has not happened, ruling R-EJ).
+    """
+    read_day = date(2026, 2, 20)
+    freeze_today(monkeypatch, read_day)
+    account = create_loan_account(
+        seed_user, db.session,
+        principal=_PRINCIPAL, rate=_RATE, term=12,
+        origination_date=_ORIGINATION, payment_day=1,
+    )
+    create_settled_transfer(
+        seed_user, db.session, seed_user["account"], account,
+        next(
+            p for p in seed_periods
+            if p.start_date <= date(2026, 2, 1) <= last_covered_day(p)
+        ),
+        amount=Decimal("532.80"),
+        settled_on=date(2026, 2, 1), due_date=date(2026, 2, 1),
+    )
+    db.session.commit()
+    ctx = BalanceContext.build(seed_user["user"].id, read_day)
+
+    projected = loan_timeline(account, ctx).projected_splits
+
+    assert [outcome.due_date for outcome in projected] == [
+        date(2026, month, 1) for month in range(3, 13)
+    ] + [date(2027, 1, 1)]
+    assert {outcome.cash for outcome in projected[:-1]} == {Decimal("1032.80")}
+    assert (projected[-1].cash, projected[-1].balance_after) == (
+        Decimal("1560.98"), Decimal("0.00"),
+    )
+    assert balance_at.loan_payoff_date(account, ctx) == date(2027, 1, 1)
 
 
 def _project_loan_payment(seed_user, db, loan, period, amount, due_date):
@@ -502,30 +529,28 @@ def test_a_record_covers_the_installment_whose_interval_it_falls_in(
     assert date(2026, 2, 22) not in [p.due_date for p in plan.payments]
 
 
-def test_the_extension_returns_to_the_due_day_after_a_short_month():
-    """A contract ending on a clamped February 28th continues on the 31st.
+def test_the_window_ends_on_the_due_day_after_a_short_month():
+    """A contract ending on a clamped February 28th ends its window on the meant day.
 
-    The extension is the loan's own installment calendar past the contract's
-    last row (``installment_calendar.installment_dates``, plan step
-    recurrence:R16-c-2), which clamps the due day to each month afresh.  It
-    stepped a month count from the last row until then, which kept the clamp:
-    2027-03-28, 2027-04-28, and so on for the loan's whole extension.
+    A recurring payment's occurrences are walked to sixty installments past
+    the contract's last (``_plan._window_end``), counted on the loan's own
+    installment rule, which clamps the due day to each month afresh.  A
+    13-month note from Jan 31, 2026, due the 31st, ends on Feb 28, 2027, and
+    its window on installment 73: Feb 29, 2032, a leap February.  A date
+    stepped sixty months from the clamped last installment would keep its
+    28th.  Until plan step recurrence:R16-f the window was the last of sixty
+    dates listed past the from-origination schedule's last row
+    (``_extension_dates``), whose first three, Mar 31, Apr 30 and May 31,
+    2027, were this test's subject; that list went with the schedule
+    (ruling plan#4107).
     """
-    # A 13-month note from Jan 31, 2026: its last installment is the
-    # contract's last row, Feb 28, 2027.
     calendar = LoanCalendar(
         origination_date=date(2026, 1, 31), payment_day=31,
         term_months=13, original_principal=_PRINCIPAL,
         periods=[], escrow_lines=[],
     )
-    contractual = [SimpleNamespace(payment_date=date(2027, 2, 28))]
 
-    extension = _extension_dates(contractual, calendar)
-
-    assert extension[:3] == [
-        date(2027, 3, 31), date(2027, 4, 30), date(2027, 5, 31),
-    ]
-    assert len(extension) == _PAYOFF_EXTENSION_MONTHS
+    assert _window_end(calendar) == date(2032, 2, 29)
 
 
 def test_an_early_settled_payment_is_not_re_synthesized_as_estimated(

@@ -33,16 +33,18 @@ rule, applied): the seam owns the derivation, the context owns the storage.
 store-once primitive, exactly as
 :func:`~app.services.balance_at._plan.memoized_plan` fills ``plans``.
 
-It also hosts one PURE (no-I/O) producer, :func:`contractual_schedule_from_origination`:
-a loan's from-origination contractual schedule, which seeds the same resolver
-composer with a synthesized origination anchor instead of a confirmed view.  Its
-one reader is the forward plan (:func:`app.services.balance_at._plan.loan_plan`);
-the property equity chart read it too until plan step recurrence:R16-f moved the
-chart's pre-tracking estimate onto the contract from origination
-(:func:`app.services.balance_at._loan_stream.origination_contract_line`).  It
-lives here beside :func:`resolve_loan_bundle` because it too composes the loaders'
-anchor synthesis with the pure resolver; the caller supplies its one loaded input
-(the rate-change feed), so the function itself stays I/O-free.
+It hosted one PURE producer too until plan step recurrence:R16-f,
+``contractual_schedule_from_origination``: a loan's from-origination
+contractual schedule, the resolver composer seeded with a synthesized
+origination anchor instead of a confirmed view.  The property equity chart's
+pre-tracking estimate moved onto the contract from origination over the one
+replay (:func:`app.services.balance_at._loan_stream.origination_contract_line`),
+and its last reader, the forward plan (:func:`app.services.balance_at._plan.loan_plan`),
+onto the contract's cash source for a loan with no recurring payment (ruling
+plan#3982) and the contract's last installment
+(:func:`~app.services.installment_calendar.final_installment_date`) for the
+end of a recurring payment's window, and it went with that reader (ruling
+plan#4107).
 
 Boundary discipline (``CLAUDE.md``): no Flask symbol, no writes; all money is
 :class:`~decimal.Decimal`.
@@ -58,11 +60,9 @@ from app.services.account_projection import (
     AccountProjectionKind,
     classify_account,
 )
-from app.services.amortization_engine import AmortizationRow, RateChangeRecord
 from app.services.loan_loaders import (
     load_loan_anchor_facts,
     load_loan_params,
-    synthesize_origination_anchor,
 )
 from app.services.loan_payment_service import LoanContext, load_loan_context
 from app.services.recurrence import RecurrenceOwner
@@ -513,61 +513,3 @@ def is_standing_loan_payment(
     if resolved is None or resolved.standing is None:
         return False
     return resolved.standing.id == template.id
-
-
-def contractual_schedule_from_origination(
-    loan_params: LoanParams,
-    rate_changes: list[RateChangeRecord] | None,
-) -> list[AmortizationRow]:
-    """Return a loan's pure contractual amortization schedule FROM ORIGINATION.
-
-    The schedule the loan's origination terms imply (``original_principal``
-    amortized over ``term_months`` at the rate-period rates): each
-    installment's date and P&I, its last row the residual.  The forward plan
-    reads it (:func:`app.services.balance_at._plan.loan_plan`) to price a loan
-    with no recurring payment and to end the window it walks a recurring
-    payment's occurrences over.  It was the property equity chart's
-    pre-tracking debt line too (the (a) contractual back-projection,
-    ``docs/plans/historical/implementation_plan_property_equity_chart_rebuild.md``)
-    until plan step recurrence:R16-f moved that onto the contract from
-    origination over the one replay
-    (:func:`app.services.balance_at._loan_stream.origination_contract_line`).
-
-    Forks NO amortization math: it seeds
-    :func:`loan_resolver.compute_payoff_scenarios` with a synthesized ORIGINATION
-    anchor (:func:`loan_loaders.synthesize_origination_anchor`) and no confirmed
-    view, and returns its ``original_forward`` -- the pure contractual reference
-    (no override, no extra).  Seeding through the composer inherits the
-    resolver's EXACT first-payment-date and remaining-term convention (the first
-    installment after the anchor, which for the origination is
-    :func:`~app.services.installment_calendar.first_installment_date`, with the
-    full ``term_months`` remaining), so its rows land on the same installment
-    grid as the resolved schedule.
-
-    Pure: takes loaded data (the caller supplies ``rate_changes`` -- the
-    resolution's own load, ``ResolvedLoan.context.rate_changes``); performs
-    no I/O.
-
-    Args:
-        loan_params: The loan's :class:`LoanParams` (its immutable
-            ``origination_date`` / ``original_principal`` / ``term_months`` /
-            ``payment_day`` / ARM cadence).
-        rate_changes: The loan's :class:`RateChangeRecord` feed (the origination
-            row plus any ARM adjustments), so each installment is governed by
-            its correct per-period rate.  Must contain the origination row
-            (:func:`loan_resolver.resolve_periods` raises on an empty feed).
-
-    Returns:
-        The contractual :class:`AmortizationRow` list from origination to payoff,
-        each ``is_confirmed=False`` (a contractual estimate, never recorded
-        fact).
-    """
-    scenarios = loan_resolver.compute_payoff_scenarios(
-        loan_inputs=loan_resolver.LoanInputs(
-            loan_params,
-            [synthesize_origination_anchor(loan_params)],
-            rate_changes,
-        ),
-        confirmed_view=None,
-    )
-    return list(scenarios.original_forward)

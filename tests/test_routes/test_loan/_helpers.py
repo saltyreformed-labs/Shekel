@@ -16,6 +16,7 @@ from app.services.recurring_definition import resolved_definition
 from app.services.transfer_service import (
     TransferSpec,
     create_transfer,
+    delete_transfer,
     update_transfer,
 )
 
@@ -23,6 +24,8 @@ from tests._test_helpers import (
     add_escrow_line,
     an_entered_day,
     create_loan_account,
+    generate_transfer_of,
+    last_covered_day,
     loan_params_for,
     make_loan_payment_template,
     on_both_sides,
@@ -449,6 +452,46 @@ def _add_escrow(db_session, account_id, name, annual_amount,
 
 
 # -- Amortization Schedule Tab Tests (Commit 5.13-1) ------------------
+
+
+def _behind_by_unplanned_installments(seed_user, db_session, loan, periods, dues):
+    """Pay *loan* by a recurring payment whose rows due on *dues* the owner deleted.
+
+    A loan BEHIND its contract in the plan: a deleted row still answers its
+    occurrence, so nothing pays that installment, and its month is charged
+    anyway (rulings R-R37, R-R64, R-R71), so its interest stands against the
+    next payment and the loan clears past its contract.  The recurring
+    payment is the loan door's derive-mode one (``make_loan_payment_template``);
+    each row is generated in the period holding its due date and deleted
+    through the transfer door, as the owner deletes one.  A loan with no
+    recurring payment is never behind in its plan: it is planned as its
+    contract line, a missed installment billed the day after the read
+    (rulings plan#3982, plan#3983), which is why the fixtures that made a loan
+    behind by paying it nothing take this since plan step recurrence:R16-f.
+
+    Args:
+        seed_user: The ``seed_user`` fixture dict (the owner).
+        db_session: The test session; committed after each write.
+        loan: The loan account.
+        periods: The owner's saved pay periods, one holding each due date.
+        dues: The due dates of the rows to delete, each an occurrence of the
+            payment's rule.
+
+    Returns:
+        The recurring payment's ``TransferTemplate``.
+    """
+    template = make_loan_payment_template(db_session, seed_user, loan)
+    db_session.commit()
+    for due in dues:
+        period = next(
+            p for p in periods if p.start_date <= due <= last_covered_day(p)
+        )
+        row = generate_transfer_of(template, period)
+        db_session.commit()
+        assert row.due_date == due, "precondition: the row is that installment's"
+        delete_transfer(row.id, seed_user["user"].id, soft=True)
+        db_session.commit()
+    return template
 
 
 def _create_fresh_mortgage(seed_user, db_session, principal=Decimal("250000.00"),

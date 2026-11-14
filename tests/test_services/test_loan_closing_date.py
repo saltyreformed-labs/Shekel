@@ -189,11 +189,14 @@ class TestLoanClosingDate:
     ):
         """``None`` now means one thing only.
 
-        A $240,000 / 30-year contract at 6% trued up to $900,000: the ~$1,439
-        level payment cannot cover $4,500 of monthly interest, so the balance
-        grows and the fold never reaches zero.  The loan still OWES, so this
-        ``None`` is not a retired loan's -- which is exactly the ambiguity the
-        producer deletes.
+        A $240,000 / 30-year contract at 6% trued up to $900,000, paid by a
+        recurring payment at its level P&I: the ~$1,439 cannot cover $4,500 of
+        monthly interest, so the balance grows and the fold never reaches
+        zero.  The loan still OWES, so this ``None`` is not a retired loan's
+        -- which is exactly the ambiguity the producer deletes.  It had no
+        recurring payment until plan step recurrence:R16-f; such a loan is
+        planned as its contract line now, whose last installment closes it
+        with the balloon (ruling plan#3982), so it answers a date.
         """
         with app.app_context():
             loan = create_loan_account(
@@ -201,6 +204,7 @@ class TestLoanClosingDate:
                 principal=Decimal("240000.00"), rate=Decimal("0.06000"),
                 term=360, origination_date=date(2026, 1, 1),
             )
+            make_loan_payment_template(db.session, seed_user, loan)
             insert_trueup_event(
                 loan_params_for(db.session, loan.id), Decimal("900000.00"),
                 anchor_date=date(2026, 2, 1),

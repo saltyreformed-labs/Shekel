@@ -19,6 +19,7 @@ from tests._test_helpers import (
     create_account_of_type,
     insert_trueup_event,
     last_covered_day,
+    make_loan_payment_template,
     one_off_row_of,
 )
 
@@ -520,15 +521,18 @@ class TestLiabilityOwedAtDates:
     def test_forward_owed_credits_only_future_installments_not_overdue_ones(
         self, app, db, seed_user, seed_periods_today,
     ):
-        """The band's forward point folds the PLAN: overdue unpaid installments pay nothing (B-9).
+        """The band's forward point folds the PLAN, not the contractual schedule (B-9).
 
         A mortgage originated a year ago with NO payment records carries a year of
         overdue unconfirmed installments.  The retired forward walk credited every
         one of them, reporting the loan paid down for installments nobody made
-        (finding B-9); the band now folds the forward PLAN, which synthesizes only
-        installments due AFTER today, so an overdue-unpaid one no longer shrinks a
-        future point.  Pinned by the divergence from the contractual walk (the band
-        owes STRICTLY MORE, by the overdue principal the walk over-credited).
+        (finding B-9); the band now folds the forward PLAN -- here a manual
+        $1,000.00 recurring payment, below the $1,083.33 a month of interest --
+        so its forward point owes STRICTLY MORE than the contractual walk.  Until
+        plan step recurrence:R16-f the loan had no recurring payment and its plan
+        billed no missed installment; such a loan is planned as its contract line
+        now (rulings plan#3982, plan#3983), crediting each installment as the
+        walk does, so it cannot tell the two apart.
 
         **And the skipped year is CHARGED** (plan step R16-b-2, ruling R-R71,
         finding D53): the plan charges every contractual installment after the
@@ -536,9 +540,9 @@ class TestLiabilityOwedAtDates:
         payment lands in it, so the twelve unpaid months' interest stands when
         the first plan payment arrives, that payment clears interest before
         principal, and the shortfall capitalizes.  The forward point therefore
-        owes MORE than today's balance, not less: on the frozen 2026-03-20
-        clock a $200,000 mortgage at 6.5% (P&I $1,264.14) reads $210,473.33 at
-        the next year's end.  Until R16-b-2 this asserted the opposite ("still
+        owes MORE than today's balance, not less (the months before the
+        owner's schedule opens are charged and paid by nothing, and the
+        payment is below the interest after them).  Until R16-b-2 this asserted the opposite ("still
         amortizes below today's balance"), which was B-9's "an overdue slot
         with no record holds flat" -- a rule about what an unpaid installment
         PAYS that had been read as a rule about what an unpaid month CHARGES.
@@ -559,6 +563,11 @@ class TestLiabilityOwedAtDates:
                 all_periods(user_id)[0],
                 Decimal("200000.00"), date.today() - timedelta(days=365),
             )
+            make_loan_payment_template(
+                db.session, seed_user, acct, amount="1000.00",
+                derive_from_loan=False,
+            )
+            db.session.commit()
             today = date.today()
             far_out = date(today.year + 1, 12, 31)
 
@@ -587,8 +596,8 @@ class TestLiabilityOwedAtDates:
                 else _owed_today(acct, bctx)
             )
 
-            # The band credits NONE of the overdue installments, so its forward
-            # point owes strictly more than the contractual walk that credited them.
+            # The band pays what the owner pays, below the interest, so its
+            # forward point owes strictly more than the contractual walk.
             assert owed[acct.id][1] > contractual_walk
             # And it CHARGES every one of the skipped months (R-R71), so the
             # arrears capitalize at the first plan payment and the forward point

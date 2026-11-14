@@ -8,9 +8,9 @@ from decimal import Decimal
 import pytest
 
 from app.extensions import db
-from app.services import balance_at, loan_loaders
+from app.services import balance_at
 from app.services.balance_at._positions import memoized_payoff
-from app.services.balance_at._resolution import contractual_schedule_from_origination
+from app.services.installment_calendar import final_installment_date
 from app.services.balance_at import BalanceContext
 from app.utils.dates import add_months
 from tests._test_helpers import insert_trueup_event
@@ -107,9 +107,12 @@ class TestLoanPayoffDateSeam:
     ):
         """A loan not yet originated folds its whole contractual timeline to payoff.
 
-        With no confirmed past and no extra, its plan is the pure contractual
-        schedule, so the derived payoff is that schedule's last installment -- the
-        contractual payoff, a future date.
+        With no confirmed past and no extra, its plan is the contract line, so
+        the derived payoff is the contract's last installment -- the
+        contractual payoff, a future date
+        (:func:`~app.services.installment_calendar.final_installment_date`;
+        the from-origination schedule's last row until plan step
+        recurrence:R16-f deleted it).
         """
         with app.app_context():
             today = date.today()
@@ -121,11 +124,10 @@ class TestLoanPayoffDateSeam:
                 seed_user, future, future.start_date, name="Payoff Future",
             )
             assert loan_params.origination_date > today
-            rate_changes = loan_loaders.load_rate_changes(account.id)
-            contractual = contractual_schedule_from_origination(
-                loan_params, rate_changes,
+            expected = final_installment_date(
+                loan_params.origination_date, loan_params.payment_day,
+                loan_params.term_months,
             )
-            expected = contractual[-1].payment_date
 
             ctx = BalanceContext.build(seed_user["user"].id)
             assert balance_at.loan_payoff_date(account, ctx) == expected
@@ -139,7 +141,16 @@ class TestLoanPayoffDateSeam:
 
 
 class TestPayoffTailExtension:
-    """C8c (N-16): the fold pays past the contractual date until the loan clears."""
+    """C8c (N-16): a recurring payment pays past the contractual date until the loan clears.
+
+    A loan with NO recurring payment is planned as its contract line, whose
+    last installment closes it at maturity (ruling **plan#3982**), so the
+    window past the contract is a recurring payment's alone, and every case
+    here but the balloon's pays by one: a derive-mode payment at the level
+    P&I with no extra.  Until plan step recurrence:R16-f these fixtures had
+    no recurring payment, and the contract-priced estimate carried sixty
+    level payments past the term instead.
+    """
 
     def test_underpaying_loan_clears_in_the_extension(
         self, app, seed_user, seed_periods_today,
@@ -149,9 +160,10 @@ class TestPayoffTailExtension:
         A true-up leaves the balance $500 above where the contractual schedule
         expects it (an underpayment / drift), so the fold does not reach zero at
         the contractual installment.  Before C8c that residue made
-        ``loan_payoff_date`` return ``None``; the post-contractual extension now
-        clears it, so it derives a REAL date -- and a LATER one than the resolver's
-        ``is_last_month``-forced contractual payoff (the deliberate N-16 move).
+        ``loan_payoff_date`` return ``None``; the recurring payment's
+        occurrences past the contract now clear it, so it derives a REAL date
+        -- and a LATER one than the resolver's ``is_last_month``-forced
+        contractual payoff (the deliberate N-16 move).
         """
         with app.app_context():
             today = date.today()
@@ -159,6 +171,7 @@ class TestPayoffTailExtension:
             account, loan_params = _create_loan(
                 seed_user, current, current.start_date, name="Payoff Underpaid",
             )
+            _attach_derive_extra(seed_user, account, Decimal("0.00"))
             # $500 behind the contractual schedule -- the underpayment residue.
             insert_trueup_event(loan_params, _PRINCIPAL + Decimal("500.00"))
             db.session.commit()
@@ -175,12 +188,42 @@ class TestPayoffTailExtension:
             )
             # The $500-behind balance compounds at 6% over the ~30-year term to a
             # residue of ~$500 * 1.005**360 ~= $3,010 at the contractual payoff,
-            # which two level-payment (~$1,798 P&I) extension installments clear
+            # which two level-payment (~$1,798 P&I) occurrences past it clear
             # (~$1,783 principal each), so payoff lands two months past the
             # engine's forced contractual date.
             assert derived == add_months(contractual_payoff, 2), (
                 f"underpaid payoff {derived} should be two extension installments "
                 f"past the engine's forced contractual {contractual_payoff}"
+            )
+
+    def test_a_loan_with_no_recurring_payment_closes_at_maturity(
+        self, app, seed_user, seed_periods_today,
+    ):
+        """The same $500 behind, with no recurring payment: paid off on the contract's date.
+
+        Ruling **plan#3982**: the loan is planned as its contract line, so
+        every installment bills the level P&I and the term's last closes it
+        with the balloon, whatever the residue has grown to.  The payoff is
+        the contractual date, and the balance there 0.00; until plan step
+        recurrence:R16-f the plan's sixty level payments past the term
+        cleared it two installments later, the case above's figure.
+        """
+        with app.app_context():
+            today = date.today()
+            current = _current_period(seed_periods_today, today)
+            account, loan_params = _create_loan(
+                seed_user, current, current.start_date, name="Payoff Balloon",
+            )
+            insert_trueup_event(loan_params, _PRINCIPAL + Decimal("500.00"))
+            db.session.commit()
+            _, contractual_payoff = _reference_payoffs(
+                loan_params, seed_user["scenario"].id, today, Decimal("0.00"),
+            )
+
+            ctx = BalanceContext.build(seed_user["user"].id)
+            assert balance_at.loan_payoff_date(account, ctx) == contractual_payoff
+            assert balance_at.balance_at(account, ctx, contractual_payoff) == (
+                Decimal("0.00")
             )
 
     def test_severe_underpayment_never_amortizes_returns_none(
@@ -190,10 +233,11 @@ class TestPayoffTailExtension:
 
         Trued up to $400k against a $300k contractual P&I (~$1,798), the monthly
         interest (~$2,000) EXCEEDS the payment, so the balance grows every month
-        and the extension never clears it: the fold reports ``None`` rather than
-        inventing a payoff.  (The resolver's ``is_last_month`` would force a date
-        by absorbing the grown balance in a phantom final payment; the fold does
-        not.)
+        and the recurring payment never clears it: the fold reports ``None``
+        rather than inventing a payoff.  (The resolver's ``is_last_month`` would
+        force a date by absorbing the grown balance in a phantom final payment;
+        the fold does not, and nor does the plan of a loan its recurring payment
+        pays.)
         """
         with app.app_context():
             today = date.today()
@@ -201,6 +245,7 @@ class TestPayoffTailExtension:
             account, loan_params = _create_loan(
                 seed_user, current, current.start_date, name="Payoff Negam",
             )
+            _attach_derive_extra(seed_user, account, Decimal("0.00"))
             insert_trueup_event(loan_params, Decimal("400000.00"))
             db.session.commit()
 
@@ -210,10 +255,10 @@ class TestPayoffTailExtension:
     def test_healthy_loan_is_not_resurrected_past_payoff(
         self, app, seed_user, seed_periods_today,
     ):
-        """A healthy loan's balance stays $0 past its payoff -- the extension is inert.
+        """A healthy loan's balance stays $0 past its payoff -- the window is inert.
 
-        The extension appends installments PAST the contractual date; on a healthy
-        loan (already zero there) they must fold to no-ops.  A year past the
+        The recurring payment's occurrences run PAST the contractual date; on a
+        healthy loan (already zero there) they must fold to no-ops.  A year past the
         contractual payoff the balance is still ``$0.00`` -- the extension neither
         moves the payoff (still the contractual date, ``test_healthy_loan...``) nor
         resurrects a paid-off balance.
@@ -224,6 +269,7 @@ class TestPayoffTailExtension:
             account, loan_params = _create_loan(
                 seed_user, current, current.start_date, name="Payoff Healthy2",
             )
+            _attach_derive_extra(seed_user, account, Decimal("0.00"))
             scenario_id = seed_user["scenario"].id
             _, contractual_payoff = _reference_payoffs(
                 loan_params, scenario_id, today, Decimal("0.00"),
@@ -271,10 +317,12 @@ class TestPayoffCutover:
 
         The control that makes the test above non-vacuous: for a healthy loan the
         two producers agree, so equality alone cannot show which one is wired.
-        A loan trued up $500 above the contractual schedule clears two
-        installments LATER than the resolver's ``is_last_month``-forced
-        contractual payoff (the C8c extension), so the two answers differ and the
-        figure must carry the fold's.
+        A loan its recurring payment pays, trued up $500 above the contractual
+        schedule, clears two installments LATER than the resolver's
+        ``is_last_month``-forced contractual payoff (the C8c window), so the two
+        answers differ and the figure must carry the fold's.  It had no
+        recurring payment until plan step recurrence:R16-f; such a loan closes
+        at maturity now (ruling plan#3982), where the two answers agree.
         """
         with app.app_context():
             today = date.today()
@@ -282,6 +330,7 @@ class TestPayoffCutover:
             account, loan_params = _create_loan(
                 seed_user, current, current.start_date, name="Cutover Underpaid",
             )
+            _attach_derive_extra(seed_user, account, Decimal("0.00"))
             insert_trueup_event(loan_params, _PRINCIPAL + Decimal("500.00"))
             db.session.commit()
             scenario_id = seed_user["scenario"].id

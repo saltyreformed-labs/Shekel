@@ -186,12 +186,15 @@ def timeline_payoff_date(
     The loan's derived payoff date: the DUE date of the FIRST projected payment
     whose running balance reaches ``<= 0`` -- the installment that pays the loan
     off (:func:`installments_payoff`).  This is a fold-to-zero, NOT the plan's
-    last date: the plan runs PAST the contractual payoff (the ESTIMATED tail's
-    extension, ``_plan._PAYOFF_EXTENSION_MONTHS``), so a loan paying extra
-    reaches zero at an EARLIER installment (the date the engine's own
-    contract-plus-extra projection reaches, ``project_forward(extra_monthly=...)``)
-    and an underpaying one at a LATER installment in the extension (a real date,
-    where the contract's projection forces its last date via ``is_last_month``).
+    last date: a recurring payment's plan runs PAST the contractual payoff (its
+    occurrences' window, ``_plan._PAYOFF_EXTENSION_MONTHS`` installments past the
+    contract's last), so a loan paying extra reaches zero at an EARLIER
+    installment (the date the engine's own contract-plus-extra projection
+    reaches, ``project_forward(extra_monthly=...)``) and an underpaying one at a
+    LATER installment in the window (a real date, where the contract's
+    projection forces its last date via ``is_last_month``).  A loan with no
+    recurring payment is planned as its contract line, which closes it on the
+    term's last installment (ruling **plan#3982**).
 
     Two ``None`` cases, kept distinct from a real payoff date so the caller can
     tell "already done" from "never pays off" (both differ from "pays off on date
@@ -205,10 +208,13 @@ def timeline_payoff_date(
       NOT yet originated is not retired: its whole plan lies ahead and this
       dates it.
     * **Never reaches zero within the plan**: negative amortization (a payment
-      below the period interest, so the balance grows), or an underpayment so
-      severe the balance is still positive after the post-contractual extension.
-      A MILDER underpayment is NOT here -- the extension lets it clear a few
-      months past the contractual date, and this returns that later date.
+      below the period interest, so the balance grows), an underpayment so
+      severe the balance is still positive after the window past the contract,
+      or a loan with no recurring payment that its contract no longer closes
+      (its record past the term, or a projected transfer on the term's last
+      installment leaving it owing).  A MILDER underpayment is NOT here -- the
+      window lets it clear a few months past the contractual date, and this
+      returns that later date.
       Recurrence stays indefinite; the ``None`` the retired case and this share
       is disambiguated by ``is_retired`` (retired here is False).
 

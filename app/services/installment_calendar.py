@@ -139,12 +139,13 @@ def first_installment_date(origination_date: date, payment_day: int) -> date:
     their projections on it
     (:func:`app.services.amortization_engine.calculate_payoff_by_date`,
     ``routes.loan.calculators._project_refinance``) rather than on a month
-    step of their own.  The
-    alternative -- reading
-    ``contractual_schedule_from_origination(...)[0].payment_date`` -- yields
-    the identical date (pinned by test) but builds the loan's entire 360-row
-    schedule and needs its rate feed to answer a question no rate can
-    influence.
+    step of their own.  The from-origination contractual schedule
+    (``balance_at._resolution.contractual_schedule_from_origination``) built
+    the loan's whole schedule and read its rate feed to answer the same date,
+    and a test pinned the two equal, until plan step recurrence:R16-f deleted
+    that schedule: the contract from origination is charged on this rule's own
+    dates (:func:`installment_dates`), so there is no second spelling left to
+    pin.
 
     It lived in :mod:`app.services.rate_period_engine` until plan step
     recurrence:R16-c-2 moved the rule here (the developer's ruling assigns
@@ -207,9 +208,9 @@ def installment_dates(
     -- every one of them from its first installment onward, whether or not a
     payment lands on it (:func:`app.services.loan_ledger.contract_charges`,
     rulings **R-R72**, **R-R89** and **R-R100**) -- and the grid the loan
-    page's band chart and the plan's post-contractual extension step along.
-    A caller that needs ONE installment asks :func:`installment_of` rather
-    than searching this list.  The enumeration is the grid's own
+    page's band chart steps along.  A caller that needs ONE installment asks
+    :func:`installment_of` rather than searching this list, or, by its
+    number, :func:`final_installment_date`.  The enumeration is the grid's own
     (:func:`app.utils.dates.grid_months_within`, plan step recurrence:R25):
     the months from the first installment's through the last on or before
     *through*, each re-clamped from the meant day.

@@ -184,8 +184,9 @@ five sibling modules that fill a per-account cache): it sits one rung above
 the internal DAG's FLOOR, importing ``_memoize`` and the outer loan leaves it
 memoizes, and depended on by every producer that folds a loan.  **Plan step E1d-a
 then moved the db-facing WHOLE-LOAN read in** (``_resolution`` =
-``resolved_loan`` / ``ResolvedLoan`` / ``contractual_schedule_from_origination``,
-formerly the public module ``app.services.loan_resolution``): its only production
+``resolved_loan`` / ``ResolvedLoan``, and ``contractual_schedule_from_origination``
+until plan step recurrence:R16-f deleted it, formerly the public module
+``app.services.loan_resolution``): its only production
 caller was this seam, and step E1d makes its confirmed seed a FOLD, so the
 composer that consumes a balance-at-T now sits on the same side of the boundary
 as the producer of one.  It is re-exported NOWHERE -- W9910 alone protects it,

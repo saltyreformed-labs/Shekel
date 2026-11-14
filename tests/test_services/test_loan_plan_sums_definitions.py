@@ -39,7 +39,6 @@ from app.models.transfer import Transfer
 from app.models.transfer_template import TransferTemplate
 from app.services import (
     balance_at,
-    loan_loaders,
     pay_period_write,
     template_amount_service,
     transfer_recurrence,
@@ -49,13 +48,11 @@ from app.services.balance_at import BalanceContext
 from app.services.balance_at._loan_stream import loan_timeline
 from app.services.balance_at._plan import (
     _PAYOFF_EXTENSION_MONTHS,
-    _extension_dates,
+    _window_end,
     loan_plan,
 )
-from app.services.balance_at._resolution import (
-    contractual_schedule_from_origination,
-)
 from app.services.generation_schedule import GenerationSchedule
+from app.services.installment_calendar import installment_dates
 from app.services.liability_sign import owed
 from app.services.loan_ledger import (
     LoanCashEvent,
@@ -621,19 +618,22 @@ class TestTheChargeCalendarIsTheContracts:
         recurrence:R16-c-2 a stream is charged through its OWN last event,
         whatever lies there (:func:`~app.services.loan_ledger.with_contract_charges`,
         ruling **R-R100**), one installment a month, and the sixty-month
-        extension is the payment tiers' window alone
-        (``_plan._extension_dates``).
+        extension is a recurring payment's window alone (``_plan._window_end``,
+        sixty installments past the contract's last: 2031-07-01).  The
+        window's installments are read off the loan's own rule here; they
+        were the from-origination schedule's rows and the sixty dates listed
+        past its last until plan step recurrence:R16-f deleted that schedule.
         """
         account, ctx = _loan(seed_user)
-        contractual = contractual_schedule_from_origination(
-            account.loan_params, loan_loaders.load_rate_changes(account.id),
-        )
         calendar = loan_plan(account, ctx).calendar
 
-        extension = _extension_dates(contractual, calendar)
-        assert len(extension) == _PAYOFF_EXTENSION_MONTHS
-        assert extension[0] == date(2026, 8, 1)
-        bounded = [row.payment_date for row in contractual] + extension
+        assert _window_end(calendar) == date(2031, 7, 1)
+        bounded = installment_dates(
+            calendar.origination_date, calendar.payment_day,
+            _window_end(calendar),
+        )
+        assert len(bounded) == _TERM + _PAYOFF_EXTENSION_MONTHS
+        assert bounded[_TERM] == date(2026, 8, 1)
 
         # A payment on the 10th faces the installment its interval opens on,
         # dated on the contract's day (the 1st): the charges end in the
@@ -720,10 +720,8 @@ class TestTheChargeCalendarIsTheContracts:
         assert (extra.interest, extra.escrow, extra.principal) == (
             Decimal("0.00"), Decimal("0.00"), Decimal("300.00"),
         )
-        contractual = contractual_schedule_from_origination(
-            account.loan_params, loan_loaders.load_rate_changes(account.id),
-        )
-        forward = [r.payment_date for r in contractual if r.payment_date >= _AS_OF]
+        # The contract's installments from the read on: 05-01, 06-01, 07-01.
+        forward = [date(2026, 5, 1), date(2026, 6, 1), date(2026, 7, 1)]
         ahead = [on_date for on_date in charged if on_date >= _AS_OF]
         assert ahead[:len(forward)] == forward
         # ...and past the contract the extension is charged too, monthly.

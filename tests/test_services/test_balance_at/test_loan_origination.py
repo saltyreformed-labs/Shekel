@@ -345,15 +345,17 @@ class TestLoanNotYetOriginated:
         step X-au-g-2c-3b-2 split the mapping from the ordering) -- and both
         asserts below raise.
 
-        $200,000.00 owed, not $199,759.69: with the clock at 2026-05-07 the loan
-        has originated, so the 2026-05-01 installment is now a PAST due date -- and
-        with NO payment record behind it, an installment nobody paid pays nothing
-        down (finding B-9 / plan D1).  The map's last period is future, but its
-        window holds no future installment WITH a record, so the balance holds at
-        the opening rather than amortizing a payment that never happened.  (In the
-        sibling tests the clock stays at 2026-03-20, where the whole schedule is
-        still ahead, so every installment is a projected ESTIMATED slot and the
-        05-01 one DOES pay down -- hence ``AFTER_FIRST_PAYMENT`` there.)
+        $200,000.00 owed TODAY, and $199,759.69 at the map's last (future)
+        period: with the clock at 2026-05-07 the loan has originated, so the
+        2026-05-01 installment is now a PAST due date with NO payment record
+        behind it.  The loan has no recurring payment, so its plan is its
+        contract line (ruling plan#3982), which bills that missed installment
+        the day after the read and splits it as if paid on its due date
+        (rulings plan#3983, plan#4029): nothing has paid it by today, and by
+        the future period it has, to the sibling tests' ``AFTER_FIRST_PAYMENT``
+        (where the clock stays at 2026-03-20 and the 05-01 installment is still
+        ahead).  Until plan step recurrence:R16-f the plan billed no missed
+        installment (finding B-9 / plan D1), and the map held at the opening.
 
         Both entries report what the loan HOLDS, negative when owed (ruling
         R-CC47, plan step credit_card:CC-5-5c), so each is read through
@@ -375,7 +377,7 @@ class TestLoanNotYetOriginated:
             ) == self.OPENING
             assert liability_sign.owed(balance_at.balance_map(acct, bctx)[
                 periods[-1].id
-            ]) == self.OPENING
+            ]) == self.AFTER_FIRST_PAYMENT
 
 
 class TestUpcomingLoanDoesNotCorruptTheSurfaces:

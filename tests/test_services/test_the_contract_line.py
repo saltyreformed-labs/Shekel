@@ -39,10 +39,12 @@ from app.services.loan_ledger import (
     replay_loan_stream,
     with_contract_charges,
 )
+from app.services.loan_loaders import load_loan_params
 from tests._test_helpers import (
     add_escrow_line,
     create_loan_account,
     create_loan_with_trueup,
+    insert_tracking_start_event,
 )
 from tests.oracles.loan_monthly_composition import rate_period
 
@@ -232,6 +234,103 @@ class TestTheContractFromOrigination:
             (date(2026, 4, 15), Decimal("1008.35"), Decimal("4.18"),
              Decimal("1004.17"), _ZERO, date(2026, 4, 15)),
         ]
+
+    def test_a_stored_loan_amortizes_to_zero_over_its_term(
+        self, app, db, seed_user,
+    ):
+        """$12,000.00 at 6% over 12 months from Jan 1, 2020: 12 installments to 0.00.
+
+        The first installment is a month after origination, Feb 1, 2020: the
+        level P&I is $1,032.80, of which 12,000.00 x 0.06 / 12 = $60.00 is
+        interest and $972.80 principal, leaving $11,027.20.  The twelfth, on
+        Jan 1, 2021, closes the loan.  These figures were the
+        from-origination schedule's (``contractual_schedule_from_origination``,
+        ``test_balance_at_resolution``) until plan step recurrence:R16-f
+        deleted it; the contract from origination over the one replay gives
+        them on the same dates (ruling plan#4107).
+        """
+        with app.app_context():
+            loan = create_loan_account(
+                seed_user, db.session, name="Clean",
+                principal=Decimal("12000.00"), rate=Decimal("0.06000"),
+                term=12, origination_date=date(2020, 1, 1), payment_day=1,
+            )
+            ctx = BalanceContext.build(seed_user["user"].id)
+
+            walk = origination_contract_line(ctx.loan_walk(loan).stream)
+
+            outcomes = walk.projected_splits
+            assert len(outcomes) == 12
+            assert _split(outcomes[0]) == (
+                date(2020, 2, 1), Decimal("1032.80"), Decimal("60.00"),
+                Decimal("972.80"), Decimal("11027.20"),
+            )
+            assert (outcomes[-1].due_date, outcomes[-1].balance_after) == (
+                date(2021, 1, 1), _ZERO,
+            )
+
+    def test_a_mortgage_spans_its_whole_term(self, app, db, seed_user):
+        """A 360-month mortgage from Jun 1, 2018 bills 360 installments, the last closing it.
+
+        Due the 1st: the first is Jul 1, 2018 and the 360th, thirty years of
+        monthly installments later, Jun 1, 2048, at a balance of 0.00.
+        """
+        with app.app_context():
+            loan = create_loan_account(
+                seed_user, db.session, name="Mortgage",
+                principal=Decimal("300000.00"), rate=Decimal("0.06000"),
+                term=360, origination_date=date(2018, 6, 1), payment_day=1,
+            )
+            ctx = BalanceContext.build(seed_user["user"].id)
+
+            outcomes = origination_contract_line(
+                ctx.loan_walk(loan).stream,
+            ).projected_splits
+
+            assert len(outcomes) == 360
+            assert outcomes[0].due_date == date(2018, 7, 1)
+            assert (outcomes[-1].due_date, outcomes[-1].balance_after) == (
+                date(2048, 6, 1), _ZERO,
+            )
+
+    def test_a_tracking_start_changes_nothing_from_origination(
+        self, app, db, seed_user,
+    ):
+        """A mid-life tracking start leaves the contract from origination as it was.
+
+        The pass's stream opens a mid-life import at its origination and
+        states the tracking start as an assertion after it; the contract from
+        origination reads the opening alone, so a $250,000.00 tracking start
+        on Jan 1, 2024, well below the contractual balance then, leaves every
+        installment's date and balance as they were without it.  It is the
+        reference the property chart estimates the months before tracking
+        with (``_secured_debt``).
+        """
+        with app.app_context():
+            loan = create_loan_account(
+                seed_user, db.session, name="Imported",
+                principal=Decimal("300000.00"), rate=Decimal("0.06000"),
+                term=360, origination_date=date(2018, 6, 1), payment_day=1,
+            )
+
+            def _rows():
+                ctx = BalanceContext.build(seed_user["user"].id)
+                return [
+                    (outcome.due_date, outcome.balance_after)
+                    for outcome in origination_contract_line(
+                        ctx.loan_walk(loan).stream,
+                    ).projected_splits
+                ]
+
+            baseline = _rows()
+            insert_tracking_start_event(
+                load_loan_params(loan.id), Decimal("250000.00"),
+                date(2024, 1, 1),
+            )
+            db.session.commit()
+
+            assert _rows() == baseline
+            assert baseline[0][0] == date(2018, 7, 1)
 
 
 class TestAStoredLoansContractLine:

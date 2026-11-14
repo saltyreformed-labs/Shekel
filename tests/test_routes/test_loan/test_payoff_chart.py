@@ -20,6 +20,7 @@ from app.utils.dates import months_between
 from app.services import balance_at
 
 from ._helpers import (
+    _behind_by_unplanned_installments,
     _create_loan_account,
     _create_auto_loan,
     _create_mortgage,
@@ -474,17 +475,25 @@ class TestBandChartLongestBaseline:
     """
 
     @staticmethod
-    def _two_installments_behind(seed_user, db_session):
+    def _two_installments_behind(seed_user, db_session, periods):
         """A $250k / 6.5% / 30-year mortgage originated 2026-01-01, nothing paid.
 
-        Its Feb 1 and Mar 1 2026 installments are due and unpaid at the frozen
-        2026-03-20 today, so they are not in the plan (ruling D1 / finding
-        B-9) and the fold clears the loan in the extension past Jan 2056.
+        Its recurring payment's Feb 1 and Mar 1 2026 rows are deleted at the
+        frozen 2026-03-20 today, so nothing pays those installments while
+        their months are charged (``_behind_by_unplanned_installments``), and
+        the fold clears the loan past Jan 2056.  Until plan step
+        recurrence:R16-f the loan had no recurring payment and its plan
+        billed no missed installment (B-9); such a loan is planned as its
+        contract line now and closes on its contract's date (ruling
+        plan#3982).
         """
         acct = _create_fresh_mortgage(
             seed_user, db_session, origination_date=date(2026, 1, 1),
         )
-        db_session.commit()
+        _behind_by_unplanned_installments(
+            seed_user, db_session, acct, periods,
+            (date(2026, 2, 1), date(2026, 3, 1)),
+        )
         return acct
 
 
@@ -501,7 +510,7 @@ class TestBandChartLongestBaseline:
         ends at $0.  Before the fix (labels keyed off the contract alone) the
         line overran the labels by the extension.
         """
-        acct = self._two_installments_behind(seed_user, db.session)
+        acct = self._two_installments_behind(seed_user, db.session, seed_periods)
         with app.app_context():
             balance_ctx, history_rows, contract, dates = _band_inputs(
                 seed_user, acct,
@@ -536,13 +545,19 @@ class TestBandChartLongestBaseline:
         (``installment_calendar.installment_dates``), which clamps the due day to each
         month afresh.  The grid's dates past the contract are the plan's own:
         the last label is the payoff's month and the point count past the
-        contract is the month count to the payoff.
+        contract is the month count to the payoff.  Its recurring payment's
+        Feb 28 row is deleted, so the loan clears past its contract
+        (``_behind_by_unplanned_installments``; it had no recurring payment
+        until plan step recurrence:R16-f, and such a loan closes on its
+        contract's date now, ruling plan#3982).
         """
         acct = _create_fresh_mortgage(
             seed_user, db.session, origination_date=date(2026, 1, 31),
             payment_day=31,
         )
-        db.session.commit()
+        _behind_by_unplanned_installments(
+            seed_user, db.session, acct, seed_periods, (date(2026, 2, 28),),
+        )
         with app.app_context():
             balance_ctx, _history_rows, contract, dates = _band_inputs(
                 seed_user, acct,
@@ -577,7 +592,7 @@ class TestBandChartLongestBaseline:
         $0.00 to the band's last tick -- aligned one-to-one, where a grid cut
         at the contract would land the overlay short of the plan's line.
         """
-        acct = self._two_installments_behind(seed_user, db.session)
+        acct = self._two_installments_behind(seed_user, db.session, seed_periods)
         with app.app_context():
             balance_ctx, _history_rows, _contract, dates = _band_inputs(
                 seed_user, acct,

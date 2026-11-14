@@ -220,8 +220,8 @@ def estimated_from_definitions(
     have written (ruling D1).
 
     The walk's window (*through*) is the caller's: :func:`._plan.loan_plan`
-    hands the later of the post-contractual extension's end
-    (``_plan._extension_dates``) and the same span past the read, so a
+    hands the later of the installment sixty past the contract's last
+    (``_plan._window_end``) and the same span past the read, so a
     matured loan still owing is walked past today.  A definition still
     firing past the window belongs to a loan the plan cannot retire, which
     :func:`._plan_fold.timeline_payoff_date` reports as ``None``.  An occurrence

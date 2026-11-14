@@ -79,7 +79,7 @@ from tests.oracles.recurrence_baseline import MONTHLY
 # ARM: 5/5 ARM, $400,000, 6% annual, 360 months, originated on the
 # first of the month ARM_STARTS_MONTHS_AGO before today's (see
 # ``_create_arm_loan``), ``arm_first_adjustment_months = 60``.  Anchor is
-# the origination event; no payments.  Inside the fixed-rate window the
+# the origination event; no settled payment.  Inside the fixed-rate window the
 # constant payment is
 #
 #     amortize(400000, 0.06, 360) = $2,398.20  (E-02 invariant)
@@ -93,21 +93,16 @@ ARM_PRINCIPAL = Decimal("400000.00")
 ARM_RATE = Decimal("0.06000")
 ARM_TERM = 360
 ARM_WINDOW = 60
-# How far before today's month the ARM originates.  Its arrears are a
-# function of the distance from origination to TODAY: ruling R-R71 charges
-# every installment nobody paid, and the forward plan dates a payoff only
-# while the loan clears within ``_plan._PAYOFF_EXTENSION_MONTHS`` (60) of
-# its contractual end.  For this loan that holds through EIGHT unpaid
-# installments and fails at nine, so an origination pinned to 2026-01-01
-# read ``None`` from 2026-10-02 on.  Relative to today it leaves five
-# unpaid installments on the 1st (today's own is still owed) and six on
-# any other day, at every read.  It must stay between 2 and 8: at least
-# one unpaid installment on the 1st (with none, the payoff equals the
-# 360-installment bound and the strict ``>`` below fails) and at most eight
-# on any day.  The fixture reads the PROCESS clock because
-# ``BalanceContext.build`` defaults to ``date.today()``; if finding N-138's
-# fix moves that default to ``display_today()``, this fixture moves with it
-# in the same change, or it fails on month boundaries under CI's skewed zone.
+# How far before today's month the ARM originates: a loan already in its
+# term, inside its fixed-rate window.  Until plan step recurrence:R16-f its
+# arrears bounded this (a loan with no recurring payment, never paid, dated a
+# payoff only while it cleared within ``_plan._PAYOFF_EXTENSION_MONTHS`` of
+# its contractual end, so between 2 and 8); that loan is planned as its
+# contract line now (ruling plan#3982).  The fixture reads the PROCESS clock
+# because ``BalanceContext.build`` defaults to ``date.today()``; if finding
+# N-138's fix moves that default to ``display_today()``, this fixture moves
+# with it in the same change, or it fails on month boundaries under CI's
+# skewed zone.
 ARM_STARTS_MONTHS_AGO = 6
 
 
@@ -460,24 +455,28 @@ def test_arm_payoff_date_consistent_across_surfaces(
     The chip no longer reads a schedule at all: it reads the seam's DERIVED
     payoff, the date the BALANCE folds to zero.  So the invariant is the chip
     agreeing with the seam, and for this fixture the seam and the contractual
-    schedule deliberately DIFFER, which the control below pins.  (It also
+    schedule deliberately DIFFER, which the first assertion pins.  (It also
     pinned, until plan step recurrence:R16-c-2 deleted ``debt_schedule_rows``,
     that the schedule the resolver builds with no payment feed ended where
     the seam's ledger-seeded resolution did -- rows no screen reads since the
     year-end consumer went at plan step F2; deleted with the developer's
     approval, 2026-09-29.)  This ARM originated
-    six months before today's month (``ARM_STARTS_MONTHS_AGO``) and has never been
-    paid: the contractual schedule ends 360 installments after origination
-    (it amortizes the installments nobody paid), while the fold starts the
-    full $400,000.00 plus those months' interest (ruling R-R71) at the next
-    installment and clears it LATER than 360 installments from there.  That
-    gap IS finding B-9, and the chip showing the honest side of it is the
-    point of C8d.
+    six months before today's month (``ARM_STARTS_MONTHS_AGO``) and is paid by
+    a derive-mode recurring payment carrying a standing $500.00 extra, so the
+    fold clears it BEFORE the contractual schedule's last installment.  Until
+    plan step recurrence:R16-f it had no recurring payment and had never been
+    paid, and the gap was finding B-9: the fold started the unpaid $400,000.00
+    plus its arrears (ruling R-R71) at the next installment and cleared it
+    LATER than 360 installments from there.  Such a loan is planned as its
+    contract line now, a missed installment billed the day after the read
+    (rulings plan#3982, plan#3983), so its two answers are one; the chip
+    showing the fold's side of a real gap is the point of C8d.
     """
     with app.app_context():
         account, loan_params = _create_arm_loan(
             seed_user, seed_periods[0],
         )
+        _add_recurring_payment_with_extra(seed_user, account, Decimal("500.00"))
 
         state = _resolver_state(account, loan_params, date.today())
         # The resolver publishes no payoff_date since plan C8d; its schedule's
@@ -488,46 +487,17 @@ def test_arm_payoff_date_consistent_across_surfaces(
         )
         ctx = BalanceContext.build(seed_user["user"].id)
 
-        # The chip's producer since C8d: the fold to zero.  Hand-checked -- the
-        # loan has paid nothing, so its balance is still $400,000.00 and the
-        # contractual payment amortizes exactly that over exactly 360
-        # installments from the first one the plan pays.  Since plan step
-        # R16-b-2 the installments nobody paid ACCRUE (ruling R-R71: a skipped
-        # month owes its interest whichever side of today it is on), so the
-        # arrears stand when the first payment lands and the loan clears LATER
-        # than 360 months after it -- how much later depends on how many
-        # installments went unpaid (five on the 1st, six on any other day:
-        # ``ARM_STARTS_MONTHS_AGO``), which is why the bound is stated as an
-        # inequality rather than a date.
-        #
-        # "Not already past" is ON OR AFTER today, not "next month".  The fixture
-        # pays on the 1st, so on the 1st of a month today's own installment is
-        # still owed and the plan synthesizes it -- the payoff is then 359 months
-        # from TODAY, not from next month.  Hard-coding ``add_months(first of this
-        # month, 1)`` assumed today is never an installment date and failed CI on
-        # 2026-08-01, reading 2056-07-01 against an expected 2056-08-01.
+        # The chip's producer since C8d: the fold to zero.  The standing extra
+        # pays principal the contract does not, so the loan clears before the
+        # contract's last installment.  This is the control too: the two
+        # answers genuinely differ, so the chip assertion below cannot pass by
+        # both producers happening to agree.
         seam_payoff = balance_at.loan_payoff_date(account, ctx)
         assert seam_payoff is not None
-        this_months_installment = date(
-            date.today().year, date.today().month, 1,
-        )
-        first_forward = (
-            this_months_installment
-            if this_months_installment >= date.today()
-            else add_months(this_months_installment, 1)
-        )
-        assert seam_payoff > add_months(first_forward, 359), (
-            f"Derived payoff {seam_payoff} is not past 360 installments from "
-            f"the next one ({first_forward}); the fold is not starting from "
-            "the unpaid full principal plus the arrears of the months nobody "
-            "paid (ruling R-R71)."
-        )
-        # Control: the two answers genuinely differ here, so the chip assertion
-        # below cannot pass by both producers happening to agree.  Without it a
-        # chip still wired to the schedule would look correct.
-        assert seam_payoff != resolver_payoff, (
-            "The fixture no longer separates the fold from the contractual "
-            "schedule, so this test cannot show which one the chip reads."
+        assert seam_payoff < resolver_payoff, (
+            f"Derived payoff {seam_payoff} is not before the contract's last "
+            f"installment ({resolver_payoff}): the fold is not paying the "
+            "standing extra, so this test cannot show which one the chip reads."
         )
 
         # Dashboard "Projected Payoff" chip: it renders the seam's derived

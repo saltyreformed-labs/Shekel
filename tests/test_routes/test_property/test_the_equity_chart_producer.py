@@ -6,9 +6,10 @@ from decimal import Decimal
 from app.services import balance_at, home_equity_service, property_equity_chart
 from app.services.balance_at._loan_stream import loan_timeline
 from app.services.balance_at._plan import memoized_plan
-from app.services.loan_loaders import load_loan_params, load_rate_changes
+from app.services.balance_at._loan_stream import origination_contract_line
+from app.services.installment_calendar import final_installment_date
+from app.services.loan_loaders import load_loan_params
 from app.services.balance_at._resolution import (
-    contractual_schedule_from_origination,
     resolve_loan_bundle,
 )
 from app.services.balance_at import BalanceContext
@@ -21,6 +22,7 @@ from tests._test_helpers import (
     freeze_today,
     insert_tracking_start_event,
     insert_trueup_event,
+    make_loan_payment_template,
 )
 
 from ._helpers import _make_property
@@ -485,9 +487,13 @@ class TestPropertyEquityChartProducer:
         the loan card's chip and the /savings cockpit show, so the axis cannot
         outlive or fall short of the payoff rendered beside it.
 
-        The loan here is trued up $500 ABOVE its contractual schedule, so the
-        fold clears it two installments LATE (the C8c extension): the two
-        producers disagree, and the last charted month must be the fold's.
+        The loan here is trued up $500 ABOVE its contractual schedule and paid
+        by a recurring payment at its level P&I, so the fold clears it two
+        installments LATE (the C8c window): the two producers disagree, and
+        the last charted month must be the fold's.  The recurring payment is
+        what parts them: a loan with none is planned as its contract line and
+        closes on the contract's date with the balloon (ruling plan#3982), and
+        this fixture had none until plan step recurrence:R16-f.
         """
         freeze_today(monkeypatch, date(2026, 4, 20))
         today = date(2026, 4, 20)
@@ -501,6 +507,7 @@ class TestPropertyEquityChartProducer:
                 origination_date=date(2026, 4, 1), payment_day=1,
             )
             loan.collateral_account_id = prop.id
+            make_loan_payment_template(db.session, seed_user, loan)
             db.session.commit()
             insert_trueup_event(
                 load_loan_params(loan.id), Decimal("240500.00"),
@@ -509,9 +516,10 @@ class TestPropertyEquityChartProducer:
 
             ctx = BalanceContext.build(prop.user_id, as_of=today)
             derived = balance_at.loan_payoff_date(loan, ctx)
-            contractual = contractual_schedule_from_origination(
-                load_loan_params(loan.id), load_rate_changes(loan.id),
-            )[-1].payment_date
+            params = load_loan_params(loan.id)
+            contractual = final_installment_date(
+                params.origination_date, params.payment_day, params.term_months,
+            )
             assert derived is not None
             assert derived > contractual, (
                 "precondition: the underpayment must push the fold past the "
@@ -563,8 +571,12 @@ class TestPropertyEquityChartProducer:
     ):
         """The OTHER ``None``: a loan that never pays off keeps a forward line.
 
-        Trued up so far above the schedule that the level payment cannot cover
-        the monthly interest, the balance grows and the fold never reaches zero.
+        Trued up so far above the schedule that its recurring payment at the
+        level P&I cannot cover the monthly interest, the balance grows and the
+        fold never reaches zero.  (A loan with no recurring payment is planned
+        as its contract line, whose last installment closes it with the
+        balloon, ruling plan#3982; this fixture had none until plan step
+        recurrence:R16-f.)
         The loan still owes money every month ahead, so the span must run out to
         the last installment the PLAN models.  Ending it at today instead would
         draw no forward debt beside a market value that keeps appreciating --
@@ -582,6 +594,7 @@ class TestPropertyEquityChartProducer:
                 origination_date=date(2026, 4, 1), payment_day=1,
             )
             loan.collateral_account_id = prop.id
+            make_loan_payment_template(db.session, seed_user, loan)
             db.session.commit()
             insert_trueup_event(
                 load_loan_params(loan.id), Decimal("900000.00"),
@@ -611,9 +624,10 @@ class TestPropertyEquityChartProducer:
     ):
         """A loan whose TERM has run out while it still owes charts no future.
 
-        The empty-plan case, and it is not a degenerate: every contractual
-        installment AND the ESTIMATED tail's post-contractual extension are in
-        the past, so the plan synthesizes nothing.  The loan is not retired (it
+        The empty-plan case, and it is not a degenerate: the loan has no
+        recurring payment, so it is planned as its contract line (ruling
+        plan#3982), and its record -- the balance stated today -- is past
+        every installment of its term, so the contract bills nothing after it.  The loan is not retired (it
         owes $50,000, asserted TODAY) and has no derived payoff, so it takes the
         never-clears branch -- which must fall back to today rather than index
         an empty plan.
@@ -634,8 +648,7 @@ class TestPropertyEquityChartProducer:
             prop = _make_property(
                 db, seed_user, seed_periods_today, rate=Decimal("0.03000"),
             )
-            # 10-year term from 2005: matured 2015, and even the 60-month
-            # extension past that ran out in 2020.
+            # 10-year term from 2005: matured 2015.
             loan = create_loan_account(
                 seed_user, db.session, name="Matured Balloon",
                 principal=Decimal("240000.00"), term=120,
@@ -648,8 +661,8 @@ class TestPropertyEquityChartProducer:
             ctx = BalanceContext.build(prop.user_id, as_of=today)
             empty = memoized_plan(loan, ctx)
             assert empty.payments == [], (
-                "precondition: the whole term and its extension must be past, "
-                "or this does not exercise the empty-plan fallback"
+                "precondition: the whole term must precede the record's last "
+                "event, or this does not exercise the empty-plan fallback"
             )
             # Every contractual installment from 2005 is charged since plan
             # step recurrence:R16-c-2 (ruling R-R100), and today's
@@ -662,7 +675,7 @@ class TestPropertyEquityChartProducer:
                 if charge.on_date > today
             ], (
                 "nothing is charged after today's assertion: every "
-                "installment of this term, its extension included, precedes "
+                "installment of this term precedes "
                 "it and is cleared by it"
             )
             figures = balance_at.loan_figures(loan, ctx)
@@ -681,9 +694,10 @@ class TestPropertyEquityChartProducer:
         balance deliberately OFF the contractual curve) gets a non-empty
         ``back_projection`` for its origination..tracking-start months.  Those
         months carry the ``estimated`` tier and EXACTLY the
-        ``contractual_schedule_from_origination`` balances (re-derived here to
-        pin the chart's month-mapping and tiering -- the amortization math itself
-        is pinned by ``test_balance_at_resolution.py``, not this test); the resolved
+        balances of the contract from origination
+        (``_loan_stream.origination_contract_line``, re-derived here to pin the
+        chart's month-mapping and tiering -- the amortization math itself is
+        pinned by ``test_the_contract_line.py``, not this test); the resolved
         region that follows -- no settled payments -- is ``projected``; and the
         tracking-start seam (the contractual balance the month before tracking vs
         the recorded opening) is shown honestly, on adjacent axis months, never
@@ -733,12 +747,16 @@ class TestPropertyEquityChartProducer:
             # Re-derive the expected pre-tracking rows from the same contractual
             # producer the seam feeds in, clipped to the months before tracking
             # begins.  This pins the chart's month-mapping and tiering of those
-            # rows (not the amortization math -- that is test_balance_at_resolution.py).
-            contractual = contractual_schedule_from_origination(
-                params, load_rate_changes(loan.id),
-            )
+            # rows (not the amortization math -- that is test_the_contract_line.py).
+            # It read the from-origination schedule's rows until plan step
+            # recurrence:R16-f deleted that schedule; the seam reads this line
+            # since plan#4042, and the two agreed row for row on both live loans.
+            contractual = origination_contract_line(
+                BalanceContext.build(seed_user["user"].id, as_of=today)
+                .loan_walk(loan).stream,
+            ).projected_splits
             oracle_pre = [
-                row for row in contractual if row.payment_date < tracking_start
+                row for row in contractual if row.due_date < tracking_start
             ]
             assert oracle_pre, "the oracle must have pre-tracking rows too"
 
@@ -755,10 +773,10 @@ class TestPropertyEquityChartProducer:
             # balance to the cent.
             for row in oracle_pre:
                 month_index = chart.labels.index(
-                    row.payment_date.strftime("%b %Y"),
+                    row.due_date.strftime("%b %Y"),
                 )
                 assert chart.debt_tier[month_index] == "estimated"
-                assert chart.debt[month_index] == row.remaining_balance
+                assert chart.debt[month_index] == row.balance_after
 
             # The first tracked month is 'confirmed': the fold reads the recorded
             # $260,000 opening (this loan has no settled payments, so the balance
@@ -767,8 +785,8 @@ class TestPropertyEquityChartProducer:
             # installment on or after the tracking start.
             first_tracked = chart.labels.index(
                 next(
-                    row.payment_date for row in contractual
-                    if row.payment_date >= tracking_start
+                    row.due_date for row in contractual
+                    if row.due_date >= tracking_start
                 ).strftime("%b %Y"),
             )
             assert chart.debt_tier[first_tracked] == "confirmed"
@@ -779,7 +797,7 @@ class TestPropertyEquityChartProducer:
             # by the loop above) differs from the recorded $260k opening -- the
             # producer shows the honest step, it does NOT reconcile it.
             seam = chart.labels.index(
-                oracle_pre[-1].payment_date.strftime("%b %Y"),
+                oracle_pre[-1].due_date.strftime("%b %Y"),
             )
             assert seam == first_tracked - 1
             assert chart.debt[seam] != chart.debt[first_tracked]

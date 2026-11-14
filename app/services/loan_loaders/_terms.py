@@ -360,11 +360,13 @@ def synthesize_origination_anchor(params: LoanParams) -> LoanAnchorFact:
     the loader sorts (plan step X-an-b) rather than prepending, so position is a
     consequence of the data, and every ``is_opening`` reader in ``app/`` already
     scans for the flag.  This function
-    stays the loan's ONE definition of the origination anchor, reused there and by
-    the callers that need JUST it -- the from-origination contractual schedule
-    the forward plan reads
-    (:func:`app.services.balance_at._resolution.contractual_schedule_from_origination`)
-    seeds from origination alone, without the loan's true-up assertions.
+    stays the loan's ONE definition of the origination anchor, reused there.  The
+    from-origination contractual schedule
+    (``balance_at._resolution.contractual_schedule_from_origination``) read it
+    alone, without the loan's true-up assertions, until plan step
+    recurrence:R16-f deleted that schedule (ruling plan#4107); the contract from
+    origination reads the opening off the loan's stream instead
+    (:func:`app.services.balance_at._loan_stream.origination_contract_line`).
 
     The synthesized origination carries :data:`_ORIGINATION_CREATED_AT` (the
     earliest possible instant) and :data:`_ORIGINATION_EVENT_ID` (below every

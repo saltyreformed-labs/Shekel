@@ -249,8 +249,9 @@ def _debt_span_upper(
     * **A real payoff**: ``max(payoff, as_of)`` -- the loan's own end, or today for
       one that pays off imminently.
     * **``None`` and NOT retired**: the loan does not clear within its plan
-      (negative amortization, or an underpayment too severe for the
-      post-contractual extension).  It still owes money for every month ahead, so
+      (negative amortization, an underpayment too severe for the window past
+      the contract, or a loan with no recurring payment its contract no longer
+      closes).  It still owes money for every month ahead, so
       the span runs to the last installment the PLAN models
       (:meth:`~app.services.balance_at.BalanceContext.loan_plan`, already
       memoized -- no extra derivation).  Falling back to *as_of* here would draw
@@ -274,19 +275,21 @@ def _debt_span_upper(
         return ctx.as_of
     payments = memoized_plan(loan, ctx).payments
     if not payments:
-        # Reachable, and not a degenerate: a loan whose whole TERM has already
-        # matured while it still owes (a balloon, or a long-delinquent loan)
-        # and has no definition paying into it.  Every contractual installment
-        # is in the past, and so is the contract-only estimate's extension, so
-        # the plan holds no payment -- the model has no future payment to draw.
-        # Since plan step R16-b-2 a matured loan WITH a live definition is not
-        # this case: the plan walks the definition past the read (its window
-        # is the later of the contract's extension and the same span past
-        # ``as_of``), so ``payments`` holds its occurrences and the branch
-        # below answers.
-        # (``original_principal > 0`` and ``term_months > 0`` are DB check
-        # constraints, so an EMPTY contractual schedule is not the case being
-        # handled here.)
+        # Reachable, and not a degenerate: a loan with no definition paying
+        # into it whose record already reaches past its term's last
+        # installment while it still owes (a balance stated after maturity).
+        # Its plan is its contract line (ruling plan#3982), and the contract
+        # bills nothing after the record's last event, so the plan holds no
+        # payment -- the model has no future payment to draw.  A matured
+        # loan whose record stops before its term's last installment is not
+        # this case: the contract bills its missed installments the day
+        # after the read and closes it (rulings plan#3983, plan#4029), so its
+        # payoff is a date and the first branch answers.  Since plan step
+        # R16-b-2 a matured loan WITH a live definition is not this case
+        # either: the plan walks the definition past the read (its window
+        # is the later of sixty installments past the contract's last and
+        # the same span past ``as_of``), so ``payments`` holds its
+        # occurrences and the branch below answers.
         return ctx.as_of
     return max(max(payment.due_date for payment in payments), ctx.as_of)
 

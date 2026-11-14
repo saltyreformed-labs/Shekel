@@ -31,6 +31,7 @@ from tests._test_helpers import (
     last_covered_day,
     make_appreciating_account,
     make_investment_account,
+    make_loan_payment_template,
     one_off_row_of,
     pricing_over,
 )
@@ -344,24 +345,23 @@ class TestBalanceAt:
     def test_loan_scalar_folds_the_forward_plan_not_the_contractual_schedule(
         self, app, db, seed_user, seed_periods_today,
     ):
-        """The loan scalar's FUTURE value folds the PLAN, crediting no unpaid installment.
+        """The loan scalar's FUTURE value folds the PLAN, not the contractual schedule.
 
         A mortgage originated in the past with NO payment records carries a
-        schedule of overdue unconfirmed installments.  The retired forward walk
+        schedule of overdue unconfirmed installments, each crediting the
+        contract's $1,516.96 P&I.  The retired forward walk
         (``balance_from_schedule_at_date`` over the resolver's schedule) credited
-        every one of them, paying the loan down for installments nobody paid
-        (finding B-9).  The seam now folds the loan's forward PLAN, which
-        synthesizes only FUTURE contractual installments, so an unpaid overdue one
-        no longer reduces a future balance.  Pinned by the divergence -- the seam
-        owes STRICTLY MORE than the contractual walk that over-credited -- so a
-        regression back to the schedule walk would fire here.
-
-        Since plan step R16-b-2 (ruling R-R71) the seam also owes MORE than the
-        seed: every skipped month since the loan's latest assertion (its
-        origination, 2024-01-01) is CHARGED, and the first plan payment
-        capitalizes the shortfall (see
-        ``TestLiabilityOwedAtDates.test_forward_owed_credits_only_future_installments_not_overdue_ones``).
-        This asserted ``seam <= projection_seed`` until then.
+        every one of them (finding B-9).  The seam folds the loan's forward
+        PLAN: what its recurring payment, a manual $1,000.00 below the
+        $1,300.00 a month of interest, will pay, and nothing for the months
+        before the owner's schedule opens, which are CHARGED all the same
+        (ruling R-R71).  Pinned by the divergence -- the seam owes STRICTLY
+        MORE than the contractual walk, and more than today -- so a regression
+        back to the schedule walk would fire here.  Until plan step
+        recurrence:R16-f the loan had no recurring payment and its plan billed
+        no missed installment; such a loan is planned as its contract line
+        now (rulings plan#3982, plan#3983), which credits each installment as
+        the schedule walk does, so it cannot tell the two apart.
 
         The scalar reports what the loan HOLDS, negative when owed (ruling
         R-CC47, plan step credit_card:CC-5-5c), so what the seam owes is read
@@ -375,6 +375,11 @@ class TestBalanceAt:
                 db, seed_user, periods[0], Decimal("240000.00"),
                 date(2024, 1, 1),
             )
+            make_loan_payment_template(
+                db.session, seed_user, mortgage, amount="1000.00",
+                derive_from_loan=False,
+            )
+            db.session.commit()
             state = resolved_loan(mortgage, bctx).state
             as_of = last_covered_day(periods[7])  # future under seed_periods_today
 
@@ -394,9 +399,8 @@ class TestBalanceAt:
             overdue = [r for r in forward_rows if r.payment_date <= bctx.as_of]
             assert overdue, "fixture must carry overdue unconfirmed installments"
 
-            # The seam credits none of the overdue installments, so it owes MORE
-            # than the contractual walk -- and, charging every one of the skipped
-            # months (R-R71), more than its seed.
+            # The seam pays what the owner pays, below the interest, so it owes
+            # MORE than the contractual walk -- and more than its seed.
             assert liability_sign.owed(seam) > contractual_walk
             assert liability_sign.owed(seam) > _owed_today(mortgage, bctx)
 

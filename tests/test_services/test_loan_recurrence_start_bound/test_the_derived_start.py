@@ -26,7 +26,12 @@ from app.services.recurrence import (
     scheduling_day_of_month,
 )
 from app.services.generation_schedule import GenerationSchedule
-from app.services.balance_at._resolution import contractual_schedule_from_origination
+# Pylint: ``shekel-private-module-import`` -- the seam publishes no reading of
+# the contract from origination; its one reader is the property chart, so the
+# first-installment pin reaches the seam module that composes it, as
+# ``test_the_contract_line`` does.
+# pylint: disable-next=shekel-private-module-import
+from app.services.balance_at._loan_stream import origination_contract_line
 from tests._test_helpers import create_loan_account, make_transfer_template
 
 from ._helpers import PRINCIPAL, _upcoming_mortgage
@@ -78,16 +83,22 @@ class TestFirstInstallmentDate:
         (date(2026, 12, 10), 5),
         (date(2026, 1, 20), 31),
     ])
-    def test_it_equals_the_engine_schedule_row_zero(
+    def test_it_is_the_contracts_first_installment_from_origination(
         self, app, db, seed_user, seed_periods, origination, payment_day,
     ):
-        """The DRY proof: the cheap derivation == the engine's own first row.
+        """The bound's derivation is the first installment the contract bills.
 
-        ``first_installment_date`` exists so the bound does not have to build a
-        360-row schedule (and load a rate feed) to learn one date.  That is only
-        legitimate while the two agree, so this pins them against each other
-        across shapes rather than asserting the claim in a docstring.  If the
-        resolver ever changes its first-payment convention, this goes red.
+        ``first_installment_date`` exists so the bound does not have to replay
+        a 360-installment contract to learn one date.  That is only legitimate
+        while the two agree, so this pins them against each other across
+        shapes rather than asserting the claim in a docstring: the contract
+        from origination (``_loan_stream.origination_contract_line``) begins
+        its installments after the opening by its own lookup
+        (``installment_after``), so a convention that billed a payment day
+        later in the origination month would part them.  It was named
+        ``test_it_equals_the_engine_schedule_row_zero`` and read the
+        from-origination schedule's first row until plan step
+        recurrence:R16-f deleted that schedule (ruling plan#4107).
         """
         with app.app_context():
             acct = create_loan_account(
@@ -96,12 +107,13 @@ class TestFirstInstallmentDate:
                 origination_date=origination, payment_day=payment_day,
                 account_type=AcctTypeEnum.MORTGAGE,
             )
-            params = loan_loaders.load_loan_params(acct.id)
-            rows = contractual_schedule_from_origination(
-                params, loan_loaders.load_rate_changes(acct.id),
+            walk = origination_contract_line(
+                BalanceContext.build(acct.user_id).loan_walk(acct).stream,
             )
-            assert rows[0].payment_date == installment_calendar.first_installment_date(
-                origination, payment_day,
+            assert walk.projected_splits[0].due_date == (
+                installment_calendar.first_installment_date(
+                    origination, payment_day,
+                )
             )
 
 

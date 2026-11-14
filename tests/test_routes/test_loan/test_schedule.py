@@ -16,6 +16,7 @@ from tests._test_helpers import make_loan_payment_template
 from tests.oracles.recurrence_baseline import MONTHLY
 
 from ._helpers import (
+    _behind_by_unplanned_installments,
     _create_loan_account,
     _create_mortgage,
     _create_other_loan,
@@ -71,11 +72,10 @@ class TestAmortizationSchedule:
 
         The loan originates on 2026-03-01 so its first installment (Apr 1)
         is after the frozen 2026-03-20 today.  Originated a month earlier,
-        the Mar 1 installment would be due and unpaid, and an overdue
-        installment is NOT in the plan (ruling D1 / finding B-9): the fold
-        then clears the loan in the post-contractual extension and the
-        table honestly runs past 360 --
-        ``test_schedule_lists_the_plan_when_an_installment_is_overdue``.
+        the Mar 1 installment would be due and unpaid, billed the day after
+        the read (rulings plan#3982, plan#3983); had the owner deleted a
+        recurring payment's row for it, the table would honestly run past
+        360 -- ``test_schedule_lists_the_plan_when_an_installment_is_overdue``.
         """
         expected_count = 360
 
@@ -264,15 +264,16 @@ class TestAmortizationSchedule:
     def test_schedule_lists_the_plan_when_an_installment_is_overdue(
         self, auth_client, seed_user, db, seed_periods,
     ):
-        """An overdue, unpaid installment is absent; the plan runs past the contract.
+        """An overdue installment the owner deleted is absent; the plan runs past the contract.
 
         The schedule lists what the loan is projected to PAY -- the balance
         seam's forward plan (plan step R7d-g-3, ruling **R-R88**) -- and an
-        installment due before today that no payment answers is not in it
-        (ruling D1 / finding B-9: a plan cannot have already happened).  A
-        $250k / 6.5% / 360-month mortgage originated 2026-01-01 with its Feb
-        1 2026 payment (#1) confirmed and its Mar 1 2026 payment (#2) unpaid
-        at the frozen 2026-03-20 today: the plan's first row is #3 (Apr 1
+        installment whose row the owner deleted pays nothing, though its month
+        is charged (rulings R-R37, R-R71).  A $250k / 6.5% / 360-month
+        mortgage originated 2026-01-01, paid by a recurring payment at its
+        level P&I, with its Feb 1 2026 payment (#1) confirmed and its Mar 1
+        2026 row (#2) deleted at the frozen 2026-03-20 today
+        (``_behind_by_unplanned_installments``): the plan's first row is #3 (Apr 1
         2026), the numbering runs continuously from there, and because the
         missed $1,580.17 is never paid it rides the balance to the contract's
         end -- ``1580.17 * 1.0054167 ** 358 ~= $10,930`` above the
@@ -282,7 +283,12 @@ class TestAmortizationSchedule:
         the last row is #368 (Sep 2056) and reaches $0.00.  Until R7d-g-3
         the composer's committed slice listed a contractual row for the
         missed month as if it would be paid, and stopped at #360 with the
-        residue absorbed into a phantom final payment.
+        residue absorbed into a phantom final payment.  Until plan step
+        recurrence:R16-f the loan had no recurring payment and its Mar 1
+        installment was simply unpaid (B-9: a plan cannot have already
+        happened); such a loan is planned as its contract line now, which
+        bills a missed installment the day after the read and closes at #360
+        (rulings plan#3982, plan#3983).
         """
         acct = _create_fresh_mortgage(
             seed_user, db.session, origination_date=date(2026, 1, 1),
@@ -292,6 +298,13 @@ class TestAmortizationSchedule:
             status_enum=StatusEnum.DONE,
         )
         db.session.commit()
+        # The recurring payment's own Feb 1 row is deleted too: the hand-made
+        # transfer above is that installment's payment, and the occurrence
+        # would otherwise be priced beside it.
+        _behind_by_unplanned_installments(
+            seed_user, db.session, acct, seed_periods,
+            (date(2026, 2, 1), date(2026, 3, 1)),
+        )
 
         resp = auth_client.get(f"/accounts/{acct.id}/loan/schedule")
         assert resp.status_code == 200
@@ -304,13 +317,14 @@ class TestAmortizationSchedule:
         assert html.count('badge bg-success">Confirmed</span>') == 1
         assert row_numbers[0] == 1
         assert 2 not in row_numbers, (
-            "the overdue, unpaid Mar 1 installment is not in the plan"
+            "the overdue Mar 1 installment the owner deleted is not in the plan"
         )
         planned = row_numbers[1:]
         assert planned[0] == 3
         assert planned == list(range(3, 3 + len(planned)))
         assert planned[-1] == 368, (
-            "the missed installment's residue takes 8 extension installments "
+            "the missed installment's residue takes 8 installments past the "
+            "contract "
             f"to clear: the last row is #368, got #{planned[-1]}"
         )
         # The last data row's balance cell -- the money cell right before the

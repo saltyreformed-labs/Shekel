@@ -89,8 +89,9 @@ class TestPlanPayoffDate:
         at 0% take $1000 down to $400, then the plan ENDS with the balance still
         positive, so no installment drives it to ``<= 0``.  This is the pure
         function's contract (a plan too short -> ``None``), independent of the
-        SEAM's ESTIMATED tail, which extends past the contractual date so a real
-        underpaying loan clears there instead (:class:`TestPayoffTailExtension`).
+        SEAM's ESTIMATED tier, whose recurring payment's occurrences run past the
+        contractual date so a real underpaying loan clears there instead
+        (:class:`TestPayoffTailExtension`).
         """
         seed = Decimal("1000.00")
         plan = _plan([

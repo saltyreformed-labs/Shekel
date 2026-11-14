@@ -28,22 +28,27 @@ class TestUnclearingDebtHasNoDebtFreeDate:
     """
 
     def _never_clearing_loan(self, seed_user, db_session, periods):
-        """A loan whose level payment cannot cover its own monthly interest.
+        """A loan whose recurring level payment cannot cover its own monthly interest.
 
         Trued up to $900,000 against a $240,000/30yr contract (a ~$1,439 payment
         versus $4,500 of monthly interest at 6%), so the balance grows and the
-        fold never reaches zero.
+        fold never reaches zero.  The payment is the loan door's recurring
+        one: a loan with none is planned as its contract line, whose last
+        installment closes it with the balloon (ruling plan#3982), and this
+        fixture had none until plan step recurrence:R16-f.
         """
         # Pylint: ``import-outside-toplevel`` -- test-local helpers, matching
         # this module's convention of importing them where used.
         from tests._test_helpers import (  # pylint: disable=import-outside-toplevel
             create_loan_account, insert_trueup_event, loan_params_for,
+            make_loan_payment_template,
         )
         acct = create_loan_account(
             seed_user, db_session, name="Never Clears",
             principal=Decimal("240000.00"), rate=Decimal("0.06000"), term=360,
             origination_date=date(2026, 1, 1),
         )
+        make_loan_payment_template(db_session, seed_user, acct)
         insert_trueup_event(
             loan_params_for(db_session, acct.id), Decimal("900000.00"),
         )
@@ -177,17 +182,16 @@ class TestARetiredLoanHasNoDebtLine:
     # date to size an axis with.
     _FALLBACK_END = date(2036, 12, 31)
     # The clearing loan's DERIVED payoff.  Its 24 installments run 2026-02-01
-    # .. 2028-01-01, but the fold pays nothing it has no settled record for,
-    # and at the frozen 2026-03-20 as-of TWO installments (2026-02-01 and
-    # 2026-03-01) are already due and unpaid -- so the plan's zero crossing
-    # lands two installments past the contractual date, and (plan step
-    # R16-b-2, ruling R-R71) those two months are CHARGED as well: $50.00
-    # each on the $12,000.00 stands at the first plan payment (2026-04-01),
-    # which clears $150.00 of interest and $376.46 of principal against the
-    # $526.46 P&I, and the $100.00 shortfall compounds into a $110.40 residue
-    # that takes one more installment.  It was 2028-03-01 while a skipped
-    # month charged nothing.
-    _CLEARING_PAYOFF = date(2028, 4, 1)
+    # .. 2028-01-01, and at the frozen 2026-03-20 as-of TWO (2026-02-01 and
+    # 2026-03-01) are already due and unpaid.  It has no recurring payment, so
+    # its plan is its contract line (ruling plan#3982): the two count from
+    # 2026-03-21 and split as if paid on time (rulings plan#3983, plan#4029),
+    # and the term's last installment closes it on the contractual date.
+    # Until plan step recurrence:R16-f the plan billed no missed installment,
+    # so its zero crossing landed past the contract: 2028-03-01, then
+    # 2028-04-01 once the two skipped months were charged (plan step R16-b-2,
+    # ruling R-R71).
+    _CLEARING_PAYOFF = date(2028, 1, 1)
     # The domain end the resolver derives from it: the payoff year plus one,
     # at that year's end.
     _CLEARING_DOMAIN_END = date(2029, 12, 31)
@@ -426,14 +430,12 @@ class TestTheDebtFreeDateIsOneDerivation:
     """
 
     # A 24-month, $12,000 @ 5% loan originated 2026-01-01 (payment_day 1) has
-    # installments due 2026-02-01 .. 2028-01-01, but at the module's frozen
-    # 2026-03-20 clock two are already due and unpaid, and the fold pays
-    # nothing it has no settled record for -- so its zero crossing lands two
-    # installments past the contractual date, plus one more for the two
-    # skipped months' interest, which the plan CHARGES since plan step R16-b-2
-    # (ruling R-R71; the arithmetic is beside
-    # ``TestARetiredLoanHasNoDebtLine._CLEARING_PAYOFF``, the same loan).
-    _CAR_PAYOFF = date(2028, 4, 1)
+    # installments due 2026-02-01 .. 2028-01-01; the two already due and
+    # unpaid at the module's frozen 2026-03-20 clock count the day after it,
+    # and the term's last closes it on the contractual date (the same loan as
+    # ``TestARetiredLoanHasNoDebtLine._CLEARING_PAYOFF``, where the rulings
+    # and the earlier figures are).
+    _CAR_PAYOFF = date(2028, 1, 1)
     # A 360-month mortgage originating 2026-06-01 (payment_day 1) has not been
     # borrowed at the frozen clock, so nothing is overdue and its plan folds
     # from its opening anchor to the contractual last installment.

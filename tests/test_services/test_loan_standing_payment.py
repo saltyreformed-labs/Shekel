@@ -38,7 +38,7 @@ from app.models.loan_payment_settings import LoanPaymentSettings
 from app.models.transfer_template import TransferTemplate
 from app.models.transfer import Transfer
 from app.services import (
-    balance_at, loan_loaders, pay_period_write,
+    balance_at, pay_period_write,
     template_amount_service,
 )
 from app.services import transfer_recurrence
@@ -46,9 +46,6 @@ from app.services.generation_schedule import GenerationSchedule
 from app.services.balance_at import BalanceContext
 from app.services.balance_at._loan_stream import loan_timeline
 from app.services.balance_at._plan import loan_plan
-from app.services.balance_at._resolution import (
-    contractual_schedule_from_origination,
-)
 from app.services.recurring_transfer_query import (
     active_recurring_transfer_template,
     active_recurring_transfer_templates,
@@ -146,14 +143,17 @@ def _recurring_payment(seed_user, loan, base, *, derive=None, extra=None,
 def _contractual_pi(account):
     """Return the contractual P&I of every installment on the test loan.
 
-    The fixture is fixed-rate, so every row carries the same figure; the test
-    asserts against it rather than hardcoding a level payment the amortization
-    engine derives.
+    The fixture is fixed-rate, so every installment carries the same figure;
+    the test asserts against it rather than hardcoding a level payment the
+    loan's terms derive.
     """
-    rows = contractual_schedule_from_origination(
-        account.loan_params, loan_loaders.load_rate_changes(account.id),
-    )
-    return rows[0].payment
+    # The loan's own terms, as the read pass charges it: its one rate
+    # period's level P&I.  It read the from-origination schedule's first
+    # row until plan step recurrence:R16-f deleted that schedule.
+    [period] = BalanceContext.build(account.user_id).loan_walk(
+        account,
+    ).stream.calendar.periods
+    return period.period_pi
 
 
 class TestStandingPayment:

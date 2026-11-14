@@ -13,8 +13,8 @@ from app.enums import AcctTypeEnum, StatusEnum
 from app.models.account import Account
 from app.routes import loan as loan_routes
 from app.services.balance_at import BalanceContext
-from app.services.loan_loaders import load_loan_params, load_rate_changes
-from app.services.balance_at._resolution import contractual_schedule_from_origination
+from app.services.installment_calendar import final_installment_date
+from app.services.loan_loaders import load_loan_params
 from app.utils.dates import add_months
 from app.services import balance_at
 
@@ -27,6 +27,7 @@ from tests._test_helpers import (
 from tests.oracles.recurrence_baseline import MONTHLY
 
 from ._helpers import (
+    _behind_by_unplanned_installments,
     _parse_band_chart,
     _create_transfer_to_loan,
     _create_fresh_mortgage,
@@ -51,9 +52,13 @@ class TestTargetDatePanelAgreesWithTheChip:
         """A target between the CONTRACTUAL and the FOLD payoff needs a top-up.
 
         That window is exactly where the two models disagreed.  The loan is trued
-        up $5,000 above its contractual schedule, so the fold retires it well
-        after the contract does; a target inside the gap is one the schedule walk
-        called "already met" and the fold does not.
+        up $5,000 above its contractual schedule and paid by a recurring payment
+        at its level P&I, so the fold retires it well after the contract does; a
+        target inside the gap is one the schedule walk called "already met" and
+        the fold does not.  The recurring payment is what keeps the gap: a loan
+        with none is planned as its contract line and closes on the contract's
+        date with the balloon (ruling plan#3982), and this fixture had none
+        until plan step recurrence:R16-f.
         """
         acct = create_loan_account(
             seed_user, db.session, name="Behind Schedule",
@@ -63,6 +68,7 @@ class TestTargetDatePanelAgreesWithTheChip:
         insert_trueup_event(
             loan_params_for(db.session, acct.id), Decimal("245000.00"),
         )
+        make_loan_payment_template(db.session, seed_user, acct)
         _create_transfer_to_loan(
             seed_user, acct, seed_periods[2], Decimal("1500.00"),
             status_enum=StatusEnum.PROJECTED,
@@ -73,9 +79,11 @@ class TestTargetDatePanelAgreesWithTheChip:
             ctx = BalanceContext.build(seed_user["user"].id)
             account = db.session.get(Account, acct.id)
             fold_payoff = balance_at.loan_payoff_date(account, ctx)
-            contractual = contractual_schedule_from_origination(
-                load_loan_params(acct.id), load_rate_changes(acct.id),
-            )[-1].payment_date
+            params = load_loan_params(acct.id)
+            contractual = final_installment_date(
+                params.origination_date, params.payment_day,
+                params.term_months,
+            )
         assert fold_payoff is not None
         assert contractual < fold_payoff, (
             "precondition: the fold must retire this loan AFTER the contractual "
@@ -162,11 +170,15 @@ class TestPayoffChipDisplayStates:
         ($900,000 at 6.5% accrues ~$4,875/mo against a ~$1,580 payment), the
         balance grows and the fold never reaches zero.  The user is told, which
         reinforces C7's drift warning rather than leaving a gap where a payoff
-        date used to be.
+        date used to be.  The payment is a recurring one at the level P&I: a
+        loan with none is planned as its contract line, whose last installment
+        closes it with the balloon (ruling plan#3982), and this fixture had
+        none until plan step recurrence:R16-f.
         """
         acct = _create_fresh_mortgage(
             seed_user, db.session, origination_date=date(2026, 1, 1),
         )
+        make_loan_payment_template(db.session, seed_user, acct)
         db.session.commit()
         insert_trueup_event(
             loan_params_for(db.session, acct.id), Decimal("900000.00"),
@@ -320,11 +332,16 @@ class TestOneWalkEdges:
         neither trajectory reaches zero: the lever says "Never, at this
         extra", and both savings chips read "--" -- a difference between two
         sums cut at the plan's horizon is not a saving.  The plan-vs-contract
-        line says the plan never pays off.
+        line says the plan never pays off.  The loan's recurring payment at the
+        level P&I is what keeps it from clearing: with none, its plan is the
+        contract line and the term's last installment closes it (ruling
+        plan#3982), and this fixture had none until plan step
+        recurrence:R16-f.
         """
         acct = _create_fresh_mortgage(
             seed_user, db.session, origination_date=date(2026, 1, 1),
         )
+        make_loan_payment_template(db.session, seed_user, acct)
         _create_transfer_to_loan(
             seed_user, acct, seed_periods[2], Decimal("1580.17"),
             status_enum=StatusEnum.DONE,
@@ -352,19 +369,29 @@ class TestOneWalkEdges:
     ):
         """Two installments behind, the bar floors principal and says the shortfall.
 
-        Nothing paid on a $250k / 6.5% mortgage originated 2026-01-01: the
-        fold charges February, March and April against the Apr 1 payment
+        Nothing paid on a $250k / 6.5% mortgage originated 2026-01-01, whose
+        owner deleted its recurring payment's February and March rows (an
+        un-planned occurrence pays nothing and its month is charged anyway,
+        rulings R-R37 and R-R71): the fold charges February, March and April
+        against the Apr 1 payment
         (``$1,354.17 + $1,354.17 + $1,354.17 = $4,062.51`` of interest on the
         untouched balance, less what the ledger's own accrual model lays off
         -- the review's fold simulation puts the first planned payment's
         interest at ``$2,705.88``), so the payment's principal is negative.
         The bar shows the whole ``$1,580.17`` to interest, no principal
-        segment, and says how far short it fell.
+        segment, and says how far short it fell.  Until plan step
+        recurrence:R16-f the loan had no recurring payment and nothing
+        deleted: its plan billed no missed installment.  It bills them the day
+        after the read now, split as if paid on time (rulings plan#3982,
+        plan#3983, plan#4029), so that loan is not behind.
         """
         acct = _create_fresh_mortgage(
             seed_user, db.session, origination_date=date(2026, 1, 1),
         )
-        db.session.commit()
+        _behind_by_unplanned_installments(
+            seed_user, db.session, acct, seed_periods,
+            (date(2026, 2, 1), date(2026, 3, 1)),
+        )
 
         resp = auth_client.get(f"/accounts/{acct.id}/loan")
         assert resp.status_code == 200

@@ -264,10 +264,11 @@ class TestDashboardChartComposer:
     so a payment in the former is due Feb 1 and one in the latter Mar 1;
     both settle before the autouse-frozen today (2026-03-20) and land in the
     composer's replay window.  **Every installment due by today is paid in
-    these fixtures**: an installment left unpaid past its due date is not in
-    the plan (ruling D1 / finding B-9), and the fold then charges its accrued
-    interest against the next payment and clears the loan in the
-    post-contractual extension -- the honest shape
+    these fixtures**: an installment left unpaid past its due date is billed
+    the day after the read on a loan with no recurring payment (rulings
+    plan#3982, plan#3983), and one whose row the owner deleted pays nothing,
+    its accrued interest standing against the next payment until the loan
+    clears past its contract -- the shape
     ``TestAmortizationSchedule.test_schedule_lists_the_plan_when_an_installment_is_overdue``
     pins, and not what "unchanged" means here.
     """
@@ -516,14 +517,18 @@ class TestDashboardChartComposer:
         asserted at $100,000 on 2026-01-01 (``_create_loan_account``).  The
         grid's Feb 1 and Mar 1 2026 fall at or before the frozen 2026-03-20
         today and read the LEDGER -- the asserted balance, flat, nothing
-        paid -- and those two installments, due and unpaid, are absent from
-        the plan (ruling D1 / finding B-9), so the fold charges their accrued
-        interest at the Apr 1 payment: the projected line's first point sits
-        ABOVE the ledger's, then amortizes.  Asserts the line is the seam's:
-        the two ledger points flat at $100,000, non-increasing from the first
-        projected point on (the rate cannot rise in the fixed-rate window),
-        and ending at $0 -- in the post-contractual extension, since the two
-        missed installments' principal is never paid down.
+        paid.  The loan has no recurring payment, so its plan is its contract
+        line (ruling plan#3982): those two installments, due and unpaid, are
+        billed the day after the read and split as if paid on their due dates
+        (rulings plan#3983, plan#4029), so by the Apr 1 point three
+        installments have paid it down and the projected line's first point
+        sits BELOW the ledger's, then amortizes.  Asserts the line is the
+        seam's: the two ledger points flat at $100,000, non-increasing from
+        there on (the rate cannot rise in the fixed-rate window), and ending
+        at $0, where the term's last installment closes the loan.  Until plan
+        step recurrence:R16-f the plan billed neither missed installment (B-9),
+        so the line started ABOVE the ledger's and ended in the sixty-payment
+        extension past the term.
 
         (The former C5-6 / C5-7 "floor" route tests were retired with the Loop B
         band rebuild: the locked band anatomy plots only the plan's line plus
@@ -550,14 +555,14 @@ class TestDashboardChartComposer:
         # asserted balance, unpaid.
         assert band["current_index"] == 2
         assert balance[:2] == [100000.0, 100000.0]
-        # The missed installments' accrued interest meets the first planned
-        # payment, so the projected line starts above the ledger's point.
-        assert balance[2] > 100000.0
-        # Last entry reaches $0 (the extension clears the residue).
+        # The missed installments count from the day after the read, so the
+        # projected line starts below the ledger's point.
+        assert balance[2] < 100000.0
+        # Last entry reaches $0 (the term's last installment closes it).
         assert balance[-1] == 0.0
-        # Non-increasing across the fixed-rate window from the first
-        # projected point on.
-        for i in range(3, len(balance)):
+        # Non-increasing across the fixed-rate window from the ledger's last
+        # point on.
+        for i in range(2, len(balance)):
             assert balance[i] <= balance[i - 1] + 0.01, (
                 f"ARM band balance increased at index {i}: "
                 f"{balance[i - 1]} -> {balance[i]}"

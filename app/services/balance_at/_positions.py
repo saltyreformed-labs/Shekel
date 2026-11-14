@@ -362,21 +362,26 @@ def loan_payoff_date(
     (``LoanState.payoff_date``, ``RecurrenceRule.end_date``) the arc retires (plan
     step C8).
 
-    It is a FOLD-TO-ZERO, not ``plan[-1].date``: the plan runs PAST the contractual
-    payoff (the ESTIMATED tail's extension), so a loan paying extra reaches zero at
-    an EARLIER installment, and this returns that earlier date.  **The baseline is
-    unmoved for a HEALTHY or OVERPAYING loan** -- the fold reaches zero at or before
-    the contractual last installment, the same date the engine's contractual
-    projection (``project_forward``) reports.  An UNDERPAYING loan gets a
-    slightly-LATER date -- the fold keeps paying the level payment past the
-    contractual date until it clears (the extension) -- where ``project_forward``
-    forces the contractual date via ``is_last_month`` (a phantom final payment); a
-    drift so severe it never clears within the extension folds to ``None``.  The
-    drift is what C7's payment-drift warning surfaces.
+    It is a FOLD-TO-ZERO, not ``plan[-1].date``: a recurring payment's plan runs
+    PAST the contractual payoff (its occurrences' window,
+    ``_plan._PAYOFF_EXTENSION_MONTHS`` installments past the contract's last), so a
+    loan paying extra reaches zero at an EARLIER installment, and this returns that
+    earlier date.  **The baseline is unmoved for a HEALTHY or OVERPAYING loan** --
+    the fold reaches zero at or before the contractual last installment, the same
+    date the engine's contractual projection (``project_forward``) reports.  A loan
+    whose recurring payment UNDERPAYS gets a slightly-LATER date -- the fold keeps
+    paying its occurrences past the contractual date until it clears -- where
+    ``project_forward`` forces the contractual date via ``is_last_month`` (a phantom
+    final payment); a drift so severe it never clears within the window folds to
+    ``None``.  The drift is what C7's payment-drift warning surfaces.  A loan with
+    NO recurring payment is planned as its contract line, whose last installment
+    closes it at maturity whatever it owes then (ruling **plan#3982**).
 
     ``None`` for a loan already retired (owing nothing at ``ctx.as_of`` -- no
-    forward crossing), negative amortization, or an underpayment too severe to clear within
-    the post-contractual extension.  The caller reads
+    forward crossing), negative amortization, an underpayment too severe to clear
+    within the window, or a loan with no recurring payment that its contract no
+    longer closes (its record past the term's last installment, or a projected
+    transfer on that installment leaving it owing).  The caller reads
     :attr:`~app.services.balance_at.LoanFigures.is_retired` to tell the paid-off
     state (badge it) from the not-yet-cleared ones (recurrence stays indefinite).
 
@@ -481,8 +486,10 @@ def loan_installments(
 
     Returns:
         The timeline's projected :class:`~app.services.loan_ledger.PaymentOutcome`
-        list in walk order, running to the plan's post-contractual extension
-        (rows after the payoff carry a zero balance and pay nothing down).  EMPTY for a
+        list in walk order, running to the plan's end -- a recurring payment's
+        window past the contract, or the contract's last installment for a loan
+        with none (rows after the payoff carry a zero balance and pay nothing
+        down).  EMPTY for a
         loan already retired (owing nothing at ``ctx.as_of``): its plan's
         payments would fold to refunds against nothing owed, and no surface
         lists a payment a paid-off loan will not make -- the same guard

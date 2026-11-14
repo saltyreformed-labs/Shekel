@@ -21,11 +21,13 @@ ways:
   date (the fold-to-zero, not ``plan[-1].date``).
 
 **Baseline parity is a healthy/overpaying claim, NOT universal.** An UNDERPAYING
-loan (a balance behind the contractual schedule) clears a few months PAST the
-contractual date -- the ESTIMATED tail's post-contractual extension (C8c,
-:class:`TestPayoffTailExtension`) -- so it derives a LATER date than the
-resolver's ``is_last_month``-forced contractual one (the deliberate move C8c
-makes).  Only a drift too severe to clear within the extension folds to ``None``.
+loan (a balance behind the contractual schedule) its recurring payment pays clears
+a few months PAST the contractual date -- the payment's occurrences past the
+contract (C8c, :class:`TestPayoffTailExtension`) -- so it derives a LATER date than
+the resolver's ``is_last_month``-forced contractual one (the deliberate move C8c
+makes).  Only a drift too severe to clear within that window folds to ``None``.  A
+loan with NO recurring payment is planned as its contract line and closes on the
+contractual date with the balloon (ruling plan#3982).
 The PURE fold-to-zero on a truncated plan (``plan_payoff_date`` handed a plan with
 no further installments) still returns ``None``, pinned below; the drift that
 produces an underpayment is what C7's payment-drift warning surfaces.

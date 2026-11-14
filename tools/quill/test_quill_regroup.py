@@ -1,25 +1,33 @@
-"""The regroup's writes (rulings plan#4011, plan#4012, plan#4013; :mod:`_regroup_pass`): a ``quill
-sync`` pass and a ``quill priority`` run each leave the board grouped, Urgent, then High, Medium,
-Low and the rest, with the developer's order kept inside each group; a dry run writes nothing; a
-second pass moves nothing; a card ``sync`` closes in the same pass is never moved; a clear
-through quill puts the card at the top of the no-Priority group; a ``quill file`` filing leaves
-the board grouped too, a new card suggested Urgent or High waiting just under the High cards and
-one suggested Medium or Low at the bottom (ruling plan#4017), a leaf in its split step's place
-(R-BAL179), and a filing run again after a cut places its card again.  The weekly update's card,
-first in the High group (ruling plan#4014), is ``test__waits.py``'s.  Over the in-memory tracker
+"""The regroup's writes (rulings plan#4011, plan#4012, plan#4096; :mod:`_regroup_pass`): a ``quill
+sync`` pass and a ``quill priority`` run each leave the board grouped, Urgent, then High, the
+cards waiting under the High cards, Medium, Low and the rest, with the developer's order kept
+inside each group; a pass reads quill's suggestion on each card no Priority ranks and on no
+other; a dry run writes nothing; a second pass moves nothing; a card ``sync`` closes in the same
+pass is never moved; a Priority cleared, through quill or on the web, puts the card at the top
+of the no-Priority group, and a card set Low at the bottom goes above it (finding plan#4092); a
+``quill file`` filing leaves the board grouped too, a new card suggested Urgent or High waiting
+under the High cards and one suggested Medium or Low at the bottom, a card it just added and an
+order read does not list yet planned at the bottom, a leaf in its split step's place (R-BAL179),
+and a filing run again after a cut places its card again; the weekly update's card is left out
+of the moves and placed first in the High group after them (ruling plan#4014), which
+``test__waits.py`` drives through ``sync``.  Over the in-memory tracker
 (:class:`_fake.FakeTracker`) and the ``code`` fixture's real git; the board's own back-to-back
 move and its read back of several placements over scripted GitHub answers.  The plan itself is
 ``test__regroup.py``'s.
 """
 from __future__ import annotations
 
+from dataclasses import replace
+
 import pytest
 
 from tools.quill import _git, _sync
 from tools.quill._board_lag import BOARD_WAIT_SECONDS
-from tools.quill._fake import FailOnce, FakeTracker, leaf_filing, run, ship, unship
+from tools.quill._draft import Suggestion
+from tools.quill._fake import QUILL_ACTOR, FailOnce, FakeTracker, leaf_filing, run, ship, unship
 from tools.quill._regroup import moves
-from tools.quill._regroup_pass import board_cards
+from tools.quill._regroup_pass import board_cards, filing_pass
+from tools.quill._suggestion import Pending
 from tools.quill._tracker import BOARD_AFTER, BOARD_TOP, Board, Child
 from tools.quill.setup_tracker import FILING, PLAN
 from tools.quill.test__tracker import _ReadBoard
@@ -46,9 +54,16 @@ def _board_moves(tracker):
     return [write[1:] for write in tracker.writes if write[0] == "board_move"]
 
 
+def _suggest(tracker, number, priority):
+    """quill's suggestion of ``priority`` pending on card ``number``, as a filing leaves it."""
+    tracker.suggestions.held[number] = Pending(Suggestion(priority, "A test card's reason."),
+                                               QUILL_ACTOR)
+
+
 def _out_of_group():
     """A board as the developer left it: Low plan#1, High plan#2, Medium plan#3, and plan#4,
-    which holds no Priority, so the regroup leaves it alone (ruling plan#4017)."""
+    which holds no Priority and no suggestion, so it is in the last group, at the bottom
+    already (ruling plan#4096)."""
     tracker = FakeTracker()
     tracker.add(1, priority="Low")
     tracker.add(2, priority="High")
@@ -61,7 +76,8 @@ def _out_of_group():
 
 def test_a_sync_pass_leaves_the_board_grouped_and_a_second_pass_moves_nothing(code, capsys):
     """The Low card goes under the Medium one, the High and Medium cards already in order stay,
-    and the card holding no Priority stays at the bottom; the move is printed and read back.
+    and the card holding no Priority stays at the bottom, in the last group; the move is printed
+    and read back.
     Run again, it finds the board grouped and moves nothing."""
     tracker = _out_of_group()
     assert run(tracker, code, "sync") == 0
@@ -142,12 +158,63 @@ def test_a_board_that_does_not_show_the_moves_yet_is_said_so(code, capsys):
         "that did not land"]
 
 
+def test_a_card_suggested_high_at_the_bottom_moves_under_the_high_cards(code, capsys):
+    """Ruling plan#4096: plan#6 holds no Priority and quill's suggestion of High, at the bottom:
+    the pass reads the suggestion and moves it under the High card, above the Medium one; plan#5,
+    suggested Low, stays in the last group."""
+    tracker = FakeTracker()
+    for number, priority in enumerate(("Urgent", "High", "Medium", "Low", None, None), start=1):
+        tracker.add(number, priority=priority)
+    _suggest(tracker, 5, "Low")
+    _suggest(tracker, 6, "High")
+    assert run(tracker, code, "sync") == 0
+    assert tracker.board.items == [1, 2, 6, 3, 4, 5]
+    assert _regroup_lines(capsys.readouterr().out) == [_moved(6, "after plan#2")]
+
+
+def test_a_priority_cleared_on_the_web_goes_to_the_top_of_the_no_priority_group(code, capsys):
+    """Ruling plan#4096: High plan#1, its Priority cleared on the web (written by no quill
+    command), goes at the next ``sync`` just under the Low card, above the cards holding none,
+    as a clear through quill does."""
+    tracker = FakeTracker()
+    for number, priority in enumerate(("High", "High", "Low", None, None), start=1):
+        tracker.add(number, priority=priority)
+    tracker.cards_by_number[1] = replace(tracker.cards_by_number[1], priority=None)
+    assert run(tracker, code, "sync") == 0
+    assert tracker.board.items == [2, 3, 1, 4, 5]
+    assert _regroup_lines(capsys.readouterr().out) == [_moved(1, "after plan#3")]
+
+
+def test_a_pass_reads_the_suggestion_of_each_card_no_priority_ranks_and_of_no_other(
+        code, monkeypatch):
+    """The pass reads quill's suggestion on plan#2 and plan#6, which no Priority ranks, and on
+    no card a Priority ranks (plan#1, and leaf plan#4 through its split step), a paused card
+    (plan#3), a closed one (plan#5) or a task (plan#7): a read for each card waiting on the
+    developer's decision and none for the rest (``_regroup_pass``'s docstring)."""
+    tracker = FakeTracker()
+    tracker.add(9, priority="High", on_board=False, children=(Child(4, "step", True),))
+    tracker.add(1, priority="Medium")
+    tracker.add(2)
+    tracker.add(3, priority="On hold")
+    tracker.add(4, parent=9)
+    tracker.add(5, is_open=False, state_reason="COMPLETED", closed_by_tool=True)
+    tracker.board.items.append(5)
+    tracker.add(6)
+    tracker.add_task(7, 1)
+    read = []
+    pending = tracker.suggestions.pending
+    monkeypatch.setattr(tracker.suggestions, "pending",
+                        lambda card: read.append(card.number) or pending(card))
+    assert run(tracker, code, "sync", "--dry-run") == 0
+    assert read == [2, 6]
+
+
 def test_the_read_by_the_boards_rows_plans_what_syncs_read_plans(code):
     """``quill priority``'s read (:func:`_regroup_pass.board_cards`: the board's rows by number
     and every step above each) plans the same moves as ``sync``'s read of every card, over a
     board holding a leaf ranked through its split step, a leaf paused through one, a card On
-    hold, a closed card and one holding no Priority; and the plan moves cards, so the two agree
-    on something."""
+    hold, a closed card and one holding no Priority and quill's suggestion of High; and the plan
+    moves cards, so the two agree on something."""
     tracker = FakeTracker()
     tracker.add(10, priority="High", on_board=False,
                 children=(Child(11, "step", True), Child(12, "step", True)))
@@ -164,9 +231,10 @@ def test_the_read_by_the_boards_rows_plans_what_syncs_read_plans(code):
     tracker.add(5)
     order = tracker.board.order()
     wide = _sync.every_card(tracker, _git.read(code), _git.ever_marked(code)).cards
-    planned = moves(order, wide)
+    planned = moves(order, wide, {5: "High"})
     assert planned
-    assert moves(order, board_cards(tracker, [number for number, _ in order])) == planned
+    assert moves(order, board_cards(tracker, [number for number, _ in order]),
+                 {5: "High"}) == planned
 
 
 # -- quill priority -----------------------------------------------------------------------------
@@ -189,6 +257,17 @@ def test_a_priority_set_moves_the_card_to_the_end_of_its_group_and_run_again_mov
                         "written\n")
 
 
+def test_a_card_at_the_bottom_set_low_ends_above_the_cards_holding_none(code):
+    """Finding plan#4092: plan#5, at the bottom holding none, set Low, ends last among the Low
+    cards, above plan#3 and plan#4, which hold none, never below them."""
+    tracker = FakeTracker()
+    for number, priority in enumerate(("Medium", "Low", None, None, None), start=1):
+        tracker.add(number, priority=priority)
+    assert run(tracker, code, "priority", "plan#5", "--to", "Low") == 0
+    assert tracker.board.items == [1, 2, 5, 3, 4]
+    assert _board_moves(tracker) == [(5, "PVTI_2")]
+
+
 def test_a_priority_set_is_regrouped_by_the_value_written_whatever_a_read_shows(code,
                                                                                monkeypatch):
     """A read of the card just after its write still shows it holding none (GitHub's lag, which
@@ -205,9 +284,9 @@ def test_a_priority_set_is_regrouped_by_the_value_written_whatever_a_read_shows(
 
 def test_a_clear_puts_the_card_at_the_top_of_the_no_priority_group_and_run_again_stays(
         code, capsys):
-    """Ruling plan#4013 applied under R-BAL207: High plan#1 cleared goes just under the Low card,
-    above the cards holding none; the same command run again finds it there and moves
-    nothing."""
+    """Rulings plan#4013, plan#4096: High plan#1 cleared drops to the top of the last group, just
+    under the Low card, above the cards holding none; the same command run again finds it there
+    and moves nothing."""
     tracker = FakeTracker()
     tracker.add(1, priority="High")
     tracker.add(2, priority="High")
@@ -217,30 +296,31 @@ def test_a_clear_puts_the_card_at_the_top_of_the_no_priority_group_and_run_again
     assert run(tracker, code, "priority", "plan#1", "--clear") == 0
     assert tracker.board.items == [2, 3, 1, 4, 5]
     assert _board_moves(tracker) == [(1, "PVTI_3")]
-    assert _regroup_lines(capsys.readouterr().out) == [
-        _moved(1, "after plan#3", ruling="plan#4013")]
+    assert _regroup_lines(capsys.readouterr().out) == [_moved(1, "after plan#3")]
     assert run(tracker, code, "priority", "plan#1", "--clear") == 0
     assert _board_moves(tracker) == [(1, "PVTI_3")]
     assert _regroup_lines(capsys.readouterr().out) == []
 
 
-def test_a_clear_of_a_card_holding_none_puts_it_there_too(code):
-    """The command's end state: a card holding no Priority, waiting under the High cards as a
-    new card suggested High does (ruling plan#4017), cleared, goes under the Low cards."""
+def test_a_clear_of_a_card_holding_none_suggested_high_leaves_it_waiting(code):
+    """plan#2 holds no Priority and quill's suggestion of High, waiting under the High card:
+    cleared, it is written nothing and its suggestion is not taken back (``quill priority``'s
+    docstring), so it keeps its group and nothing moves."""
     tracker = FakeTracker()
     tracker.add(1, priority="High")
     tracker.add(2)
     tracker.add(3, priority="Low")
+    _suggest(tracker, 2, "High")
     assert run(tracker, code, "priority", "plan#2", "--clear") == 0
-    assert tracker.board.items == [1, 3, 2]
-    assert not [write for write in tracker.writes if write[0] == "set_field"]
+    assert tracker.board.items == [1, 2, 3] and not _board_moves(tracker)
+    assert not [write for write in tracker.writes if write[0] in ("set_field", "withdraw")]
 
 
-def test_a_clear_the_regroup_moves_with_others_sends_the_cards_move_after_theirs(code, capsys):
-    """A drag left Low plan#3 above Medium plan#4: the clear of High plan#1 sends the regroup's
-    move first (Medium plan#4 up, of the two single moves that group the rest, the one keeping
-    the earlier run, ``_regroup._kept``), then the card's, after it, where the board as that move
-    leaves it puts the top of the no-Priority group."""
+def test_a_clear_the_regroup_moves_with_others_is_one_of_its_moves(code, capsys):
+    """A drag left Low plan#3 above Medium plan#4: the clear of High plan#1 is planned with the
+    rest, in the sort's order, Medium plan#4 up first (of the two single moves that group the
+    rest, the one keeping the earlier run, ``_regroup._kept``), then the cleared card to the top
+    of the last group, under the Low card that move leaves last of its group."""
     tracker = FakeTracker()
     tracker.add(1, priority="High")
     tracker.add(2, priority="High")
@@ -250,23 +330,7 @@ def test_a_clear_the_regroup_moves_with_others_sends_the_cards_move_after_theirs
     assert run(tracker, code, "priority", "plan#1", "--clear") == 0
     assert tracker.board.items == [2, 4, 3, 1, 5]
     assert _regroup_lines(capsys.readouterr().out) == [
-        _moved(4, "after plan#2"), _moved(1, "after plan#3", ruling="plan#4013")]
-
-
-def test_a_cleared_card_is_left_out_of_the_plan_so_no_move_goes_after_it(code, capsys):
-    """High plan#2, the last High card, cleared, above Low plan#4 and Medium plan#3: the plan is
-    made over the board without it (``_regroup.goes_after``'s contract), so Medium plan#3 goes
-    just under High plan#1, not under the card about to leave, and then the card goes under
-    the Low card."""
-    tracker = FakeTracker()
-    tracker.add(1, priority="High")
-    tracker.add(2, priority="High")
-    tracker.add(4, priority="Low")
-    tracker.add(3, priority="Medium")
-    assert run(tracker, code, "priority", "plan#2", "--clear") == 0
-    assert tracker.board.items == [1, 3, 4, 2]
-    assert _regroup_lines(capsys.readouterr().out) == [
-        _moved(3, "after plan#1"), _moved(2, "after plan#4", ruling="plan#4013")]
+        _moved(4, "after plan#2"), _moved(1, "after plan#3")]
 
 
 def test_a_clear_that_leaves_a_leaf_ranked_through_its_step_is_the_regroups(code):
@@ -292,7 +356,7 @@ def _closed_step(tracker):
 
 
 def _task(tracker):
-    """Task plan#2 under plan#1, which holds none, on the board under it, holding High."""
+    """Task plan#2 under plan#1, which holds Low, on the board under it, holding High."""
     tracker.add_task(2, 1, priority="High")
 
 
@@ -303,31 +367,17 @@ def _off_the_board(tracker):
 
 @pytest.mark.parametrize("second", [_closed_step, _task, _off_the_board],
                          ids=["closed", "task", "off-the-board"])
-def test_a_clear_of_a_card_in_no_place_of_the_order_places_nothing(code, second):
+def test_a_clear_of_a_card_in_no_place_of_the_order_moves_nothing(code, second):
     """A closed card, a task (in no place of the board's order, ruling plan#1814) and a card off
-    the board, cleared, are never placed, though nothing ranks them; the board, grouped, moves
+    the board, cleared, are never moved, though nothing ranks them; the board, grouped, moves
     nothing."""
     tracker = FakeTracker()
-    tracker.add(1)
+    tracker.add(1, priority="Low")
     second(tracker)
-    tracker.add(3, priority="Low")
+    tracker.add(3)
     held = list(tracker.board.items)
     assert run(tracker, code, "priority", "plan#2", "--clear") == 0
     assert tracker.board.items == held and not _board_moves(tracker)
-
-
-def test_a_cleared_card_the_boards_order_read_does_not_list_yet_is_placed(code, monkeypatch):
-    """The board's order read lags the card's place on it: the card is placed all the same,
-    since where it sits is unread."""
-    tracker = FakeTracker()
-    tracker.add(1, priority="High")
-    tracker.add(2, priority="Low")
-    tracker.add(3)
-    listed = tracker.board.order
-    monkeypatch.setattr(tracker.board, "order",
-                        lambda: [row for row in listed() if row[0] != 1])
-    assert run(tracker, code, "priority", "plan#1", "--clear") == 0
-    assert _board_moves(tracker) == [(1, "PVTI_2")]
 
 
 def test_a_run_that_writes_no_priority_still_regroups(code):
@@ -385,35 +435,74 @@ _WAITS = {
 @pytest.mark.parametrize("suggestion", list(_WAITS))
 def test_a_new_card_waits_by_its_suggestion_under_the_high_cards_or_at_the_bottom(
         code, tmp_path, capsys, kind, suggestion):
-    """Ruling plan#4017, amending plan#3555: a new step or question suggested Urgent or High goes
-    just under the High cards, above the Medium ones, before its mark comes off; one suggested
-    Medium or Low stays at the bottom, where GitHub adds it.  Either holds no Priority, so the
-    next pass leaves it where it is."""
+    """Rulings plan#4017, plan#4096: a new step or question suggested Urgent or High is moved by
+    the regroup, which reads its suggestion, just under the High cards, above the Medium ones,
+    before its mark comes off; one suggested Medium or Low stays at the bottom, where GitHub adds
+    it, in the last group.  The next pass finds the board grouped and moves nothing."""
     board, moved = _WAITS[suggestion]
     tracker = _grouped()
     assert run(tracker, code, *_filing(tmp_path, kind, suggestion)) == 0
     assert tracker.board.items == board and _board_moves(tracker) == moved
     assert tracker.writes[-1] == ("unmark", 6)
-    lines = [f"moved on the board after plan#2 (ruling plan#4017): plan#6 [{kind}, balance] New"]
+    lines = [f"moved on the board after plan#2 (ruling plan#4011): plan#6 [{kind}, balance] New"]
     assert _regroup_lines(capsys.readouterr().out) == ([f"  {lines[0]}"] if moved else [])
     assert run(tracker, code, "sync") == 0
     assert tracker.board.items == board and _board_moves(tracker) == moved
 
 
-def test_a_filing_regroups_the_board_before_it_places_its_card(code, tmp_path, capsys):
-    """A drag left Low plan#2 above Medium plan#3: the filing of a card suggested High sends the
-    regroup's move first, then its card's, just under High plan#1 on the board that move leaves;
-    one suggested Low is the regroup's alone, and stays at the bottom."""
+def test_a_filing_regroups_the_board_with_its_card_in_it(code, tmp_path, capsys):
+    """A drag left Low plan#2 above Medium plan#3: the filing of a card suggested High plans its
+    card with the rest, in the sort's order, the card first, under High plan#1, then Medium
+    plan#3 under it; one suggested Low stays at the bottom, and Medium plan#3 alone moves."""
+    lines = {"High": ["  " + _moved(4, "after plan#1").replace("card 4", "New"),
+                      "  " + _moved(3, "after plan#4")],
+             "Low": ["  " + _moved(3, "after plan#1")]}
     for suggestion, board in (("High", [1, 4, 3, 2]), ("Low", [1, 3, 2, 4])):
         tracker = FakeTracker()
         for number, priority in ((1, "High"), (2, "Low"), (3, "Medium")):
             tracker.add(number, priority=priority)
         assert run(tracker, code, *_filing(tmp_path, "step", suggestion)) == 0
         assert tracker.board.items == board
-        lines = _regroup_lines(capsys.readouterr().out)
-        assert len(lines) == (2 if suggestion == "High" else 1)
-        assert lines[-1].endswith("(ruling plan#4017): plan#4 [step, balance] New") is (
-            suggestion == "High")
+        assert _regroup_lines(capsys.readouterr().out) == lines[suggestion]
+
+
+def test_a_card_the_filing_added_that_the_order_read_does_not_list_yet_is_moved(
+        code, tmp_path, monkeypatch):
+    """The board's order read lags the add (``_board_lag``): the card the filing just added at
+    the bottom, suggested High, is planned there all the same, and moved under the High cards."""
+    tracker = _grouped()
+    listed = tracker.board.order
+    monkeypatch.setattr(tracker.board, "order", lambda: [row for row in listed() if row[0] != 6])
+    assert run(tracker, code, *_filing(tmp_path, "step", "High")) == 0
+    assert _board_moves(tracker) == [(6, "PVTI_2")]
+
+
+def test_a_leaf_the_order_read_does_not_list_yet_keeps_its_split_steps_place(
+        code, tmp_path, monkeypatch):
+    """The leaf of High plan#2 goes into its place, above High plan#6, and the board's order read
+    after does not list it yet: it was placed, not added at the bottom, so the pass plans
+    nothing for it, where planning it at the bottom would move it under plan#6 (R-BAL179)."""
+    tracker = FakeTracker()
+    for number, priority in ((1, "High"), (2, "High"), (6, "High"), (4, "Medium")):
+        tracker.add(number, priority=priority)
+    listed = tracker.board.order
+    monkeypatch.setattr(tracker.board, "order", lambda: [row for row in listed() if row[0] != 7])
+    assert run(tracker, code, *leaf_filing(tmp_path, "Leaf", parent="plan#2")) == 0
+    assert tracker.board.items == [1, 7, 6, 4] and not _board_moves(tracker)
+
+
+def test_the_updates_card_is_left_out_of_the_moves_and_placed_first_in_high_after_them(capsys):
+    """Ruling plan#4014: the weekly update's card, High plan#4, at the bottom on a board a drag
+    left Low plan#2 above Medium plan#3: the regroup's move over the board without it is sent
+    first, Medium plan#3 under Urgent plan#1, then the card's, first in High, under plan#1 on the
+    board that move leaves, so no move goes after the card about to leave the bottom."""
+    tracker = FakeTracker()
+    for number, priority in ((1, "Urgent"), (2, "Low"), (3, "Medium"), (4, "High")):
+        tracker.add(number, priority=priority)
+    filing_pass(tracker, tracker.cards_by_number[4], "PVTI_4", True, False)
+    assert tracker.board.items == [1, 4, 3, 2]
+    assert _regroup_lines(capsys.readouterr().out) == [
+        "  " + _moved(3, "after plan#1"), "  " + _moved(4, "after plan#1", ruling="plan#4014")]
 
 
 def test_a_card_a_person_gave_a_priority_while_filed_is_the_regroups(code, tmp_path):

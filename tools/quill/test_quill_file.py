@@ -802,7 +802,9 @@ def test_a_marked_leaf_is_moved_only_by_a_leaf_filed_before_it_on_the_board(code
     """Review cp4d A1-A3, L5, R-BAL202: a marked leaf is moved after the leaves filed before
     it when the board shows one (here a move to where it already is, which no read can tell
     from a person's drag); with none on the board -- alone, or beside another step -- there
-    is nothing to place it by, and it stays where it is."""
+    is nothing to place it by, and it stays where it is.  The other step, plan#4, holds Medium,
+    as the leaves do through plan#1, so every board here is grouped and the regroup moves
+    nothing (ruling plan#4096: a card holding none would be the last group's)."""
     spec = tmp_path / "spec.md"
     spec.write_text("Half.")
     tracker = FakeTracker()
@@ -810,7 +812,7 @@ def test_a_marked_leaf_is_moved_only_by_a_leaf_filed_before_it_on_the_board(code
                              Child(5, "step", True)), on_board=False)
     tracker.add(2, parent=1, on_board=False)
     tracker.add(3, parent=1, on_board=False)
-    tracker.add(4, on_board=False)
+    tracker.add(4, priority="Medium", on_board=False)
     tracker.add(5, parent=1, body="Half.", title="half", on_board=False,
                 labels=("balance", FILING), effort="2")
     tracker.board.items[:] = board

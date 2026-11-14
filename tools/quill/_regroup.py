@@ -1,53 +1,52 @@
-"""Where a card goes on the board: the one home of it (rulings plan#4011 to plan#4017).  Nothing
-here reads GitHub or writes: the caller hands over the board's order and the cards, and writes
-what this plans.
+"""Where a card goes on the board: the one home of it (rulings plan#4011 to plan#4017, plan#4096).
+Nothing here reads GitHub or writes: the caller hands over the board's order, the cards and
+quill's pending suggestions on them, and writes what this plans.
 
-**The board reads in ``quill next``'s order** (ruling plan#4016, amending plan#1831): Urgent, then
-High, then Medium, then Low, then the cards no Priority ranks.  A card's group is its rank as
-``quill next`` reads it, the highest Priority at it or at a step above it (the group of
-:func:`_next.turn`, the one key both sort by), so a leaf ranks through its split step and takes
-its group from it.  Within a group the developer's drag decides its place (R-BAL177).
+**The board's groups** (:data:`_GROUPS`; rulings plan#4016, plan#4096, amending plan#1831 and
+plan#4017), top first: Urgent, High, the cards waiting under the High cards, Medium, Low, then
+the rest.  A card a Priority ranks takes its group from its rank as ``quill next`` reads it, the
+highest Priority at it or at a step above it (the group of :func:`_next.turn`), so a leaf ranks
+through its split step and takes its group from it.  A card no Priority ranks takes its group
+from quill's pending suggestion on it, which the caller reads for each (:func:`undecided`): one
+suggested Urgent or High waits under the High cards; one suggested Medium or Low, or holding no
+suggestion, is in the last group.  ``quill next`` ranks a waiting card last until its Priority
+is set, so the board shows it ahead of Medium and Low cards ``quill next`` hands out first
+(ruling plan#4017's 9B): the board's group of it is not :func:`_next.turn`'s.  Within a group
+the developer's drag decides its place (R-BAL177).
 
 **The regroup** (ruling plan#4011, :func:`moves`) makes the board a stable sort by group of the
-rows it may move (:func:`movable`): open steps and questions on the board that a Priority ranks
-and nothing pauses.  It keeps the longest run of them already in group order where it is, and
-moves each other row, so it makes the fewest moves and keeps the developer's order inside each
-group; a second pass plans nothing.  Of two runs as long, it keeps the one that leaves more of
-the rows it leaves alone between the groups they sat between.  A drag that puts a card in
-another group is undone at the next pass.  It never moves a card no Priority ranks (an undecided
-card, ruling plan#4017), a paused card (On hold at it or at a step above it, ruling plan#4015) or
-a closed one.
+rows it may move (:func:`movable`): every open step and question on the board that nothing
+pauses.  It keeps the longest run of them already in group order where it is, and moves each
+other row, so it makes the fewest moves and keeps the developer's order inside each group; a
+second pass plans nothing.  Of two runs as long, it keeps the one that leaves more of the rows
+it leaves alone between the groups they sat between.  A drag that puts a card in another group
+is undone at the next pass, a card no Priority ranks among them (ruling plan#4096).  It never
+moves a paused card (On hold at it or at a step above it, ruling plan#4015) or a closed one.
 
 **Where a moved row lands.**  Just under the row before it in that sort, or at the top when none
 is.  A row that opens its group goes under the rows the regroup leaves alone that sit directly
-under the end of the group above it, when a row of a later group follows them, so each such run
-stays between the two groups: the cards waiting under the High cards stay under the High cards
-(ruling plan#4017), and a paused card at the end of its group stays at that end (ruling
-plan#4015: a paused High card stays among the High rows).  The rows left alone below the last row
-a Priority ranks are the no-Priority group, which a ranked row goes above.  Decided under
-R-BAL207, with the tie-break above: the rulings place those cards and leave them alone, and this
-keeps a card moving past them from landing between them and their group.
+under the end of the group above it, so a paused card at the end of its group stays at that
+end, at the bottom of the board too (ruling plan#4015: a paused High card stays among the High
+rows).  Decided under R-BAL207, with the tie-break above: the ruling leaves a paused card where
+it is, and this keeps a card moving past it from landing between it and its group.
 
 **A Priority changed** (ruling plan#4013) needs no rule of its own.  On a board the last pass
 grouped, a card whose Priority drops is above every card of its new group, so the sort puts it
 first there; one whose Priority rises is below every card of its new group, so it goes last.
-Nothing reads which way it moved.  A card dropped from the end of the High group is already
-first in its new group where it stands, so it stays, above any cards waiting there.  A Priority
-cleared through ``quill priority --clear`` puts the card at the top of the no-Priority group,
-just under the Low cards (:func:`goes_after` with ``LOW``); one cleared on the web leaves the card
-where it is, since the regroup leaves undecided cards alone (R-BAL207's application of plan#4013
-under plan#4017).
+Nothing reads which way it moved, nor where it was changed: a Priority cleared, through ``quill
+priority --clear`` or on the web, drops the card to the top of the last group, just under the
+Low cards (ruling plan#4096), and a card dropped from High to Medium goes under the cards
+waiting under the High cards.
 
-**A card filed** goes:
-- a new top-level step or question suggested Urgent or High, just under the High cards
-  (:func:`goes_after` with ``HIGH``; ruling plan#4017, amending plan#3555), where it waits until
-  the developer sets its Priority, shown in the Inbox meanwhile (rulings plan#2800, plan#3231);
-  one suggested Medium or Low, or nothing, at the bottom, where GitHub adds it;
-- the card the weekly update files, which holds High, first in the High group, just under the
-  Urgent cards (:func:`goes_after` with ``HIGH`` and ``first``; ruling plan#4014, amending
-  plan#3620);
-- a leaf, where its split step sat (R-BAL179, :func:`_state.leaf_placement`); the regroup then
-  moves it only if it ranks in another group.
+**A card filed** goes on the board at the bottom, where GitHub adds it, and the regroup moves it
+like any other card: a new top-level step or question suggested Urgent or High to the end of the
+cards waiting under the High cards, where it waits until the developer sets its Priority, shown
+in the Inbox meanwhile (rulings plan#2800, plan#3231, plan#4017, plan#4096); one suggested
+Medium or Low, or nothing, stays at the bottom, in the last group.  A leaf goes where its split
+step sat (R-BAL179, :func:`_state.leaf_placement`), and the regroup moves it only if it ranks in
+another group.  Only the card the weekly update files, which holds High, is placed apart from
+the sort, which would put it last among the High cards: first in the High group, just under the
+Urgent cards (:func:`goes_after`; ruling plan#4014, amending plan#3620).
 
 A task nests under its step on the board, in no place of this order (ruling plan#1814), and is no
 row of it (:meth:`_tracker.Board.order`).
@@ -59,10 +58,22 @@ from itertools import takewhile
 from operator import itemgetter
 from typing import NamedTuple
 
-from tools.quill._fields import RANKS
+from tools.quill._fields import HIGH, RANKS, URGENT
 from tools.quill._next import ranked, turn
 from tools.quill._state import held_at
 from tools.quill._tracker import Card
+
+#: The group of a card no Priority ranks on which quill's suggestion of Urgent or High is
+#: pending (:data:`_WAITS`): it waits just under the High cards (rulings plan#4017, plan#4096).
+_WAITING = "waiting"
+#: The suggestions that put a card no Priority ranks in :data:`_WAITING`.
+_WAITS = (URGENT, HIGH)
+#: Where :data:`_WAITING` falls among ``quill next``'s ranks: just after High.
+_AFTER_HIGH = RANKS.index(HIGH) + 1
+#: The board's groups, top first, a card's group (:func:`_group`) its index here (rulings
+#: plan#4016, plan#4096): ``quill next``'s ranks (:data:`_fields.RANKS`) with :data:`_WAITING`
+#: just after High, then None, every other card no Priority ranks.
+_GROUPS = (*RANKS[:_AFTER_HIGH], _WAITING, *RANKS[_AFTER_HIGH:], None)
 
 
 class Move(NamedTuple):
@@ -85,10 +96,32 @@ class _Pass(NamedTuple):
 
 
 def movable(card: Card, cards: Mapping[int, Card]) -> bool:
-    """Whether the regroup may move ``card``, a row of the board's order: it is open, a Priority
-    at it or at a step above it ranks it (:func:`_next.ranked`), and nothing at it or above it
-    pauses it (:func:`_state.held_at`).  ``cards`` holds every step above it."""
-    return card.is_open and ranked(card, cards) and held_at(card, cards) is None
+    """Whether the regroup may move ``card``, a row of the board's order: it is open and nothing
+    at it or above it pauses it (:func:`_state.held_at`).  ``cards`` holds every step above
+    it."""
+    return card.is_open and held_at(card, cards) is None
+
+
+def undecided(order: Sequence[tuple[int, str]], cards: Mapping[int, Card]) -> list[int]:
+    """The rows of ``order``, the board's order (``(card number, board item)``, top first), whose
+    group quill's pending suggestion on them decides (:func:`_group`): each the regroup may move
+    (:func:`movable`) that no Priority ranks (:func:`_next.ranked`), in the board's order.  A
+    caller reads the suggestion of each, and of no other card, for :func:`moves`.  ``cards``
+    holds every open card in ``order`` and every step above each."""
+    return [number for number, _ in order if number in cards
+            and movable(cards[number], cards) and not ranked(cards[number], cards)]
+
+
+def _group(number: int, cards: Mapping[int, Card], places: Mapping[int, int],
+           suggested: Mapping[int, str]) -> int:
+    """Card ``number``'s group on the board, its index in :data:`_GROUPS`: its rank as ``quill
+    next`` reads it (:func:`_next.turn`, ``places`` the board's rows), or, when no Priority
+    ranks it, :data:`_WAITING` for a suggestion ``suggested`` holds of Urgent or High and the
+    last group for any other or none.  ``cards`` holds the card and every step above it."""
+    rank = turn(number, cards, places).group
+    if rank < len(RANKS):
+        return _GROUPS.index(RANKS[rank])
+    return _GROUPS.index(_WAITING if suggested.get(number) in _WAITS else None)
 
 
 def _spots(order: Sequence[tuple[int, str]],
@@ -96,9 +129,11 @@ def _spots(order: Sequence[tuple[int, str]],
     """Each row of ``order`` that :func:`_kept`'s run may hold, in the board's order, with its
     spot: twice its group for a row the regroup may move (one of ``groups``); for a row it leaves
     alone between two such rows in group order, twice the group above it, and one more when the
-    group below it is a later one, since it sits at the end of the group above (as the cards
-    waiting under the High cards do).  A row left alone above the first row it may move, below
-    the last, or between two out of group order, is passed: it says nothing of where it sits."""
+    group below it is a later one, since it sits at the end of the group above (as a paused card
+    at the end of its group does, ruling plan#4015); and for one below the last such row, twice
+    that row's group and one more, the end of that group, where :func:`_under` keeps it.  A row
+    left alone above the first row it may move, or between two out of group order, is passed:
+    it says nothing of where it sits."""
     above: int | None = None
     alone: list[int] = []
     for number, _ in order:
@@ -110,13 +145,15 @@ def _spots(order: Sequence[tuple[int, str]],
             yield from ((row, 2 * above + (above < group)) for row in alone)
         alone, above = [], group
         yield number, 2 * group
+    if above is not None:
+        yield from ((row, 2 * above + 1) for row in alone)
 
 
 def _kept(order: Sequence[tuple[int, str]], groups: Mapping[int, int]) -> set[int]:
     """The rows the regroup may move (``groups``) that stay where they are: a longest run of them
     already in group order, so it moves the fewest, and of such runs the one keeping the most
-    rows it leaves alone in their spots (:func:`_spots`), such as the cards waiting at the end of
-    a group.  A run is rows whose spots never fall, each row it may move outweighing every row
+    rows it leaves alone in their spots (:func:`_spots`), such as a paused card at the end of its
+    group.  A run is rows whose spots never fall, each row it may move outweighing every row
     left alone together.  ``best`` holds, for each spot, the heaviest run so far ending at it and
     the row ending it; ``links`` each row's row before it in its run.  Spots run no higher than
     twice the last group, so each row reads a handful of them."""
@@ -139,27 +176,27 @@ def _kept(order: Sequence[tuple[int, str]], groups: Mapping[int, int]) -> set[in
 
 def _under(board: Sequence[int], row: int, groups: Mapping[int, int]) -> int:
     """The row a row opening the group after ``row``'s goes just after: the last of the rows the
-    regroup leaves alone directly under ``row``, when a row it may move (one of ``groups``)
-    follows them, so they stay between the two groups; else ``row`` itself, the rows left alone
-    below the last ranked row being the no-Priority group."""
-    start = board.index(row) + 1
-    run = list(takewhile(lambda number: number not in groups, board[start:]))
-    return run[-1] if run and start + len(run) < len(board) else row
+    regroup leaves alone directly under ``row`` (any not of ``groups``, the rows it may move), so
+    they stay at the end of ``row``'s group; else ``row`` itself."""
+    run = list(takewhile(lambda number: number not in groups, board[board.index(row) + 1:]))
+    return run[-1] if run else row
 
 
-def _plan(order: Sequence[tuple[int, str]], cards: Mapping[int, Card]) -> _Pass:
+def _plan(order: Sequence[tuple[int, str]], cards: Mapping[int, Card],
+          suggested: Mapping[int, str]) -> _Pass:
     """The pass over ``order``, the board's order (``(card number, board item)``, top first),
-    with ``cards`` holding every open card in it and every step above each; a row it does not
-    hold is a closed card, which the regroup never moves.  Each row moved goes after the row
-    before it in the sort, or under the rows left alone there when it opens its group
-    (:func:`_under`), read off the board as the moves before it leave it."""
+    with ``cards`` holding every open card in it and every step above each, and ``suggested``
+    what quill's pending suggestion on each card of ``order`` no Priority ranks suggests
+    (:func:`undecided`), a card holding none absent; a row ``cards`` does not hold is a closed
+    card, which the regroup never moves.  Each row moved goes after the row before it in the
+    sort, or under the rows left alone there when it opens its group (:func:`_under`), read off
+    the board as the moves before it leave it."""
     items = dict(order)
     places = {number: place for place, (number, _) in enumerate(order)}
-    turns = {number: turn(number, cards, places) for number in places
-             if number in cards and movable(cards[number], cards)}
-    groups = {number: key.group for number, key in turns.items()}
+    groups = {number: _group(number, cards, places, suggested) for number in places
+              if number in cards and movable(cards[number], cards)}
     kept = _kept(order, groups)
-    target = sorted(turns, key=turns.__getitem__)
+    target = sorted(groups, key=groups.__getitem__)
     board = [number for number, _ in order]
     planned = []
     for before, number in zip([None, *target], target):
@@ -174,32 +211,34 @@ def _plan(order: Sequence[tuple[int, str]], cards: Mapping[int, Card]) -> _Pass:
     return _Pass(planned, board, groups)
 
 
-def moves(order: Sequence[tuple[int, str]], cards: Mapping[int, Card]) -> list[Move]:
+def moves(order: Sequence[tuple[int, str]], cards: Mapping[int, Card],
+          suggested: Mapping[int, str]) -> list[Move]:
     """The regroup's moves over ``order``, the board's order (``(card number, board item)``, top
     first), in the order they are written, each planned on the board as the moves before it leave
     it.  A pass keeps nothing for the next, which plans from the board as it finds it, so a pass
     cut short is finished by the next.  ``cards`` holds every open card in ``order`` and every
-    step above each; a row it does not hold is a closed card, never moved."""
-    return _plan(order, cards).moves
+    step above each; a row it does not hold is a closed card, never moved.  ``suggested`` holds
+    what quill's pending suggestion on each of :func:`undecided`'s cards suggests, a card holding
+    none absent."""
+    return _plan(order, cards, suggested).moves
 
 
-def goes_after(order: Sequence[tuple[int, str]], cards: Mapping[int, Card], priority: str,
-               first: bool = False) -> tuple[int, str] | None:
-    """Where a card goes on the board once the regroup's moves over ``order`` (:func:`moves`)
-    have landed: the row it goes just after, a card number and its board item, or None for the
-    top.  ``order`` leaves out the card being placed, so neither its place now nor its own move
-    decides it; a caller writes the moves over that same ``order`` first.
+def goes_after(order: Sequence[tuple[int, str]], cards: Mapping[int, Card],
+               suggested: Mapping[int, str], priority: str) -> tuple[int, str] | None:
+    """Where a card goes to be first in ``priority``'s group once the regroup's moves over
+    ``order`` (:func:`moves`, with ``cards`` and ``suggested``) have landed: the row it goes just
+    after, a card number and its board item, or None for the top.  ``order`` leaves out the card
+    being placed, so neither its place now nor its own move decides it; a caller writes the moves
+    over that same ``order`` first.
 
-    Just under the cards ranked ``priority`` or higher; with ``first``, first in ``priority``'s
-    group, which is under the rows left alone at the end of the group above (:func:`_under`), as
-    the regroup places a row opening its group.  So under the High cards for a new card suggested
-    Urgent or High, first in High for the weekly update's card, and under the Low cards, the top
-    of the no-Priority group, for a Priority cleared through quill (this module's docstring)."""
-    planned = _plan(order, cards)
-    rank = RANKS.index(priority)
-    above = [number for number in planned.board if number in planned.groups
-             and (planned.groups[number] < rank if first else planned.groups[number] <= rank)]
+    Under the rows of every group above ``priority``'s and the rows left alone at the end of the
+    last of them (:func:`_under`), as the regroup places a row opening its group: first in High
+    for the weekly update's card (ruling plan#4014, this module's docstring)."""
+    planned = _plan(order, cards, suggested)
+    group = _GROUPS.index(priority)
+    above = [number for number in planned.board
+             if number in planned.groups and planned.groups[number] < group]
     if not above:
         return None
-    after = _under(planned.board, above[-1], planned.groups) if first else above[-1]
+    after = _under(planned.board, above[-1], planned.groups)
     return after, dict(order)[after]

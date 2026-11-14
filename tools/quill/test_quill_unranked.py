@@ -41,13 +41,16 @@ def test_a_clear_on_a_split_step_leaving_its_pieces_unranked_is_refused(code, ca
     assert tracker.cards_by_number[1].priority == "Medium"
 
 
-@pytest.mark.parametrize(("why", "fields"), [
-    ("each piece holds its own", {2: {"priority": "High"}, 3: {"priority": "Low"}}),
-    ("one shipped, the other holds its own", {3: {"priority": "Low"}}),
+@pytest.mark.parametrize(("why", "fields", "moved"), [
+    ("each piece holds its own", {2: {"priority": "High"}, 3: {"priority": "Low"}}, []),
+    ("one shipped, the other holds its own", {3: {"priority": "Low"}}, [("board_move", 3, None)]),
 ])
-def test_a_clear_on_a_split_step_whose_pieces_are_ranked_otherwise_is_taken(code, why, fields):
+def test_a_clear_on_a_split_step_whose_pieces_are_ranked_otherwise_is_taken(code, why, fields,
+                                                                           moved):
     """A piece holding its own Priority is ranked by it; one shipped in git is no piece still
-    to build."""
+    to build.  Shipped plan#2, open until ``sync`` closes it, holds no Priority once plan#1 is
+    cleared, so it is in the last group, and the regroup lifts Low plan#3 above it (ruling
+    plan#4096)."""
     tracker = FakeTracker()
     _split(tracker, 1, (2, 3), priority="Medium")
     tracker.add(2, parent=1, **fields.get(2, {}))
@@ -55,7 +58,7 @@ def test_a_clear_on_a_split_step_whose_pieces_are_ranked_otherwise_is_taken(code
     if 2 not in fields:
         ship(code, 2)
     assert run(tracker, code, "priority", "plan#1", "--clear") == 0, why
-    assert tracker.writes == [("set_field", 1, "Priority", None)]
+    assert tracker.writes == [("set_field", 1, "Priority", None), *moved]
 
 
 def test_a_clear_under_a_step_holding_a_priority_is_taken(code):

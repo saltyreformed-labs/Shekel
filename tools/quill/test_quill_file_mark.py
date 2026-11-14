@@ -85,7 +85,8 @@ def test_a_leaf_cut_short_after_its_create_is_never_offered_and_the_same_command
     ``quill next`` names the leaf as an unfinished filing and never offers it, and ``quill
     claim`` refuses it.  Under R-BAL201's order (link last), a stop at the move, its
     read-back or the link left the leaf a top-level step, offered and claimed past
-    plan#1's wait."""
+    plan#1's wait.  Finished, the leaf, ranked Medium through plan#1, sits above plan#9, which
+    holds no Priority and so is in the last group (ruling plan#4096)."""
     tracker = FakeTracker()
     tracker.add(9, "question")
     tracker.add(1, priority="Medium", blocked_by=(9,))
@@ -110,7 +111,7 @@ def test_a_leaf_cut_short_after_its_create_is_never_offered_and_the_same_command
     assert "its filing has not finished (R-BAL202)" in capsys.readouterr().err
     assert run(tracker, code, *args) == 0
     card = tracker.cards_by_number[10]
-    assert (card.parent, card.labels, tracker.board.items) == (1, ("balance",), [9, 10])
+    assert (card.parent, card.labels, tracker.board.items) == (1, ("balance",), [10, 9])
     capsys.readouterr()
     assert run(tracker, code, "next") == 0
     assert capsys.readouterr().out == "next: nothing\n"

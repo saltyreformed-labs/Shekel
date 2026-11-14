@@ -8,10 +8,10 @@ newest first (rulings plan#2800, plan#3224, plan#3231). The suggestion follows t
 plan#2797's triage of the open board drafted and the developer's rulings on it left as it stands
 here.
 
-Until the developer sets its Priority, the card waits on the board by its suggestion: just under the
-High cards when suggested Urgent or High, at the bottom when suggested Medium or Low (ruling
-plan#4017). The module docstring of `tools/quill/_regroup.py` says where every card goes on the
-board.
+Until the developer sets its Priority, the card waits on the board by its suggestion, and quill's
+regroup keeps it there: just under the High cards when suggested Urgent or High, at the bottom among
+the cards holding no Priority when suggested Medium or Low (rulings plan#4017, plan#4096). The
+module docstring of `tools/quill/_regroup.py` says where every card goes on the board.
 
 A leaf takes no suggestion, since the step it splits ranks it (ruling plan#3229), and a finding
 takes none, since its owner step's Priority decides (ruling plan#3226). `check.takes_suggestion` is

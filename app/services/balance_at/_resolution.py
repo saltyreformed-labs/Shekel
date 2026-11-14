@@ -50,15 +50,12 @@ from datetime import date
 from app.models.account import Account
 from app.models.loan_params import LoanParams
 from app.services import loan_resolver
-from app.services.account_projection import (
-    AccountProjectionKind,
-    classify_account,
-)
 from app.services.amortization_engine import AmortizationRow, RateChangeRecord
 from app.services.loan_loaders import (
     load_loan_anchor_facts,
     load_loan_params,
     synthesize_origination_anchor,
+    when_configured_loan,
 )
 from app.services.loan_payment_service import LoanContext, load_loan_context
 from app.services.recurrence import RecurrenceOwner
@@ -273,15 +270,29 @@ def configured_loan(
     times can move money when one statement is edited and the others are not.
     Nothing enforced the agreement, so nothing would have caught the drift.
 
-    **BOTH halves are load-bearing and neither implies the other.**
-    :func:`resolve_loan_bundle` tests for a
+    **BOTH halves are load-bearing and neither implies the other**, and since
+    plan task plan#3964 the conjunction is stated in the loan leaf,
+    :func:`app.services.loan_loaders.when_configured_loan`, rather than here
+    (ruling plan#3954; ``CLAUDE.md`` rule 14, the placement clause).  The books
+    boundary sits below this seam and asks the same question
+    (:func:`app.services.cash_ledger.books_start`): a configured loan's books
+    start on its origination.  While the question was this private function's
+    alone, the boundary could not reach it and read the opening record
+    instead.  :func:`resolve_loan_bundle` tests for a
     :class:`~app.models.loan_params.LoanParams` row and never consults the
-    account's KIND, so a params row on a non-amortizing account would resolve
-    here; the classifier test is what keeps such a data defect off the
+    account's KIND, so a params row on a non-amortizing account resolves
+    there; the leaf's kind test is what keeps such a data defect off the
     amortization path instead of silently amortizing a savings account.  The
-    resolver test is what degrades a Mortgage-typed account whose terms were
-    never entered -- two clicks in the UI produce one -- to the cash producer
-    rather than letting it reach :func:`._positions.positions`' fail-loud.
+    resolution's ``None`` is the terms half, which degrades a Mortgage-typed
+    account whose terms were never entered -- two clicks in the UI produce
+    one -- to the cash producer rather than letting it reach
+    :func:`._positions.positions`' fail-loud.
+
+    **The leaf is handed this pass's memoized resolution as its terms
+    lookup**, and asks it only for an amortizing account, so a cash account
+    is answered by its kind with no query and a loan by the one resolution
+    the pass already holds: the dispatch issues no statement it did not issue
+    before the leaf existed.
 
     It returns the RESOLUTION rather than a bool because that is what
     :func:`resolved_loan` already hands back; narrowing it to a bool would throw
@@ -298,9 +309,7 @@ def configured_loan(
         The pass's memoized :class:`ResolvedLoan`, or ``None`` when *account* is
         not an amortizing account with loan terms.
     """
-    if classify_account(account) is not AccountProjectionKind.AMORTIZING:
-        return None
-    return resolved_loan(account, ctx)
+    return when_configured_loan(account, lambda: resolved_loan(account, ctx))
 
 
 def resolve_loan_bundle(

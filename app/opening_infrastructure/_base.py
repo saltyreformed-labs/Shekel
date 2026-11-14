@@ -88,7 +88,8 @@ ALL_ARMS = (MOVEMENT_ARM, MATCHED_LINE_ARM, LOAN_ORIGINATION_ARM)
 #: records why it lost its ``created_at`` term at plan step X-f3c-2b-2a: the
 #: table is append-only and the latest restatement governs (ruling **R-HE**).
 #: With that arm, a configured loan's day is its origination instead
-#: (:func:`_create_opened_on_sql`).
+#: (:func:`_create_opened_on_sql`), the way ``cash_ledger.books_start`` reads
+#: an account's books start in Python since plan task plan#3964.
 _OPENED_ON_FUNCTION = "budget.account_books_opened_on"
 
 #: THE COMPARISON, in SQL, so this tier states it exactly once -- the same

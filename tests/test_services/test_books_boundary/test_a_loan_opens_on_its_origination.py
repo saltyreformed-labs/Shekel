@@ -7,10 +7,11 @@ openings arms judge the loan by that day.  Three triggers grade the writes that
 decide whether an account is such a loan.
 
 Every case writes past the Python tier on purpose -- a raw statement, or a
-row the ORM adds with no door in front of it -- because the Python tier still
-reads the opening record until task plan#3964, and what is graded here is the
-database's own refusal.  Each refusal is paired with the same write made legal,
-so no case passes against a trigger that refuses everything.
+row the ORM adds with no door in front of it -- because what is graded here is
+the database's own refusal, and since task plan#3964 the Python tier refuses
+the same states first (``test_the_service_judges_a_loan_by_its_start.py``).
+Each refusal is paired with the same write made legal, so no case passes
+against a trigger that refuses everything.
 """
 
 from datetime import date, timedelta
@@ -202,23 +203,27 @@ class TestTheArmsJudgeALoanByItsOrigination:
     ):
         """FIRING CONTROL for the movement arm: ruling plan#3954's refusal.
 
-        A mortgage closing 2026-04-15 with an installment due after it
-        (``seed_periods[8]`` starts 2026-04-24) and its money moving
-        2026-03-10, before the loan exists.  The transfer door's installment
-        check passes it, and the database refuses it.
+        The loan originated 2026-01-01 and its payment settled 2026-03-13;
+        re-dated onto the origination day itself, which the loan's full amount
+        already holds (ruling plan#4040), the database refuses it at COMMIT.
+
+        *It was a mortgage closing 2026-04-15 whose money moved 2026-03-10,
+        settled through the transfer writer, until plan task plan#3964*, while
+        the Python tier read the opening record and let the day through.  The
+        service now refuses that write itself
+        (``test_the_service_judges_a_loan_by_its_start.py``), and under the
+        suite's clock (2026-03-20) a loan closing in April holds no payment a
+        raw statement could re-date, so the case is rebuilt on a payment
+        after the start (ruling plan#4040's rule for these cases) and re-dated
+        past the service, the shape every other case in this module takes.
         """
         with app.app_context():
-            loan = create_loan_account(
-                seed_user, db.session, name="Closing In April",
-                principal=Decimal("200000.00"), term=360,
-                origination_date=date(2026, 4, 15),
-            )
-            with refused_by_database_rule(r"books open \(2026-04-15\)"):
-                create_settled_transfer(
-                    seed_user, db.session, seed_user["account"], loan,
-                    seed_periods[8], amount=Decimal("1200.00"),
-                    settled_on=date(2026, 3, 10),
-                )
+            loan = _paid_loan(db, seed_user, seed_periods, "Re-dated Payment")
+            db.session.execute(sa.text(
+                "UPDATE budget.transaction_entries "
+                "SET settled_on = :d, purchased_on = :d WHERE account_id = :a"
+            ), {"d": _ORIGINATED, "a": loan.id})
+            with refused_by_database_rule(r"books open \(2026-01-01\)"):
                 db.session.commit()
             db.session.rollback()
 
@@ -444,7 +449,7 @@ class TestAnAccountEditDoesNotReserveTheTable:
 
     _DDL = "ALTER TABLE budget.accounts ENABLE TRIGGER audit_accounts"
 
-    def test_a_rename_leaves_DDL_on_the_table_legal(
+    def test_a_rename_leaves_ddl_on_the_table_legal(
         self, app, db, seed_user,
     ):
         """A write naming ``account_type_id`` with its own value queues nothing."""

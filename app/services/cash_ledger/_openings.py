@@ -7,6 +7,15 @@ owner holds (ruling **plan#2623**), with the two doors that read it -- the
 WRITE door's question (:func:`governing_account_opening`, ``None`` for no
 row) and the READER's (:func:`account_opening_fact`, which refuses one).
 
+**And where an account's books START, which is not always that row**
+(:class:`BooksStart`, :func:`books_start`, :func:`required_books_start`;
+card plan#2436, ruling **plan#3954**).  A configured loan's books start on
+its origination, owing its original principal, because that is where its
+balance starts; every other account's start on its governing opening record.
+The boundary every movement, line and recurring occurrence is judged against
+asks that, so a configured loan's opening record bounds nothing.  The fold's
+LEVEL is still the record: a configured loan is never folded as cash.
+
 They were :mod:`._events`' own until plan task plan#2648 gave the loads a
 scope, which took that module to one line under the 1,000-line ceiling: the
 opening is the one fact kind there that is no event in the stream but the
@@ -19,13 +28,15 @@ session holds pending, as every query in the session does.
 
 from __future__ import annotations
 
-from collections.abc import Collection
+from collections.abc import Callable, Collection
 from dataclasses import dataclass
 from datetime import date, datetime
 from decimal import Decimal
 
 from app.extensions import db
+from app.models.account import Account
 from app.models.account_opening import AccountOpening
+from app.services.loan_loaders import load_loan_params, when_configured_loan
 from app.utils.dates import utc_instant
 
 
@@ -79,7 +90,6 @@ class CashOpeningFact:
     opening_equity: Decimal
     source_id: int
     recorded_at: datetime
-
 
 
 def governing_account_opening(account_id: int) -> CashOpeningFact | None:
@@ -254,3 +264,128 @@ def _required_openings(
                 "silently."
             )
     return openings
+
+
+@dataclass(frozen=True)
+class BooksStart:
+    """Where an account's books START: the day, and the figure that day holds.
+
+    The one answer to "from when may money move in this account?" (card
+    plan#2436, ruling **plan#3954**), with the balance's own dispatch: a
+    CONFIGURED loan's books start on its origination, owing its original
+    principal, and every other account's on its governing opening record
+    (:class:`CashOpeningFact`).  Either way the figure is the balance at the
+    CLOSE of :attr:`opened_on` (ruling **R-HG**; ruling **plan#4040** for a
+    loan), so money may move only on a later day
+    (:func:`~app.utils.books_boundary.books_hold`).
+
+    **Why a loan's start is not its opening record.**  A configured loan's
+    balance starts from its terms
+    (``loan_loaders.synthesize_origination_anchor``), and no door writes or
+    corrects its ``budget.account_openings`` row: account creation dates it
+    on the creation form's day, and migration ``d3b6f1c8a274`` dated the two
+    production loans' rows by the app's own records.  Bounding a loan by that
+    row refused the Van Loan's April payment on the bank's own day, three
+    years after the loan began.  The database tier answers the same way
+    (``budget.account_books_opened_on``, plan task plan#3960), so the
+    service refuses exactly what a COMMIT would.
+
+    Attributes:
+        opened_on: The civil day the books start.  Money may move only after
+            it.
+        figure: What the books start with, as a refusal names it: an opening
+            record's equity, ledger-native and signed as
+            :attr:`CashOpeningFact.opening_equity` is; a loan's original
+            principal, the amount it OWED, positive.
+        is_loan_start: Whether :attr:`opened_on` is a configured loan's
+            origination, which is how a refusal knows to name the loan's
+            start rather than an opening the owner could restate.
+    """
+
+    opened_on: date
+    figure: Decimal
+    is_loan_start: bool
+
+
+def books_start(account_id: int) -> BooksStart | None:
+    """Return where *account_id*'s books start, or ``None`` for no record.
+
+    :class:`BooksStart`'s non-raising producer, the twin of
+    :func:`governing_account_opening`: ``None`` exactly where the SQL tier's
+    ``budget.account_books_opened_on`` answers NULL -- an account that is no
+    configured loan and carries no opening record, a broken invariant that a
+    reader of the day treats as bounding nothing (the recurrence floor does).
+
+    Args:
+        account_id: The account, assumed already scoped to its owner by the
+            caller.
+
+    Returns:
+        The :class:`BooksStart`, or ``None``.
+    """
+    return _books_start(account_id, governing_account_opening)
+
+
+def required_books_start(account_id: int) -> BooksStart:
+    """Return where *account_id*'s books start, refusing an account with none.
+
+    :class:`BooksStart`'s raising producer, the twin of
+    :func:`account_opening_fact`, for a refusal that must not answer "then
+    anything is allowed" over a broken invariant.
+
+    Args:
+        account_id: The account, assumed already scoped to its owner by the
+            caller.
+
+    Returns:
+        The :class:`BooksStart`.
+
+    Raises:
+        RuntimeError: When the account is no configured loan and carries no
+            ``AccountOpening`` row (:func:`account_opening_fact`'s refusal).
+    """
+    return _books_start(account_id, account_opening_fact)
+
+
+def _books_start(
+    account_id: int,
+    opening_of: Callable[[int], CashOpeningFact | None],
+) -> BooksStart | None:
+    """Return *account_id*'s :class:`BooksStart`, its opening read by *opening_of*.
+
+    The ONE dispatch both producers above share, so the two cannot come to
+    disagree about which home a configured loan's start is read from.  The
+    loan question is :func:`app.services.loan_loaders.when_configured_loan`,
+    the same one the balance's dispatch asks
+    (``balance_at._resolution.configured_loan``), with the terms loaded
+    directly: this tier holds no read pass.  An account row that does not
+    exist is no loan, and its opening read answers for it.
+
+    Args:
+        account_id: The account.
+        opening_of: :func:`governing_account_opening` or
+            :func:`account_opening_fact`, which decides what an account with
+            no opening record gets.
+
+    Returns:
+        The :class:`BooksStart`, or ``None`` when *opening_of* answers
+        ``None``.
+    """
+    account = db.session.get(Account, account_id)
+    terms = None if account is None else when_configured_loan(
+        account, lambda: load_loan_params(account_id),
+    )
+    if terms is not None:
+        return BooksStart(
+            opened_on=terms.origination_date,
+            figure=Decimal(str(terms.original_principal)),
+            is_loan_start=True,
+        )
+    opening = opening_of(account_id)
+    if opening is None:
+        return None
+    return BooksStart(
+        opened_on=opening.opened_on,
+        figure=opening.opening_equity,
+        is_loan_start=False,
+    )

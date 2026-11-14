@@ -324,6 +324,16 @@ CASH_LEDGER_NON_PRODUCERS = frozenset({
     # the reason ``governing_anchor`` carries ``resolve_anchor``'s: same
     # row, same query, and only the empty-state policy differs.
     "governing_account_opening",
+    # ``books_start`` and ``required_books_start`` (card plan#2436, task
+    # plan#3964, ruling plan#3954) -- the DAY an account's books start and
+    # the figure a refusal names beside it: a configured loan's origination
+    # and original principal off its terms, else the governing opening
+    # record above, under that pair's two empty-state policies.  A loader of
+    # stored facts, read by the boundary's refusals and floors; the fold
+    # seeds from ``account_opening_fact`` and never from this, and nothing
+    # here sums a movement.
+    "books_start",
+    "required_books_start",
     # ``_books`` (X-f3c-2b, N-378; X-f3c-2b-2a; X-f3c-2b-2b, N-383) -- FIVE
     # REFUSALS stating the books boundary, each returning nothing, plus the
     # three DAYS they bound against.

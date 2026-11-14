@@ -17,6 +17,7 @@ from datetime import date
 from decimal import Decimal
 
 import pytest
+import sqlalchemy as sa
 
 from app import ref_cache
 from app.enums import AccountOpeningSourceEnum
@@ -39,6 +40,21 @@ _MIGRATIONS = (
 #: The revision under test.
 _REVISION_FILE = "e5b2c8a41f73_a_set_up_loans_books_open_on_its_origination.py"
 
+_REVISION = load_migration_module(_REVISION_FILE)
+
+# The revision's arm sets and census helpers, each bound once.  They are
+# private to the revision's module by design, and grading the revision through
+# its own helpers rather than a copy of them is this file's point.
+
+# Pylint: protected-access -- the revision's own arm set, graded directly.
+_ARMS_BEFORE = _REVISION._ARMS_BEFORE  # pylint: disable=protected-access
+# Pylint: protected-access -- the revision's own arm set, graded directly.
+_ARMS_AFTER = _REVISION._ARMS_AFTER  # pylint: disable=protected-access
+# Pylint: protected-access -- the revision's own census, run as it runs.
+_REJECT_UPGRADE = _REVISION._reject_upgrade_over_violations  # pylint: disable=protected-access
+# Pylint: protected-access -- the revision's own census, run as it runs.
+_REJECT_DOWNGRADE = _REVISION._reject_downgrade_over_violations  # pylint: disable=protected-access
+
 
 class TestTheLoanRevisionCensusesBothDirections:
     """``e5b2c8a41f73`` installs the loan-origination arm over a census, and
@@ -50,8 +66,6 @@ class TestTheLoanRevisionCensusesBothDirections:
     day refuses.  Each is a control shown to fire and shown to stay quiet,
     run through the revision's own helpers against the real schema.
     """
-
-    _REVISION = load_migration_module(_REVISION_FILE)
 
     @staticmethod
     def _executor(db):
@@ -83,10 +97,12 @@ class TestTheLoanRevisionCensusesBothDirections:
             "d1f6a83c9e47_a_matched_bank_line_cannot_predate_the_books.py"
         )
 
-        assert self._REVISION._ARMS_BEFORE == previous._ARMS_AFTER
-        assert self._REVISION._ARMS_AFTER == (
-            *previous._ARMS_AFTER, LOAN_ORIGINATION_ARM,
-        )
+        # Pylint: protected-access -- the previous revision's own arm set,
+        # which this one's downgrade must restore.
+        previous_arms = previous._ARMS_AFTER  # pylint: disable=protected-access
+
+        assert _ARMS_BEFORE == previous_arms
+        assert _ARMS_AFTER == (*previous_arms, LOAN_ORIGINATION_ARM)
 
     def test_a_clean_database_passes_both_censuses(
         self, app, db, seed_user, seed_periods,
@@ -111,15 +127,15 @@ class TestTheLoanRevisionCensusesBothDirections:
             connection = db.session.connection()
 
             apply_opening_functions(
-                self._executor(db), arms=self._REVISION._ARMS_AFTER,
+                self._executor(db), arms=_ARMS_AFTER,
             )
-            assert self._REVISION._reject_upgrade_over_violations(
+            assert _REJECT_UPGRADE(
                 connection,
             ) is None
             apply_opening_functions(
-                self._executor(db), arms=self._REVISION._ARMS_BEFORE,
+                self._executor(db), arms=_ARMS_BEFORE,
             )
-            assert self._REVISION._reject_downgrade_over_violations(
+            assert _REJECT_DOWNGRADE(
                 connection,
             ) is None
             db.session.rollback()
@@ -133,33 +149,44 @@ class TestTheLoanRevisionCensusesBothDirections:
         built with the arm withdrawn, which is the state a database below
         ``e5b2c8a41f73`` can hold.  The refusal names the loan, the day its
         books would open and the earliest payment in the way.
+
+        **Built past the service**, since plan task plan#3964 made the
+        transfer writer refuse a payment before a loan's start itself, as a
+        door below this revision did not.  The loan is set up originating
+        2026-01-01, so the payment settles through the writer, and the
+        origination then moves onto 2026-04-15 by a raw statement, which the
+        withdrawn arm does not grade.  It settled through the writer onto a
+        loan already closing in April until that task.
         """
         with app.app_context():
             apply_opening_infrastructure(
-                self._executor(db), arms=self._REVISION._ARMS_BEFORE,
+                self._executor(db), arms=_ARMS_BEFORE,
             )
             db.session.commit()
             loan = create_loan_account(
                 seed_user, db.session, name="Closing In April",
                 principal=Decimal("200000.00"), term=360,
-                origination_date=date(2026, 4, 15),
+                origination_date=date(2026, 1, 1),
             )
             # periods[8] starts 2026-04-24: the installment is after the
-            # origination, so the transfer door accepts it, while the money
-            # moves on 2026-03-10, before the loan exists.
+            # origination either way, while the money moves on 2026-03-10.
             create_settled_transfer(
                 seed_user, db.session, seed_user["account"], loan,
                 seed_periods[8], amount=Decimal("1200.00"),
                 settled_on=date(2026, 3, 10),
             )
+            db.session.execute(sa.text(
+                "UPDATE budget.loan_params SET origination_date = :d "
+                "WHERE account_id = :a"
+            ), {"d": date(2026, 4, 15), "a": loan.id})
             db.session.commit()
             loan_id = loan.id
 
             apply_opening_functions(
-                self._executor(db), arms=self._REVISION._ARMS_AFTER,
+                self._executor(db), arms=_ARMS_AFTER,
             )
             with pytest.raises(RuntimeError) as caught:
-                self._REVISION._reject_upgrade_over_violations(
+                _REJECT_UPGRADE(
                     db.session.connection(),
                 )
             db.session.rollback()
@@ -205,10 +232,10 @@ class TestTheLoanRevisionCensusesBothDirections:
             loan_id = loan.id
 
             apply_opening_functions(
-                self._executor(db), arms=self._REVISION._ARMS_BEFORE,
+                self._executor(db), arms=_ARMS_BEFORE,
             )
             with pytest.raises(RuntimeError) as caught:
-                self._REVISION._reject_downgrade_over_violations(
+                _REJECT_DOWNGRADE(
                     db.session.connection(),
                 )
             db.session.rollback()

@@ -16,10 +16,13 @@ The pure data-loading functions every loan consumer shares, in three modules:
 * :mod:`._records` -- many loans' records at once (plan task plan#2649): each
   kind a loan's walk folds, loaded once for every loan an owner holds, over
   the same bodies the one-loan doors above call.
+* :mod:`._configured` -- whether an account IS a configured loan (plan task
+  plan#3964, ruling plan#3954): the one Python statement of it, which the
+  balance seam's dispatch and the books boundary both ask.
 
 The graph has no cycle -- ``_terms`` imports ``_legs`` for the settled set the
-escrow forward-only guard bounds on, ``_records`` imports both, and nothing
-reads back.
+escrow forward-only guard bounds on, ``_records`` imports both, ``_configured``
+imports neither, and nothing reads back.
 
 **It was one module until plan step balance:X-bl-2a**, which gave the shadow
 half a partition producer and moved the amount model's eager-load set out of the
@@ -39,8 +42,9 @@ cycle), rather than a lazy-import workaround.
 
 This package is a LEAF: it imports models, the pure engine primitives
 (:class:`~app.services.amortization_engine.RateChangeRecord`,
-:func:`~app.services.installment_calendar.monthly_due_date`), the shared
-balance predicates and the transfer-leg leaf
+:func:`~app.services.installment_calendar.monthly_due_date`), the account-kind
+classifier (:func:`~app.services.account_projection.classify_account`, pure
+over a loaded account), the shared balance predicates and the transfer-leg leaf
 (:mod:`app.services.transfer_legs`, itself a leaf: models, the session, the
 reference cache and the shared predicates, and no service) -- never another
 loan service.  Flask-isolated, reads only, no commits.
@@ -57,6 +61,7 @@ payment that has settled is worth the figure its transfer stores, never a
 figure read off its record (which holds none).
 """
 
+from ._configured import when_configured_loan
 from ._legs import (
     IncomeLegs,
     income_legs,
@@ -105,4 +110,5 @@ __all__ = [
     "projected_income_legs",
     "settled_income_legs",
     "synthesize_origination_anchor",
+    "when_configured_loan",
 ]

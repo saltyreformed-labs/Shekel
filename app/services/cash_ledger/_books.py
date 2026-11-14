@@ -99,20 +99,32 @@ from app.opening_infrastructure import (
     MATCHED_LINE_DAYS_SQL, SETTLED_MOVEMENTS_SQL,
 )
 
-from ._openings import account_opening_fact
+from ._openings import BooksStart, required_books_start
 
 if TYPE_CHECKING:  # pragma: no cover -- annotation only
     from ._openings import CashOpeningFact
 
 
 def reject_movement_before_books_open(account_id: int, day: date) -> None:
-    """Refuse a cash movement dated on or before *account_id*'s opening day.
+    """Refuse a cash movement dated on or before the day *account_id*'s books start.
 
     The MOVEMENT side of the boundary (plan step X-f3c-2b, finding **N-378**).
     An account's opening equity is what it held at the CLOSE of
     :attr:`~._openings.CashOpeningFact.opened_on`, so a movement dated on or
     before that day is ALREADY INSIDE the figure, and recording it counts the
     money twice.
+
+    **The day is the books START, which for a configured loan is its
+    origination** (card plan#2436, ruling **plan#3954**;
+    :func:`~._openings.required_books_start`).  A loan's full amount is what
+    it owed at the close of the day it started (ruling **plan#4040**), so a
+    payment dated by then is refused, with a sentence naming the loan's start
+    and amount, and a payment after it is accepted whatever the loan's
+    opening RECORD says.  The record's day is one no loan door writes or
+    corrects: the Van Loan's, 2026-04-22, refused its own April payment on
+    the bank's day until this read the loan's terms instead.  The database
+    tier judges a loan by the same day (``budget.account_books_opened_on``),
+    so what passes here passes at COMMIT.
 
     **What the double count costs, and why the balance healing is not a
     defence.**  The fold seeds at the opening equity and
@@ -148,12 +160,13 @@ def reject_movement_before_books_open(account_id: int, day: date) -> None:
         day: The civil day the movement's cash moved.
 
     Raises:
-        ValidationError: When *day* is on or before the account's opening day.
-            A 400 rather than a programming error: the day arrives from a date
-            box, and the message names both the offending value and the bound
-            it broke so a surface can render it verbatim.
-        RuntimeError: When the account carries no opening record, propagated
-            from :func:`~._openings.account_opening_fact` -- a broken invariant,
+        ValidationError: When *day* is on or before the day the account's
+            books start.  A 400 rather than a programming error: the day
+            arrives from a date box, and the message names both the offending
+            value and the bound it broke so a surface can render it verbatim.
+        RuntimeError: When the account is no configured loan and carries no
+            opening record, propagated from
+            :func:`~._openings.required_books_start` -- a broken invariant,
             and deliberately not softened here into "then anything is allowed".
     """
     # **Under ``no_autoflush``, and that is a defect plan step X-f3c-2b's own
@@ -184,15 +197,44 @@ def reject_movement_before_books_open(account_id: int, day: date) -> None:
     # statement, which sent it before (measured 2026-08-31 at statement 6).*
     # Neither leaves an unflushed opening for a settle in the same transaction
     # to race, and the migration writes through ``op.execute`` outside the ORM
-    # entirely.
+    # entirely.  The loan half of the read (the account, its type and its
+    # terms) is under the same suppression, and the same argument covers it:
+    # the one writer of a loan's terms, the setup door
+    # (``routes/loan/params.create_params``), flushes the row as it adds it,
+    # so no pending terms row can hide from this read.
     with db.session.no_autoflush:
-        opening = account_opening_fact(account_id)
-    if books_hold(opening.opened_on, day):
+        start = required_books_start(account_id)
+    if books_hold(start.opened_on, day):
         return
-    raise ValidationError(
+    raise ValidationError(_movement_refusal(start, day))
+
+
+def _movement_refusal(start: BooksStart, day: date) -> str:
+    """Return the sentence refusing money moved on *day*, before *start* holds it.
+
+    Two sentences because the two starts have two remedies.  An opening
+    record can be restated to an earlier day; a loan's start is part of its
+    terms, so the owner is asked to date the money after it instead.
+
+    Args:
+        start: Where the account's books start, which does not hold *day*.
+        day: The refused day.
+
+    Returns:
+        The refusal, naming both days and the figure the start holds.
+    """
+    if start.is_loan_start:
+        return (
+            f"Money cannot have moved on {day.isoformat()}: this loan started "
+            f"on {start.opened_on.isoformat()} owing ${start.figure:,.2f}, and "
+            "that is what it owed at the end of its first day -- so anything "
+            "that moved by then is already inside it.  Date it after "
+            f"{start.opened_on.isoformat()}."
+        )
+    return (
         f"Money cannot have moved on {day.isoformat()}: this account's books "
-        f"open on {opening.opened_on.isoformat()} holding "
-        f"${opening.opening_equity:,.2f}, and that figure is the closing balance "
+        f"open on {start.opened_on.isoformat()} holding "
+        f"${start.figure:,.2f}, and that figure is the closing balance "
         "for its own day -- so anything that moved by then is already inside "
         "it.  Restate the account's opening to an earlier day if the records "
         "really do start before it."

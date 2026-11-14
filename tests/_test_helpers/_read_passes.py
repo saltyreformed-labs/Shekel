@@ -3,6 +3,7 @@ counters, a planted pricing basis, and what a test reads off the pay calendar.
 """
 
 from contextlib import contextmanager
+from decimal import Decimal
 
 from ._users_and_eras import eras_of
 
@@ -383,6 +384,31 @@ class PlantedPricing:
         )
 
 
+class PlantedNoCarries:
+    """A stand-in for the amount model's CARRY derivation that holds no carry.
+
+    :class:`~app.services.cash_ledger._carry.Carries` loads the owner's carry
+    links on the first price a pass asks (plan step ``balance:X-ax``); a
+    planted basis prices rows a reduction under test built, none of which a
+    carry-forward linked, so its honest answer is that nothing was carried
+    into any of them, with no query.  A case that grades a carry builds a real
+    basis (``derived_amount_basis``) over rows it linked.
+    """
+
+    def carried_into(self, target_id, budget_of):
+        """Return ``Decimal("0")``: nothing was carried into any planted row.
+
+        Args:
+            target_id: Ignored.
+            budget_of: Ignored.
+
+        Returns:
+            ``Decimal("0")``.
+        """
+        del target_id, budget_of
+        return Decimal("0")
+
+
 def planted_basis(*rows, overrides=None):
     """An :class:`~app.services.cash_ledger.AmountBasis` answering *overrides*.
 
@@ -391,7 +417,8 @@ def planted_basis(*rows, overrides=None):
     a salary profile to reach the override seam.  The ``loans`` field is planted
     with the same object, which answers nothing there: since plan step
     X-au-g-2c-2 the only thing a caller asks it is ``derive_cash``, and a
-    reduction under test never does.
+    reduction under test never does.  The ``carries`` field holds no carry
+    (:class:`PlantedNoCarries`).
 
     Args:
         rows: The rows this basis will price.  A basis was built OVER a row set
@@ -416,6 +443,7 @@ def planted_basis(*rows, overrides=None):
         scenario_id=getattr(rows[0], "scenario_id", 0) if rows else 0,
         salary=planted,
         loans=planted,
+        carries=PlantedNoCarries(),
     )
 
 

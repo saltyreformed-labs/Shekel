@@ -418,7 +418,7 @@ def _budget_legs(
     and their sum is what the period costs** (ruling **R-FM**, plan step
     X-f3b).  Its posted purchases are settled facts here, at the parent's own
     budget column; the reservation
-    (:func:`~app.services.cash_ledger._amounts._entry_checking_impact`) holds
+    (:func:`~app.services.cash_ledger.unspent_budget`) holds
     the rest.  Before X-f3b a purchase was no fact at all, so an envelope
     budgeted ``$100.00`` with ``$45.85`` already taken by the bank contributed
     only its ``$54.15`` reservation to this column -- the spend was inside the

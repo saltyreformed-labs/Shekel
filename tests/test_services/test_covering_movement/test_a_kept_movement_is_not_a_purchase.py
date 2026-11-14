@@ -21,7 +21,8 @@ from app.services import (
 )
 from app.services.account_resolver import resolve_owner_cash_flow_set
 from app.services.balance_at import BalanceContext
-from app.services.cash_ledger._amounts import _entry_aware_amount, _entry_checking_impact
+from app.services.cash_ledger import unspent_budget
+from app.services.cash_ledger._amounts import _entry_aware_amount
 from app.services.cash_ledger._amount_source import resolve_transaction_amount
 from app.services.dashboard_service._bills import _entry_progress_fields
 from app.services.dashboard_service._pulse import _row_still_due
@@ -90,7 +91,7 @@ class TestAKeptMovementIsNotAPurchase:
             # the owner withdrew read as a purchase -- and nothing of the plan
             # would be held back (the unspent-budget reservation, ruling
             # R-BAL77; through X-bi-3e the three-bucket floor read $120.00).
-            assert _entry_checking_impact(envelope.entries, Decimal("100.00")) == Decimal("0")
+            assert unspent_budget(Decimal("100.00"), envelope.entries) == Decimal("0")
 
     def test_the_reconcile_panel_neither_offers_nor_stamps_the_survivor(
         self, app, seed_user, seed_periods,

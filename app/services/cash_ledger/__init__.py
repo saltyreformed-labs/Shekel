@@ -14,6 +14,7 @@ what happened, when?            :mod:`._events`           ``loan_ledger._events`
 whose movements?                :mod:`._movement_scope`   (no loan analog)
 where do books open?            :mod:`._books`            (no loan analog)
 what IS the amount?             :mod:`._amount_source`    (see below)
+what was carried into it?       :mod:`._carry`            (no loan analog)
 what would a row be worth?      :mod:`._definition_cash`  (see below)
 what does a pass derive live?   :mod:`._amount_basis`     (no loan analog)
 what does a loan resolve to?    :mod:`._loan_pricing`     (no loan analog)
@@ -229,6 +230,7 @@ from ._amount_rule import (
 from ._definition_cash import DefinitionRow, definition_cash, stated_price
 from ._amount_source import (
     amounts_by_key,
+    own_amount,
     resolve_amount,
     resolve_transaction_amount,
     resolve_transfer_amount,
@@ -240,6 +242,7 @@ from ._amounts import (
     contributions_by_key,
     settled_contribution,
 )
+from ._carry import unspent_budget
 from ._cash_leg import (
     cash_leg_of,
     credit_entry_sum,
@@ -341,6 +344,7 @@ __all__ = [
     "movement_cash_leg",
     "movement_figure_for",
     "off_statement_sum",
+    "own_amount",
     "owner_cash_records",
     "settled_contribution",
     "planned_cash_rows",
@@ -358,6 +362,7 @@ __all__ = [
     "template_pricing_load_options",
     "transfer_pricing_load_options",
     "transfer_template_pricing_load_options",
+    "unspent_budget",
     "valuation_load_options",
     "reject_line_before_books_open",
     "reject_movement_before_books_open",

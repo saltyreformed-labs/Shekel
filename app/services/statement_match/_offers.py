@@ -241,7 +241,7 @@ class MatchDays:
                 :class:`BankLine` and
                 :class:`~app.models.statement_import.BankStatementLine` do.
                 The idiom is
-                :func:`app.services.cash_ledger._amounts._entry_checking_impact`'s
+                :func:`app.services.cash_ledger.unspent_budget`'s
                 -- one rule, stated once, over whichever of the two shapes the
                 caller already holds, rather than a conversion whose only job
                 is to satisfy an annotation.

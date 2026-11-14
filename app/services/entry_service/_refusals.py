@@ -41,7 +41,7 @@ from app.utils.hidden_row import HiddenRow
 #: in ``app/`` settles each one:
 #:
 #: * ``amount`` -- :func:`app.services.row_valuation.purchases_total`,
-#:   ``cash_ledger._entry_checking_impact``, ``posted_purchase_sum``,
+#:   ``cash_ledger.unspent_budget``, ``posted_purchase_sum``,
 #:   ``credit_entry_sum``.  COST-BEARING;
 #: * ``is_credit`` -- those same four plus ``sync_entry_payback``, which moves
 #:   the purchase between this account's outflow and its CC Payback sibling.

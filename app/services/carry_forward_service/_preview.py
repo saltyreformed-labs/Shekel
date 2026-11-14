@@ -17,6 +17,7 @@ from app.models.transaction import Transaction
 from app.services.cash_ledger import (
     resolve_transaction_amount,
     resolve_transfer_amount,
+    unspent_budget,
 )
 from app.services.match_withdrawal import (
     MatchWithdrawal,
@@ -429,19 +430,10 @@ def _build_envelope_plan(source_txn, target_period, basis, schedule):
     # would be exactly the drift ``_classify_leftover_target`` exists to
     # prevent, one term further out.
     budget = resolve_transaction_amount(source_txn, basis)
-    # **The floor is against an OVERSPENT envelope and never against a
-    # refunded one** (developer ruling **bank_import:R-IK**, 2026-09-01, plan step
-    # ``bank_import:X-gj-2b-3``).  Ruling **bank_import:R-II** made a merchant
-    # credit a NEGATIVE purchase, so ``entries_sum`` can be negative and this
-    # leftover can EXCEED the budget: an envelope budgeting `$100.00` holding
-    # one `-$50.00` refund rolls `$150.00` forward and settles at `-$50.00`,
-    # which the two together conserve -- `$100.00` of plan across the two
-    # periods.  That is the ruled NET basis and it is what
-    # ``entry_service.compute_remaining`` answers for the same row on screen;
-    # capping it at the budget was put to the developer with those numbers and
-    # refused, because it would make the rollover disagree with the figure the
-    # owner reads beside it.
-    leftover = max(Decimal("0"), budget - entries_sum)
+    # The leftover is the one producer's (``cash_ledger.unspent_budget``), the
+    # figure the mutating path rolls: its refund rule and its overspend floor
+    # (ruling bank_import:R-IK) are stated there once.
+    leftover = unspent_budget(budget, source_txn.purchases)
     target_fields = _resolve_envelope_target_fields(
         source_txn, target_period, basis, leftover, schedule,
     )

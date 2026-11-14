@@ -149,7 +149,7 @@ def add_entry(  # pylint: disable=too-many-arguments,too-many-positional-argumen
     **The three bucket flags are parameters (plan step X-c2c2a).**  It built a
     DEBIT-only, outstanding entry until the per-row valuation tests moved to
     ``test_cash_amounts/``, which needs all three buckets of
-    ``cash_ledger._amounts._entry_checking_impact`` -- settled debit,
+    ``cash_ledger.unspent_budget`` -- settled debit,
     outstanding debit, and credit.  Narrowness is why the helper had not
     displaced the hand-rolled copies it exists to prevent: seven suites still
     define their own ``_add_entry`` because this one could not express their

@@ -241,7 +241,7 @@ def _submission_is_the_coverage_boundary(
     the modal opens headed with the AUG 4 balance offering an Aug 2 purchase --
     which a Jul 15 statement cannot show.  Ticking it is a settlement the user
     has no evidence for, and it moves that debit out of its envelope's
-    outstanding floor (``cash_ledger._amounts._entry_checking_impact``:
+    outstanding floor (``cash_ledger.unspent_budget``:
     ``max(500 - 0, 120) = 500`` becomes ``max(500 - 120, 0) = 380``), so the
     projected balance reads ``$120.00`` HIGH on money that never left the bank.
 

@@ -345,7 +345,7 @@ class TestTheDerivedPostedIndicator:
 
         It must move WITH the reservation and not merely alongside it: the same
         purchase is released from its envelope's budget
-        (``cash_ledger._amounts._entry_checking_impact``), so a row still saying
+        (``cash_ledger.unspent_budget``), so a row still saying
         "the budget is still held back" would contradict the number beside it --
         the exact defect ``entry_list_view`` was created to make unrepresentable.
         """

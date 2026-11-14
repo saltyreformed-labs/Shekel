@@ -59,7 +59,7 @@ from app.routes._amount_version_actions import (
 from app.routes._recurrence_preview import recurrence_preview_fragment
 from app.services.cash_ledger import (
     derived_amount_basis,
-    resolve_transaction_amount,
+    own_amount,
 )
 from app.routes._recurrence_conflict_chooser import (
     PreEditTemplateState,
@@ -289,8 +289,11 @@ _TXN_TEMPLATE_KIND = RecurrenceConflictKind(
     # A transaction's amount rule, as a one-argument callable: the chooser
     # renders this figure as money and a derived row carries no column to read
     # (plan step X-au-c2b).  The basis is built from the row's own pins, which
-    # is safe because the chooser prices ONE row at a time.
-    resolve_amount=lambda row: resolve_transaction_amount(
+    # is safe because the chooser prices ONE row at a time.  The row's OWN
+    # amount (plan step balance:X-ax, ruling plan#3978): "your amount" is the
+    # figure the choice keeps or replaces, and money a carry rolled into the
+    # row stays on top whichever is chosen.
+    resolve_amount=lambda row: own_amount(
         row, derived_amount_basis(row.account.user_id, row.scenario_id),
     ),
     regenerate_fn=recurrence_engine.regenerate_for_template,

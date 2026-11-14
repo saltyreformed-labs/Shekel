@@ -5,8 +5,11 @@ The TOTAL dispatch behind ruling **R-FI** (plan step **X-au-b**): a row's amount
 is either its OWN -- a human authored the figure, or the money already moved --
 or it is DERIVED, and a derived amount is not stored at all.  Four rules, one
 per source, each delegating to the producer that already answers it.  Given a
-row, :func:`resolve_transaction_amount` answers what its amount column holds or
-would hold, and REFUSES rather than falling back for a row it cannot place.
+row, :func:`own_amount` answers what its amount column holds or would hold, and
+REFUSES rather than falling back for a row it cannot place;
+:func:`resolve_transaction_amount` adds the money a carry-forward rolled into
+the row, derived from its source and stored nowhere (plan step balance:X-ax,
+:mod:`._carry`).
 
 **This is the sibling of :mod:`._amounts`, not a second copy of it, and the two
 answer different questions.**  This module answers *what is this row's amount* --
@@ -179,12 +182,30 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
 
 
 def resolve_transaction_amount(txn, basis: AmountBasis) -> Decimal:
-    """Return what *txn*'s amount is, by the rule that owns it.
+    """Return what *txn*'s amount is: its own amount, plus any money carried into it.
 
     The resolver plan step X-au-b exists to build.  It is TOTAL over rows -- one
     of the three rules a transaction takes applies to every one -- and total in
     its answer: it returns a
     ``Decimal`` or it raises, never ``None`` and never a plausible substitute.
+
+    **A row's amount is a COMPOSITION since plan step balance:X-ax** (ruling
+    **plan#3973**)::
+
+        amount(row) = own_amount(row) + carried_into(row)
+
+    :func:`own_amount` is the rule dispatch, which this function was until that
+    step; the second term is the unspent budget of every settled envelope a
+    carry-forward linked into the row (:class:`._carry.Carries`, through
+    :func:`._carry.unspent_budget`), each of those budgets this same function's
+    answer for its source, so a chain composes.  A row nothing rolled into
+    answers its own amount exactly, as it did before the step.  Every reader of
+    a row's BUDGET, its WORTH to a balance or its plan in a report asks this;
+    a reader that offers or writes the row's OWN figure (an amount box, the
+    recurrence chooser's "your amount", a freeze that states a derived figure
+    as owned) asks :func:`own_amount`, since writing the total back as an own
+    figure would count the carried money twice.  The census of both kinds is
+    the commit that made the split.
 
     Proven equal to the answer the app gives today for **every one of the 997
     rows** on the 2026-08-12 production clone
@@ -216,25 +237,10 @@ def resolve_transaction_amount(txn, basis: AmountBasis) -> Decimal:
     DOWN because ``loan_loaders`` needs it and this package imports
     ``loan_loaders``; that module states the argument.
 
-    **It no longer asks whether *txn* was in the basis's row set** (plan step
-    X-au-c2b).  A basis holds DERIVATIONS pinned to an owner and a scenario, not
-    answers pinned to a row set, so every row of that owner and scenario is
-    resolvable against it and the membership refusal this used to raise has no
-    state left to describe.
-
-    **What it asks INSTEAD is the pin the caller can still get wrong**, and the
-    substitution is the point rather than a smaller guard.  ``priced_ids``
-    caught "this row was not in the set I built over"; it could not catch "this
-    basis belongs to another scenario", which is the mistake that actually
-    changes a figure -- ``LoanPricing`` resolves a loan against ITS scenario's
-    payment history, so a foreign basis answers a different ``monthly_payment``
-    with no error at all.  A row states its own ``scenario_id`` in a column, so
-    the check is free and TOTAL where the membership set was neither.
-
-    An adversarial review of this step's own build is what put it here: the
-    control that replaced the deleted membership test proved the SAFE direction
-    (a basis answers for a row it was not built over) and left the unsafe one --
-    a silently different number -- with nothing asserting it.
+    **The scenario pin is checked in** :func:`own_amount`, **first**, so a
+    foreign basis refuses before the carry links are loaded.  A carry joins
+    rows of one owner and scenario (``fk_transactions_rolled_into``), so every
+    source this function then prices is in the basis's scenario too.
 
     Args:
         txn: The :class:`~app.models.transaction.Transaction` to price.  It must
@@ -242,12 +248,13 @@ def resolve_transaction_amount(txn, basis: AmountBasis) -> Decimal:
         basis: The read pass's :class:`AmountBasis` (:func:`amount_basis`).
 
     Returns:
-        The row's amount as a ``Decimal``.
+        The row's amount as a ``Decimal``, carried money included.
 
     Raises:
         AmountUnresolvable: When *txn* belongs to another scenario than *basis*,
-            or when the rule that owns this row cannot answer for it.  See the
-            module docstring: a refusal is never a fallback.
+            or when the rule that owns this row, or a source carried into it,
+            cannot answer.  See the module docstring: a refusal is never a
+            fallback.
 
             **No OTHER exception this arc defines reaches a caller here**
             -- ``amount_rule`` can still raise ``KeyError`` for a ref member
@@ -275,6 +282,50 @@ def resolve_transaction_amount(txn, basis: AmountBasis) -> Decimal:
             while a row it prices still derives its figure from the profile
             (the usual case: a template whose rows fall in the saved
             calendar) until its state is one the law lists.
+    """
+    return own_amount(txn, basis) + basis.carries.carried_into(
+        txn.id, lambda source: resolve_transaction_amount(source, basis),
+    )
+
+
+def own_amount(txn, basis: AmountBasis) -> Decimal:
+    """Return *txn*'s OWN amount: what the rule that owns it answers, before any carry.
+
+    The rule dispatch (ruling **R-FI**'s rules 1 to 3), which
+    :func:`resolve_transaction_amount` composes with the money carried into the
+    row (plan step balance:X-ax, ruling **plan#3973**).  A row a carry landed in
+    keeps its own price: a recurring row its definition's, a hand-priced row
+    the figure its owner typed.  This is the figure an amount box offers and a
+    writer states (ruling **plan#3978**: a typed amount on a row holding
+    carried money is its own budget, the carry staying on top), so a reader
+    that turns a resolved figure into an OWN one reads this, never the total.
+
+    **It asks the scenario pin first** (plan step X-au-c2b).  A basis holds
+    DERIVATIONS pinned to an owner and a scenario, not answers pinned to a row
+    set, so every row of that owner and scenario is resolvable against it; what
+    the caller can still get wrong is "this basis belongs to another scenario",
+    which is the mistake that changes a figure -- ``LoanPricing`` resolves a
+    loan against ITS scenario's payment history, so a foreign basis answers a
+    different ``monthly_payment`` with no error at all.  A row states its own
+    ``scenario_id`` in a column, so the check is free and TOTAL.  It replaced a
+    ``priced_ids`` membership set, and an adversarial review of that step is
+    what put it here: the control that replaced the membership test proved the
+    SAFE direction (a basis answers for a row it was not built over) and left
+    the unsafe one -- a silently different number -- with nothing asserting it.
+
+    Args:
+        txn: The :class:`~app.models.transaction.Transaction` to price.  It must
+            belong to *basis*'s scenario.
+        basis: The read pass's :class:`AmountBasis` (:func:`amount_basis`).
+
+    Returns:
+        The row's own amount as a ``Decimal``.
+
+    Raises:
+        AmountUnresolvable: When *txn* belongs to another scenario than *basis*,
+            or when the rule that owns this row cannot answer for it.
+        UnsupportedStateError: From the salary rule's pricer, as
+            :func:`resolve_transaction_amount` states.
     """
     if txn.scenario_id != basis.scenario_id:
         raise AmountUnresolvable(

@@ -267,6 +267,9 @@ class RecurrenceConflictKind:
             answering what one row's amount RESOLVES to.  It was the row's
             amount COLUMN NAME until plan step X-au-c2b; a derived row does not
             carry that column, and the chooser renders the figure as money.
+            For a transaction it is the row's OWN amount
+            (``cash_ledger.own_amount``, plan step balance:X-ax): the figure
+            the choice keeps or replaces, with any carried money left on top.
         regenerate_fn: The kind's ``regenerate_for_template(template,
             schedule, scenario_id, effective_from=...)`` callable, where
             ``schedule`` is a

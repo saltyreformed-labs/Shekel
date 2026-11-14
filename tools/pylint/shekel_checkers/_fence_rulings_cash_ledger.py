@@ -141,6 +141,19 @@ CASH_LEDGER_NON_PRODUCERS = frozenset({
     "transfer_amount_rule",
     "resolve_transaction_amount",
     "resolve_transfer_amount",
+    # A row's amount BEFORE any carry rolled into it (plan step balance:X-ax,
+    # ruling plan#3973): the rule dispatch ``resolve_transaction_amount``
+    # composes with the carried money, for a reader that offers or writes the
+    # row's own figure.  A non-producer on the resolver's ground: one row's
+    # amount, nothing folded, dated, summed or anchored.
+    "own_amount",
+    # ``_carry`` (the same step): an envelope's UNSPENT BUDGET, its budget less
+    # its purchases floored at zero, one row's figure from its own two inputs;
+    # and the per-pass memo of what each row was carried, a sum of that figure
+    # over the sources linked into ONE row.  Neither reads an anchor, a date
+    # or an account: what a row's plan holds, never what a balance is.
+    "unspent_budget",
+    "carried_into",
     # The ONE branch on a plan item's PARENT table (ruling plan#1983): a
     # row's amount or a transfer's, by the two resolvers above.  A
     # non-producer on their ground: one parent's amount, nothing folded,

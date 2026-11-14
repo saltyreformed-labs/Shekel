@@ -703,7 +703,7 @@ class InFlightMovement:
     it inside ``max(estimated - dated - card, undated)`` and a CLOSED
     envelope's row leg booked it on the close day; the identity
     ``max(a, b) = b + max(a - b, 0)`` splits the first into this item plus
-    the envelope's unspent budget (:func:`~._amounts._entry_checking_impact`),
+    the envelope's unspent budget (:func:`~._carry.unspent_budget`),
     and the ruling deletes the second.
 
     Attributes:

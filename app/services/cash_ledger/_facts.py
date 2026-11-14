@@ -401,7 +401,7 @@ def planned_cash_rows(
     un-dated half of the ONE movement stream the settled twin reads the dated
     half of).  It is worth its own figure and lands no earlier than the day it
     happened; the Projected envelope it sits under reserves only its UNSPENT
-    budget (:func:`~._amounts._entry_checking_impact`), so the two never
+    budget (:func:`~._carry.unspent_budget`), so the two never
     hold the same dollars back twice.  Through ``X-bi-3e`` a Projected
     envelope's reservation carried its un-dated purchases inside one
     ``max`` and a CLOSED envelope's row leg booked them on the close day;

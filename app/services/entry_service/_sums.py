@@ -476,7 +476,7 @@ def entry_list_view(
             recorded, so their money has left the account and their envelope is
             no longer holding their budget back.  It is the SAME fact the
             reservation buckets on
-            (``cash_ledger._amounts._entry_checking_impact``), decided HERE in
+            (``cash_ledger.unspent_budget``), decided HERE in
             Python; the template renders the answer and never re-derives it.
           - ``removals`` (dict[int, PurchaseRemoval]): each purchase's
             :class:`~app.services.entry_service._removals.PurchaseRemoval`
@@ -523,7 +523,7 @@ def compute_remaining(
     at the budget -- was put to the developer with those numbers and refused,
     because it breaks the identity every surface that renders this depends on
     (``sum(entries) + remaining == budget``) and because
-    ``cash_ledger._amounts._entry_checking_impact`` already reads the plan the
+    ``cash_ledger.unspent_budget`` already reads the plan the
     same way: its own derivation says that treating a refund as spending
     nothing further *is the opposite of what a reservation is for*.
 

@@ -69,7 +69,7 @@ import logging
 
 from app.exceptions import AmountUnresolvable
 from app.services.amount_ownership import state_own_amount
-from app.services.cash_ledger import derived_amount_basis, resolve_transaction_amount
+from app.services.cash_ledger import derived_amount_basis, own_amount
 from app.utils.log_events import BUSINESS, EVT_SALARY_ROWS_FROZEN, log_event
 
 logger = logging.getLogger(__name__)
@@ -137,8 +137,12 @@ def archive_profile(profile) -> int:
             bases[row.scenario_id] = derived_amount_basis(
                 profile.user_id, row.scenario_id,
             )
+        # The row's OWN amount, never its total (plan step balance:X-ax): the
+        # freeze states a derived figure as owned, and money a carry rolled
+        # into the row is derived from its source and stays on top, so
+        # freezing the total would count it twice.
         try:
-            resolved = resolve_transaction_amount(row, bases[row.scenario_id])
+            resolved = own_amount(row, bases[row.scenario_id])
         except AmountUnresolvable:
             continue
         state_own_amount(row, resolved)

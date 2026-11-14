@@ -36,6 +36,7 @@ from typing import TYPE_CHECKING
 
 from app.services.loan_ledger import LoanCalendars
 
+from ._carry import Carries
 from ._loan_pricing import LoanPricing, loan_pricing
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
@@ -92,8 +93,8 @@ class AmountBasis:
     state the model cannot reach is a fence, and this arc's business is making
     fences structurally unnecessary rather than adding them.
 
-    Both derivations are LAZY, so a pass that prices no paycheck and no loan
-    payment issues no query -- the "fast no-op when there are no candidates"
+    Every derivation is LAZY, so a pass that prices no paycheck and no loan
+    payment issues no query for either -- the "fast no-op when there are no candidates"
     property the row-set producers had, kept rather than traded for the sharing.
 
     Attributes:
@@ -113,12 +114,18 @@ class AmountBasis:
             read-time repair that needed the question asked scenario-wide; the
             amount model reads the refinement off the parent transfer it was
             handed, per row.
+        carries: The pass's carry links (:class:`._carry.Carries`, plan step
+            ``balance:X-ax``): which settled envelopes rolled into which rows,
+            loaded once on the first price asked and memoised per target.  It
+            is a derivation like the two above, pinned to the same owner and
+            scenario, since a carry joins rows of one owner and scenario.
     """
 
     user_id: int
     scenario_id: int
     salary: "SalaryPricing" = field(compare=False, repr=False)
     loans: LoanPricing = field(compare=False, repr=False)
+    carries: Carries = field(compare=False, repr=False)
 
 
 def amount_basis(
@@ -214,6 +221,7 @@ def amount_basis(
         scenario_id=scenario_id,
         salary=income_service.salary_pricing(scenario_id, paychecks),
         loans=loan_pricing(loan_calendars),
+        carries=Carries(paychecks.user_id, scenario_id),
     )
 
 

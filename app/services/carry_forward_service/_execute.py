@@ -22,7 +22,11 @@ from app.models.transaction import Transaction
 from app.services import posting_service, transfer_service
 from app.services.amount_ownership import state_own_amount
 from app.services.match_press import NOTHING_SHOWN, Press, Shown
-from app.services.cash_ledger import resolve_transaction_amount
+from app.services.cash_ledger import (
+    own_amount,
+    resolve_transaction_amount,
+    unspent_budget,
+)
 from app.services.one_off import (
     due_date_after_move,
     due_date_for,
@@ -30,7 +34,6 @@ from app.services.one_off import (
     place_row_of,
 )
 from app.services.recurrence import compute_due_date
-from app.services.row_valuation import purchases_total
 from app.utils.balance_predicates import is_projected_clause
 from app.utils.log_events import BUSINESS, EVT_CARRY_FORWARD, log_event
 
@@ -580,25 +583,13 @@ def _settle_source_and_roll_leftover(source_txn, target_period, basis,
     # family (ruling R-BAL68): a reverted manual close's kept movement is
     # not spend, so the whole budget rolls -- and the settle below then
     # withdraws that movement (a ``purchases`` record covers nothing).
-    entries_sum = purchases_total(source_txn.purchases)
-    # The source's BUDGET, resolved rather than read off the column (plan step
-    # X-au-c2b): ruling E-21 fixes an envelope's base on its own amount
-    # unconditionally, and a derived row stores none.
-    # **The floor is against an OVERSPENT envelope and never against a
-    # refunded one** (developer ruling **bank_import:R-IK**, 2026-09-01, plan step
-    # ``bank_import:X-gj-2b-3``).  Ruling **bank_import:R-II** made a merchant
-    # credit a NEGATIVE purchase, so ``entries_sum`` can be negative and this
-    # leftover can EXCEED the budget: an envelope budgeting `$100.00` holding
-    # one `-$50.00` refund rolls `$150.00` forward and settles at `-$50.00`,
-    # which the two together conserve -- `$100.00` of plan across the two
-    # periods.  That is the ruled NET basis and it is what
-    # ``entry_service.compute_remaining`` answers for the same row on screen;
-    # capping it at the budget was put to the developer with those numbers and
-    # refused, because it would make the rollover disagree with the figure the
-    # owner reads beside it.
-    leftover = max(
-        Decimal("0"),
-        resolve_transaction_amount(source_txn, basis) - entries_sum,
+    # The source's BUDGET is resolved rather than read off the column (plan
+    # step X-au-c2b): ruling E-21 fixes an envelope's base on its own amount
+    # unconditionally, and a derived row stores none.  The reduction, its
+    # refund rule and its overspend floor are the one producer's
+    # (``cash_ledger.unspent_budget``, rulings bank_import:R-IK and R-BAL68).
+    leftover = unspent_budget(
+        resolve_transaction_amount(source_txn, basis), source_txn.purchases,
     )
 
     # Bump the target only when there is unspent leftover.  Overspend
@@ -623,7 +614,7 @@ def _settle_source_and_roll_leftover(source_txn, target_period, basis,
         # flush.  ``state_own_amount`` assigns one attribute holding one of two
         # shapes, so the release IS the write.
         state_own_amount(
-            target_row, resolve_transaction_amount(target_row, basis) + leftover,
+            target_row, own_amount(target_row, basis) + leftover,
         )
         target_row.is_override = True
 

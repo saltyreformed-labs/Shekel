@@ -112,10 +112,13 @@ the fence had ruled all four explicit non-producers.  (The override map itself
 is gone as of plan step X-au-d, above; the reason the valuations live together
 is not.)  A producer module holding
 the valuation rules is what stranded them (finding N-30) -- and
-:func:`_entry_checking_impact` is the formula behind the grid-vs-savings
-divergence (F-002 Pair C / E-25), which a sibling module documented itself as
+the reservation formula was the one behind the grid-vs-savings divergence
+(F-002 Pair C / E-25), which a sibling module documented itself as
 "mirroring".  One home is what stops two producers agreeing by coincidence;
-D1c deleted that mirror, so the formula now has a single caller and is private.
+D1c deleted that mirror.  *The formula left this module at plan step
+balance:X-ax*: an envelope's unspent budget is also what a settled one carries
+forward, so it is :func:`._carry.unspent_budget`, one producer read by the
+reservation here and by the carry.
 
 Services-boundary discipline (``CLAUDE.md`` Architecture / B6-01): plain data
 in, ``Decimal`` out; no Flask import, no writes.
@@ -152,6 +155,7 @@ from ._amount_source import (
     resolve_amount,
     resolve_transaction_amount,
 )
+from ._carry import unspent_budget
 
 
 @dataclass(frozen=True)
@@ -415,91 +419,6 @@ def contribution_of(parent: PlanParent, basis: AmountBasis) -> Decimal:
     return resolve_amount(parent, basis)
 
 
-def _entry_checking_impact(entries, estimated_amount: Decimal) -> Decimal:
-    """An envelope's UNSPENT BUDGET: what its plan still holds back.
-
-    The core of the entry-aware reduction, with exactly ONE caller:
-    :func:`_entry_aware_amount` below, which owns the empty-entries
-    short-circuit.
-
-    **It is private, and D1c is what made that the honest answer.**  It was
-    public for one documented reason -- ``balance_resolver`` held a second copy
-    of the reduction (``_entry_aware_amount_dated``) and reached in here for the
-    shared bucketing so the two paths "could not drift between the two balance
-    paths".  D1c deleted that copy, so there is no second path to keep in step,
-    and a public name justified by a caller that no longer exists is the
-    stale-rationale shape finding N-30 is about.  Being private also retires its
-    W9909 ruling -- structure doing what a fence entry was doing, which is the
-    whole point of Phase D.
-
-    One expression::
-
-        impact = max(estimated_amount - sum(entries), 0)
-
-    -- the budget less EVERY purchase recorded against it, debit or card,
-    posted or not, floored at zero.  A purchase already recorded is not
-    budget still to spend, whichever account its money leaves through and
-    whether or not the bank has been seen to take it.
-
-    **This was a three-bucket reservation through plan step ``X-bi-3e``, and
-    ruling R-BAL77 is what reduced it** (plan step ``balance:X-bi-4a``).  It
-    read ``max(E - P - C, U)`` -- the budget less the POSTED debits (already
-    cash movements of their own, ruling **R-FM**) and the card purchases
-    (which leave through a CC Payback sibling), floored at the UNPOSTED
-    debits, so an envelope could never reserve less than the purchases nobody
-    had yet seen leave.  That floor was the projection's only home for an
-    un-dated purchase, and it lived inside the PROJECTED row's valuation --
-    which is why a purchase under a CLOSED envelope had to be booked by the
-    row's own leg on the close day instead, a second home for the same
-    dollars.  The identity this docstring already carried is what split
-    them::
-
-        max(E - P - C, U)  ==  U + max(E - P - C - U, 0)
-                           ==  U + max(E - sum(entries), 0)
-
-    -- exact for EVERY sign of ``U`` (a refund is a negative purchase, ruling
-    **bank_import:R-II**), checked exhaustively over the four terms.  The
-    first term, ``U``, is now the account's movements IN FLIGHT
-    (:func:`~._events.in_flight_movements`), one plan item per un-dated
-    purchase whatever its parent's status; the second is this function.  So
-    an envelope budgeting `$100.00` with a `$120.00` posted purchase and a
-    `$40.00` refund not yet posted holds back ``max(100 - 80, 0) = 20.00``
-    here and ``-40.00`` in flight: the refund arrives (`+40.00`) and `$20.00`
-    of the budget is still expected to leave -- the same ``-20.00`` the
-    three-bucket form answered, in two items that each say what they are.
-
-    **What this does NOT ask, and why**: whether a purchase has POSTED.  That
-    question moved out of here twice before it left entirely -- a stored
-    ``is_cleared`` boolean written by a bulk UPDATE at every true-up, then a
-    derivation against the account's latest asserted day (ruling R-DH (d)),
-    then the RECORDED statement (ruling R-FL) -- and ruling R-FM made a
-    posted purchase a cash movement of its own in the walk, on its own day,
-    where :class:`~._clearing.StatementCoverage` asks which statement cleared
-    it.  A purchase not yet posted is a movement in flight, held by the plan
-    beside this.  So this reduction asks one fact about the row in front of
-    it -- what has been recorded against its budget -- and no fact about the
-    account or the bank.
-
-    This function sees whatever entry set it is handed and applies the
-    reduction to all of it.  Short-circuiting an empty set belongs to the
-    caller, and there is exactly one, so that decision is made once rather than
-    kept in step across two paths.
-
-    Args:
-        entries: An iterable of entry rows, each exposing ``amount``
-            (Decimal).  The caller is responsible for short-circuiting an
-            empty sequence before calling.
-        estimated_amount: Decimal -- the transaction's budgeted amount,
-            the ceiling the recorded purchases reduce.
-
-    Returns:
-        Decimal -- the budget this envelope still holds back from the account,
-        never negative.
-    """
-    spent = sum((entry.amount for entry in entries), Decimal("0"))
-    return max(estimated_amount - spent, Decimal("0"))
-
-
 def _entry_aware_amount(txn: PlanParent, basis: AmountBasis) -> Decimal:
     """Compute the checking-balance impact of one still-planned expense parent.
 
@@ -512,7 +431,8 @@ def _entry_aware_amount(txn: PlanParent, basis: AmountBasis) -> Decimal:
     For projected expenses with entries (loaded eagerly or lazy-loaded on
     demand), the row is worth its UNSPENT BUDGET -- the plan less every
     purchase recorded against it, floored at zero
-    (:func:`_entry_checking_impact`)::
+    (:func:`._carry.unspent_budget`, which a settled envelope's carry reads
+    too)::
 
         checking_impact = max(estimated_amount - sum(purchases), 0)
 
@@ -662,7 +582,7 @@ def _entry_aware_amount(txn: PlanParent, basis: AmountBasis) -> Decimal:
             :class:`~._clearing.StatementCoverage` beside it until plan step
             X-f3b, in a ``ProjectedBasis`` wrapper; the reservation is the
             fact that needed it, and it no longer asks (see
-            :func:`_entry_checking_impact`), so the wrapper went with it.
+            :func:`._carry.unspent_budget`), so the wrapper went with it.
 
     Returns:
         Decimal -- the amount this transaction contributes to checking
@@ -702,7 +622,6 @@ def _entry_aware_amount(txn: PlanParent, basis: AmountBasis) -> Decimal:
         return contribution_of(txn, basis)
 
     # Hold back what is unspent.  The reservation formula lives once, in
-    # ``_entry_checking_impact`` (E-27).
-    return _entry_checking_impact(
-        entries, resolve_transaction_amount(txn, basis),
-    )
+    # ``_carry.unspent_budget`` (E-27), the same figure a settled envelope's
+    # carry rolls forward.
+    return unspent_budget(resolve_transaction_amount(txn, basis), entries)

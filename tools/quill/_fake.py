@@ -38,6 +38,7 @@ from tools.ci.scratch import run as _run
 from tools.quill import _git, _waits, quill
 from tools.quill._arcs import ARC_FIELD, ArcCard
 from tools.quill._board_fields import STATUS_OPTIONS
+from tools.quill._board_lag import sits
 from tools.quill._command import on_board as goes_on_board
 from tools.quill._fields import FIELDS
 from tools.quill._github import GitHubError
@@ -110,10 +111,12 @@ class FakeBoard:
         self._put(item, after, "board_move")
 
     def shows(self, placed):
-        """Whether the board shows each item of ``placed`` where it was put: at once, as it
-        shows a placement, unless :attr:`lagging`."""
+        """Whether the board shows each item of ``placed`` just after the item paired with it,
+        by the check :meth:`_tracker.Board.shows` reads the board with
+        (:func:`_board_lag.sits`): at once, as it shows a placement, unless :attr:`lagging`, so
+        a read back asking for a place no item sits in is said, as on the board."""
         assert placed, "a read back of no placement"
-        return not self.lagging
+        return not self.lagging and sits(placed, self.held())
 
     def _put(self, item, after, write):
         """Move an item to just after ``after`` (the top when None), logged as ``write``."""

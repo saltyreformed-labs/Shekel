@@ -11,7 +11,7 @@ module of quill's.
 """
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 
 #: How long a write waits for the board to show what it placed: three times
 #: the ~20 seconds L1 measured, so a slow read is waited out and a stuck one
@@ -35,3 +35,14 @@ def read_until[T](read: Callable[[], list[T]], holds: Callable[[list[T]], bool],
             return order, False
         sleep(POLL_SECONDS)
         waited += POLL_SECONDS
+
+
+def sits(placed: Sequence[tuple[str, str | None]],
+         positions: Sequence[tuple[int, str, str | None]]) -> bool:
+    """Whether each board item of ``placed`` sits right after the item paired with it, first
+    when None, in ``positions``, every item the board holds in its positions (``(card number,
+    item id, issue type)``, ``_tracker.Board.held``): what a read back of a placement checks, the
+    board's (``_tracker.Board.shows``) and the fake's alike."""
+    items = [item for _, item, _ in positions]
+    before = dict(zip(items, [None, *items]))
+    return all(item in before and before[item] == after for item, after in placed)

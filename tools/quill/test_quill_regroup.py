@@ -2,7 +2,8 @@
 sync`` pass and a ``quill priority`` run each leave the board grouped, Urgent, then High, the
 cards waiting under the High cards, Medium, Low and the rest, with the developer's order kept
 inside each group; a pass reads quill's suggestion on each card no Priority ranks and on no
-other; a dry run writes nothing; a second pass moves nothing; a card ``sync`` closes in the same
+other; a dry run writes nothing; a second pass moves nothing; two rows moved down are sent after
+one row, last first, and read back where they end (plan#3906); a card ``sync`` closes in the same
 pass is never moved; a Priority cleared, through quill or on the web, puts the card at the top
 of the no-Priority group, and a card set Low at the bottom goes above it (finding plan#4092); a
 ``quill file`` filing leaves the board grouped too, a new card suggested Urgent or High waiting
@@ -12,8 +13,9 @@ and a filing run again after a cut places its card again; the weekly update's ca
 of the moves and placed first in the High group after them (ruling plan#4014), which
 ``test__waits.py`` drives through ``sync``.  Over the in-memory tracker
 (:class:`_fake.FakeTracker`) and the ``code`` fixture's real git; the board's own back-to-back
-move and its read back of several placements over scripted GitHub answers.  The plan itself is
-``test__regroup.py``'s.
+move and its read back of several placements over scripted GitHub answers, and the fake
+board's read back by the same check, so a test sees a read back asking for the wrong place.  The
+plan itself is ``test__regroup.py``'s.
 """
 from __future__ import annotations
 
@@ -87,6 +89,22 @@ def test_a_sync_pass_leaves_the_board_grouped_and_a_second_pass_moves_nothing(co
     assert run(tracker, code, "sync") == 0
     assert _board_moves(tracker) == [(1, "PVTI_3")]
     assert _regroup_lines(capsys.readouterr().out) == []
+
+
+def test_two_rows_moved_down_go_after_one_row_and_read_back_where_they_end(code, capsys):
+    """High plan#1 and plan#2 above Urgent plan#3 to plan#5: plan#2 is sent under plan#5, then
+    plan#1 under plan#5 too, above it, so the High cards keep their order after each move (the
+    review's H1, plan#3906); the read back asks for plan#2 under plan#1, where it ends, not under
+    plan#5, where it was sent, so it holds and says nothing (M1)."""
+    tracker = FakeTracker()
+    for number, priority in ((1, "High"), (2, "High"), (3, "Urgent"), (4, "Urgent"),
+                             (5, "Urgent")):
+        tracker.add(number, priority=priority)
+    assert run(tracker, code, "sync") == 0
+    assert tracker.board.items == [3, 4, 5, 1, 2]
+    assert _board_moves(tracker) == [(2, "PVTI_5"), (1, "PVTI_5")]
+    assert _regroup_lines(capsys.readouterr().out) == [_moved(2, "after plan#5"),
+                                                      _moved(1, "after plan#5")]
 
 
 def test_a_dry_run_prints_each_move_and_writes_none(code, capsys):
@@ -575,7 +593,8 @@ def test_a_move_is_one_write_naming_the_board_and_reads_nothing():
                            (BOARD_AFTER, {"p": "PVT_p", "i": "B", "a": "A"})]
 
 
-@pytest.mark.parametrize("placed, shown", [
+#: Read backs of several placements on a board reading A, B, C, and whether each holds.
+_READ_BACKS = pytest.mark.parametrize("placed, shown", [
     ([("B", "A"), ("C", "B")], True),
     ([("A", None), ("C", "B")], True),
     ([("B", "A"), ("C", "A")], False),
@@ -584,6 +603,9 @@ def test_a_move_is_one_write_naming_the_board_and_reads_nothing():
     ([("D", None)], False),
 ], ids=["each-after-its-own", "first-and-after", "one-after-another", "one-not-on-it",
         "not-first", "not-on-it-first"])
+
+
+@_READ_BACKS
 def test_a_read_back_shows_the_moves_only_where_each_sits_right_after_its_own(placed, shown):
     """The board reads A, B, C: a read back of several placements holds only when every item
     sits right after the item paired with it (first when None); else it is waited on for the
@@ -592,3 +614,16 @@ def test_a_read_back_shows_the_moves_only_where_each_sits_right_after_its_own(pl
     board = Board(_ReadBoard(("A", "B", "C")), PLAN, "PVT_p", sleep=slept.append)
     assert board.shows(placed) is shown
     assert sum(slept) == (0 if shown else BOARD_WAIT_SECONDS)
+
+
+@_READ_BACKS
+def test_the_fake_boards_read_back_holds_where_the_boards_does(placed, shown):
+    """The fake board holding cards 1, 2 and 3, items A, B and C, answers each read back as
+    the board does (``_board_lag.sits``), so a test of the regroup sees a read back asking for a
+    place no item sits in (the review's M1, plan#3906)."""
+    tracker = FakeTracker()
+    for number in (1, 2, 3):
+        tracker.add(number)
+    assert tracker.board.items == [1, 2, 3]
+    item = {"A": "PVTI_1", "B": "PVTI_2", "C": "PVTI_3", "D": "PVTI_4", None: None}
+    assert tracker.board.shows([(item[at], item[after]) for at, after in placed]) is shown

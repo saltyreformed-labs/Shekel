@@ -67,7 +67,7 @@ from urllib.parse import quote
 
 from tools.quill import _arcs, _queries
 from tools.quill._arcs import ARC_FIELD, ArcCard, arc_answered, arc_of, labels_and_values
-from tools.quill._board_lag import read_until
+from tools.quill._board_lag import read_until, sits
 from tools.quill._draft import Draft
 from tools.quill._fields import FIELDS, answered_value, value_of
 from tools.quill._filed import filed_labels, filed_values
@@ -468,14 +468,11 @@ class Board:
 
     def shows(self, placed: Sequence[tuple[str, str | None]]) -> bool:
         """Read the board until each item of ``placed`` sits right after the item paired with
-        it (first when None), for at most ``_board_lag.BOARD_WAIT_SECONDS`` (:func:`read_until`).
-        It reads every item's position (:meth:`held`), not the order: a move is a write of
-        positions, which it makes whatever the item's type."""
-        def holds(positions: list[tuple[int, str, str | None]]) -> bool:
-            items = [item_id for _, item_id, _ in positions]
-            before = dict(zip(items, [None, *items]))
-            return all(item in before and before[item] == after for item, after in placed)
-        return read_until(self.held, holds, self._sleep)[1]
+        it (first when None, :func:`_board_lag.sits`), for at most
+        ``_board_lag.BOARD_WAIT_SECONDS`` (:func:`read_until`).  It reads every item's position
+        (:meth:`held`), not the order: a move is a write of positions, which it makes whatever
+        the item's type."""
+        return read_until(self.held, partial(sits, placed), self._sleep)[1]
 
 
 class CardReader:

@@ -30,6 +30,20 @@ end, at the bottom of the board too (ruling plan#4015: a paused High card stays 
 rows).  Decided under R-BAL207, with the tie-break above: the ruling leaves a paused card where
 it is, and this keeps a card moving past it from landing between it and its group.
 
+**The order the moves are written in** (:func:`_written`) keeps each group's order after every
+move, so a pass cut short between two (a GitHub error, a killed process) leaves no group out of
+the developer's order, and the next pass, a stable sort of the board it finds, ends with the
+same order of the rows it moves as the whole pass would.  Each row a pass moves sits too high, a
+row it keeps of an earlier group below it (:func:`_sinking`), or too low, under one of a later
+group; a group's rows sit, top first, as those too high, those kept, then those too low.  So
+the groups are sorted in turn, top first: the rows too high, last first, each just after the
+row their group opens under, so each lands above the one moved before it; then the rows too
+low, first to last, each just after the row before it in the sort.  Written in sort order
+instead, a row moved down would land below a row of its group not yet moved, and a pass cut
+there would leave the two swapped for good (the review's H1, plan#3906).  The rows a pass
+leaves alone, paused and closed cards, may end on the other side of a group's edge than the
+whole pass leaves them, since each pass keeps the end of a group by the board it finds.
+
 **A Priority changed** (ruling plan#4013) needs no rule of its own.  On a board the last pass
 grouped, a card whose Priority drops is above every card of its new group, so the sort puts it
 first there; one whose Priority rises is below every card of its new group, so it goes last.
@@ -62,7 +76,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Iterator, Mapping, Sequence
 from functools import partial
-from itertools import takewhile
+from itertools import groupby, takewhile
 from operator import itemgetter
 from typing import NamedTuple
 
@@ -201,32 +215,78 @@ def _under(board: Sequence[int], row: int, groups: Mapping[int, int]) -> int:
     return run[-1] if run else row
 
 
+def _sinking(board: Sequence[int], groups: Mapping[int, int], kept: set[int]) -> set[int]:
+    """The rows of ``board`` (card numbers, top first) that the regroup moves down: each of
+    ``groups``, the rows it may move, not ``kept`` that sits above a kept row of an earlier
+    group.  Each other row it moves sits under a kept row of a later group, and goes up: a row
+    under no kept row of a later group and above none of an earlier one would lengthen the run
+    :func:`_kept` keeps."""
+    sinking, lowest = set(), len(_GROUPS)
+    for number in reversed(board):
+        if number in kept:
+            lowest = min(lowest, groups[number])
+        elif number in groups and lowest < groups[number]:
+            sinking.add(number)
+    return sinking
+
+
+def _shift(board: list[int], number: int, after: int | None) -> None:
+    """Move row ``number`` of ``board`` (card numbers, top first) just after row ``after``, or
+    to the top when None, as the board moves an item (:meth:`_tracker.Board.move`): the one
+    spelling of a move, which a plan writes and a read back reads (:func:`lands`).  A row
+    ``board`` does not list is put in: the weekly update's card, which a read lagging an earlier
+    run's add leaves out (``_regroup_pass._placing``)."""
+    if number in board:
+        board.remove(number)
+    board.insert(0 if after is None else board.index(after) + 1, number)
+
+
+def _written(board: list[int], groups: Mapping[int, int],
+             kept: set[int]) -> list[tuple[int, int | None]]:
+    """Each row of ``board`` (card numbers, top first) the regroup moves, with the row it goes
+    just after (None: the top), in the order they are written, ``board`` left as they leave it;
+    ``groups`` holds the group of each row it may move, and ``kept`` those it keeps
+    (:func:`_kept`).  The groups are sorted in turn, top first, each written so its order holds
+    after every move (this module's docstring): its rows too high (:func:`_sinking`), last
+    first, each just after the row the group opens under, under the rows left alone at the end
+    of the group above it (:func:`_under`), or at the top for the first group; then its rows too
+    low, first to last, each just after the row before it in the sort, or where the group opens
+    when it is the first.  Each is read off the board as the moves before it leave it."""
+    sinking = _sinking(board, groups, kept)
+    written: list[tuple[int, int | None]] = []
+
+    def write(number: int, after: int | None) -> None:
+        _shift(board, number, after)
+        written.append((number, after))
+
+    last = None
+    for _, run in groupby(sorted(groups, key=groups.__getitem__), key=groups.__getitem__):
+        rows = list(run)
+        opening = None if last is None else _under(board, last, groups)
+        for number in reversed([row for row in rows if row in sinking]):
+            write(number, opening)
+        for before, number in zip([None, *rows], rows):
+            if number not in kept and number not in sinking:
+                write(number, opening if before is None else before)
+        last = rows[-1]
+    return written
+
+
 def _plan(order: Sequence[tuple[int, str]], cards: Mapping[int, Card],
           suggested: Mapping[int, str]) -> _Pass:
     """The pass over ``order``, the board's order (``(card number, board item)``, top first),
     with ``cards`` holding every open card in it and every step above each, and ``suggested``
     what quill's pending suggestion on each card of ``order`` no Priority ranks suggests
     (:func:`undecided`), a card holding none absent; a row ``cards`` does not hold is a closed
-    card, which the regroup never moves.  Each row moved goes after the row before it in the
-    sort, or under the rows left alone there when it opens its group (:func:`_under`), read off
-    the board as the moves before it leave it."""
+    card, which the regroup never moves.  Its moves are :func:`_written`'s, over the rows it may
+    move (:func:`movable`) and the run of them it keeps (:func:`_kept`)."""
     items = dict(order)
     places = {number: place for place, (number, _) in enumerate(order)}
     groups = {number: _group(number, cards, places, suggested) for number in places
               if number in cards and movable(cards[number], cards)}
-    kept = _kept(order, groups)
-    target = sorted(groups, key=groups.__getitem__)
     board = [number for number, _ in order]
-    planned = []
-    for before, number in zip([None, *target], target):
-        if number in kept:
-            continue
-        board.remove(number)
-        after = before if before is None or groups[before] == groups[number] else _under(
-            board, before, groups)
-        board.insert(0 if after is None else board.index(after) + 1, number)
-        planned.append(Move(number, items[number], None if after is None else (after,
-                                                                               items[after])))
+    planned = [Move(number, items[number], None if after is None else (after, items[after]))
+               for number, after in _written(board, groups, _kept(order, groups))]
     return _Pass(planned, board, groups)
 
 
@@ -234,12 +294,30 @@ def moves(order: Sequence[tuple[int, str]], cards: Mapping[int, Card],
           suggested: Mapping[int, str]) -> list[Move]:
     """The regroup's moves over ``order``, the board's order (``(card number, board item)``, top
     first), in the order they are written, each planned on the board as the moves before it leave
-    it.  A pass keeps nothing for the next, which plans from the board as it finds it, so a pass
-    cut short is finished by the next.  ``cards`` holds every open card in ``order`` and every
-    step above each; a row it does not hold is a closed card, never moved.  ``suggested`` holds
-    what quill's pending suggestion on each of :func:`undecided`'s cards suggests, a card holding
-    none absent."""
+    it.  A pass keeps nothing for the next, which plans from the board as it finds it; each move
+    leaves every group in its order (this module's docstring), so a pass cut short is finished by
+    the next, which ends with the same order of the rows it moves.  ``cards`` holds every open
+    card in ``order`` and every step above each; a row it does not hold is a closed card, never
+    moved.  ``suggested`` holds what quill's pending suggestion on each of :func:`undecided`'s
+    cards suggests, a card holding none absent."""
     return _plan(order, cards, suggested).moves
+
+
+def lands(order: Sequence[tuple[int, str]],
+          planned: Sequence[Move]) -> list[tuple[str, str | None]]:
+    """Where each row ``planned`` moves ends once all of them, written in turn over ``order``
+    (the board's order, ``(card number, board item)``, top first), have landed: its board item
+    and the item just above it then, None at the top, which a read back of them checks
+    (:meth:`_tracker.Board.shows`).  Not the row each move was sent after: a later move sent
+    after the same row lands between them, as a group's rows too high do (:func:`_written`), and
+    the weekly update's card after the regroup's moves (``_regroup_pass._placing``)."""
+    items = {**dict(order), **{move.number: move.item for move in planned}}
+    board = [number for number, _ in order]
+    for move in planned:
+        _shift(board, move.number, None if move.after is None else move.after[0])
+    above = dict(zip(board, [None, *board]))
+    return [(items[number], None if above[number] is None else items[above[number]])
+            for number in dict.fromkeys(move.number for move in planned)]
 
 
 class Crossing(NamedTuple):

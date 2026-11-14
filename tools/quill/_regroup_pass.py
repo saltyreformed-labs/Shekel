@@ -10,14 +10,18 @@ before its mark comes off (:func:`filing_pass`).  Each is a whole pass over the 
 finishes a pass a failure cut short, the plan being stateless.
 
 **How it writes** (:func:`_send`).  Each move is sent back to back and printed as it lands, then
-the board is read back once, until it shows every move where it was sent
-(:meth:`_tracker.Board.shows`).  Measured 2026-11-14 04:10 UTC on the tracker, on seven closed
-cards in a row: six moves sent back to back, each just after the row the move before it moved,
-as the regroup's are, showed as sent at the first read back, 13 s later, and the six that put
-them back did too; each move took about 2 s.  ``Board.place`` reads the whole board back after
-each move instead, every item it holds (15 s), so 48 moves would take over 10 minutes.  A board
-that does not show every move yet is said so, and the next pass finishes what did not land.  The
-tracker's first pass, planned 2026-11-14 04:08 UTC: 10 moves (48 on 2026-11-13).
+the board is read back once, until it shows every row moved where the moves together leave it
+(:func:`_regroup.lands`, :meth:`_tracker.Board.shows`): not each just after the row it was sent
+after, since a later move sent after the same row lands between them.  Measured 2026-11-14 04:10
+UTC on the tracker, on seven closed cards in a row: six moves sent back to back, each just after
+the row the move before it moved, showed as sent at the first read back, 13 s later, and the six
+that put them back did too; each move took about 2 s.  Not measured: moves sent back to back
+after one row, as a group's rows too high are (``_regroup``'s docstring), or after a row no move
+before them moved; the read back is what sees one land otherwise.  ``Board.place`` reads the
+whole board back after each move instead, every item it holds (15 s), so 48 moves would take
+over 10 minutes.  A board that does not show every move yet is said so, and the next pass
+finishes what did not land, each group's order kept by every move that did.  The tracker's first
+pass, planned 2026-11-14 04:08 UTC: 10 moves (48 on 2026-11-13).
 
 **What ``quill priority`` and ``quill file`` read** (:func:`board_cards`): each row of the board's
 order by its number, and every step above each, which is all a plan reads of a card
@@ -51,7 +55,7 @@ from dataclasses import replace
 
 from tools.quill._command import _label, with_cards
 from tools.quill._fields import HIGH
-from tools.quill._regroup import Move, goes_after, moves, undecided
+from tools.quill._regroup import Move, goes_after, lands, moves, undecided
 from tools.quill._state import SyncPlan
 from tools.quill._tracker import Card, Tracker
 
@@ -81,21 +85,24 @@ def pending_suggestions(tracker: Tracker, numbers: Iterable[int],
             if (pending := tracker.suggestions.pending(cards[number])) is not None}
 
 
-def _send(tracker: Tracker, sent: Sequence[tuple[Move, str]], cards: Mapping[int, Card],
-          dry_run: bool, prefix: str = "") -> None:
-    """Send each move of ``sent`` to the board, back to back (:meth:`_tracker.Board.move`), each
-    printed as it lands with the ruling it is made for, then read the board back once, saying so
-    when it does not show every move where it was sent yet; under ``dry_run``, each printed as
-    what would be written, none sent and nothing read back.  Each line opens with ``prefix``, a
+def _said(move: Move, ruling: str, cards: Mapping[int, Card]) -> str:
+    """What a line says of ``move``, made for ``ruling``, after its verb: where on the board it
+    goes and its card, which ``cards`` holds."""
+    where = "to the top" if move.after is None else f"after plan#{move.after[0]}"
+    return f"on the board {where} (ruling {ruling}): {_label(cards[move.number])}"
+
+
+def _send(tracker: Tracker, order: Sequence[tuple[int, str]], sent: Sequence[tuple[Move, str]],
+          cards: Mapping[int, Card], prefix: str = "") -> None:
+    """Send each move of ``sent``, planned over ``order``, the board's order, to the board, back
+    to back (:meth:`_tracker.Board.move`), each printed as it lands with the ruling it is made
+    for, then read the board back once, saying so when it does not show every row moved where
+    the moves together leave it yet (:func:`_regroup.lands`).  Each line opens with ``prefix``, a
     filing's indent under its card.  ``cards`` holds each card moved."""
     for move, ruling in sent:
-        if not dry_run:
-            tracker.board.move(move.item, move.after and move.after[1])
-        where = "to the top" if move.after is None else f"after plan#{move.after[0]}"
-        print(f"{prefix}{'would move' if dry_run else 'moved'} on the board {where} (ruling "
-              f"{ruling}): {_label(cards[move.number])}")
-    if sent and not dry_run and not tracker.board.shows(
-            [(move.item, move.after and move.after[1]) for move, _ in sent]):
+        tracker.board.move(move.item, move.after and move.after[1])
+        print(f"{prefix}moved {_said(move, ruling, cards)}")
+    if sent and not tracker.board.shows(lands(order, [move for move, _ in sent])):
         print(f"{prefix}  the board does not show every move yet (it lags a write): the next "
               "regroup moves each that did not land")
 
@@ -112,15 +119,20 @@ def sync_pass(tracker: Tracker, cards: Mapping[int, Card], changes: SyncPlan,
     board's order read now, ``cards`` holding each card ``sync`` read, every open one and every
     step above each, with each its state writes (``changes``) closed or reopened read as they
     leave it, so no card it has just closed is moved, and the suggestions read now
-    (:func:`pending_suggestions`); under ``dry_run``, printed as what would be written and none
-    sent (:func:`_send`)."""
+    (:func:`pending_suggestions`), sent (:func:`_send`); under ``dry_run``, each printed as what
+    would be written, none sent and nothing read back."""
     states = {**dict.fromkeys(changes.reopen, True),
               **dict.fromkeys((*changes.close, *changes.drop), False)}
     shown = {number: replace(card, is_open=states[number]) if number in states else card
              for number, card in cards.items()}
     order = tracker.board.order()
     held = pending_suggestions(tracker, (number for number, _ in order), shown)
-    _send(tracker, _planned(order, shown, held), shown, dry_run)
+    planned = _planned(order, shown, held)
+    if not dry_run:
+        _send(tracker, order, planned, shown)
+        return
+    for move, ruling in planned:
+        print(f"would move {_said(move, ruling, shown)}")
 
 
 def _placing(order: Sequence[tuple[int, str]], cards: Mapping[int, Card],
@@ -149,7 +161,7 @@ def priority_pass(tracker: Tracker, card: Card, priority: str | None) -> None:
     cards = board_cards(tracker, [*(number for number, _ in order), card.number])
     cards[card.number] = replace(cards[card.number], priority=priority)
     held = pending_suggestions(tracker, (number for number, _ in order), cards)
-    _send(tracker, _planned(order, cards, held), cards, False)
+    _send(tracker, order, _planned(order, cards, held), cards)
 
 
 def filing_pass(tracker: Tracker, card: Card, item: str, first: bool, added: bool) -> None:
@@ -169,4 +181,4 @@ def filing_pass(tracker: Tracker, card: Card, item: str, first: bool, added: boo
     held = pending_suggestions(tracker, (number for number, _ in order), cards)
     sent = (_placing(order, cards, held, card.number, item) if first
             else _planned(order, cards, held))
-    _send(tracker, sent, cards, False, "  ")
+    _send(tracker, order, sent, cards, "  ")

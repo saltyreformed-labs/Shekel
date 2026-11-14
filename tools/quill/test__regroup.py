@@ -7,7 +7,10 @@ step, a card no Priority ranks waits under the High cards when quill suggested U
 and sits last otherwise (plan#4017, plan#4096), the rows left alone at the end of a group stay
 there, and :func:`_regroup.goes_after` names where the weekly update's card goes (plan#4014).
 A place ``quill move`` refuses (:func:`_regroup.crossing`) is exactly one the next pass would
-undo, and a paused card's never is (ruling plan#4011).
+undo, and a paused card's never is (ruling plan#4011).  Every move a pass writes keeps each group
+in the developer's order, so a pass cut short after any move ends, at the next pass, with the
+rows it moves where the whole pass leaves them (the review's H1, plan#3906), and
+:func:`_regroup.lands` names where each moved row ends, which a read back checks.
 
 The random boards are checked against an oracle of the rulings written here, apart from
 ``_regroup`` and ``_next``: a card's group is the highest Priority at it or at a step above it,
@@ -21,7 +24,7 @@ from functools import partial
 
 from tools.quill._fake import FakeBoard
 from tools.quill._fields import HIGH, LOW, MEDIUM, ON_HOLD, RANKS, URGENT
-from tools.quill._regroup import Move, around, crossing, goes_after, moves, undecided
+from tools.quill._regroup import Move, around, crossing, goes_after, lands, moves, undecided
 from tools.quill._tracker import Card, Child
 
 #: How many random boards each property is checked over.
@@ -61,6 +64,13 @@ def _board(rows, unread=()):
     for card in unread:
         board.items.insert(card.number % (len(board.items) + 1), card.number)
     return board
+
+
+def _at(board, items):
+    """A fake board holding ``board``'s cards, its rows at ``items``, top first."""
+    placed = FakeBoard([], board.cards)
+    placed.items = list(items)
+    return placed
 
 
 def _land(board, planned):
@@ -224,6 +234,73 @@ def test_a_pass_reads_the_suggestion_of_each_open_unpaused_card_no_priority_rank
             number for number in board.items if _unranked(number, cards)], f"seed {seed}"
 
 
+def test_every_move_keeps_each_group_in_the_developers_order():
+    """After each move a pass writes, the rows of each group sit in the order they sat in before
+    the pass, so no move leaves a group out of the developer's order for a pass cut there to
+    keep (the review's H1, plan#3906)."""
+    for seed in range(_DRAWS):
+        board, cards, suggested, before = _random(seed)
+        group = partial(_group, cards=cards, suggested=suggested)
+        drag = {value: [number for number in before if group(number) == value]
+                for value in range(len(_GROUPS))}
+        for move in moves(board.order(), cards, suggested):
+            _land(board, [move])
+            assert {value: [number for number in board.items if group(number) == value]
+                    for value in drag} == drag, f"seed {seed}: after plan#{move.number}"
+
+
+def test_a_pass_cut_short_after_any_move_is_finished_by_the_next_in_the_same_order():
+    """A pass cut short after any of its moves, then a whole pass over the board it leaves: the
+    rows the regroup moves end in the order the uncut pass leaves them, on every random board at
+    every cut.  The draws reach cuts the next pass has moves left to finish."""
+    finished = 0
+    for seed in range(_DRAWS):
+        board, cards, suggested, before = _random(seed)
+        planned = moves(board.order(), cards, suggested)
+        whole = _at(board, before)
+        _land(whole, planned)
+        grouped = [number for number in whole.items
+                   if _group(number, cards, suggested) is not None]
+        for cut in range(len(planned)):
+            cut_board = _at(board, before)
+            _land(cut_board, planned[:cut])
+            rest = moves(cut_board.order(), cards, suggested)
+            finished += bool(rest)
+            _land(cut_board, rest)
+            assert [number for number in cut_board.items if number in grouped] == grouped, (
+                f"seed {seed}: cut after {cut} moves")
+    assert finished, "no cut left the next pass a move to finish"
+
+
+def test_rows_moved_down_are_written_last_first_so_a_cut_keeps_their_order():
+    """High plan#1 and plan#2 above the Urgent cards: plan#2 goes under the last Urgent card
+    first, then plan#1 just after the same card, above it.  Cut after the first move, the board
+    reads 1, 3, 4, 5, 2, the High cards still in their order, and the next pass ends where the
+    whole pass does, 3, 4, 5, 1, 2; written in sort order, plan#1 first, the cut would leave 2
+    above 1 for good."""
+    rows = [_card(1, HIGH), _card(2, HIGH), _card(3, URGENT), _card(4, URGENT), _card(5, URGENT)]
+    cards = {card.number: card for card in rows}
+    assert _after(rows) == ([3, 4, 5, 1, 2], [Move(2, "PVTI_2", (5, "PVTI_5")),
+                                              Move(1, "PVTI_1", (5, "PVTI_5"))])
+    board = _board(rows)
+    _land(board, moves(board.order(), cards, {})[:1])
+    assert board.items == [1, 3, 4, 5, 2]
+    _land(board, moves(board.order(), cards, {}))
+    assert board.items == [3, 4, 5, 1, 2]
+
+
+def test_where_each_moved_row_ends_is_read_off_the_board_all_the_moves_leave():
+    """:func:`_regroup.lands`: of two moves sent just after plan#5, the first ends under the
+    second, so its read back names the second, not the row it was sent after; a row the order
+    does not list, the weekly update's card a read lagging its add leaves out, is put in."""
+    rows = [_card(1, HIGH), _card(2, HIGH), _card(3, URGENT), _card(4, URGENT), _card(5, URGENT)]
+    order = _board(rows).order()
+    planned = moves(order, {card.number: card for card in rows}, {})
+    assert lands(order, planned) == [("PVTI_2", "PVTI_1"), ("PVTI_1", "PVTI_5")]
+    assert lands(order, [Move(9, "PVTI_9", None), Move(1, "PVTI_1", (9, "PVTI_9"))]) == [
+        ("PVTI_9", None), ("PVTI_1", "PVTI_9")]
+
+
 def test_a_place_quill_move_refuses_is_one_the_next_pass_would_undo():
     """``quill move``'s refusal (:func:`_regroup.crossing`, ruling plan#4011) reads the regroup's
     own group order: on each random board a pass has grouped, an open card placed at the top or
@@ -241,8 +318,7 @@ def test_a_place_quill_move_refuses_is_one_the_next_pass_would_undo():
             after = rng.choice([None, *(row for row in rows if row != number)])
             cross = crossing(order, cards, suggested, number,
                              around(order, cards, number, after))
-            placed = FakeBoard([], board.cards)
-            placed.items = list(board.items)
+            placed = _at(board, board.items)
             placed.place(f"PVTI_{number}", None if after is None else f"PVTI_{after}")
             undone = bool(moves(placed.order(), cards, suggested))
             assert (cross is not None) == undone, f"seed {seed}: plan#{number} after {after}"

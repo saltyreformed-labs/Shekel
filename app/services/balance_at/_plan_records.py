@@ -21,6 +21,8 @@ from decimal import Decimal
 
 from app.services.loan_ledger import LoanCalendar
 
+from ._definition_walk import UnwrittenOccurrence
+
 _ONE_DAY = timedelta(days=1)
 
 
@@ -67,12 +69,23 @@ class PlannedPayment:
         is_estimated: ``True`` for an occurrence or contractual installment
             no row answers, ``False`` for a real projected-shadow record --
             carried for display / debugging; the fold treats both alike.
+        unwritten: The definition's occurrence an ESTIMATED payment prices
+            (:class:`~._definition_walk.UnwrittenOccurrence`: whose it is,
+            the occurrence, and the paycheck its row would live in), and
+            ``None`` for a planned row or a contractual installment, which
+            answer no definition's occurrence.  Carried so the account PAYING
+            the loan reads its estimate off this plan rather than walking
+            the definition a second time (plan step ``pay_calendar:C9``,
+            ruling plan#3932: loan payments follow the loan's own figures,
+            so the loan and the account paying it agree).  The fold does not
+            read it.
     """
 
     due_date: date
     effective_date: date
     cash: Decimal
     is_estimated: bool
+    unwritten: UnwrittenOccurrence | None = None
 
 
 @dataclass(frozen=True)

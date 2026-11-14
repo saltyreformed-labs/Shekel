@@ -9,17 +9,20 @@ more event kinds on it::
     kind = ASSERTION    balance := asserted_value      (AccountAnchorHistory, every OWNER row)
          | ACTUAL       balance += movement_cash_leg   (dated movements)
          | PLANNED      balance += reservation         (still-projected, clamped, R-G)
+         | ESTIMATED    balance += definition's price  (past the saved paychecks, C9)
          | CONTRIBUTION balance += modelled_rate       (payroll deductions + employer)
          | ACCRUAL      balance += balance * rate      (modelled return, DAILY, R-T)
 
-The first three are exactly :mod:`app.services.balance_at._cash_fold`'s three
+The first four are exactly :mod:`app.services.balance_at._cash_fold`'s four
 tiers, taken whole through :func:`~._cash_fold.assembled_fold`
-rather than re-derived -- which is the structural claim this module exists to
-make: an INTEREST account, an INVESTMENT and a Property are not three questions,
-they are the cash fold plus a rate.  The retired interest layer said exactly
-that in its own words ("that module models an INVESTMENT's growth and an
-APPRECIATING asset's appreciation on top of their cash bases, and this one models
-an INTEREST account's accrual on top of its folded cash balance") years before
+rather than re-derived (the fourth through the read's own end,
+:meth:`~._cash_fold.AssembledCashFold.through`) -- which is the structural
+claim this module exists to make: an INTEREST account, an INVESTMENT and a
+Property are not three questions, they are the cash fold plus a rate.  The
+retired interest layer said exactly that in its own words ("that module models
+an INVESTMENT's growth and an APPRECIATING asset's appreciation on top of their
+cash bases, and this one models an INTEREST account's accrual on top of its
+folded cash balance") years before
 there was a shape that could express it; plan step X-g4b deleted it, and this
 module is the sentence made structural.
 
@@ -254,6 +257,7 @@ def _resolve(
     cash: _cash_fold.AssembledCashFold,
     contributions: "list[tuple[date, Decimal]]",
     window: "AccrualWindow | None",
+    horizon_end: date,
 ) -> ModelledFold:
     """Replay the merged event stream ONCE, resolving each day's accrual in order.
 
@@ -285,16 +289,23 @@ def _resolve(
     sub-half-cent daily accrual accumulates into a cent instead of vanishing.
 
     Args:
-        cash: The account's assembled cash fold -- its seed and its three
+        cash: The account's assembled cash fold -- its seed and its four
             tiers' dated deltas.
         contributions: The dated CONTRIBUTION events.
         window: The account's :class:`AccrualWindow`, or ``None`` when it
             models no return (the result is then the cash fold, unchanged).
+        horizon_end: The furthest date this read will be sampled at -- how
+            far the cash fold's ESTIMATED tier is worked out
+            (:meth:`~._cash_fold.AssembledCashFold.through`, plan step
+            ``pay_calendar:C9``), the bound the accrual window and the
+            contribution axis already take.
 
     Returns:
         The :class:`ModelledFold`.
     """
-    by_day, contribution_by_day = _merged_day_deltas(cash, contributions)
+    by_day, contribution_by_day = _merged_day_deltas(
+        cash.through(horizon_end).steps, contributions,
+    )
     days = set(by_day)
     if window is not None:
         days.update(window.days())
@@ -308,13 +319,14 @@ def _resolve(
 
 
 def _merged_day_deltas(
-    cash: _cash_fold.AssembledCashFold,
+    cash_steps: "list[tuple[date, Decimal]]",
     contributions: "list[tuple[date, Decimal]]",
 ) -> "tuple[dict[date, Decimal], dict[date, Decimal]]":
     """Collapse the additive tiers onto their days, keeping the contributions apart.
 
     Args:
-        cash: The account's assembled cash fold.
+        cash_steps: The account's cash fold steps through the read's end
+            (:meth:`~._cash_fold.AssembledCashFold.through`), every cash tier.
         contributions: The dated CONTRIBUTION events.
 
     Returns:
@@ -323,7 +335,7 @@ def _merged_day_deltas(
         reader can report what the modelled tier put in without re-deriving it.
     """
     by_day: dict[date, Decimal] = {}
-    for on_date, delta in cash.steps:
+    for on_date, delta in cash_steps:
         by_day[on_date] = by_day.get(on_date, _ZERO_MONEY) + delta
     contribution_by_day: dict[date, Decimal] = {}
     for on_date, amount in contributions:
@@ -387,7 +399,7 @@ def resolve(
 
     The replay's real entry, and the reason a modelled asset needs no cash basis
     of its own: it takes the pass's whole assembled record -- the seed, the
-    three tiers' dated deltas, and the walk it reads the latest assertion off --
+    four tiers' dated deltas, and the walk it reads the latest assertion off --
     and adds the two modelled kinds to it.
 
     Taking the assembled fold rather than assembling one is what lets a reader
@@ -451,7 +463,7 @@ def resolve(
     cash.require_account(account)
     accrual = modelled_return(account, inputs.investment_params)
     if accrual is None:
-        return _resolve(cash, [], None)
+        return _resolve(cash, [], None, horizon_end)
 
     # ONE resolution of "the account's latest assertion", read two ways on
     # purpose: the contribution feed asks it the COVERAGE question (ruling
@@ -477,6 +489,7 @@ def resolve(
             cash.calendar.projection_axis(date.min, horizon_end),
         ),
         window,
+        horizon_end,
     )
 
 

@@ -11,7 +11,12 @@ set-up-a-recurring-payment prompt, and the loan recurrence-sync uses it to
 find the rule whose OPENING bound it re-derives from the loan's contract
 (:func:`~app.services.loan_recurrence_sync.sync_loan_payment_start`).
 Centralising it keeps those surfaces from drifting on what counts as an
-account's recurring funding transfer.
+account's recurring funding transfer.  **Since plan step**
+``pay_calendar:C9`` **the balance seam's cash fold reads the same set from
+either side of an account** (:func:`active_recurring_transfer_templates_on`),
+to estimate its transfers past the last saved paycheck; both loaders filter
+the one statement of an active recurring transfer
+(:func:`_active_recurring_transfers`).
 
 **The loan-payment SETTINGS read moved here at plan step R7d-a**, from
 ``loan_payment_service``.  It is a read OF this module's own subject -- the
@@ -49,7 +54,8 @@ an estimate is priced through those arms now
 from decimal import Decimal
 from typing import TYPE_CHECKING
 
-from sqlalchemy.orm import joinedload
+from sqlalchemy import or_
+from sqlalchemy.orm import Query, joinedload
 
 from app.extensions import db
 from app.models.account import Account
@@ -115,37 +121,25 @@ def destination_account(
     return db.session.get(Account, account_id)
 
 
-def active_recurring_transfer_templates(
-    account_id: int, user_id: int,
-) -> list[TransferTemplate]:
-    """Return EVERY active recurring transfer template paying INTO *account_id*.
+def _active_recurring_transfers(user_id: int) -> Query[TransferTemplate]:
+    """Return the query for *user_id*'s active recurring transfer templates.
 
-    The active (``is_active``) :class:`TransferTemplate` rows owned by
-    *user_id* whose destination is *account_id* and which carry a recurrence
-    rule (a ``budget.recurrence_rules`` row names each), oldest first.  **The
-    set, not one of it** (plan step **R16-b-2**, ruling **R-R35**): every
-    recurring transfer into a loan is a payment against it, and the balance
-    seam's ESTIMATED tier sums each one's occurrences on its own cadence --
-    so the question this answers is "which definitions pay in here", where
-    :func:`active_recurring_transfer_template` below answers the narrower
-    "which ONE is the standing payment" for the opening-bound sync alone.
-    That function is this one's first element, so the filter is stated once.
-    **Since plan step R7d-g-3 the loan dashboard reads THIS set too**: its
-    payment card offers extra-principal and track controls per definition
-    (ruling **R-R83**), and its two settings doors admit a template only if
-    it is in this set for the loan the URL names.
+    The ONE statement of "an active recurring transfer" and of what its
+    readers price it from, filtered by side by each public loader below
+    (:func:`active_recurring_transfer_templates`, the transfers INTO an
+    account; :func:`active_recurring_transfer_templates_on`, those on either
+    side of it), so the two cannot come to disagree about which definitions
+    count.
 
     The 1:1 ``settings`` row and the price SERIES are eager-loaded on every
     row -- see the comments on the options for why.
 
     Args:
-        account_id: The destination account (a loan or investment account).
         user_id: The owning user (scopes the query -- ownership is established
             by the caller's chokepoint).
 
     Returns:
-        The active recurring :class:`TransferTemplate` rows, ascending by id;
-        ``[]`` when the account has no recurring funding transfer.
+        An unexecuted query, ordered by id.
     """
     return (
         db.session.query(TransferTemplate)
@@ -161,7 +155,6 @@ def active_recurring_transfer_templates(
         )
         .filter(
             TransferTemplate.user_id == user_id,
-            TransferTemplate.to_account_id == account_id,
             TransferTemplate.is_active.is_(True),
             # "Carries a recurrence rule", as an EXISTS rather than a NOT NULL
             # column test: the owning FK moved onto the rule at plan step
@@ -187,6 +180,73 @@ def active_recurring_transfer_templates(
         # one session must not disagree about it.  The oldest definition wins,
         # which is stable under later edits.
         .order_by(TransferTemplate.id)
+    )
+
+
+def active_recurring_transfer_templates(
+    account_id: int, user_id: int,
+) -> list[TransferTemplate]:
+    """Return EVERY active recurring transfer template paying INTO *account_id*.
+
+    The active (``is_active``) :class:`TransferTemplate` rows owned by
+    *user_id* whose destination is *account_id* and which carry a recurrence
+    rule (a ``budget.recurrence_rules`` row names each), oldest first.  **The
+    set, not one of it** (plan step **R16-b-2**, ruling **R-R35**): every
+    recurring transfer into a loan is a payment against it, and the balance
+    seam's ESTIMATED tier sums each one's occurrences on its own cadence --
+    so the question this answers is "which definitions pay in here", where
+    :func:`active_recurring_transfer_template` below answers the narrower
+    "which ONE is the standing payment" for the opening-bound sync alone.
+    That function is this one's first element, so the filter is stated once.
+    **Since plan step R7d-g-3 the loan dashboard reads THIS set too**: its
+    payment card offers extra-principal and track controls per definition
+    (ruling **R-R83**), and its two settings doors admit a template only if
+    it is in this set for the loan the URL names.
+
+    Args:
+        account_id: The destination account (a loan or investment account).
+        user_id: The owning user (scopes the query -- ownership is established
+            by the caller's chokepoint).
+
+    Returns:
+        The active recurring :class:`TransferTemplate` rows, ascending by id;
+        ``[]`` when the account has no recurring funding transfer.
+    """
+    return (
+        _active_recurring_transfers(user_id)
+        .filter(TransferTemplate.to_account_id == account_id)
+        .all()
+    )
+
+
+def active_recurring_transfer_templates_on(
+    account_id: int, user_id: int,
+) -> list[TransferTemplate]:
+    """Return every active recurring transfer template *account_id* is on, either side.
+
+    The definitions a generate pass writes transfer rows from that move money
+    out of or into the account: the balance seam's cash fold estimates each
+    one's occurrences past the last saved paycheck (plan step
+    ``pay_calendar:C9``, ruling plan#3930), the transfer twin of the rows
+    :func:`app.services.cash_ledger.planned_cash_rows` loads on either side.
+
+    Args:
+        account_id: The account a template moves money out of or into.
+        user_id: The owning user (scopes the query -- ownership is established
+            by the caller's chokepoint).
+
+    Returns:
+        The active recurring :class:`TransferTemplate` rows from or to the
+        account, ascending by id; ``[]`` when there are none.
+    """
+    return (
+        _active_recurring_transfers(user_id)
+        .filter(
+            or_(
+                TransferTemplate.from_account_id == account_id,
+                TransferTemplate.to_account_id == account_id,
+            )
+        )
         .all()
     )
 

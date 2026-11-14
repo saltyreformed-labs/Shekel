@@ -88,6 +88,13 @@ class UnwrittenOccurrence(NamedTuple):
     """One occurrence of a definition that no row answers, placed and dated.
 
     Attributes:
+        template_id: The id of the definition it is an occurrence of, so a
+            reader handed occurrences of several definitions can tell whose
+            each is: the cash fold's estimate reads a loan payment's
+            occurrences back off the loan's plan, which holds every
+            definition paying the loan (ruling plan#3932).  Unique within one
+            template kind; a reader mixing transaction and transfer templates
+            keys by the kind as well.
         occurrence: The date the rule's cadence names, the ``occurs_on`` its
             row would carry.
         period: The saved or projected paycheck its row would live in.
@@ -96,6 +103,7 @@ class UnwrittenOccurrence(NamedTuple):
             here so its pricing reads it rather than deriving it again.
     """
 
+    template_id: int
     occurrence: date
     period: DerivedPeriod
     due_date: date
@@ -171,6 +179,7 @@ def unwritten_occurrences(
     rule = template.recurrence_rule
     return [
         UnwrittenOccurrence(
+            template_id=template.id,
             occurrence=placement.occurrence,
             period=placement.period,
             due_date=compute_due_date(

@@ -817,6 +817,11 @@ _FENCED_MODULE_RULINGS = {
         # oldest of them.  Rows, not figures.
         "active_recurring_transfer_templates",
         "active_recurring_transfer_template",
+        # The same rows from EITHER side of the account (plan step
+        # pay_calendar:C9): the definitions the cash fold's estimated tier
+        # walks past the last saved paycheck.  Rows, not figures; the seam
+        # prices them.
+        "active_recurring_transfer_templates_on",
         # The other direction: which ACCOUNT a definition pays into.  A row off
         # the template's own FK column, moved here from ``loan_recurrence_sync``
         # at plan step R16-b-2 (ruling R-R70) so the balance seam's identity

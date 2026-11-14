@@ -27,7 +27,7 @@ _ZERO_MONEY = Decimal("0.00")
 
 @dataclass(frozen=True)
 class CashDayFacts:
-    """One day's folded balance, and the THREE things that moved it.
+    """One day's folded balance, and the FOUR things that moved it.
 
     **The decomposition lives in the seam, one module from
     :func:`~._cash_fold._running_steps`, because it is that assembly read
@@ -36,7 +36,8 @@ class CashDayFacts:
     WRONG the day a fourth tier joins the running total, labelling it as
     something it is not.  Stating the split beside the fold that builds the
     steps means a new tier is a change to this class rather than a mislabelled
-    number on a report.
+    number on a report.  *It read THREE until plan step* ``pay_calendar:C9``
+    *added* :attr:`estimated`, *which is that sentence's case arriving.*
 
     Attributes:
         balance: The account's cash-flow balance at the END of the day, cent
@@ -60,12 +61,18 @@ class CashDayFacts:
             ``max(its attribution date, as_of + 1)`` (ruling R-G).  Zero for
             every day at or before *as_of*, which is what lets a reader
             comparing PAST days against an outside record ignore it.
+        estimated: What the recurring definitions contribute that day past
+            the last saved paycheck, where no row exists (plan step
+            ``pay_calendar:C9``, :mod:`._cash_estimate`).  Zero for every
+            day at or before both the last saved paycheck's end and *as_of*,
+            for the reason ``planned`` is.
     """
 
     balance: Decimal
     recorded: Decimal
     asserted: Decimal
     planned: Decimal
+    estimated: Decimal
 
 
 @dataclass(frozen=True)
@@ -118,13 +125,14 @@ def _day_sums(
 def day_facts(
     folded: AssembledCashFold, days: list[date],
 ) -> "CashDaySeries":
-    """Return each day's folded balance beside the three tiers that moved it.
+    """Return each day's folded balance beside the four tiers that moved it.
 
     The fourth reading of the ONE assembled row set (plan step
     ``bank_import:X-f6e-2``), and a reading rather than a second producer: the
     balance it reports is :func:`sample_cumulative` over the very
-    ``(seed, steps)`` :func:`~._cash_fold.balances_at` samples, so the two cannot
-    disagree about a day's balance.  What it adds is the SPLIT of that day's
+    ``(seed, steps)`` :func:`~._cash_fold.balances_at` samples, through the
+    latest of *days* (:meth:`~._cash_fold.AssembledCashFold.through`), so the
+    two cannot disagree about a day's balance.  What it adds is the SPLIT of that day's
     movement, which no other reader needs and a consumer must not re-derive
     (see :class:`CashDayFacts`).
 
@@ -137,10 +145,12 @@ def day_facts(
         The :class:`CashDaySeries` -- one :class:`CashDayFacts` per distinct
         requested day, and the day the account's books opened.
 
-    **The three components sum to the day's change in the running total**, and
+    **The four components sum to the day's change in the running total**, and
     that is arithmetic rather than a claim: ``_running_steps`` assembles exactly
     ``dated_deltas`` (the source facts) plus this fold's assertion corrections
-    plus the planned nets, so a day's steps ARE these three sums.  The opening
+    plus the planned nets, and
+    :meth:`~._cash_fold.AssembledCashFold.through` adds the estimated nets it
+    returns beside the steps, so a day's steps ARE these four sums.  The opening
     equity is in the SEED, not in any day's steps, so it moves no day (plan step
     X-f3c-2a; before it a compensator had to cancel the opening correction on
     its own day to achieve the same thing).  ``balance`` is quantized where the
@@ -148,7 +158,10 @@ def day_facts(
     reader wanting the identity to the cent must compare the components rather
     than differencing two rounded balances.
     """
-    balances = sample_cumulative(folded.seed, folded.steps, days)
+    if not days:
+        return CashDaySeries(facts={}, opened_on=folded.walk.opening.opened_on)
+    running = folded.through(max(days))
+    balances = sample_cumulative(folded.seed, running.steps, days)
     recorded = _day_sums(
         [(fact.settled_on, fact.delta) for fact in folded.walk.source_facts]
     )
@@ -172,6 +185,7 @@ def day_facts(
                 recorded=recorded.get(day, _ZERO_MONEY),
                 asserted=asserted.get(day, _ZERO_MONEY),
                 planned=folded.day_nets.get(day, _ZERO_MONEY),
+                estimated=running.estimated.get(day, _ZERO_MONEY),
             )
             for day, balance in balances.items()
         },

@@ -83,11 +83,13 @@ from ._memoize import _memoize_once, require_scenario
 from ._recurrence_memos import RecurrenceMemosMixin
 
 if TYPE_CHECKING:
-    # Type-only: all three RECORD types below are defined by seam SIBLINGS that
+    # Type-only: all four RECORD types below are defined by seam SIBLINGS that
     # import THIS module at runtime.  They type the caches the seam FILLS (this
-    # module never builds a plan, never resolves a loan and never assembles a
-    # cash fold), so they carry NO runtime edge back -- the sibling cycle a
-    # runtime import would close (finding N-25) stays open.
+    # module never builds a plan, never resolves a loan, never assembles a
+    # cash fold and never prices an estimate), so they carry NO runtime edge
+    # back -- the sibling cycle a runtime import would close (finding N-25)
+    # stays open.
+    from ._cash_estimate import PricedWalk
     from ._cash_fold import AssembledCashFold
     from ._plan import LoanForwardPlan
     from ._resolution import ResolvedLoan
@@ -96,9 +98,9 @@ if TYPE_CHECKING:
 class BalanceContext(RecurrenceMemosMixin):  # pylint: disable=too-many-instance-attributes
     """One read pass's pinned as-of, scenario, and memoized derivations.
 
-    Pylint: ``too-many-instance-attributes`` (16/7) -- suppressed because the
-    sixteen ARE one read pass's state and there is no smaller cohesive object
-    inside them: three PINS (``user_id`` / ``scenario`` / ``as_of``) and thirteen
+    Pylint: ``too-many-instance-attributes`` (17/7) -- suppressed because the
+    seventeen ARE one read pass's state and there is no smaller cohesive object
+    inside them: three PINS (``user_id`` / ``scenario`` / ``as_of``) and fourteen
     MEMOS, each keyed by the thing it is a derivation of.  Bundling the memos
     behind a nested record would put an access level in front of state the
     seam fills from five different modules while creating a second object with
@@ -109,9 +111,10 @@ class BalanceContext(RecurrenceMemosMixin):  # pylint: disable=too-many-instance
     recurrence:**R16-b-2** (a rule's resolution), 13 at
     recurrence:**R7d-f-2** (a resolved recurrence's occurrence walk), 14 at
     recurrence:**R16-c-1** (the loan's timeline), 15 at
-    pay_calendar:**C18-a** (each account's books floor) and 16 at
-    recurrence:**R25** (the loan calendars its walk and its pricer share);
-    plan step
+    pay_calendar:**C18-a** (each account's books floor), 16 at
+    recurrence:**R25** (the loan calendars its walk and its pricer share) and
+    17 at pay_calendar:**C9** (each recurring definition's priced occurrences
+    past the last saved paycheck); plan step
     **X-i1** raises it further, because that step's remaining inputs (the contribution feed, the
     standing extra, the contractual schedule) are memos of exactly this kind.
     The count is a property of what a read pass IS rather than a threshold
@@ -129,8 +132,8 @@ class BalanceContext(RecurrenceMemosMixin):  # pylint: disable=too-many-instance
     contexts with the same pins are equal whether or not either has resolved a
     loan yet.
 
-    **SIX derivations this class owns, three it stores in PUBLIC caches, and
-    ONE in a PRIVATE one.**  The WALK (:meth:`loan_walk`), the CALENDAR
+    **SIX derivations this class owns, four it stores in PUBLIC caches, and
+    TWO in PRIVATE ones.**  The WALK (:meth:`loan_walk`), the CALENDAR
     (:meth:`calendar`), the AMOUNT BASIS (:meth:`amounts`), the PAYCHECK
     PRICING (:meth:`paychecks`), a rule's RESOLUTION
     (:meth:`resolved_recurrence_of`) and a resolved recurrence's OCCURRENCE
@@ -141,18 +144,24 @@ class BalanceContext(RecurrenceMemosMixin):  # pylint: disable=too-many-instance
     module by ruling **R-BAL146**.  *The count read "two" and named only the first two
     until plan step X-i4, having missed ``amounts`` when X-au-c2b added it, and
     "three" until R16-b-2's review, having missed ``paychecks`` -- the same
-    omission the attribute-count note above records, one sentence over.*  The RESOLUTION, PLAN and
-    PAYOFF caches (:attr:`loans` /
+    omission the attribute-count note above records, one sentence over.  It
+    read "three PUBLIC" and "ONE in a PRIVATE one" until plan step
+    pay_calendar:C9, which added :attr:`estimates` and found the private count
+    already one short: R16-c-1's ``_timelines`` is the second.*  The
+    RESOLUTION, PLAN and PAYOFF caches (:attr:`loans` /
     :attr:`plans` / :attr:`payoffs`) are derived in the
     ``balance_at`` seam modules ABOVE it (``_resolution`` / ``_plan`` /
     ``_positions``, which import THIS
     module); the context cannot import them back to compute them without inverting
     the dependency arrow and closing a real import cycle (finding N-25), so those
     caches are PUBLIC pass-through state the seam FILLS through
-    :func:`~._memoize._memoize_once`.  Plan step D-ctx-b retired the earlier design that
-    INJECTED the builder into a context method: no builder crosses into the context
-    now -- the seam owns the derivation, the context owns the storage.  Plan step
-    E1d-a moved the RESOLUTION under that same rule (it was a context METHOD, the
+    :func:`~._memoize._memoize_once`.  The fourth, :attr:`estimates`, is the
+    same pass-through state keyed by a DEFINITION rather than an account, and
+    filled by ``_cash_estimate`` for that reason.  Plan step D-ctx-b retired
+    the earlier design that INJECTED the builder into a context method: no
+    builder crosses into the context now -- the seam owns the derivation, the
+    context owns the storage.  Plan step E1d-a moved the RESOLUTION under that
+    same rule (it was a context METHOD, the
     one surface W9910 cannot see -- finding H1 of step D3's review), which is why
     ``loans`` is a cache here rather than a ``resolved_loan`` method.
 
@@ -179,8 +188,9 @@ class BalanceContext(RecurrenceMemosMixin):  # pylint: disable=too-many-instance
     reaches it for a row the amount model has already checked against this
     pass's scenario (``cash_ledger._amount_source``).
 
-    Exposing THOSE THREE caches hands out no balance the fence must guard: a plan
-    is payment RECORDS, a payoff is a ``date``, and a
+    Exposing THOSE FOUR caches hands out no balance the fence must guard: a plan
+    is payment RECORDS, an estimate is priced OCCURRENCES with no seed under
+    them, a payoff is a ``date``, and a
     :class:`~app.services.balance_at._resolution.ResolvedLoan` carries schedule
     detail and NO balance-at-T (its ``current_balance`` was deleted at the root by
     plan step D2a -- the reason step D3 un-fenced the memo in the first place).
@@ -229,6 +239,18 @@ class BalanceContext(RecurrenceMemosMixin):  # pylint: disable=too-many-instance
         payoffs: The read pass's per-loan derived-payoff cache, keyed by
             ``account.id`` and FILLED by the seam's
             :func:`~app.services.balance_at._positions.memoized_payoff`.
+        estimates: The read pass's per-DEFINITION estimate past the last saved
+            paycheck (plan step ``pay_calendar:C9``), keyed by the template's
+            class and id and FILLED by the seam's
+            ``_cash_estimate.priced_occurrences``: every occurrence a
+            recurring definition owes on a projected paycheck through the
+            farthest day any reader of the pass has asked, each priced as
+            its row would be.  One walk per definition per pass, so the two
+            accounts a transfer moves money between read one figure.  Not
+            filled through :func:`~._memoize._memoize_once`, which binds an
+            ACCOUNT: the templates reaching it are loaded by a query scoped
+            to this pass's ``user_id``, for an account that primitive has
+            already bound.
         _timelines: The pass's per-loan TIMELINE memo (plan step
             recurrence:R16-c-1), keyed by ``account.id`` and FILLED by the seam's
             :func:`~app.services.balance_at._loan_stream.loan_timeline`: the
@@ -245,7 +267,7 @@ class BalanceContext(RecurrenceMemosMixin):  # pylint: disable=too-many-instance
             carries ``seed`` and ``steps``, which ARE a balance-at-T -- five
             lines of prefix sum over them reproduce
             :func:`~app.services.balance_at.cash_balance_at`'s answer exactly.
-            The three PUBLIC caches beside it are public because they carry no
+            The four PUBLIC caches beside it are public because they carry no
             such thing, which is the argument the paragraph above makes and
             which this one would have falsified.  Two adversarial reviews found
             it public in X-i4's first build and each measured the bypass: a
@@ -341,6 +363,9 @@ class BalanceContext(RecurrenceMemosMixin):  # pylint: disable=too-many-instance
         default_factory=dict, repr=False, compare=False,
     )
     payoffs: "dict[int, date | None]" = field(
+        default_factory=dict, repr=False, compare=False,
+    )
+    estimates: "dict[tuple[type, int], PricedWalk]" = field(
         default_factory=dict, repr=False, compare=False,
     )
     _timelines: dict[int, LoanLedgerWalk] = field(

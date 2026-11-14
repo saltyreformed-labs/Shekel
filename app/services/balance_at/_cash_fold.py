@@ -10,9 +10,10 @@ consumer legitimately holding a
 :class:`~app.services.cash_ledger.CashLedgerWalk` (the posting writer at plan
 step X-d) cannot reach a balance from a public leaf name.
 
-**Three tiers, ONE :func:`~app.services.balance_at._fold.sample_cumulative`, no
+**Four tiers, ONE :func:`~app.services.balance_at._fold.sample_cumulative`, no
 branch.**  Every date is answered off a single running total
-(:func:`_running_steps`) assembled from:
+(:func:`_running_steps`, then :meth:`AssembledCashFold.through`) assembled
+from:
 
 * the **SEED** -- the account's stored OPENING EQUITY: what it held before its
   records begin, read from ``budget.account_openings`` rather than backed out of
@@ -27,6 +28,12 @@ branch.**  Every date is answered off a single running total
   already happened").  The cash twin of the loan timeline's projections
   (:mod:`app.services.balance_at._loan_stream`).  See :func:`_cash_plan`
   and :func:`_planned_day_nets`.
+* the **ESTIMATED** steps -- past the owner's last saved paycheck, where no
+  row exists, what each recurring definition on the account would generate
+  there, priced as its row would be and landing where its row would (plan
+  step ``pay_calendar:C9``, rulings plan#3930 and plan#3932).  Worked out as
+  far as the reader samples (ruling plan#4036), so it is the one tier the
+  assembly does not hold whole: see :mod:`._cash_estimate`.
 
 **Three readers of that ONE row set** (plan steps X-c1 / X-c2b2, ruling R-K).
 :func:`balances_at` samples the running total at a list of dates -- the
@@ -107,7 +114,7 @@ Boundary discipline (``CLAUDE.md``): no Flask symbol, no writes; all money is
 """
 
 from collections import OrderedDict, defaultdict
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, timedelta
 from decimal import Decimal
 
@@ -126,6 +133,7 @@ from app.services.pay_calendar import FiledRow, PayCalendar, PeriodWindow
 from app.services.transfer_legs import TransferLeg, parent_of
 
 from ._assertions import CashAnchorCorrection, assertion_corrections
+from ._cash_estimate import EstimatedCashTier
 from ._context import BalanceContext
 from ._memoize import _memoize_once
 from ._fold import sample_cumulative
@@ -141,21 +149,44 @@ _ONE_DAY = timedelta(days=1)
 
 
 @dataclass(frozen=True)
+class FoldThrough:
+    """A cash fold's running total through one day, and its estimate's share.
+
+    What :meth:`AssembledCashFold.through` returns, so a reader that needs
+    both the balance and the ESTIMATED tier's share of each day's movement
+    (:func:`~._cash_day_facts.day_facts`) works the estimate out once.
+
+    Attributes:
+        steps: Every tier's dated deltas, ASCENDING by date, covering every
+            day through the day asked for -- what
+            :func:`~app.services.balance_at._fold.sample_cumulative` samples.
+        estimated: The ESTIMATED tier's ``{day: net}`` among them; ``{}``
+            when none lands by that day.
+    """
+
+    steps: "list[tuple[date, Decimal]]"
+    estimated: "dict[date, Decimal]"
+
+
+@dataclass(frozen=True)
 class AssembledCashFold:  # pylint: disable=too-many-instance-attributes
     """One account's whole running total, plus the facts it was built from.
 
-    Pylint: ``too-many-instance-attributes`` (9/7) -- suppressed because the
-    count is the POINT rather than an accident.  Three of the nine are the
+    Pylint: ``too-many-instance-attributes`` (10/7) -- suppressed because the
+    count is the POINT rather than an accident.  Three of the ten are the
     inputs this record was built FROM (:attr:`account_id`, :attr:`scenario_id`,
     :attr:`calendar`), carried so a reader holding both this and one of them
-    cannot pair them wrongly; the other six (:attr:`seed`, :attr:`steps`,
+    cannot pair them wrongly; six (:attr:`seed`, :attr:`_unestimated_steps`,
     :attr:`walk`, :attr:`corrections`, :attr:`plan`, :attr:`day_nets`) are one
-    derivation and its groupings.  Collapsing the three into a nested value
-    would hide exactly
+    derivation and its groupings, and the tenth (:attr:`estimate`) is the
+    tier that derivation is extended by as far as a reader samples.
+    Collapsing the three into a nested value would hide exactly
     what each is here to make visible, and dropping one is what findings
     **N-354** and this step's own review re-opened.  Same disposition as
-    :class:`~._context.BalanceContext` (10/7) one module over, for the same
-    reason.
+    :class:`~._context.BalanceContext` (17/7) one module over, for the same
+    reason.  *The count read (9/7) until plan step* ``pay_calendar:C9``
+    *added the estimate, and the context's read (10/7) here from plan step
+    X-i4 until then, six memos behind it.*
 
     *This said* ``(8/7)`` *and "the other five" until plan step
     balance:X-f3c-3, which is one short of the nine fields below:*
@@ -174,10 +205,20 @@ class AssembledCashFold:  # pylint: disable=too-many-instance-attributes
 
     The output of :func:`~._cash_fold.assembled_fold`, and the reason the three readers below are
     readings of ONE valued row set rather than three producers a test keeps in
-    step (ruling R-K).  It carries the sampling inputs (:attr:`seed` /
-    :attr:`steps`) AND the groupings the period view regroups the same rows by
-    (:attr:`walk` / :attr:`plan` / :attr:`day_nets`), so no reader re-loads or
-    re-values anything a sibling reader already has.
+    step (ruling R-K).  It carries the sampling inputs (:attr:`seed` and the
+    steps :meth:`through` hands out) AND the groupings the period view
+    regroups the same rows by (:attr:`walk` / :attr:`plan` /
+    :attr:`day_nets`), so no reader re-loads or re-values anything a sibling
+    reader already has.
+
+    **A reader samples through** :meth:`through` **and never reads the steps
+    whole** (plan step ``pay_calendar:C9``, ruling plan#4036).  The ESTIMATED
+    tier past the last saved paycheck has no end of its own, so the steps a
+    reader samples are the recorded and planned ones plus the estimate
+    through the last day that reader samples.  The recorded and planned
+    steps are therefore a private field: a reader sampling them whole would
+    read every balance past the last saved paycheck frozen, which is the
+    defect that step closes.
 
     **A fourth reader lives one module over** (plan step X-g1): the modelled
     asset fold (:mod:`app.services.balance_at._asset_fold`) takes this whole
@@ -205,8 +246,9 @@ class AssembledCashFold:  # pylint: disable=too-many-instance-attributes
             second's `$2,000.00` opening.
         seed: The balance before every step -- the account's stored OPENING
             EQUITY (plan step X-f3c-2a, ruling R-GX).
-        steps: The dated deltas, ASCENDING by date -- the ACTUAL tier and the
-            PLANNED tier merged into one list.
+        _unestimated_steps: The dated deltas, ASCENDING by date -- the
+            ACTUAL tier and the PLANNED tier merged into one list.  Read only
+            by :meth:`through`, which adds the ESTIMATED tier to them.
         walk: The account's :class:`~app.services.cash_ledger.CashLedgerWalk`
             (its settled source facts and its balance assertions).
         corrections: One
@@ -237,17 +279,53 @@ class AssembledCashFold:  # pylint: disable=too-many-instance-attributes
             than taking one beside it: :func:`~._asset_fold.resolve` DROPPED
             its own ``calendar`` parameter here, which removes the mis-pairing
             rather than adding a check that catches it.
+        estimate: The account's ESTIMATED tier
+            (:class:`~._cash_estimate.EstimatedCashTier`), worked out through
+            whatever day a reader asks :meth:`through` for.  Excluded from
+            equality and ``repr``: it holds the read pass it was built in.
     """
 
     account_id: int
     scenario_id: int
     seed: Decimal
-    steps: "list[tuple[date, Decimal]]"
+    _unestimated_steps: "list[tuple[date, Decimal]]"
     walk: CashLedgerWalk
     corrections: "list[CashAnchorCorrection]"
     plan: _CashPlan
     day_nets: "dict[date, Decimal]"
     calendar: PayCalendar
+    estimate: EstimatedCashTier = field(repr=False, compare=False)
+
+    def through(self, last_day: date) -> "FoldThrough":
+        """Return the running total's steps covering every day through *last_day*.
+
+        The recorded and planned steps, plus the ESTIMATED tier's day nets
+        through *last_day* (:meth:`~._cash_estimate.EstimatedCashTier
+        .day_nets_through`), merged ascending.  Every reader that samples
+        this fold asks here with the LAST day it samples, so the estimate
+        runs as far as that reader asks and no further (ruling plan#4036).
+        A step after *last_day* would move no sample at or before it, so
+        sampling any day up to *last_day* reads the same balance whichever
+        later day was asked for.
+
+        Args:
+            last_day: The last day the reader samples.
+
+        Returns:
+            The :class:`FoldThrough`: the steps, and the estimated nets that
+            went into them.
+
+        Raises:
+            AmountUnresolvable: When a definition states no price for an
+                occurrence the estimate reaches -- exactly where its written
+                row would refuse.
+        """
+        estimated = self.estimate.day_nets_through(last_day)
+        if not estimated:
+            return FoldThrough(steps=self._unestimated_steps, estimated={})
+        steps = self._unestimated_steps + list(estimated.items())
+        steps.sort(key=lambda step: step[0])
+        return FoldThrough(steps=steps, estimated=estimated)
 
     def require_account(self, account: Account) -> None:
         """Refuse an *account* these steps were not assembled for.
@@ -375,12 +453,17 @@ def assembled_fold(
         ctx, cache, account,
         lambda: _assemble(
             account, ctx.amounts(), ctx.as_of, ctx.calendar(),
+            EstimatedCashTier(account, ctx),
         ),
     )
 
 
 def _assemble(
-    account: Account, basis: AmountBasis, as_of: date, calendar: PayCalendar,
+    account: Account,
+    basis: AmountBasis,
+    as_of: date,
+    calendar: PayCalendar,
+    estimate: EstimatedCashTier,
 ) -> AssembledCashFold:
     """Walk the account's facts and load its plan -- ONCE, for every reader.
 
@@ -414,6 +497,10 @@ def _assemble(
             carries neither a scenario nor a clock, so passing one alongside
             *basis* and *as_of* reintroduces nothing they could disagree
             about.
+        estimate: The account's ESTIMATED tier, bound to the same pass
+            (plan step ``pay_calendar:C9``).  Nothing of it is worked out
+            here: it has no end until a reader names one
+            (:meth:`AssembledCashFold.through`).
 
     Returns:
         The :class:`AssembledCashFold`.
@@ -440,8 +527,9 @@ def _assemble(
     return AssembledCashFold(
         account_id=account.id,
         scenario_id=basis.scenario_id,
-        seed=seed, steps=steps, walk=walk, corrections=corrections,
-        plan=plan, day_nets=day_nets, calendar=calendar,
+        seed=seed, _unestimated_steps=steps, walk=walk,
+        corrections=corrections, plan=plan, day_nets=day_nets,
+        calendar=calendar, estimate=estimate,
     )
 
 
@@ -469,6 +557,11 @@ def balances_at(
     long after (a projection).  Two dates that are not the same date used to be
     a contract this docstring stated; it is now a property of the signature.
 
+    **Past the last saved paycheck it reads the ESTIMATED tier through the
+    latest of *dates*** (plan step ``pay_calendar:C9``, ruling plan#4036), so
+    a date there counts every recurring item through that day rather than
+    reading the balance the saved schedule ended on.
+
     Args:
         folded: The account's :class:`AssembledCashFold`
             (:func:`~._cash_fold.assembled_fold`).
@@ -479,7 +572,11 @@ def balances_at(
         ``{date: balance}`` -- one cent-quantized ``Decimal`` per distinct
         requested date.  ``{}`` for an empty *dates*.
     """
-    return sample_cumulative(folded.seed, folded.steps, dates)
+    if not dates:
+        return {}
+    return sample_cumulative(
+        folded.seed, folded.through(max(dates)).steps, dates,
+    )
 
 
 def period_balances(
@@ -527,10 +624,16 @@ def period_balances(
 
     Returns:
         ``OrderedDict`` period id -> cent-quantized ``Decimal``, in payday
-        order.  EVERY period of *window* is present.
+        order.  EVERY period of *window* is present.  A projected period in
+        *window* reads the ESTIMATED tier through its end (plan step
+        ``pay_calendar:C9``); every caller today passes saved periods, which
+        no estimate reaches.
     """
+    ends = [period.end_date for period in window]
+    if not ends:
+        return OrderedDict()
     sampled = sample_cumulative(
-        folded.seed, folded.steps, [period.end_date for period in window],
+        folded.seed, folded.through(max(ends)).steps, ends,
     )
     return OrderedDict(
         (period.period_id, sampled[period.end_date]) for period in window
@@ -613,13 +716,16 @@ def _running_steps(
     corrections: "list[CashAnchorCorrection]",
     day_nets: "dict[date, Decimal]",
 ) -> "tuple[Decimal, list[tuple[date, Decimal]]]":
-    """Return the ``(seed, steps)`` a whole cash account folds from.
+    """Return the ``(seed, steps)`` a whole cash account folds from, short of the estimate.
 
     The ONE assembly, and the reason both readers in this module are readings of
     ONE valued row set rather than two producers a test keeps in step (ruling
     R-K): :func:`balances_at` samples these steps for a balance, and
     :func:`~._cash_periods.period_view_of` samples them for its balance row while grouping the
-    SAME facts on the budget clock beside it.
+    SAME facts on the budget clock beside it.  Each samples them through
+    :meth:`AssembledCashFold.through`, which adds the ESTIMATED tier as far
+    as that reader samples (plan step ``pay_calendar:C9``); this is every
+    tier with an end of its own.
 
     Args:
         walk: The account's :class:`~app.services.cash_ledger.CashLedgerWalk`.

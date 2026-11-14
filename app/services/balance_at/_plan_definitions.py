@@ -103,7 +103,8 @@ def estimated_from_definitions(
 
     Returns:
         One :class:`PlannedPayment` per unanswered placeable occurrence of
-        every definition (``is_estimated=True``), in walk order per
+        every definition (``is_estimated=True``), carrying that occurrence
+        (:attr:`~._plan_records.PlannedPayment.unwritten`), in walk order per
         definition; the caller sorts.
 
     Raises:
@@ -137,6 +138,7 @@ def estimated_from_definitions(
                 effective_date=max(unwritten.due_date, clamp_floor),
                 cash=cash,
                 is_estimated=True,
+                unwritten=unwritten,
             ))
     return estimated
 

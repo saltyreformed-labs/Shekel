@@ -225,7 +225,7 @@ class TestTransferPrompt:
         schedule, and a set could not see two payments in one slot.
 
         The start bound is also graded, in both directions, in
-        ``tests/test_services/test_loan_recurrence_start_bound.py``; its
+        ``tests/test_services/test_loan_recurrence_start_bound/``; its
         EARLIER side is not graded here: the first contractual installment
         (2023-07-01) falls long before the schedule opens (2026-01-02), so a
         cadence started earlier than it writes these same four payments

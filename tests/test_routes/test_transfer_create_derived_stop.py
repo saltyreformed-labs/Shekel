@@ -60,7 +60,7 @@ from tests._test_helpers import (
 #: The day every request here is made on, frozen so "today" cannot drift past
 #: the schedule ``seed_periods`` builds (2026-01-02 through May) and so the
 #: loan below has not originated yet when the payment is created -- the
-#: shape ``test_loan_recurrence_start_bound`` measures the derived start on.
+#: shape ``test_loan_recurrence_start_bound``'s package measures the derived start on.
 _TODAY = date(2026, 3, 1)
 
 #: The loan's origination and its derived first installment (payment day 1 of

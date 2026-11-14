@@ -186,13 +186,36 @@ def resolve_transaction_amount(txn, basis: AmountBasis) -> Decimal:
     its answer: it returns a
     ``Decimal`` or it raises, never ``None`` and never a plausible substitute.
 
-    Proven equal to the answer the app gives today for **every one of the 997
-    rows** on the 2026-08-12 production clone
-    (``tests/manual/verify_amount_resolver.py``).  "The answer the app gives
-    today" is not single-valued -- ``routes/grid/page.py``'s ``index`` reads the override map
-    while ``dashboard_service.py:279`` reads the raw column, which IS finding
-    **N-224** -- so the oracle grades the OVERRIDE-MAP answer, the one every
-    balance surface folds.
+    **Two controls grade it, and each can FAIL.**
+    ``tests/manual/verify_amount_resolver.py`` resolves every transaction row
+    of a database the operator names: its first pass fails on any row that
+    refuses, and its perturbation pass moves one source at a time -- the
+    row's own column, a definition's price series, a salary profile -- and
+    fails unless each row its expectation says must follow does, and every
+    other row holds.  That expectation is read off the declarations and
+    stored columns and makes no call to this function, though it shares the
+    classifier :func:`amount_rule` with it; the harness's docstring holds its
+    negative control and what else it cannot see.  The
+    ``tests/test_services/test_amount_source/`` package grades what no
+    database shows: the figure each rule answers, hand-computed
+    (``test_what_each_rule_answers.py``); the dispatch's totality and the
+    declaration that picks the rule (``test_which_rule_prices_a_row.py``);
+    each refusal, the scenario pin among them, reached and shown to raise
+    (``test_what_the_resolver_refuses.py``); the column, status and clock the
+    rules do not read (``test_what_the_rules_do_not_read.py``); and the basis
+    this reads and the maps that answer through it
+    (``test_the_basis_and_its_maps.py``).
+
+    *This paragraph said "proven equal to the answer the app gives today for
+    every one of the 997 rows" of the 2026-08-12 production clone, on that
+    harness's word, until task plan#3886.  The harness struck the figure: its
+    agreement pass compared this function with itself, and plan step X-bl-1
+    deleted it.  The sentence after it said the app gave two answers, the
+    grid's override map and the dashboard's raw column (finding **N-224**),
+    and that the oracle graded the first.  Plan step X-au-c2b put the
+    dashboard on :func:`amounts_by_key` and X-au-d deleted the last of the
+    override map (:mod:`._amounts`' docstring), so the app's answer is this
+    function's and there is no second one to grade it against.*
 
     **It was UNWIRED at plan step X-au-b**: nothing in ``app/`` called it
     until plan step X-au-c2 routed the readers through it, and X-au-c3 made a

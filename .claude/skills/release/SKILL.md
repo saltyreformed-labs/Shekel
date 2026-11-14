@@ -136,9 +136,9 @@ what `main` holds beyond production:
 - `production is not in main`: STOP and tell Josh.
 - `main holds more than added done files`: `main` holds a change production lacks. The cases
   below say which; none matching is a STOP.
-- `dev lacks main`: a records-only merge into `main` whose resync into `dev` (CLAUDE.md, Git
-  Workflow) has not landed, so step 6 would refuse the cut after the approval. STOP and tell
-  Josh: the resync lands first.
+- `dev lacks main`: a records-only merge into `main` whose resync into `dev` (CLAUDE.md,
+  Multi-session operation) has not landed, so step 6 would refuse the cut after the approval. STOP
+  and tell Josh: the resync lands first.
 - A release whose record ends at "Not now" at step 10: resume it at step 9 by copying its record's
   `current.sh` back.
 - The start block refused with `an unfinished run`: a run that never reached step 13 (a lost
@@ -484,13 +484,15 @@ sha as `M`:
 ```bash
 . ~/projects/shekel-handoffs/releases/current.sh && cd "${W:?}" || exit 1
 : "${M:?}"
-gh run list --workflow docker-publish.yml --branch main --limit 3 --json databaseId,headSha \
-    --jq ".[] | select(.headSha == \"$M\") | .databaseId"; echo "exit=$?"
+gh run list --workflow docker-publish.yml --branch main --event push --limit 3 \
+    --json databaseId,headSha --jq ".[] | select(.headSha == \"$M\") | .databaseId"; echo "exit=$?"
 ```
 
-It prints the build's run id, the run whose `headSha` is `$M`. Nothing printed means the run is not
-listed yet (on 10-14 it was listed about 20 seconds after the merge): run the block again until it
-prints one, never taking another run. Then, `<run>` being that id:
+It prints the build's run id, the push's run whose `headSha` is `$M`. The Monday rebuild of `main`
+(ruling plan#3724) can build the same commit, on the `schedule` event, and is never the merge's
+build. Nothing printed means the run is not listed yet (on 10-14 it was listed about 20 seconds
+after the merge): run the block again until it prints one, never taking another run. Then, `<run>`
+being that id:
 
 ```bash
 . ~/projects/shekel-handoffs/releases/current.sh && cd "${W:?}" || exit 1
@@ -565,9 +567,9 @@ one runs in its place. Production reads nothing in this venv, so a failure holds
 deploy: name it in the record (step 13) with uv's own words.
 
 Then `dev`. No one can push to `dev` (ruleset `dev-queue`, whose bypass list is empty, R-BAL322),
-so `main` reaches it as a pull request from `main` through `dev`'s merge queue, as CLAUDE.md's Git
-Workflow resyncs `dev` (measured on a throwaway repository 10-18: it lands, and `main` is not
-deleted):
+so `main` reaches it as a pull request from `main` through `dev`'s merge queue, the resync
+CLAUDE.md's Multi-session operation names (measured on a throwaway repository 10-18: it lands, and
+`main` is not deleted):
 
 ```bash
 . ~/projects/shekel-handoffs/releases/current.sh && cd "${W:?}" || exit 1
@@ -581,21 +583,22 @@ with `gh pr merge "$RS" --merge` (no `--match-head-commit`: whatever `main` hold
 what `dev` should get), find its queue run on the branch `gh-readonly-queue/dev/pr-<RS>-<sha>` and watch it into
 `$R/queue_<run>.txt`. A failed run is read as step 6 reads one: nothing reached `dev`; queue it
 again or STOP. Once it is merged, append `RM="<its merge sha>"` as step 6 appends `M`. Neither
-wait holds the deploy: go on to step 9, and read both before step 13. A resync that conflicts over
-a file the tracker switch deleted is settled by CLAUDE.md's resync rule (Git Workflow): it takes
-`dev`'s delete.
+wait holds the deploy: go on to step 9, and read both before step 13.
 
 ## 9. The dry run
 
 ```bash
 . ~/projects/shekel-handoffs/releases/current.sh && cd "${W:?}" || exit 1
-: "${R:?}"
-shekel-deploy --dry-run > "$R/dryrun.txt" 2>&1; echo "exit=$?"
+: "${R:?}" "${DIGEST:?}"
+shekel-deploy --dry-run "$DIGEST" > "$R/dryrun.txt" 2>&1; echo "exit=$?"
 ```
 
-Read it, not its exit alone:
+The dry run and the deploy are handed `$DIGEST`, the image step 7 built, never `:latest` (ruling
+plan#3740): the weekly rebuild moves `:latest` every Monday (ruling plan#3724), so the release
+deploys exactly the image it checked, and a rebuild newer than it waits for the next release or a
+`shekel-deploy` by hand, WUD reporting it meanwhile. Read it, not its exit alone:
 
-- `current pin` is production now; `target pin` must be `$DIGEST`, the image step 7 built.
+- `current pin` is production now; `target pin` must be `$DIGEST`.
 - The stamp line, `database is stamped at: <revision>`, is a real check. With `ADDED` migrations:
   `plan.txt` lists them in PATH order, not chain order, so take the one whose `down_revision`
   (`git show "$CUT":<its path>`) is not itself an `ADDED` revision; the stamp must be that
@@ -623,9 +626,9 @@ not apply, STOP and ask Josh, with the ways out 2.6 names, before anything else.
 
 ```bash
 . ~/projects/shekel-handoffs/releases/current.sh && cd "${W:?}" || exit 1
-: "${R:?}" "${C:?}"
+: "${R:?}" "${C:?}" "${DIGEST:?}"
 date -Iseconds > "$R/deploy_since.txt"
-shekel-deploy > "$R/deploy.txt" 2>&1; echo "exit=$?"
+shekel-deploy "$DIGEST" > "$R/deploy.txt" 2>&1; echo "exit=$?"
 ~/projects/Shekel/deploy/verify_prod_deploy.sh "$(cat "$R/deploy_since.txt")" > "$R/verify.txt" 2>&1; echo "exit=$?"
 docker inspect "$C" --format '{{.Config.Image}} {{.State.Health.Status}} {{.RestartCount}}'
 ```

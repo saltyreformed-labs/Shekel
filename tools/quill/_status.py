@@ -124,13 +124,14 @@ def unwritable(statuses: Statuses) -> str | None:
 
 def sync_statuses(tracker: Tracker, cards: Mapping[int, Card], reads: _git.Reads,
                   dry_run: bool, scope: Collection[int] | None = None) -> list[str]:
-    """``quill sync``'s last pass, display of the plan: the board's Status read, every card it
-    holds that ``cards`` lacks read by its number, and each write :func:`status_writes` names
-    made (or under ``dry_run`` printed and not made), each printed as it lands; none while
-    the field cannot hold every answer (:func:`unwritable`).  Its REPORT lines, for ``sync``
-    to print and exit 1 on.  With ``scope``, only the cards it numbers that the board holds
-    are decided and written: ``quill watch``'s pass over the cards a moved branch names
-    (:mod:`_watch`), ``cards`` holding each and what a decision over it reads.
+    """``quill sync``'s last pass of display, before it files the weekly update's waits
+    (``_waits``): the board's Status read, every card it holds that ``cards`` lacks read by its
+    number, and each write :func:`status_writes` names made (or under ``dry_run`` printed and
+    not made), each printed as it lands; none while the field cannot hold every answer
+    (:func:`unwritable`).  Its REPORT lines, for ``sync`` to print and exit 1 on.  With
+    ``scope``, only the cards it numbers that the board holds are decided and written:
+    ``quill watch``'s pass over the cards a moved branch names (:mod:`_watch`), ``cards``
+    holding each and what a decision over it reads.
 
     Raises:
         _tracker.TrackerError: when a card the board holds does not exist by its number.

@@ -29,14 +29,13 @@ from __future__ import annotations
 import threading
 import time
 from dataclasses import dataclass
-from urllib.parse import urlsplit
 
 from sqlalchemy import event, text
 from sqlalchemy.orm import Session
 
 from app.extensions import db as _db
 from tests._test_helpers import owner_lock_key
-from tests._seed_owner_fixtures import SEED_USER_EMAIL, SEED_USER_PASSWORD
+from tests._seed_owner_fixtures import log_in_seed_user
 
 
 #: How long a race waits for a request to reach its commit, or the second
@@ -49,22 +48,14 @@ RACE_WAIT_SECONDS = 8.0
 def signed_in_clients(app, count=2):
     """*count* clients, each signed in as the seed user.
 
-    Each sign-in's redirect is checked not to be the sign-in page, so a race
-    cannot quietly run one client signed out.
+    Each signs in through the shared sign-in (:func:`log_in_seed_user`), which
+    checks the sign-in landed on the owner's page, so a race cannot quietly run
+    one client signed out or held at the code form.
 
     Returns:
         The signed-in clients, in order.
     """
-    clients = []
-    for _ in range(count):
-        client = app.test_client()
-        response = client.post("/login", data={
-            "email": SEED_USER_EMAIL, "password": SEED_USER_PASSWORD,
-        })
-        assert response.status_code == 302, response.status_code
-        assert urlsplit(response.headers["Location"]).path != "/login"
-        clients.append(client)
-    return clients
+    return [log_in_seed_user(app.test_client()) for _ in range(count)]
 
 
 #: Whether a backend in THIS database waits, ungranted, for one owner's write

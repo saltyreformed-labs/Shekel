@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import pytest
 
+from tools.quill import _waits
 from tools.quill._fake import FailOnce, FakeTracker, run
 from tools.quill._github import GitHubError
 from tools.quill.check import TITLE_CAP, ruling_body
@@ -238,6 +239,37 @@ def test_edit_refuses_a_questions_text_in_a_rulings_shape_and_its_conversion_sti
                "--answer-file", _text(tmp_path, "Yes.", "answer.md")) == 0
     assert tracker.bodies[2] == ruling_body("Ship it tomorrow?", "Yes.")
     assert tracker.cards_by_number[2].kind == "ruling"
+
+
+#: The two lines ending a card ``quill sync`` filed for PR 669's comment (:mod:`_waits`), as
+#: :func:`_waits.told_line` writes them: the queue's two markers there, as read 2026-11-13.
+TOLD = tuple(f"<!-- quill: told on PR 669 --> <!-- update: mention {digest} -->" for digest in (
+    "0ff52c4bc4f08733209079a4eed33cd6fcd40bc7d535fbd85137bd8046f46ea1",
+    "feff69fc96efd06871a0164289534de4b2576f5435b8d90eefc1b1fe8c441a4f"))
+
+
+def test_edit_keeps_the_lines_holding_what_the_weekly_update_told(code, tmp_path, capsys):
+    """A card ``quill sync`` filed ends with lines holding what the update told, which render
+    as nothing: a new text keeping them at its end is written; one dropping one, or moving it
+    into a code block, is refused, naming it, with nothing written, as the next pass would
+    file it again (finding 5 of plan#3613's review)."""
+    tracker = FakeTracker()
+    tracker.add(1, body="Read rumdl's changelog.\n\n" + "\n".join(TOLD))
+    kept = "Read rumdl's changelog, then claim plan#2957.\n\n" + "\n".join(TOLD) + "\n"
+    for text in ("Read the changelog.\n\n" + TOLD[1],
+                 "Read the changelog.\n\n```\n" + "\n".join(TOLD) + "\n```"):
+        path = _text(tmp_path, text)
+        assert run(tracker, code, "edit", "plan#1", "--body-file", path) == 1
+        err = capsys.readouterr().err
+        assert err.startswith(
+            "refused: plan#1's text ends with lines holding what the weekly update told, which "
+            "`quill sync` reads (ruling plan#3619), and this text drops ")
+        assert f"one to a line:\n  {TOLD[0]}\n" in err
+        assert not tracker.writes
+    assert run(tracker, code, "edit", "plan#1", "--body-file", _text(tmp_path, kept)) == 0
+    assert tracker.writes == [("set_body", 1, kept)]
+    assert _waits.holds(tracker.bodies[1]) == _waits.holds("\n".join(TOLD))
+    capsys.readouterr()
 
 
 def test_edit_with_nothing_to_write_or_no_such_card_is_refused(code, tmp_path, capsys):

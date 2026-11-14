@@ -13,8 +13,17 @@ def enable_mfa(db_session, user_id, backup_codes=()):
     """Turn two-factor on for *user_id* with a fresh secret, and commit.
 
     A FRESH secret per call, so two users (or two tests) never share a
-    replay-prevention step.  Nine files carried a private copy of this before
-    plan#2173 wrote it here; they still do.
+    replay-prevention step.  The one enrolment of a test account: the private
+    copies nine files carried before plan#2173 wrote it here are gone
+    (plan#3600).
+
+    **Every shared test owner is made with two-factor** (plan#3600): the
+    fixture that creates it calls this, as production holds an account without
+    it at setup.  The shared companion, ``seed_companion``, is made without it,
+    as her owner makes her.  So a test calls this for her, for an account it
+    made itself, or to turn a reset owner's row on again (below), and reads a
+    shared owner's secret with
+    :func:`tests._two_factor_sign_in.two_factor_secret_of`.
 
     Args:
         db_session: The test ``db.session``.
@@ -23,17 +32,46 @@ def enable_mfa(db_session, user_id, backup_codes=()):
 
     Returns:
         The plaintext base32 secret, for ``pyotp.TOTP(secret)`` codes.
+
+    An account whose two-factor a reset took away
+    (``tests._two_factor_sign_in.reset_two_factor_of``) keeps its disabled
+    row, and this turns that row on again, as setting it up again does.
+
+    Raises:
+        AssertionError: *user_id* already has two-factor turned on.
     """
+    row = db_session.query(MfaConfig).filter_by(user_id=user_id).one_or_none()
+    assert row is None or not row.is_enabled, (
+        f"user {user_id} already has two-factor: every shared test account is "
+        f"made with it, so read its secret with "
+        f"tests._two_factor_sign_in.two_factor_secret_of({user_id})"
+    )
+    if row is None:
+        row = MfaConfig(user_id=user_id)
+        db_session.add(row)
     secret = mfa_service.generate_totp_secret()
-    db_session.add(MfaConfig(
-        user_id=user_id,
-        is_enabled=True,
-        totp_secret_encrypted=mfa_service.encrypt_secret(secret),
-        backup_codes=mfa_service.hash_backup_codes(list(backup_codes), rounds=4),
-        confirmed_at=_real_datetime.now(_real_timezone.utc),
-    ))
+    row.is_enabled = True
+    row.totp_secret_encrypted = mfa_service.encrypt_secret(secret)
+    row.backup_codes = mfa_service.hash_backup_codes(list(backup_codes), rounds=4)
+    row.confirmed_at = _real_datetime.now(_real_timezone.utc)
     db_session.commit()
     return secret
+
+
+def store_backup_codes(db_session, user_id, backup_codes):
+    """Give *user_id*'s two-factor row *backup_codes*, hashed, in place of its own, and commit.
+
+    For a test of a backup code on a shared account, which is made with
+    two-factor and no backup codes (:func:`enable_mfa`).
+
+    Args:
+        db_session: The test ``db.session``.
+        user_id: The ``auth.users.id`` whose row to change; it has two-factor.
+        backup_codes: The plaintext backup codes the row then holds.
+    """
+    row = db_session.query(MfaConfig).filter_by(user_id=user_id, is_enabled=True).one()
+    row.backup_codes = mfa_service.hash_backup_codes(list(backup_codes), rounds=4)
+    db_session.commit()
 
 
 def register_form_data(**overrides):

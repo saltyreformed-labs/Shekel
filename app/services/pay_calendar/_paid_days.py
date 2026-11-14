@@ -47,7 +47,7 @@ from dataclasses import dataclass
 from datetime import date, timedelta
 
 from ._calendar import PayCalendar
-from ._eras import first_payday_of, grid_below_record, matched_planned
+from ._eras import grid_below_record, matched_planned
 from ._grid import nominal_payday
 
 _ONE_DAY = timedelta(days=1)
@@ -93,7 +93,7 @@ def previous_payday(calendar: PayCalendar, payday: date) -> date:
     readers (task plan#3122): :func:`days_paid_for` starts a paycheck's days
     the day after this one's end, and the engine's banner reads which days
     this one priced (:meth:`~app.services.payroll_basis.PayrollBasis
-    .pay_event_on`), so the two cannot disagree about which paycheck came
+    .banner_on`), so the two cannot disagree about which paycheck came
     first.  It is the calendar's own paycheck covering the day before
     *payday*; below the record, where the calendar holds none, it is the grid
     payday the plan puts just below *payday* (:func:`~._eras.grid_below_record`),
@@ -148,43 +148,4 @@ def days_paid_for(
     )
 
 
-def first_day_paid_at(
-    calendar: PayCalendar, index: int, ends_days_before: int,
-) -> date:
-    """Return the first day era *index*'s rhythm pays wages for.
-
-    Task plan#3100: **a change of rhythm takes effect from the first day its
-    first paycheck pays for**, so every day one paycheck pays for is paid at
-    that paycheck's rhythm.  The era's first paycheck is the calendar's
-    paycheck that stands for the era's first planned payday
-    (:func:`~._eras.matched_planned`, the match
-    :func:`~._rhythm.cadence_on` reads a paycheck's rhythm by): the one
-    covering :func:`~._eras.first_payday_of` the era, or, when a record paid
-    the era's first paycheck LATE, so that the paycheck covering that day is
-    still the earlier era's, the paycheck after it.  A record paid EARLY
-    covers the day and stands for the era already.
-
-    Args:
-        calendar: The owner's calendar.
-        index: An era after the first: the earliest era has no first day,
-            because its rhythm also runs backward below the record.  Every
-            later era's first payday is at or above the record's opening
-            (ruling **R-PC75**, which :func:`~._derive.validate_eras`
-            enforces, and ruling **R-PC110** at the door that retires the
-            first paydays), so a paycheck covers it.
-        ends_days_before: The job's ``period_end_days_before_payday``.
-
-    Returns:
-        The first day the era's first paycheck pays for
-        (:func:`days_paid_for`).
-    """
-    eras = calendar.eras
-    paycheck = calendar.span_containing(first_payday_of(eras[index]))
-    if matched_planned(eras, paycheck.start_date)[0] < index:
-        paycheck = calendar.span_containing(paycheck.end_date + _ONE_DAY)
-    return days_paid_for(calendar, paycheck.start_date, ends_days_before).first
-
-
-__all__ = [
-    "PaidDays", "days_paid_for", "first_day_paid_at", "previous_payday", "scheduled_payday",
-]
+__all__ = ["PaidDays", "days_paid_for", "previous_payday", "scheduled_payday"]

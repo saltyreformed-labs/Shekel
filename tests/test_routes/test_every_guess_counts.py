@@ -1,8 +1,9 @@
 """
 Shekel Budget App -- Every password and code guess counts toward the one lock.
 
-The doors: the code form at sign-in, ``/reauth``, ``/change-password`` and
-``/mfa/disable``.  Each counts a wrong answer on the record of the account's
+The doors: the code form at sign-in, ``/reauth`` and ``/change-password``
+(``/mfa/disable`` was one until no account could turn two-factor off, ruling
+plan#3604).  Each counts a wrong answer on the record of the account's
 email (ruling plan#3110) through the one function that also trips the lock,
 each refuses even a right answer while locked, and only a finished sign-in or
 re-confirm clears the count (ruling plan#3007).  The code form also has a
@@ -38,8 +39,12 @@ from app.utils.log_events import (
 )
 from tests._guess_records import count_of, locked_until_of, set_record
 from tests._limited_app import limited_app, through_nginx
+from tests._seed_owner_fixtures import OWNERS_PAGE
 from tests._sign_in import make_a_stranger
-from tests._two_factor_sign_in import code_now
+from tests._test_helpers import store_backup_codes
+from tests._two_factor_sign_in import (
+    code_now, sign_in_from_a_trusted_browser, two_factor_secret_of,
+)
 
 _EMAIL = "test@shekel.local"
 _PASSWORD = "testpass"
@@ -54,8 +59,10 @@ _CODE_LIMIT = 5
 _NEVER_A_CODE = "xxxxxx"
 
 
-def _enable_mfa(user_id: int) -> str:
-    """Enable two-factor for *user_id* with a fresh secret and one backup code.
+def _secret_and_one_backup_code(user_id: int) -> str:
+    """Give *user_id*'s two-factor the one backup code :data:`_BACKUP_CODE`; return its secret.
+
+    The account is a shared one, made with two-factor (plan#3600).
 
     Args:
         user_id: The account.
@@ -63,16 +70,8 @@ def _enable_mfa(user_id: int) -> str:
     Returns:
         The plaintext secret.
     """
-    secret = mfa_service.generate_totp_secret()
-    db.session.add(MfaConfig(
-        user_id=user_id,
-        is_enabled=True,
-        totp_secret_encrypted=mfa_service.encrypt_secret(secret),
-        backup_codes=mfa_service.hash_backup_codes([_BACKUP_CODE]),
-        confirmed_at=datetime.now(timezone.utc),
-    ))
-    db.session.commit()
-    return secret
+    store_backup_codes(db.session, user_id, [_BACKUP_CODE])
+    return two_factor_secret_of(user_id)
 
 
 def _wrong_code(secret: str) -> str:
@@ -154,7 +153,7 @@ class TestTheCodeFormCounts:
         """One wrong code is one on the count, and the form stays up to retry."""
         with app.app_context():
             user_id = seed_user["user"].id
-            secret = _enable_mfa(user_id)
+            secret = _secret_and_one_backup_code(user_id)
             _type_password(client)
 
             response = client.post(
@@ -172,7 +171,7 @@ class TestTheCodeFormCounts:
         """
         with app.app_context():
             user_id = seed_user["user"].id
-            secret = _enable_mfa(user_id)
+            secret = _secret_and_one_backup_code(user_id)
             code = code_now(secret)
             _type_password(client)
             assert client.post(
@@ -193,7 +192,7 @@ class TestTheCodeFormCounts:
         """A backup code is a guess at the same second factor."""
         with app.app_context():
             user_id = seed_user["user"].id
-            _enable_mfa(user_id)
+            _secret_and_one_backup_code(user_id)
             _type_password(client)
 
             response = client.post(
@@ -207,7 +206,7 @@ class TestTheCodeFormCounts:
         """A submit with neither code is refused and counted like a wrong code."""
         with app.app_context():
             user_id = seed_user["user"].id
-            _enable_mfa(user_id)
+            _secret_and_one_backup_code(user_id)
             _type_password(client)
 
             response = client.post("/mfa/verify", data={})
@@ -219,7 +218,7 @@ class TestTheCodeFormCounts:
         """Seven digits cannot be a right code, so it is no guess at one."""
         with app.app_context():
             user_id = seed_user["user"].id
-            _enable_mfa(user_id)
+            _secret_and_one_backup_code(user_id)
             _type_password(client)
 
             response = client.post("/mfa/verify", data={"totp_code": "1234567"})
@@ -231,7 +230,7 @@ class TestTheCodeFormCounts:
         """The operator's key problem is not the person's guess."""
         with app.app_context():
             user_id = seed_user["user"].id
-            secret = _enable_mfa(user_id)
+            secret = _secret_and_one_backup_code(user_id)
             _type_password(client)
 
             with patch.object(
@@ -250,7 +249,7 @@ class TestTheCodeFormCounts:
         """The ruling's case: re-entering the password between wrong codes clears nothing."""
         with app.app_context():
             user_id = seed_user["user"].id
-            secret = _enable_mfa(user_id)
+            secret = _secret_and_one_backup_code(user_id)
             for attempt in range(3):
                 _type_password(client)
                 client.post("/mfa/verify", data={"totp_code": _wrong_code(secret)})
@@ -270,7 +269,7 @@ class TestTheCodeFormCounts:
         monkeypatch.setenv("LOCKOUT_THRESHOLD", "3")
         with app.app_context():
             user_id = seed_user["user"].id
-            secret = _enable_mfa(user_id)
+            secret = _secret_and_one_backup_code(user_id)
             with caplog.at_level(logging.WARNING, logger="app.services.auth_service"):
                 for _ in range(3):
                     _type_password(client)
@@ -295,7 +294,7 @@ class TestTheCodeFormCounts:
         """A pending sign-in meets the lock: back to /login, signed out, code unspent."""
         with app.app_context():
             user_id = seed_user["user"].id
-            secret = _enable_mfa(user_id)
+            secret = _secret_and_one_backup_code(user_id)
             _type_password(client)
             _set_lock_state(user_id, locked_for=timedelta(minutes=10))
 
@@ -318,7 +317,7 @@ class TestTheCodeFormCounts:
         """Every check passed: the count goes back to zero."""
         with app.app_context():
             user_id = seed_user["user"].id
-            secret = _enable_mfa(user_id)
+            secret = _secret_and_one_backup_code(user_id)
             _type_password(client)
             client.post("/mfa/verify", data={"totp_code": _wrong_code(secret)})
             assert _count(user_id) == 1
@@ -336,7 +335,7 @@ class TestTheCodeFormCounts:
         """A window that has ended blocks nothing, and only finishing removes it."""
         with app.app_context():
             user_id = seed_user["user"].id
-            secret = _enable_mfa(user_id)
+            secret = _secret_and_one_backup_code(user_id)
             _set_lock_state(user_id, locked_for=timedelta(seconds=-1))
 
             _type_password(client)
@@ -383,7 +382,7 @@ class TestReauthCounts:
         """The right password and a wrong code is one on the count."""
         with app.app_context():
             user_id = seed_user["user"].id
-            secret = _enable_mfa(user_id)
+            secret = _secret_and_one_backup_code(user_id)
 
             response = stranger_client.post("/reauth", data={
                 "password": _PASSWORD, "totp_code": _wrong_code(secret),
@@ -410,7 +409,7 @@ class TestReauthCounts:
         """The operator's key problem is not the person's guess."""
         with app.app_context():
             user_id = seed_user["user"].id
-            secret = _enable_mfa(user_id)
+            secret = _secret_and_one_backup_code(user_id)
 
             with patch.object(
                 mfa_service, "verify_totp_code", side_effect=RuntimeError("no key"),
@@ -442,14 +441,17 @@ class TestReauthCounts:
     def test_success_clears_the_count_and_a_run_out_lock(
         self, app, stranger_client, seed_user,
     ):
-        """A finished re-confirm is every check this account faces."""
+        """A finished re-confirm is every check this account faces: its password and its code."""
         with app.app_context():
             user_id = seed_user["user"].id
+            secret = two_factor_secret_of(user_id)
             _set_lock_state(
                 user_id, count=3, locked_for=timedelta(seconds=-1),
             )
 
-            response = stranger_client.post("/reauth", data={"password": _PASSWORD})
+            response = stranger_client.post("/reauth", data={
+                "password": _PASSWORD, "totp_code": code_now(secret),
+            })
 
             assert response.status_code == 302
             assert _count(user_id) == 0
@@ -461,7 +463,7 @@ class TestReauthCounts:
         """With a second factor, the clear waits for the code."""
         with app.app_context():
             user_id = seed_user["user"].id
-            secret = _enable_mfa(user_id)
+            secret = _secret_and_one_backup_code(user_id)
             _set_lock_state(user_id, count=3)
 
             stranger_client.post("/reauth", data={
@@ -553,86 +555,6 @@ class TestChangePasswordCounts:
             assert _count(user_id) == 0
 
 
-class TestDisableTwoFactorCounts:
-    """``/mfa/disable`` counts both answers and refuses while locked (ruling plan#3008)."""
-
-    @staticmethod
-    def _still_enabled(user_id: int) -> bool:
-        """Return whether two-factor is still on for *user_id*.
-
-        Args:
-            user_id: The account.
-
-        Returns:
-            True when its config says enabled.
-        """
-        config = db.session.query(MfaConfig).filter_by(user_id=user_id).one()
-        db.session.refresh(config)
-        return config.is_enabled
-
-    def test_a_wrong_password_counts(self, app, stranger_client, seed_user):
-        """One wrong password is one on the count, and two-factor stays on."""
-        with app.app_context():
-            user_id = seed_user["user"].id
-            secret = _enable_mfa(user_id)
-
-            response = stranger_client.post("/mfa/disable", data={
-                "current_password": "wrong", "totp_code": code_now(secret),
-            }, follow_redirects=True)
-
-            assert b"Invalid password" in response.data
-            assert _count(user_id) == 1
-            assert self._still_enabled(user_id)
-
-    def test_a_wrong_code_counts(self, app, stranger_client, seed_user):
-        """The right password and a wrong code is one on the count."""
-        with app.app_context():
-            user_id = seed_user["user"].id
-            secret = _enable_mfa(user_id)
-
-            response = stranger_client.post("/mfa/disable", data={
-                "current_password": _PASSWORD,
-                "totp_code": _wrong_code(secret),
-            }, follow_redirects=True)
-
-            assert b"Invalid authentication code" in response.data
-            assert _count(user_id) == 1
-            assert self._still_enabled(user_id)
-
-    def test_a_locked_account_refuses_the_right_answers(
-        self, app, stranger_client, seed_user,
-    ):
-        """The right password and code while locked leave two-factor on."""
-        with app.app_context():
-            user_id = seed_user["user"].id
-            secret = _enable_mfa(user_id)
-            _set_lock_state(user_id, locked_for=timedelta(minutes=10))
-
-            response = stranger_client.post("/mfa/disable", data={
-                "current_password": _PASSWORD,
-                "totp_code": code_now(secret),
-            }, follow_redirects=True)
-
-            assert _LOCKED_MESSAGE in response.data
-            assert self._still_enabled(user_id)
-
-    def test_success_does_not_clear_the_count(self, app, stranger_client, seed_user):
-        """Clearing is a finished sign-in's or re-confirm's, not this form's."""
-        with app.app_context():
-            user_id = seed_user["user"].id
-            secret = _enable_mfa(user_id)
-            _set_lock_state(user_id, count=3)
-
-            response = stranger_client.post("/mfa/disable", data={
-                "current_password": _PASSWORD,
-                "totp_code": code_now(secret),
-            }, follow_redirects=True)
-
-            assert b"has been disabled" in response.data
-            assert not self._still_enabled(user_id)
-            assert _count(user_id) == 3
-
-
 class TestOneCountAcrossEveryDoor:
     """The doors share one count and one lock, and a lock leaves signed-in pages working."""
 
@@ -643,7 +565,7 @@ class TestOneCountAcrossEveryDoor:
         monkeypatch.setenv("LOCKOUT_THRESHOLD", "3")
         with app.app_context():
             user_id = seed_user["user"].id
-            _enable_mfa(user_id)
+            _secret_and_one_backup_code(user_id)
 
             stranger_client.post("/reauth", data={"password": "wrong"})
             stranger_client.post("/change-password", data={
@@ -654,9 +576,10 @@ class TestOneCountAcrossEveryDoor:
             assert _count(user_id) == 2
             assert _locked_until(user_id) is None
 
-            stranger_client.post("/mfa/disable", data={
-                "current_password": "wrong", "totp_code": _NEVER_A_CODE,
-            })
+            # The third door, the code form, from a browser of its own.
+            at_the_code_form = app.test_client()
+            _type_password(at_the_code_form)
+            at_the_code_form.post("/mfa/verify", data={"totp_code": _NEVER_A_CODE})
 
             assert _count(user_id) == 0
             assert _locked_until(user_id) > datetime.now(timezone.utc)
@@ -684,13 +607,15 @@ class TestARefusedGuessLogsItsAddress:
     def _sign_in(self, client):
         """Sign *client* in through nginx, keeping one address for its session.
 
+        Through the shared sign-in, on a browser the owner trusts, so it types
+        no code and every code of this step is the test's.
+
         Args:
             client: The test client.
         """
-        assert client.post(
-            "/login", data={"email": _EMAIL, "password": _PASSWORD},
-            **through_nginx(self._CLIENT),
-        ).status_code == 302
+        sign_in_from_a_trusted_browser(
+            client, _EMAIL, _PASSWORD, OWNERS_PAGE, **through_nginx(self._CLIENT),
+        )
 
     @staticmethod
     def _addresses(caplog, event) -> list[str]:
@@ -710,7 +635,7 @@ class TestARefusedGuessLogsItsAddress:
     def test_a_wrong_code_at_sign_in(self, app, client, seed_user, caplog):
         """The code form logs a wrong code against the client's address."""
         with app.app_context():
-            secret = _enable_mfa(seed_user["user"].id)
+            secret = _secret_and_one_backup_code(seed_user["user"].id)
             _type_password(client, **through_nginx(self._CLIENT))
 
             with caplog.at_level(logging.WARNING, logger="app.routes.auth.mfa"):
@@ -725,7 +650,7 @@ class TestARefusedGuessLogsItsAddress:
         """The code form logs a refusal while locked, even for a right code."""
         with app.app_context():
             user_id = seed_user["user"].id
-            secret = _enable_mfa(user_id)
+            secret = _secret_and_one_backup_code(user_id)
             _type_password(client, **through_nginx(self._CLIENT))
             _set_lock_state(user_id, locked_for=timedelta(minutes=5))
 
@@ -754,33 +679,6 @@ class TestARefusedGuessLogsItsAddress:
                     "current_password": "wrong",
                     "new_password": _NEW_PASSWORD,
                     "confirm_password": _NEW_PASSWORD,
-                }, **through_nginx(self._CLIENT))
-
-            assert self._addresses(caplog, EVT_REAUTH_FAILED) == [self._CLIENT]
-
-    def test_a_wrong_password_at_disable(self, app, client, seed_user, caplog):
-        """Disable two-factor logs a wrong password."""
-        with app.app_context():
-            self._sign_in(client)
-            secret = _enable_mfa(seed_user["user"].id)
-
-            with caplog.at_level(logging.WARNING, logger="app.routes.auth.mfa"):
-                client.post("/mfa/disable", data={
-                    "current_password": "wrong", "totp_code": code_now(secret),
-                }, **through_nginx(self._CLIENT))
-
-            assert self._addresses(caplog, EVT_REAUTH_FAILED) == [self._CLIENT]
-
-    def test_a_wrong_code_at_disable(self, app, client, seed_user, caplog):
-        """Disable two-factor logs a wrong code."""
-        with app.app_context():
-            self._sign_in(client)
-            secret = _enable_mfa(seed_user["user"].id)
-
-            with caplog.at_level(logging.WARNING, logger="app.routes.auth.mfa"):
-                client.post("/mfa/disable", data={
-                    "current_password": _PASSWORD,
-                    "totp_code": _wrong_code(secret),
                 }, **through_nginx(self._CLIENT))
 
             assert self._addresses(caplog, EVT_REAUTH_FAILED) == [self._CLIENT]
@@ -833,7 +731,7 @@ class TestTheCodeFormIsLimitedByThePendingAccount:
     ):
         """Five guesses from five addresses spend the account's one budget."""
         with rate_app.app_context():
-            _enable_mfa(seed_user["user"].id)
+            _secret_and_one_backup_code(seed_user["user"].id)
             for hit in range(_CODE_LIMIT):
                 response = self._guess_from(rate_app, f"8.8.8.{hit}")
                 assert response.status_code == 200
@@ -846,8 +744,8 @@ class TestTheCodeFormIsLimitedByThePendingAccount:
     ):
         """One account's budget running out does not reach another's."""
         with rate_app.app_context():
-            _enable_mfa(seed_user["user"].id)
-            _enable_mfa(seed_second_user["user"].id)
+            _secret_and_one_backup_code(seed_user["user"].id)
+            _secret_and_one_backup_code(seed_second_user["user"].id)
             for hit in range(_CODE_LIMIT):
                 self._guess_from(rate_app, f"8.8.8.{hit}")
 
@@ -863,8 +761,8 @@ class TestTheCodeFormIsLimitedByThePendingAccount:
     ):
         """One address guessing at two accounts spends one address budget."""
         with rate_app.app_context():
-            _enable_mfa(seed_user["user"].id)
-            _enable_mfa(seed_second_user["user"].id)
+            _secret_and_one_backup_code(seed_user["user"].id)
+            _secret_and_one_backup_code(seed_second_user["user"].id)
             for _ in range(3):
                 assert self._guess_from(rate_app, "8.8.8.8").status_code == 200
             for _ in range(2):
@@ -925,7 +823,7 @@ class TestTheCodeFormIsLimitedByThePendingAccount:
     ):
         """Replaying a timed-out pending sign-in leaves the owner's right code working."""
         with rate_app.app_context():
-            secret = _enable_mfa(seed_user["user"].id)
+            secret = _secret_and_one_backup_code(seed_user["user"].id)
             kept, cookie = self._kept_cookie(rate_app, "6.6.6.6")
             name = rate_app.config["SESSION_COOKIE_NAME"]
             for hit in range(_CODE_LIMIT):
@@ -956,7 +854,7 @@ class TestTheCodeFormIsLimitedByThePendingAccount:
     def test_a_kept_cookie_still_spends_its_own_address(self, rate_app, seed_user):
         """The exemption is from the account's budget, never from the address's."""
         with rate_app.app_context():
-            _enable_mfa(seed_user["user"].id)
+            _secret_and_one_backup_code(seed_user["user"].id)
             kept, cookie = self._kept_cookie(rate_app, "6.6.6.6")
             name = rate_app.config["SESSION_COOKIE_NAME"]
             statuses = []

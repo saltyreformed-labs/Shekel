@@ -87,7 +87,7 @@ class TestProjectSalary:
         assert all(isinstance(r, PaycheckBreakdown) for r in result)
 
     def test_raise_event_appears_in_correct_period(self, simple_tax_configs):
-        """raise_event populated at raise month."""
+        """The banner names the raise on the paycheck it first reaches."""
         profile = FakeProfile(
             pay=Decimal("2307.69"), pay_from=date(2026, 2, 13),  # $60,000.00 a year / 26
             raises=[FakeRaise(percentage="0.03", effective_date=date(2026, 3, 1),
@@ -102,9 +102,9 @@ class TestProjectSalary:
 
         result = project_salary(payroll_basis(profile, periods), periods, simple_tax_configs)
 
-        assert result[0].period.raise_event == ""
-        assert "MERIT" in result[1].period.raise_event
-        assert result[2].period.raise_event == ""
+        assert result[0].period.banner.text == ""
+        assert "Merit" in result[1].period.banner.text
+        assert result[2].period.banner.text == ""
 
     def test_recurring_raise_event_not_shown_before_effective_year(self, simple_tax_configs):
         """A recurring raise badges no event in years before its effective_year (deep-hunt #13).
@@ -128,7 +128,7 @@ class TestProjectSalary:
             _period(start_date=date(2026, 4, 10), period_id=3),
         ]
         result_2026 = project_salary(payroll_basis(profile, periods_2026), periods_2026, simple_tax_configs)
-        assert all(r.period.raise_event == "" for r in result_2026)
+        assert all(r.period.banner.text == "" for r in result_2026)
         # 2307.69 x 26 = 59999.94: the yearly figure is pay x paychecks a
         # year since plan step salary:X-av-3a (ruling R-SAL59).
         assert result_2026[1].earnings.annual_salary == Decimal("59999.94")
@@ -141,8 +141,8 @@ class TestProjectSalary:
             _period(start_date=date(2027, 3, 12), period_id=28),
         ]
         result_2027 = project_salary(payroll_basis(profile, periods_2027), periods_2027, simple_tax_configs)
-        assert result_2027[0].period.raise_event == ""
-        assert "MERIT" in result_2027[1].period.raise_event
+        assert result_2027[0].period.banner.text == ""
+        assert "Merit" in result_2027[1].period.banner.text
         # 2307.69 x 1.03 = 2376.9207 -> 2376.92 (R-SAL60); x 26 = 61799.92.
         assert result_2027[1].earnings.annual_salary == Decimal("61799.92")
 

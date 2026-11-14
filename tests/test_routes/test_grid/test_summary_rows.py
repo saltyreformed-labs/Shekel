@@ -305,7 +305,7 @@ class TestTheTwoRemainderRows:
         position relative to the assertion rather than the clock's.
         """
         salary = make_salary_profile(
-            seed_user, db.session, pay=Decimal("3631.74"),  # $94,425.24 a year / 26
+            seed_user, db.session, pay=Decimal("3019.23"),  # $78,500.00 a year / 26, made up
         )
         salary.is_active = True
         db.session.flush()

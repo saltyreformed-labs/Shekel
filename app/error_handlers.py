@@ -200,9 +200,9 @@ def register_error_handlers(app):
 
         Triggers on unhandled exceptions in route handlers or
         service layer code.  The rollback clears any failed transaction
-        so the layout's own queries (the MFA nag's, and the onboarding
-        checklist's as the template reads it) can run and the custom
-        error template renders instead of a blank page.
+        so the layout's own queries (the onboarding checklist's, as the
+        template reads it) can run and the custom error template renders
+        instead of a blank page.
         """
         db.session.rollback()
         return render_template("errors/500.html"), 500

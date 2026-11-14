@@ -85,7 +85,7 @@ class AccountPayrollFeed:
     no raise relationship at all; a deduction's method and timing are read
     as the ``calc_method_id`` / ``paycheck_line_kind_id`` columns -- so a
     resolver fired mid-walk in a pure module issues no query.  Counted at the
-    cursor rather than assumed, by ``test_projection_inputs
+    cursor rather than assumed, by ``test_projection_inputs.test_the_payroll_feeds
     .TestLoadPayrollFeeds.test_a_resolver_fired_past_the_loader_issues_NO_query``
     over a profile WITH a recurring raise inside the walked window, which
     fails on the deductions' lazy ``SELECT`` the moment the loader's

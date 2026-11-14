@@ -457,15 +457,16 @@ _MFA_MATERIAL_FIELDS = (
 def clear_mfa_material(mfa_config: MfaConfig) -> None:
     """Disable MFA and clear every piece of stored MFA material.
 
-    The single clear rule shared by the app's ``/mfa/disable`` route
-    and the emergency ``scripts/reset_mfa.py`` CLI, so the two paths
-    cannot drift on which fields a disable must scrub.  Sets
+    The clear of the one reset act, :func:`reset_two_factor`, which
+    ``scripts/reset_mfa.py`` and the owner's Reset of a companion's
+    two-factor both run; :func:`has_mfa_material` reads the same field
+    set, so the clear and the residue check cannot drift.  Sets
     ``is_enabled`` to ``False`` and nulls every
     :data:`_MFA_MATERIAL_FIELDS` column:
 
     * ``totp_secret_encrypted`` / ``backup_codes`` -- the credentials
       themselves; no decryptable or verifiable secret may remain at
-      rest after a disable.
+      rest after a reset.
     * ``confirmed_at`` -- the enrolment timestamp of the now-cleared
       secret.
     * ``last_totp_timestep`` -- records the highest step consumed
@@ -480,8 +481,8 @@ def clear_mfa_material(mfa_config: MfaConfig) -> None:
 
     Mutates the row in place and does NOT commit -- the clear joins
     the caller's transaction so it lands atomically with the caller's
-    own bookkeeping (the route's security-event stamp, the script's
-    standalone commit).
+    own bookkeeping (the reset's ``session_invalidated_at`` bump, which
+    its caller commits).
 
     Args:
         mfa_config: The user's MfaConfig row to scrub.
@@ -528,8 +529,8 @@ def reset_two_factor(user: User) -> bool:
     or after that column (``app.services.known_device_service``), and a reset
     is exactly when a trust the old authenticator vouched for must die,
     or a browser trusted under it would skip the code of the one enrolled
-    after.  A user the rule requires two-factor of (``User.must_have_two_factor``)
-    then meets setup at their next sign-in.
+    after.  Every account must have two-factor (plan#3452), so the login gate
+    then holds the user at setup from their next sign-in.
 
     A row already disabled but still carrying material (an orphaned secret
     from a manual database change, an interrupted disable, or an abandoned

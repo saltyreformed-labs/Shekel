@@ -9,8 +9,8 @@ Since plan step X-at-6 each paycheck's tax lines carry the basis of the law
 they were priced on as their ``rules`` (ruling R-SAL75), so a salary page
 names the year's rules off the paycheck itself (finding N-235).
 
-Its own module rather than ``test_income_service.py``, which is past the
-1,000-line ceiling (ruling R-IR).
+Its own module rather than ``test_income_service.py``, which was past the
+1,000-line ceiling then (ruling R-IR).
 """
 
 from datetime import date

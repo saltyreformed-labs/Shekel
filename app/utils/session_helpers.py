@@ -142,8 +142,8 @@ Caller contract for :func:`invalidate_other_sessions`
 -----------------------------------------------------
 
   * The caller must have already committed any state change that
-    motivates the invalidation (password hash update, MFA disable,
-    backup-code list mutation).  The helper commits its own write
+    motivates the invalidation (its one caller's: the backup-code list
+    a consumed code shortened).  The helper commits its own write
     of ``session_invalidated_at`` and would inadvertently flush any
     in-flight session state with it.
 
@@ -462,10 +462,9 @@ def invalidate_other_sessions(user: User, reason: str) -> None:
             current session.  Must also be the same identity
             authenticated on the current request, or the wrong cookie
             will be refreshed (see module docstring).
-        reason: Short machine-readable label for the audit log
-            (``"password_change"``, ``"mfa_disabled"``,
-            ``"backup_code_consumed"``).  Required, non-empty -- a
-            blank reason defeats the audit trail this helper exists
+        reason: Short machine-readable label for the audit log, as its
+            one caller's ``"backup_code_consumed"``.  Required, non-empty
+            -- a blank reason defeats the audit trail this helper exists
             to produce.
 
     Raises:

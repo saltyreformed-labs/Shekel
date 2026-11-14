@@ -83,7 +83,7 @@ a settle day past the last reported end is absent from BOTH sides of ruling
 R-K's identity and cancels.  The money reports as a timing remainder -- the row
 ruling R-DH split out to carry precisely this -- and the balance is right
 either way: on that end date the bank had genuinely not taken it.  Pinned by
-``test_cash_period_view.py``'s
+``test_cash_period_view/test_the_identity.py``'s
 ``test_a_settle_day_past_the_window_keeps_every_column_exact``, and driven on a
 production CLONE: retiring 58 of 61 periods strands three real rows totalling
 ``$177.47`` and every surviving column reconciles to the cent.
@@ -580,11 +580,12 @@ def reject_payday_before_calendar(earliest: date) -> None:
 
     **Asked of "Add earlier paychecks" alone** (plan step
     ``pay_calendar:C18-b``), because it is the one door that COMPUTES a day
-    below the record rather than taking one from a form:
-    ``app.schemas.validation.pay_periods.payday_field`` holds every STATED
-    payday to :data:`~app.utils.dates.CALENDAR_DATE_MIN` ..
-    :data:`~app.utils.dates.CALENDAR_DATE_MAX`, and so is a stated history
-    (``ck_pay_schedule_history_opens_range``), while
+    below the record rather than taking one from a form: every STATED payday
+    is held to :data:`~app.utils.dates.CALENDAR_DATE_MIN` ..
+    :data:`~app.utils.dates.CALENDAR_DATE_MAX` by the one payday window,
+    ``app.schemas.validation._helpers._PAYDAY_RANGE`` (which
+    ``pay_periods.payday_field`` carries onto the pay-period doors), and so
+    is a stated history (``ck_pay_schedule_history_opens_range``), while
     ``budget.pay_periods.start_date`` carries no CHECK of its own.  A long
     cadence times a large count reaches past it -- 27 paychecks 365 days
     apart below a record opening 2026-01-02 reach 1999-01-09 -- so the door

@@ -94,7 +94,6 @@ import pathlib
 import re
 import subprocess
 import sys
-from datetime import datetime, timezone
 
 # Python puts the SCRIPT's own directory on ``sys.path``, not the working
 # directory, so the repository root is added explicitly -- the same line every
@@ -112,7 +111,7 @@ from app.models.account import Account  # noqa: E402
 from app.models.loan_params import LoanParams  # noqa: E402
 from app.models.user import User  # noqa: E402
 from app.services.account_category import is_liability_account  # noqa: E402
-from app.utils.session_helpers import login_session_stamps  # noqa: E402
+from tests.manual.forged_sign_in import signed_in_client  # noqa: E402
 # pylint: enable=wrong-import-position
 
 #: The whole-page and fragment GETs that render a liability figure.
@@ -379,34 +378,6 @@ def _owner_ids(app):
         return user.id, account_ids, loan_ids, grid_liability_ids
 
 
-def _forged_client(app, user_id):
-    """Return a test client already logged in as *user_id*.
-
-    The probe FORGES a session rather than posting the login form, because it
-    has no password for the database it is pointed at, and strong protection
-    refuses a session whose identifier was not minted inside a request -- the
-    same scoping ``verify_render_surfaces.py`` states for its own forge.
-
-    Args:
-        app: The Flask application (session protection already disabled).
-        user_id: The user to log in as.
-
-    Returns:
-        The logged-in test client.
-    """
-    client = app.test_client()
-    with client.session_transaction() as session:
-        session["_user_id"] = str(user_id)
-        session["_fresh"] = True
-        session["_id"] = None
-        # The stamps a sign-in writes, the user's among them: ``load_user``
-        # refuses a session without them (plan#2173).
-        session.update(login_session_stamps(
-            datetime.now(timezone.utc), user_id,
-        ))
-    return client
-
-
 def _render(client, snapshot, owned):
     """Request every listed surface and save each response into *snapshot*.
 
@@ -451,16 +422,21 @@ def main(out_path):
             a snapshot (a stale file would survive into the diff).
     """
     out_dir = pathlib.Path(out_path)
-    out_dir.mkdir(parents=True, exist_ok=False)
     app = create_app()
     app.config["WTF_CSRF_ENABLED"] = False
+    # The probe FORGES a session rather than posting the login form, because it
+    # has no password for the database it is pointed at, and strong protection
+    # refuses a session whose identifier was not minted inside a request -- the
+    # same scoping ``verify_render_surfaces.py`` states for its own forge.
     login_manager.session_protection = None
     user_id, account_ids, loan_ids, grid_liability_ids = _owner_ids(app)
+    # The forge stops here, before the directory is made, when the app does not
+    # let the session in (an owner without two-factor is held at its setup), so
+    # a stopped run leaves nothing for the next to refuse as stale.
+    client = signed_in_client(app, user_id)
+    out_dir.mkdir(parents=True, exist_ok=False)
     snapshot = _Snapshot(out_dir)
-    _render(
-        _forged_client(app, user_id), snapshot,
-        (account_ids, loan_ids, grid_liability_ids),
-    )
+    _render(client, snapshot, (account_ids, loan_ids, grid_liability_ids))
     snapshot.write_index()
     identity = _tree_identity()
     (out_dir / "tree.json").write_text(

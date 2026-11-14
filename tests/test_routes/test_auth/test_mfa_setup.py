@@ -1,4 +1,9 @@
-"""Auth route tests: the two-factor setup and confirm flow, and its edge cases."""
+"""Auth route tests: the two-factor setup and confirm flow, and its edge cases.
+
+Every shared account is made with two-factor (plan#3600), so a test of setup
+signs in through ``no_two_factor_client``, the seed owner after the reset act
+took it away, and a test of an account with it uses ``auth_client``.
+"""
 
 import re
 from datetime import datetime, timedelta, timezone
@@ -6,15 +11,17 @@ from datetime import datetime, timedelta, timezone
 from app.extensions import db
 from app.models.user import MfaConfig
 from app.services import mfa_service
+from tests._test_helpers import store_backup_codes
+from tests._two_factor_sign_in import two_factor_row_of
 
 
 class TestMfaSetup:
     """Tests for the MFA setup flow."""
 
-    def test_mfa_setup_page_renders(self, app, auth_client, seed_user):
+    def test_mfa_setup_page_renders(self, app, no_two_factor_client, seed_user):
         """GET /mfa/setup renders the QR code and manual key."""
         with app.app_context():
-            response = auth_client.get("/mfa/setup")
+            response = no_two_factor_client.get("/mfa/setup")
             assert response.status_code == 200
             assert b"Set Up Two-Factor Authentication" in response.data
             assert b"mfa/confirm" in response.data
@@ -22,7 +29,7 @@ class TestMfaSetup:
             assert b"data:image/png;base64," in response.data
 
     def test_mfa_setup_stores_encrypted_pending_server_side(
-        self, app, auth_client, seed_user
+        self, app, no_two_factor_client, seed_user
     ):
         """GET /mfa/setup persists the pending secret in the DB, not the session.
 
@@ -36,11 +43,11 @@ class TestMfaSetup:
         session key is never written.
         """
         with app.app_context():
-            response = auth_client.get("/mfa/setup")
+            response = no_two_factor_client.get("/mfa/setup")
             assert response.status_code == 200
 
             # The plaintext secret must NOT appear in the Flask session.
-            with auth_client.session_transaction() as sess:
+            with no_two_factor_client.session_transaction() as sess:
                 assert "_mfa_setup_secret" not in sess
 
             # The encrypted pending secret IS in the database.
@@ -59,7 +66,7 @@ class TestMfaSetup:
             assert (f"<code>{decrypted}</code>").encode("utf-8") in response.data
 
     def test_mfa_setup_sets_expiry_within_window(
-        self, app, auth_client, seed_user
+        self, app, no_two_factor_client, seed_user
     ):
         """GET /mfa/setup sets pending_secret_expires_at ~15 minutes ahead.
 
@@ -70,7 +77,7 @@ class TestMfaSetup:
         """
         with app.app_context():
             before = datetime.now(timezone.utc)
-            response = auth_client.get("/mfa/setup")
+            response = no_two_factor_client.get("/mfa/setup")
             after = datetime.now(timezone.utc)
             assert response.status_code == 200
 
@@ -92,22 +99,16 @@ class TestMfaSetup:
             )
 
     def test_mfa_setup_redirects_if_already_enabled(self, app, auth_client, seed_user):
-        """GET /mfa/setup redirects if MFA is already enabled."""
+        """GET /mfa/setup redirects if MFA is already enabled, as the seed owner's is."""
+        # Pylint: ``unused-argument`` -- ``seed_user`` is the account, made
+        # with two-factor, that ``auth_client`` is signed in as.
+        # pylint: disable=unused-argument
         with app.app_context():
-            mfa_config = MfaConfig(
-                user_id=seed_user["user"].id,
-                is_enabled=True,
-                totp_secret_encrypted=mfa_service.encrypt_secret("TESTBASE32SECRET"),
-                backup_codes=mfa_service.hash_backup_codes(["aaaaaaaa"]),
-            )
-            db.session.add(mfa_config)
-            db.session.commit()
-
             response = auth_client.get("/mfa/setup", follow_redirects=False)
             assert response.status_code == 302
             assert "security" in response.headers.get("Location", "")
 
-    def test_mfa_confirm_valid_code(self, app, auth_client, seed_user, monkeypatch):
+    def test_mfa_confirm_valid_code(self, app, no_two_factor_client, seed_user, monkeypatch):
         """POST /mfa/confirm with valid code promotes pending to active.
 
         End-to-end check of the C-05 confirm path: the pending secret
@@ -127,7 +128,7 @@ class TestMfaSetup:
             )
 
             # Visit setup to write the pending secret to the DB.
-            auth_client.get("/mfa/setup")
+            no_two_factor_client.get("/mfa/setup")
             pending_config = (
                 db.session.query(MfaConfig)
                 .filter_by(user_id=seed_user["user"].id)
@@ -138,7 +139,7 @@ class TestMfaSetup:
             )
 
             # Confirm with a mocked-valid code.
-            response = auth_client.post("/mfa/confirm", data={
+            response = no_two_factor_client.post("/mfa/confirm", data={
                 "totp_code": "123456",
             })
             assert response.status_code == 200
@@ -166,7 +167,7 @@ class TestMfaSetup:
             assert config.backup_codes is not None
 
     def test_mfa_confirm_invalid_code_keeps_pending(
-        self, app, auth_client, seed_user, monkeypatch
+        self, app, no_two_factor_client, seed_user, monkeypatch
     ):
         """POST /mfa/confirm with invalid code preserves pending state.
 
@@ -191,7 +192,7 @@ class TestMfaSetup:
             )
 
             # Visit setup to write a pending secret.
-            auth_client.get("/mfa/setup")
+            no_two_factor_client.get("/mfa/setup")
             pending_before = (
                 db.session.query(MfaConfig)
                 .filter_by(user_id=seed_user["user"].id)
@@ -201,7 +202,7 @@ class TestMfaSetup:
             expires_before = pending_before.pending_secret_expires_at
             assert ciphertext_before is not None
 
-            response = auth_client.post("/mfa/confirm", data={
+            response = no_two_factor_client.post("/mfa/confirm", data={
                 "totp_code": "000000",
             }, follow_redirects=False)
             assert response.status_code == 302
@@ -218,14 +219,14 @@ class TestMfaSetup:
 
             # Following the redirect manually delivers the flash to the
             # user, since the confirm route itself returned 302.
-            follow_up = auth_client.get(
+            follow_up = no_two_factor_client.get(
                 response.headers["Location"], follow_redirects=False,
             )
             assert follow_up.status_code == 200
             assert b"Invalid code" in follow_up.data
 
     def test_mfa_confirm_oversized_code_rejected_before_verifier(
-        self, app, auth_client, seed_user, db, monkeypatch,
+        self, app, no_two_factor_client, seed_user, db, monkeypatch,
     ):
         """POST /mfa/confirm with an over-length code is rejected at the schema.
 
@@ -249,7 +250,7 @@ class TestMfaSetup:
                 mfa_service, "verify_totp_setup_code", _must_not_run,
             )
 
-            auth_client.get("/mfa/setup")
+            no_two_factor_client.get("/mfa/setup")
             pending_before = (
                 db.session.query(MfaConfig)
                 .filter_by(user_id=seed_user["user"].id)
@@ -259,7 +260,7 @@ class TestMfaSetup:
             expires_before = pending_before.pending_secret_expires_at
             assert ciphertext_before is not None
 
-            response = auth_client.post("/mfa/confirm", data={
+            response = no_two_factor_client.post("/mfa/confirm", data={
                 "totp_code": "0" * 100,
             }, follow_redirects=False)
             assert response.status_code == 302
@@ -274,7 +275,7 @@ class TestMfaSetup:
             assert pending_before.totp_secret_encrypted is None
             assert pending_before.confirmed_at is None
 
-            follow_up = auth_client.get(
+            follow_up = no_two_factor_client.get(
                 response.headers["Location"], follow_redirects=False,
             )
             assert follow_up.status_code == 200
@@ -298,7 +299,7 @@ class TestMfaSetup:
             assert b"MFA setup session expired" in response.data
 
     def test_mfa_confirm_rejects_expired_pending(
-        self, app, auth_client, seed_user, monkeypatch
+        self, app, no_two_factor_client, seed_user, monkeypatch
     ):
         """POST /mfa/confirm rejects pending state past its expiry.
 
@@ -322,20 +323,17 @@ class TestMfaSetup:
                 mfa_service, "verify_totp_setup_code", lambda s, c: 12345,
             )
 
-            # Build a row with pending state already past expiry.
-            mfa_config = MfaConfig(
-                user_id=seed_user["user"].id,
-                pending_secret_encrypted=mfa_service.encrypt_secret(
-                    "JBSWY3DPEHPK3PXP"
-                ),
-                pending_secret_expires_at=(
-                    datetime.now(timezone.utc) - timedelta(minutes=1)
-                ),
+            # Give the reset row pending state already past expiry.
+            mfa_config = two_factor_row_of(seed_user["user"].id)
+            mfa_config.pending_secret_encrypted = mfa_service.encrypt_secret(
+                "JBSWY3DPEHPK3PXP"
             )
-            db.session.add(mfa_config)
+            mfa_config.pending_secret_expires_at = (
+                datetime.now(timezone.utc) - timedelta(minutes=1)
+            )
             db.session.commit()
 
-            response = auth_client.post("/mfa/confirm", data={
+            response = no_two_factor_client.post("/mfa/confirm", data={
                 "totp_code": "123456",
             }, follow_redirects=False)
             assert response.status_code == 302
@@ -354,7 +352,7 @@ class TestMfaSetup:
             # so the user-visible message is locked down.  Use
             # follow_redirects=False on the GET so we do not chain
             # through into a fresh /mfa/setup that resets the page.
-            follow_up = auth_client.get(
+            follow_up = no_two_factor_client.get(
                 response.headers["Location"], follow_redirects=False,
             )
             assert follow_up.status_code == 200
@@ -363,28 +361,31 @@ class TestMfaSetup:
     def test_regenerate_backup_codes(self, app, auth_client, seed_user):
         """POST /mfa/regenerate-backup-codes generates new codes."""
         with app.app_context():
-            # Enable MFA for the user first.
-            mfa_config = MfaConfig(
-                user_id=seed_user["user"].id,
-                is_enabled=True,
-                totp_secret_encrypted=mfa_service.encrypt_secret("TESTBASE32SECRET"),
-                backup_codes=mfa_service.hash_backup_codes(["aaaaaaaa"]),
-            )
-            db.session.add(mfa_config)
-            db.session.commit()
+            store_backup_codes(db.session, seed_user["user"].id, ["aaaaaaaa"])
 
             response = auth_client.post("/mfa/regenerate-backup-codes")
             assert response.status_code == 200
             assert b"Save Your Backup Codes" in response.data
 
-    def test_regenerate_backup_codes_requires_mfa_enabled(self, app, auth_client, seed_user):
-        """POST /mfa/regenerate-backup-codes without MFA enabled shows error."""
+    def test_regenerate_backup_codes_requires_mfa_enabled(
+        self, app, no_two_factor_client, seed_user,
+    ):
+        """POST /mfa/regenerate-backup-codes without MFA enabled mints no codes.
+
+        The login gate holds an account without two-factor at setup
+        (plan#3452), so the POST is sent there and never performed: the row
+        the reset cleared still holds no backup codes, and setup's page is
+        what follows the redirect.
+        """
         with app.app_context():
-            response = auth_client.post(
+            response = no_two_factor_client.post(
                 "/mfa/regenerate-backup-codes", follow_redirects=True
             )
             assert response.status_code == 200
-            assert b"Two-factor authentication is not enabled" in response.data
+            assert [hop.headers["Location"] for hop in response.history] == ["/mfa/setup"]
+            assert b"Verify and Enable" in response.data
+            assert b"Save Your Backup Codes" not in response.data
+            assert two_factor_row_of(seed_user["user"].id).backup_codes is None
 
     def test_regenerate_backup_codes_renders_28_char_codes(self, app, auth_client, seed_user):
         """POST /mfa/regenerate-backup-codes renders 10 codes of 28 hex chars.
@@ -397,14 +398,7 @@ class TestMfaSetup:
         could ship without breaking any unit test.
         """
         with app.app_context():
-            mfa_config = MfaConfig(
-                user_id=seed_user["user"].id,
-                is_enabled=True,
-                totp_secret_encrypted=mfa_service.encrypt_secret("TESTBASE32SECRET"),
-                backup_codes=mfa_service.hash_backup_codes(["legacy01"], rounds=4),
-            )
-            db.session.add(mfa_config)
-            db.session.commit()
+            store_backup_codes(db.session, seed_user["user"].id, ["legacy01"])
 
             response = auth_client.post("/mfa/regenerate-backup-codes")
             assert response.status_code == 200
@@ -439,7 +433,7 @@ class TestMfaSetup:
             # endpoint regenerates, it does not append.
             assert mfa_service.verify_backup_code("legacy01", stored_hashes) == -1
 
-    def test_mfa_confirm_renders_28_char_codes(self, app, auth_client, seed_user, monkeypatch):
+    def test_mfa_confirm_renders_28_char_codes(self, app, no_two_factor_client, seed_user, monkeypatch):
         """POST /mfa/confirm renders 10 freshly generated 28-char backup codes.
 
         Mirrors test_regenerate_backup_codes_renders_28_char_codes for
@@ -452,9 +446,9 @@ class TestMfaSetup:
             monkeypatch.setattr(
                 mfa_service, "verify_totp_setup_code", lambda s, c: 12345,
             )
-            auth_client.get("/mfa/setup")
+            no_two_factor_client.get("/mfa/setup")
 
-            response = auth_client.post("/mfa/confirm", data={"totp_code": "123456"})
+            response = no_two_factor_client.post("/mfa/confirm", data={"totp_code": "123456"})
             assert response.status_code == 200
             assert b"Save Your Backup Codes" in response.data
 
@@ -473,7 +467,7 @@ class TestMfaSetupEdgeCases:
     create duplicate MfaConfig rows or cause errors.
     """
 
-    def test_mfa_confirm_double_submit(self, app, auth_client, seed_user, monkeypatch):
+    def test_mfa_confirm_double_submit(self, app, no_two_factor_client, seed_user, monkeypatch):
         """Submitting MFA confirmation twice does not create a duplicate MfaConfig.
 
         Under C-05, the first POST decrypts the pending secret, promotes
@@ -489,10 +483,10 @@ class TestMfaSetupEdgeCases:
             )
 
             # Visit setup to write the pending secret to the DB.
-            auth_client.get("/mfa/setup")
+            no_two_factor_client.get("/mfa/setup")
 
             # First confirm: promotes pending to active and shows backup codes.
-            resp1 = auth_client.post("/mfa/confirm", data={
+            resp1 = no_two_factor_client.post("/mfa/confirm", data={
                 "totp_code": "123456",
             })
             assert resp1.status_code == 200
@@ -506,7 +500,7 @@ class TestMfaSetupEdgeCases:
             confirmed_at_after_first = config_after_first.confirmed_at
 
             # Second confirm: pending state was cleared; should redirect.
-            resp2 = auth_client.post("/mfa/confirm", data={
+            resp2 = no_two_factor_client.post("/mfa/confirm", data={
                 "totp_code": "123456",
             }, follow_redirects=False)
             assert resp2.status_code == 302

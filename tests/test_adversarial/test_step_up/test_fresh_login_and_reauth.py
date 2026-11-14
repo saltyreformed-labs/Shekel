@@ -1,6 +1,11 @@
 """C-10's step-up tests (F-045): login stamps the fresh-login time, fresh_login_required redirects
 a stale session to /reauth, and /reauth, a password change and a session invalidation each move
 or keep the stamps they should.
+
+The seed owner is made with two-factor (plan#3600), and its shared sign-in
+(``auth_client``, ``tests._seed_owner_fixtures.log_in_seed_user``) is on a
+browser it trusts and types no code.  So ``/reauth`` asks for the owner's code
+too, and a test types the current step's (:func:`_reauth_form`).
 """
 
 from datetime import datetime, timedelta, timezone
@@ -10,8 +15,23 @@ from app.models.account import Account
 from app.services import mfa_service
 from app.services.mfa_service import TotpVerificationResult
 from app.utils.session_helpers import FRESH_LOGIN_AT_KEY, SESSION_CREATED_AT_KEY
+from tests._seed_owner_fixtures import SEED_USER_PASSWORD, log_in_seed_user
+from tests._two_factor_sign_in import code_now, two_factor_secret_of
 
-from ._helpers import _enable_mfa, _do_login_no_mfa
+
+def _reauth_form(user_id):
+    """Return the ``/reauth`` form *user_id* fills in: the right password and code.
+
+    Args:
+        user_id: The seed owner's id, whose two-factor secret the code is for.
+
+    Returns:
+        The form's fields, for ``client.post("/reauth", data=...)``.
+    """
+    return {
+        "password": SEED_USER_PASSWORD,
+        "totp_code": code_now(two_factor_secret_of(user_id)),
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -25,13 +45,13 @@ class TestFreshLoginAtSetOnLogin:
     high-value routes without an extra reauth round-trip.
     """
 
-    def test_login_no_mfa_sets_fresh_login_at(
+    def test_login_with_no_code_sets_fresh_login_at(
         self, app, client, seed_user,
     ):
-        """Successful no-MFA login writes ``_fresh_login_at``."""
+        """A login with no code, on a browser the owner trusts, writes ``_fresh_login_at``."""
         with app.app_context():
             before = datetime.now(timezone.utc)
-            _do_login_no_mfa(client)
+            log_in_seed_user(client)
             after = datetime.now(timezone.utc)
 
             with client.session_transaction() as sess:
@@ -55,7 +75,6 @@ class TestFreshLoginAtSetOnLogin:
         that establishes the authenticated session), not the first.
         """
         with app.app_context():
-            _enable_mfa(seed_user["user"].id)
             monkeypatch.setattr(
                 mfa_service, "verify_totp_code",
                 lambda mc, c: TotpVerificationResult.ACCEPTED,
@@ -254,13 +273,13 @@ class TestReauthRoute:
             assert resp.status_code == 302
             assert "/login" in resp.headers.get("Location", "")
 
-    def test_post_correct_password_no_mfa_refreshes_fresh_login(
-        self, app, auth_client,
+    def test_post_correct_password_and_code_refreshes_fresh_login(
+        self, app, auth_client, seed_user,
     ):
-        """A correct password POST updates ``_fresh_login_at``.
+        """A correct password and code POST updates ``_fresh_login_at``.
 
-        The whole point of /reauth: typing the password again proves
-        identity and restarts the step-up window.
+        The whole point of /reauth: typing the password and the code again
+        proves identity and restarts the step-up window.
         """
         with app.app_context():
             stale = (
@@ -270,9 +289,10 @@ class TestReauthRoute:
                 sess[FRESH_LOGIN_AT_KEY] = stale
 
             before = datetime.now(timezone.utc)
-            resp = auth_client.post("/reauth", data={
-                "password": "testpass",
-            }, follow_redirects=False)
+            resp = auth_client.post(
+                "/reauth", data=_reauth_form(seed_user["user"].id),
+                follow_redirects=False,
+            )
             after = datetime.now(timezone.utc)
 
             assert resp.status_code == 302, (
@@ -315,20 +335,20 @@ class TestReauthRoute:
                 assert sess[FRESH_LOGIN_AT_KEY] == stale_iso
 
     def test_post_redirects_to_safe_next(
-        self, app, auth_client,
+        self, app, auth_client, seed_user,
     ):
         """A safe ``next`` param in the URL is honoured on success."""
         with app.app_context():
             resp = auth_client.post(
                 "/reauth?next=%2Fdashboard",
-                data={"password": "testpass"},
+                data=_reauth_form(seed_user["user"].id),
                 follow_redirects=False,
             )
             assert resp.status_code == 302
             assert resp.headers.get("Location", "").endswith("/dashboard")
 
     def test_post_rejects_unsafe_next(
-        self, app, auth_client,
+        self, app, auth_client, seed_user,
     ):
         """An unsafe ``next`` param redirects to dashboard, not the
         attacker URL.
@@ -341,7 +361,7 @@ class TestReauthRoute:
         with app.app_context():
             resp = auth_client.post(
                 "/reauth?next=https%3A%2F%2Fevil.com",
-                data={"password": "testpass"},
+                data=_reauth_form(seed_user["user"].id),
                 follow_redirects=False,
             )
             assert resp.status_code == 302
@@ -362,7 +382,6 @@ class TestReauthRoute:
         mirrors.
         """
         with app.app_context():
-            _enable_mfa(seed_user["user"].id)
             monkeypatch.setattr(
                 mfa_service, "verify_totp_code",
                 lambda mc, c: TotpVerificationResult.INVALID,
@@ -380,7 +399,6 @@ class TestReauthRoute:
     ):
         """A user with MFA enabled completes reauth with password + TOTP."""
         with app.app_context():
-            _enable_mfa(seed_user["user"].id)
             monkeypatch.setattr(
                 mfa_service, "verify_totp_code",
                 lambda mc, c: TotpVerificationResult.ACCEPTED,
@@ -417,7 +435,7 @@ class TestReauthDoesNotRefreshSessionCreatedAt:
     """
 
     def test_reauth_does_not_advance_session_created_at(
-        self, app, auth_client,
+        self, app, auth_client, seed_user,
     ):
         """``_session_created_at`` is unchanged across a successful reauth."""
         with app.app_context():
@@ -428,9 +446,9 @@ class TestReauthDoesNotRefreshSessionCreatedAt:
                 "_session_created_at."
             )
 
-            resp = auth_client.post("/reauth", data={
-                "password": "testpass",
-            })
+            resp = auth_client.post(
+                "/reauth", data=_reauth_form(seed_user["user"].id),
+            )
             assert resp.status_code == 302
 
             with auth_client.session_transaction() as sess:

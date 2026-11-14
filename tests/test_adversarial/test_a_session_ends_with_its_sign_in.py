@@ -7,24 +7,26 @@ ten wrong guesses removed its record.  These tests drive the real app:
 
 * :class:`TestThirtyDaysAfterItsSignIn` -- the boundary, to the second, and a
   session with no sign-in stamp, which every session open at the release is.
-* :class:`TestNothingButASignInRenewsIt` -- Log out all, Change password and
-  Disable two-factor each move ``_session_created_at`` to now, and none moves
-  the sign-in, so a session that pressed one near day 30 still ends on day 30.
+* :class:`TestNothingButASignInRenewsIt` -- Log out all and Change password
+  each move ``_session_created_at`` to now, and neither moves the sign-in, so a
+  session that pressed one near day 30 still ends on day 30.
 * :class:`TestTheSessionAndItsRecord` -- the session's sign-in is the record's
   ``last_signed_in_at``, and a browser kept active for 29 days still gets past
   a stranger's lock.
+
+The seed owner is made with two-factor (plan#3600), so a browser signs in with
+no code owed only on a browser the owner trusts, the shared sign-in
+(``tests._seed_owner_fixtures.log_in_seed_user``).
 """
 
-import time
 from datetime import datetime, timedelta, timezone
 
-import pyotp
 import pytest
 import time_machine
 
 from app.extensions import db
 from app.models.known_device import KnownDevice
-from app.models.user import MfaConfig, User
+from app.models.user import User
 from app.services import auth_service
 from app.utils.session_helpers import (
     SESSION_CREATED_AT_KEY,
@@ -32,8 +34,11 @@ from app.utils.session_helpers import (
     SESSION_SIGNED_IN_AT_KEY,
 )
 from tests._guess_records import locked_until_of
-from tests._test_helpers import enable_mfa
-from tests._seed_owner_fixtures import SEED_USER_EMAIL, SEED_USER_PASSWORD
+from tests._seed_owner_fixtures import (
+    SEED_USER_EMAIL,
+    SEED_USER_PASSWORD,
+    log_in_seed_user,
+)
 
 #: Ruling plan#3069's thirty days, spelled here as an oracle the model's
 #: constant cannot move silently.
@@ -48,9 +53,6 @@ _LATER = timedelta(minutes=2)
 
 #: Wrong passwords in a row that lock the account: spelled here as an oracle.
 _THRESHOLD = 10
-
-#: The length of one authenticator step.
-_TOTP_STEP_SECONDS = 30
 
 _NEW_PASSWORD = "a-brand-new-passphrase"
 
@@ -71,10 +73,12 @@ def _signed_in(response):
 
 
 def _sign_in(app):
-    """Return a browser that has just finished a sign-in with no code owed."""
-    browser = app.test_client()
-    assert _signed_in(_password(browser))
-    return browser
+    """Return a browser that has just finished a sign-in with no code owed.
+
+    A browser the owner trusts, through the shared sign-in, which asserts its
+    own redirect.
+    """
+    return log_in_seed_user(app.test_client())
 
 
 def _is_signed_in(browser):
@@ -98,16 +102,6 @@ def _stamp(browser, **stamps):
     with browser.session_transaction() as sess:
         for key, moment in stamps.items():
             sess[key] = moment.isoformat()
-
-
-def _code(secret):
-    """Return the code valid now for *secret*."""
-    return pyotp.TOTP(secret).at(int(time.time()))
-
-
-def _next_code(secret):
-    """Return a code for *secret* one step past now's, so it is no replay."""
-    return pyotp.TOTP(secret).at(int(time.time()) + _TOTP_STEP_SECONDS)
 
 
 class TestThirtyDaysAfterItsSignIn:
@@ -219,26 +213,6 @@ class TestNothingButASignInRenewsIt:
             )
 
         assert _the_session_after(_sign_in(app), change_password) is False
-
-    def test_turning_two_factor_off(self, app, seed_user):
-        """``/mfa/disable`` near day thirty: the session still ends on it."""
-        user_id = seed_user["user"].id
-        secret = enable_mfa(db.session, user_id)
-        browser = app.test_client()
-        assert _password(browser).headers["Location"].endswith("/mfa/verify")
-        assert _signed_in(browser.post("/mfa/verify", data={"totp_code": _code(secret)}))
-
-        def turn_two_factor_off(browser):
-            browser.post("/mfa/disable", data={
-                "current_password": SEED_USER_PASSWORD,
-                "totp_code": _next_code(secret),
-            })
-            db.session.expire_all()
-            assert db.session.query(MfaConfig).filter_by(
-                user_id=user_id,
-            ).one().is_enabled is False
-
-        assert _the_session_after(browser, turn_two_factor_off) is False
 
 
 class TestTheSessionAndItsRecord:

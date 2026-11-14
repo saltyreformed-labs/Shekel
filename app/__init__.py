@@ -92,8 +92,9 @@ def create_app(config_name=None, *, init_ref_cache=True):
 
     if not app.config.get("TOTP_ENCRYPTION_KEY"):
         app.logger.warning(
-            "TOTP_ENCRYPTION_KEY is not set. MFA/TOTP will be unavailable "
-            "until this key is configured. See .env.example for details."
+            "TOTP_ENCRYPTION_KEY is not set. Every account must set up "
+            "two-factor, which needs it, so no one can sign in until this key "
+            "is configured. See .env.example for details."
         )
 
     # --- Extensions -------------------------------------------------------

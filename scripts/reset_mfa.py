@@ -11,15 +11,28 @@ even when ``is_enabled`` is already ``False`` but residual material
 lingers on the row.  An emergency reset must leave no decryptable
 secret at rest.
 
-Like ``/mfa/disable``, the reset also bumps the user's
-``session_invalidated_at``: it ends every session of the user and forgets
-every trusted device of theirs (plan#2173, ruling plan#2406, "turning 2FA
-off ... forgets them all").
+The reset also bumps the user's ``session_invalidated_at``: it ends every
+session of the user and forgets every trusted device of theirs (plan#2173,
+ruling plan#2406, "turning 2FA off ... forgets them all").  No account can
+turn two-factor off in the app (ruling plan#3604), so this, and for a
+companion the owner's Reset, is how an account's two-factor is cleared.
+Every account must have two-factor (plan#3452), so the user's next sign-in
+lands on its setup, and the login gate holds them there until they enrol an
+authenticator again.
 
 **The reset is ONE act, ``mfa_service.reset_two_factor``** (ruling
 plan#3441), which the owner's "Reset two-factor" for a companion on
 Settings > Companions runs too: its docstring says why each part is there.
-This script finds the user, runs it, commits, logs and reports.
+This script takes every account's write lock, finds the user, runs it,
+commits, logs and reports.
+
+**It takes the lock a signed-in save takes, every account's, before it
+reads the account it resets** (ruling plan#3823; the lock itself reads only
+the list of account ids it takes), as the deploy reconciles do
+(``app.services.user_write_lock.lock_every_user_writes``).  So it waits for
+any save in flight and no save overlaps it: the login gate's answer to "is
+two-factor on?" holds for the whole of each save, and the doors behind the
+gate act on the row it read (ruling plan#3826).
 
 Usage:
     python scripts/reset_mfa.py <user_email>
@@ -41,7 +54,9 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 def reset_mfa(email: str | None) -> None:
     """Disable MFA and clear all stored MFA material for the user.
 
-    Runs the one reset act, ``mfa_service.reset_two_factor``: it clears
+    Under every account's write lock, taken before anything is read (ruling
+    plan#3823) and held until its transaction ends, runs the one reset act,
+    ``mfa_service.reset_two_factor``: it clears
     the encrypted TOTP secret, hashed backup codes, confirmation
     timestamp, replay-prevention step boundary, and any pending setup
     ciphertext, and bumps the user's ``session_invalidated_at``, which
@@ -71,9 +86,20 @@ def reset_mfa(email: str | None) -> None:
     from app.extensions import db
     from app.models.user import User
     from app.services import mfa_service
+    from app.services.user_write_lock import lock_every_user_writes
     from app.utils.log_events import AUTH, EVT_MFA_RESET, log_event
     # pylint: enable=import-outside-toplevel
 
+    # Every account's write lock first, before the account is read (ruling
+    # plan#3823; the lock reads only the ids it takes): a signed-in save
+    # holds its owner's from its transaction's start, and the login gate
+    # reads the two-factor row under it, so this waits for any save in
+    # flight and none starts until this transaction ends.
+    # Unlocked, a reset landing between the gate's read and Regenerate's
+    # write left ten new backup codes on the row it had cleared (plan#3775).
+    # Every account's rather than the one's: no key need be read unlocked to
+    # find it, as a companion's is her owner's.
+    lock_every_user_writes()
     user = db.session.query(User).filter_by(email=email).first()
     if not user:
         print(f"Error: No user found with email '{email}'.")

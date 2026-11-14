@@ -593,10 +593,10 @@ class TestTheRailSavesARaisesEndYear(_TestTheRailSavesARaisesEndYearMembers):
             retirement_mod.salary_regeneration, "regenerate_salary_transactions", _counted,
         )
 
-        resp = self._save(auth_client, raise_id, "year", str(effective))
+        resp = self._save(auth_client, raise_id, "year", str(effective + 2))
 
         assert resp.status_code == 200
-        assert self._stored(db, raise_id)[0] == effective
+        assert self._stored(db, raise_id)[0] == effective + 2
         assert first_id != second_id
         assert calls == [second_id], (
             "the regeneration ran for a profile other than the raise's own"
@@ -608,11 +608,11 @@ class TestTheRailSavesARaisesEndYear(_TestTheRailSavesARaisesEndYearMembers):
         """The plain-form fallback writes the same column and lands on the page."""
         raise_id, effective, _ = self._seed_saveable_raise(seed_user, db, seed_periods_today)
 
-        resp = self._save(auth_client, raise_id, "year", str(effective + 1), htmx=False)
+        resp = self._save(auth_client, raise_id, "year", str(effective + 2), htmx=False)
 
         assert resp.status_code == 302
         assert "/retirement" in resp.headers["Location"]
-        assert self._stored(db, raise_id)[0] == effective + 1
+        assert self._stored(db, raise_id)[0] == effective + 2
 
     def test_two_rows_posted_together_both_write(
         self, auth_client, seed_user, db, seed_periods_today, monkeypatch,

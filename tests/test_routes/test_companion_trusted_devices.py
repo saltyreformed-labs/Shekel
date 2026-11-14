@@ -36,8 +36,13 @@ from tests._test_helpers import enable_mfa
 from tests._trusted_devices import (
     CHROME_WINDOWS, FIREFOX_LINUX, SAFARI_IPHONE, is_trusted, move_trust_to, trust,
 )
-from tests._two_factor_sign_in import code_now, post_her_password, redirect_path
-from tests._seed_owner_fixtures import SEED_USER_EMAIL, SEED_USER_PASSWORD
+from tests._two_factor_sign_in import (
+    code_now,
+    post_her_password,
+    redirect_path,
+    sign_in_from_a_trusted_browser,
+)
+from tests._seed_owner_fixtures import OWNERS_PAGE, SEED_USER_EMAIL, SEED_USER_PASSWORD
 
 #: The day format the page shows, the ``local_datetime`` filter's default,
 #: spelled here as an oracle.
@@ -194,10 +199,9 @@ class TestHerDevices:
             app, enable_mfa(db.session, companion_id),
         )
         assert browser.post("/logout").status_code == 302
-        owner = browser.post("/login", data={
-            "email": SEED_USER_EMAIL, "password": SEED_USER_PASSWORD,
-        })
-        assert redirect_path(owner) not in ("/login", "/mfa/verify"), owner.headers
+        sign_in_from_a_trusted_browser(
+            browser, SEED_USER_EMAIL, SEED_USER_PASSWORD, OWNERS_PAGE,
+        )
         trust(companion_id, SAFARI_IPHONE)
 
         row = companion_row(browser.get(COMPANIONS_PAGE).get_data(as_text=True))

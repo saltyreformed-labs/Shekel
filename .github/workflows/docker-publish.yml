@@ -2,7 +2,37 @@
 #
 # Triggers:
 #   - Push to main → tags as "latest"
-#   - Git tag v* → tags as version + "latest"
+#   - Mondays at 08:23 UTC → main's newest commit rebuilt, tagged "latest"
+#     (metadata-action reads a schedule as the default branch's)
+#   - No git tag (ruling plan#3741): shekel-deploy accepts only an image
+#     signed by this file at refs/heads/main, so a tag's build was an image
+#     nothing deploys, and metadata-action's ``latest=auto`` flavor tagged
+#     it "latest" too.
+#
+# THE WEEKLY REBUILD (ruling plan#3724).  Each build takes Debian's newest
+# OpenSSL, libpq and Postgres client (the Dockerfile's apt-get lines, with no
+# layer cache: .github/actions/build-image), so a week with no release would
+# otherwise leave a Debian fix out of the image production can deploy.  The
+# schedule's run builds, pushes and signs exactly as a push to main does,
+# its certificate naming this file at refs/heads/main as a release's does, so
+# shekel-deploy verifies it the same way.  It reaches production only by a
+# deploy, the next release's or a ``shekel-deploy`` run by hand: no build of
+# this workflow deploys anything.  WUD, watching ``shekel-prod-app`` by
+# digest (docker-compose.yml), reports a rebuilt "latest" production does not
+# run at its daily scan, 09:00 New York, after this one.  Off the top of the
+# hour, when GitHub may drop queued scheduled runs.  In a public repository
+# GitHub turns a schedule off after 60 days with no repository activity
+# (as tax-law.yml states); a release, a merge into main, is activity.
+#
+# One build at a time (``concurrency`` below): a rebuild and a release
+# build never run together, and no run cancels another, each waiting its
+# turn.  GitHub does not guarantee the order they wait in, so the build's
+# second step is what holds "latest" to main: it refuses a run whose commit
+# is no longer main's tip when its turn comes, whatever order runs are made
+# in (a re-run of an older run among them), so "latest" only ever moves
+# forward along main.  A scheduled run whose build failed opens the update
+# alert's issue mentioning the developer (the ``alert`` job); a release
+# watches its own build.
 #
 # Audit Commit C-36 (findings F-060, F-155):
 #   - Image is digest-pinned downstream by deploy/docker-compose.prod.yml
@@ -22,7 +52,21 @@ name: Build & Publish Docker Image
 on:
   push:
     branches: [main]
-    tags: ["v*"]
+  schedule:
+    - cron: "23 8 * * 1"
+
+# One run at a time, and none cancelled (the header's THE WEEKLY REBUILD).
+# ``queue: max`` lets up to 100 runs wait.  GitHub's default keeps one
+# waiting and cancels it for the next, so a re-run of an older run could
+# cancel the waiting build of main's newest commit and then refuse at the
+# tip step, leaving nothing built and no alert.  The waiting runs go first
+# in, first out, by when each began to wait, an order GitHub does not
+# guarantee; the build's tip step holds a run that comes out of it.  One
+# group, as every run is of main and pushes "latest".
+concurrency:
+  group: release-image
+  cancel-in-progress: false
+  queue: max
 
 env:
   REGISTRY: ghcr.io
@@ -36,10 +80,11 @@ jobs:
   # pull request, judged when the PR is pushed and again on the merge-queue
   # group that lands it (main's included, measured 2026-10-23), but a group
   # is judged before it lands: one judged green on November 30 could land on
-  # December 1, and a v* tag skips pull requests altogether.  This check is
-  # judged when the release is BUILT, so neither can ship one.  A December
-  # merge without next year leaves production on the previous image until the
-  # law is added (R-SAL88); the code on main runs ahead of it meanwhile.
+  # December 1, and the weekly rebuild runs on no pull request at all.  This
+  # check is judged when the release is BUILT, so neither can ship one.  A
+  # December merge without next year leaves production on the previous image
+  # until the law is added (R-SAL88); the code on main runs ahead of it
+  # meanwhile.
   #
   # "Re-run failed jobs" re-runs only the build and REUSES this job's result,
   # so a check that passed on November 28 would otherwise wave through a
@@ -131,6 +176,35 @@ jobs:
           echo "Next year's tax law is missing, so this commit cannot ship; the release that adds it builds on its own push." >&2
           exit 1
 
+      # SECOND, still before any checkout or login: refuse a run whose commit
+      # is no longer main's tip (ruling plan#3724).  "latest" is what
+      # ``shekel-deploy`` deploys when handed no digest, so it must never
+      # name an older commit than main's, and every run pushes it: a push to
+      # main and the schedule (the header's Triggers).  The concurrency group
+      # runs builds one at a time and cancels none, in an order GitHub does
+      # not guarantee; this step holds a run that is no longer of main's tip
+      # when its turn comes, a re-run of an older run among them, whose
+      # commit's newer successor has a run of its own.  A tip that cannot be
+      # read refuses: ``set -e`` fails the assignment, and an empty answer is
+      # no match.  tools/ci/test_release_image_workflow.py RUNS this text
+      # with a stand-in ``git``.
+      - name: Is this still main's newest commit?
+        shell: bash
+        env:
+          SHA: ${{ github.sha }}
+          REMOTE: ${{ github.server_url }}/${{ github.repository }}.git
+        run: |
+          set -euo pipefail
+          tip="$(git ls-remote --exit-code "${REMOTE}" refs/heads/main)"
+          tip="${tip%%[[:space:]]*}"
+          if [ "${tip}" = "${SHA}" ]; then
+              echo "${SHA} is main's newest commit."
+              exit 0
+          fi
+          echo "Refusing to build: this run is of ${SHA}, and main's newest commit is '${tip}'." >&2
+          echo "Its own run builds that one; latest must never name an older commit." >&2
+          exit 1
+
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -162,8 +236,6 @@ jobs:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
             type=raw,value=latest,enable={{is_default_branch}}
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
             type=sha
 
       - name: Build and push image
@@ -230,8 +302,53 @@ jobs:
               echo "\`\`\`"
               echo "cosign verify \\"
               echo "    --certificate-identity-regexp \\"
-              echo "    \"https://github.com/${{ github.repository }}/.github/workflows/docker-publish.yml@.*\" \\"
+              echo "    '^https://github\.com/${{ github.repository }}/\.github/workflows/docker-publish\.yml@refs/heads/main\$' \\"
               echo "    --certificate-oidc-issuer https://token.actions.githubusercontent.com \\"
               echo "    ghcr.io/${{ github.repository }}@${DIGEST}"
               echo "\`\`\`"
           } >> "$GITHUB_STEP_SUMMARY"
+
+  # A failed weekly rebuild, told to the developer (rulings plan#3724,
+  # plan#3742): the update alert's issue (tools/update/alert.py, which
+  # updates.yml's alert opens too), mentioning him, linking the run and
+  # naming each job's result: the issue plan#3552 has ``quill sync`` file as
+  # a card (rulings plan#3619, plan#3622).  Only a scheduled run's, as a
+  # release watches its own build, and only when the build failed: the
+  # tax-law job's refusal skips the build and opens none, as the in-app
+  # banner, tax-law.yml's weekly email and ci.yml's refusal of every pull
+  # request report a missing tax law already (ruling plan#3742).  So the
+  # tax-law job failing on an outside fault, its install's, opens none
+  # either.  Two failed builds open one that is no fault in the image: a
+  # scheduled run overtaken by a push to main while it waited, which its
+  # tip step refuses, and a re-run by hand after December 1 that the
+  # build's own tax-law step refuses.  A build cancelled, by hand or at
+  # GitHub's own 360 minutes (the build carries no time limit of its own,
+  # plan#2361's to rule), opens none: ``failure()`` is true only when a job
+  # it needs failed.  It installs nothing, so an install's failure cannot
+  # stop it: main's own code on the runner's Python with the standard
+  # library alone, the issue sent by the runner's gh.  It publishes nothing
+  # and holds only the workflow's own token, widened to issues for this job
+  # alone, so it needs no tax-law check of its own.
+  alert:
+    needs: [tax-law, build-and-push]
+    if: failure() && github.event_name == 'schedule' && needs.build-and-push.result == 'failure'
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Open an issue naming the failed run
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          TAX_LAW: ${{ needs.tax-law.result }}
+          BUILD_AND_PUSH: ${{ needs.build-and-push.result }}
+        run: >-
+          python3 -S -m tools.update.alert "${RUN}"
+          "tax-law=${TAX_LAW}" "build-and-push=${BUILD_AND_PUSH}"

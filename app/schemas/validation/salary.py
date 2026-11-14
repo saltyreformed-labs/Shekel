@@ -20,7 +20,10 @@ from app.services import paycheck_line_kinds, payroll_line_cadence
 from app.schemas.validation._helpers import (
     BaseSchema,
     RowId,
+    _MONETARY_INPUT_CEILING,
     _NON_NEGATIVE_MONETARY,
+    _PAY_AMOUNT_RANGE,
+    _PAYDAY_RANGE,
     _PERCENT_INPUT_RANGE,
     _RAISE_DATE_RANGE,
     _RAISE_YEAR_RANGE,
@@ -32,7 +35,7 @@ from app.services.salary_raises import (
     EndYearError,
     end_year_of,
 )
-from app.utils.dates import CALENDAR_DATE_MAX, CALENDAR_DATE_MIN, to_display_date
+from app.utils.dates import to_display_date
 
 # The raise form's end-year answer is a MODE beside the year (plan step
 # **salary:S3-c**, ruling **R-SAL13**); the vocabulary and the ONE rule that
@@ -43,13 +46,6 @@ from app.utils.dates import CALENDAR_DATE_MAX, CALENDAR_DATE_MIN, to_display_dat
 _END_YEAR_FIELDS = {"mode": "raise_end_mode", "year": "terminal_year"}
 
 
-#: What one paycheck may pay: above zero like ``ck_pay_entries_positive_amount``,
-#: under the same form-layer ceiling the other monetary inputs take.
-_PAY_AMOUNT_RANGE = validate.Range(
-    min=Decimal("0"), min_inclusive=False, max=Decimal("10000000"),
-)
-#: The window a pay entry's payday may be typed in: the calendar's own.
-_PAYDAY_RANGE = validate.Range(min=CALENDAR_DATE_MIN, max=CALENDAR_DATE_MAX)
 #: ``(month, day)`` of the one date a yearly repeat cannot land on every year.
 _LEAP_DAY = (2, 29)
 
@@ -193,15 +189,15 @@ class SalaryProfileUpdateSchema(BaseSchema):
     version_id = RowId(validate=validate.Range(min=1))
 
 
-class SalaryPayEntryFixSchema(BaseSchema):
-    """Validates POST data for fixing one entry of a salary's pay list.
+class SalaryPayEntryRecordSchema(BaseSchema):
+    """Validates POST data for recording a pay change on a salary's pay list.
 
-    Plan step **salary:X-av-3a**, ruling **R-SAL61**: "'Fix' edits one" --
-    its amount, its payday, or both.  Whether the payday is a payday, and
-    whether another entry already holds it, are the service's questions
-    (:func:`~app.services.pay_list_service.fix_entry`).  ``version_id`` is
-    the entry's optimistic-locking counter; see
-    :class:`TransactionUpdateSchema` for the contract.
+    Plan step **salary:X-av-3b**, ruling **R-SAL61**: "'Record a pay change'
+    adds one from a payday you pick" -- what one paycheck pays, and the
+    payday it pays it from.  Whether the payday is a payday, is not later
+    than the owner's next one, and is not one another entry already holds,
+    are the service's questions
+    (:func:`~app.services.pay_list_service.record_entry`).
     """
 
     @pre_load
@@ -213,6 +209,34 @@ class SalaryPayEntryFixSchema(BaseSchema):
         required=True, places=2, as_string=True, validate=_PAY_AMOUNT_RANGE,
     )
     payday = fields.Date(required=True, validate=_PAYDAY_RANGE)
+
+
+class SalaryPayEntryFixSchema(SalaryPayEntryRecordSchema):
+    """Validates POST data for fixing one entry of a salary's pay list.
+
+    Plan step **salary:X-av-3a**, ruling **R-SAL61**: "'Fix' edits one" --
+    its amount, its payday, or both: the two fields a Record states, so they
+    are inherited rather than spelled again.  Whether a CHANGED payday is a
+    payday, and whether another entry already holds it, are the service's
+    questions (:func:`~app.services.pay_list_service.fix_entry`).
+    ``version_id`` is the entry's optimistic-locking counter; see
+    :class:`TransactionUpdateSchema` for the contract.
+    """
+
+    version_id = RowId(required=True, validate=validate.Range(min=1))
+
+
+class SalaryPayEntryRemoveSchema(BaseSchema):
+    """Validates POST data for removing one entry of a salary's pay list.
+
+    Plan step **salary:X-av-3b**, ruling **R-SAL68** ("Remove, except the last
+    one"): the entry's optimistic-locking counter alone, so a Remove rendered
+    before another tab's Fix of the entry is refused rather than deleting pay
+    the owner has not seen.  Whether the entry is the profile's only one is
+    the service's question
+    (:func:`~app.services.pay_list_service.remove_entry`).
+    """
+
     version_id = RowId(required=True, validate=validate.Range(min=1))
 
 
@@ -250,14 +274,16 @@ class RaiseCreateSchema(BaseSchema):
     # F-011 / C-24: Tightened from Range(-1e7, 1e7) to a positive,
     # column-fitting bound on a flat-dollar raise, dollars a year (R-SAL65).
     # ``salary.salary_raises.flat_amount`` is ``Numeric(12, 2)``; the
-    # DB CHECK ``flat_amount > 0`` rejects zero/negative.  $10M is
-    # the schema-layer ceiling -- well above any realistic raise but
-    # below the column limit, so an order-of-magnitude typo is
-    # rejected with a clean 400 rather than being committed.
+    # DB CHECK ``flat_amount > 0`` rejects zero/negative.  The ceiling is
+    # the named one the one-paycheck bound and ``_NON_NEGATIVE_MONETARY``
+    # take too, ``_MONETARY_INPUT_CEILING`` ($10M, read by name since task
+    # plan#3577) -- well above any realistic raise but below the column
+    # limit, so an order-of-magnitude typo is rejected with a clean 400
+    # rather than being committed.
     flat_amount = fields.Decimal(
         places=2, as_string=True,
         validate=validate.Range(
-            min=Decimal("0.01"), max=Decimal("10000000"),
+            min=Decimal("0.01"), max=_MONETARY_INPUT_CEILING,
         ),
     )
     is_recurring = fields.Boolean(load_default=False)

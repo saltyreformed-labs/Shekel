@@ -427,7 +427,7 @@ def test_the_same_release_locked_now_is_the_release_closed(tmp_path):
 
 def test_the_package_s_next_release_is_published_though_the_last_was_closed(tmp_path, capsys):
     """Closing means "not this release": pyee 14.0.1 is committed on its branch and its pull
-    request opened, which the queue mentions once; the closed one stays closed."""
+    request opened, which the queue tells of once; the closed one stays closed."""
     fake = _GitHub()
     _closed_at(fake, tmp_path, _pyee("14.0.0"))
     assert _publish(fake, _folder(tmp_path, _pyee("14.0.1"))) == 0

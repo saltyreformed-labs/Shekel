@@ -23,8 +23,8 @@
 # lists, checked against the hash uv carries for it, whatever Python the
 # runner image holds, so it too moves only when the Dockerfile's uv does.
 # The image runs its base image's Python of the same minor (the Dockerfile's
-# FROM tags, which tests/test_deploy/test_image_supply_chain.py holds to
-# ``.python-version``); the patch releases can differ.
+# FROM tags, which tests/test_deploy/test_image_supply_chain/test_dockerfile.py
+# holds to ``.python-version``); the patch releases can differ.
 #
 # NO WORKFLOW RESTORES A CACHE (ruling plan#2471).  Any job on main can
 # write main's Actions cache, whatever its token's permissions, and package

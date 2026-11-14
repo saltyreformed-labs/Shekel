@@ -30,9 +30,8 @@ from app.models.pension_profile import PensionProfile
 from app.models.ref import AccountType, FilingStatus
 from app.models.salary_profile import SalaryProfile
 from app.models.user import UserSettings
-from app.services import pension_calculator, retirement_levers, retirement_readiness
+from app.services import retirement_levers, retirement_readiness
 from app.services.balance_at import BalanceContext
-from app.services.payroll_basis import PayrollBasis
 from app.services import retirement_plan
 from app.services.retirement_plan import (
     _stored_blend_percent,
@@ -599,77 +598,114 @@ class TestThePointBelievesARaiseSet:
             )
 
     def test_a_probe_moves_the_pension_the_target_and_the_funded_account(
-        self, app, db, seed_user, seed_periods_today,
+        self, app, db, monkeypatch, seed_user, seed_periods_52,
     ):
         """Ending the raise after its first year lowers every figure it feeds.
 
-        The salary path is exact and hand-checkable.  $3,076.92 a paycheck
-        ($80,000.00 / 26) with a 5% January raise from year N+1 (N is the
-        pass's year), evaluated each December 1, each raise step rounded to
-        the cent (ruling R-SAL60) and the year's figure the pay times 26
-        (ruling R-SAL59):
+        **The pension is graded on the path it read, exactly.**  Today is
+        pinned to 2027-03-20 (on the 52 paydays from 2026-01-02 that hold
+        it), because the years of service count to a retirement 240 months
+        from today and would move with every day the case ran; the pass's
+        year is then 2027 and the plan retires 2047-03-20.  $3,076.92 a
+        paycheck ($80,000.00 / 26) with a 5% raise every January 1 from 2028;
+        each year is the pay in force on its December 1, each raise step
+        rounded to the cent (ruling R-SAL60), and the year's figure the pay
+        times 26 (ruling R-SAL59).  The pension
+        averages its best 4 consecutive years (the FIRST best: a later run
+        replaces it only on a strictly higher average) and has served
+        2010-01-01 to 2047-03-20, 13,592 days / 365.25 = 37.2128... -> 37.21
+        years:
 
-          stored (no end year):   N+1: 3,076.92 x 1.05 = 3,230.766 -> 3,230.77
-                                       x 26 = 84,000.02
-                                  N+2: 3,230.77 x 1.05 = 3,392.3085 -> 3,392.31
-                                       x 26 = 88,200.06
-          probed (ends after N+1): N+1 = 84,000.02, N+2 = 84,000.02 (it stops)
+          probed (the raise ends after 2028):
+            2027: 3,076.92 x 26 = 79,999.92
+            2028-2047: 3,076.92 x 1.05 = 3,230.766 -> 3,230.77
+                       x 26 = 84,000.02 every year (it stops)
+            window 2028-2031, average 84,000.02 (2027-2030 averages
+            82,999.995 -> 83,000.00, and no later run is higher)
+            0.015 x 37.21 x 84,000.02 = 46,884.611... -> 46,884.61 a year
+            / 12 = 3,907.050... -> 3,907.05 a month
 
-        **The path is read off the walk the pension projects it with** --
-        :func:`~app.services.pension_calculator.project_profile_salaries` over
-        each point's believed set -- since plan step salary:X-av-3a deleted
-        the summary's copy of it; that the pension itself read the probed set
-        is the ``monthly_income`` inequality below.
+          stored (no end year), the pay each year, each January's step
+          x 1.05 rounded to the cent:
+            2027 3,076.92  2028 3,230.77  2029 3,392.31  2030 3,561.93
+            2031 3,740.03  2032 3,927.03  2033 4,123.38  2034 4,329.55
+            2035 4,546.03  2036 4,773.33  2037 5,012.00  2038 5,262.60
+            2039 5,525.73  2040 5,802.02  2041 6,092.12  2042 6,396.73
+            2043 6,716.57  2044 7,052.40  2045 7,405.02  2046 7,775.27
+            2047 8,164.03
+            window 2044-2047 (the path only rises), x 26:
+            183,362.40 + 192,530.52 + 202,157.02 + 212,264.78
+            = 790,314.72 / 4 = 197,578.68
+            0.015 x 37.21 x 197,578.68 = 110,278.540... -> 110,278.54 a year
+            / 12 = 9,189.878... -> 9,189.88 a month
 
-        Every figure downstream of that path is then LOWER under the probe:
-        the pension's monthly benefit (its high-4 average is over smaller
-        salaries), the income target, and the 401(k)'s projected balance (its
+        **Read off each picture's own pension derivation**: the window its
+        benefit carries, which the page's pension line names, and the
+        benefit priced from it.  The window pins what the pension made of the
+        path: every run of four averages at most the window's, and the runs
+        before it less.  This test walked
+        :func:`~app.services.pension_calculator.project_profile_salaries`
+        itself until finding SAL-589 (plan#1592): that walk is the call the
+        pension makes, not the pension, so it stayed green whatever set the
+        pension was handed, and the pension was graded only by its monthly
+        benefit falling.  A pension believing the probed raise one year
+        longer (window 2029-2032 at 88,200.06, 4,102.41 a month) or not at
+        all (2027-2030 at 79,999.92, 3,721.00 a month) fell too, and passed
+        (measured 2026-11-11 by mutating the pension's set).
+
+        Every other figure downstream of that path is LOWER under the probe:
+        the income target, and the 401(k)'s projected balance (its
         5%-of-gross employer contribution is priced off a smaller gross from
-        N+2 on).  The REQUIRED savings fall too, but that is a fact about
+        2029 on).  The REQUIRED savings fall too, but that is a fact about
         these parameters rather than a law: the requirement is the gap
         between target and pension scaled by the SWR, and the target falls
         by roughly the take-home rate of the salary delta while the pension
         falls by the benefit multiplier times years of service times the
-        high-4 delta -- here about 0.75 against about 0.55 of a comparable
+        high-4 delta -- here about 0.75 against about 0.56 of a comparable
         delta, with the gap staying well above zero, so the target's drop
-        wins.  Asserted as inequalities against the same render's stored
-        picture, so the case cannot rot into a restatement of the tax
-        engine's arithmetic.
+        wins.  Those three are asserted as inequalities against the same
+        render's stored picture, so the case cannot rot into a restatement
+        of the tax engine's arithmetic; the pension has no tax in it.
         """
+        freeze_today(monkeypatch, date(2027, 3, 20))
         with app.app_context():
-            year = display_today().year + 1
-            profile, raise_row, account = _seed_believed_plan(
-                db, seed_user, effective_year=year,
+            _, raise_row, account = _seed_believed_plan(
+                db, seed_user, effective_year=2028,
             )
             inputs = load_retirement_inputs(
                 BalanceContext.build(seed_user["user"].id),
             )
-            probed_point = inputs.plan_with(
-                raise_probes={raise_row.id: ("year", year)},
-            )
             stored = picture_at(inputs, inputs.stored_plan)
-            probed = picture_at(inputs, probed_point)
-
-            def salary_path(point):
-                return dict(pension_calculator.project_profile_salaries(
-                    PayrollBasis(
-                        profile, inputs.balance_ctx.calendar(),
-                        point.terms_for(profile),
-                    ),
-                    year, year + 1,
-                ))
-
-            stored_path = salary_path(inputs.stored_plan)
-            probed_path = salary_path(probed_point)
-            assert stored_path[year] == Decimal("84000.02")
-            assert stored_path[year + 1] == Decimal("88200.06")
-            assert probed_path[year] == Decimal("84000.02")
-            assert probed_path[year + 1] == Decimal("84000.02"), (
-                "the probed end year did not reach the salary path the "
-                "pension walks"
+            probed = picture_at(
+                inputs,
+                inputs.plan_with(raise_probes={raise_row.id: ("year", 2028)}),
             )
 
-            assert probed.pension.monthly_income < stored.pension.monthly_income
+            (probed_line,) = probed.pension.per_pension
+            assert probed_line["benefit"].years_of_service == Decimal("37.21")
+            assert probed_line["benefit"].high_salary_years == [
+                (2028, Decimal("84000.02")),
+                (2029, Decimal("84000.02")),
+                (2030, Decimal("84000.02")),
+                (2031, Decimal("84000.02")),
+            ], "the pension did not read the probed path"
+            assert probed_line["benefit"].high_salary_average == Decimal(
+                "84000.02",
+            )
+            assert probed.pension.monthly_income == Decimal("3907.05")
+
+            (stored_line,) = stored.pension.per_pension
+            assert stored_line["benefit"].high_salary_years == [
+                (2044, Decimal("183362.40")),
+                (2045, Decimal("192530.52")),
+                (2046, Decimal("202157.02")),
+                (2047, Decimal("212264.78")),
+            ], "the pension did not read the stored path"
+            assert stored_line["benefit"].high_salary_average == Decimal(
+                "197578.68",
+            )
+            assert stored.pension.monthly_income == Decimal("9189.88")
+
             assert (
                 probed.net.pre_retirement_net_monthly
                 < stored.net.pre_retirement_net_monthly

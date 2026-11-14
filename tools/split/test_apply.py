@@ -14,6 +14,7 @@ from tools.split._layout import Layout
 from tools.split._prove import import_block, line_origins, prove_static
 from tools.split._render import (
     Origin,
+    docstring_lines,
     importer_rewrites,
     line_limit,
     render_all,
@@ -28,7 +29,7 @@ from tools.split._source import (
     member_free_names,
     read_module,
 )
-from tools.split.conftest import SAMPLE, SOURCE, build, layout_of
+from tools.split.conftest import SAMPLE, SOURCE, build, layout_of, plan_dict
 
 PACKAGE = "tests/test_area/test_sample"
 
@@ -46,9 +47,10 @@ ANNOTATED_SAMPLE = SAMPLE.replace('''    """Make a thing."""
 ''', 1)
 
 
-def applied(repo: Path) -> Layout:
-    """Split the sample under its plan and return the layout the prover holds it to."""
-    layout = layout_of(repo)
+def applied(repo: Path, plan: dict | None = None) -> Layout:
+    """Split the sample under ``plan`` (the sample plan when None) and return the layout the
+    prover holds it to."""
+    layout = layout_of(repo, plan)
     texts = render_all(layout, line_limit(repo))
     write(layout, repo, texts, importer_rewrites(layout, repo))
     return layout
@@ -158,6 +160,40 @@ class TestTheSampleSplits:
         layout = applied(repo)
         assert not proof(repo, layout)
         assert '_CASES: list = [("a", 1), ("b", 2)]' in text(repo, "_helpers")
+
+
+class TestAPartsDocstring:
+    """A one-paragraph part docstring at the 99-column limit: on one line with both its
+    quotes up to 93 characters, wrapped from 97, and between them the text on the opening
+    quotes' line with the closing quotes on the next.  Laid out on one line because it fit
+    the wrap width, a text of 94 to 96 characters was refused as too wide, and the plan's
+    author reworded it to get past the tool."""
+
+    @pytest.mark.parametrize("width", [93, 94, 95, 96, 97])
+    def test_its_lines(self, width):
+        """Each width's lines, for a text of ``x`` repeated, a space, and ``yz``."""
+        source = "x" * (width - 3) + " yz"
+        expected = {
+            93: [f'"""{source}"""'],
+            94: [f'"""{source}', '"""'],
+            95: [f'"""{source}', '"""'],
+            96: [f'"""{source}', '"""'],
+            97: ['"""' + "x" * 94, "yz", '"""'],
+        }[width]
+        assert docstring_lines(source, 99, "test_first") == expected
+
+    def test_one_the_wrap_width_holds_alone_splits_and_proves(self, tmp_path):
+        """test_first under a 95-character docstring is written on two lines, and the
+        static proof reads it as the docstring the plan gives the part."""
+        docstring = ("The first section and the top-level test, under a docstring its "
+                     "opening quotes leave space for.")
+        assert len(docstring) == 95
+        plan = plan_dict()
+        plan["parts"][0]["docstring"] = docstring
+        repo = build(tmp_path)
+        layout = applied(repo, plan)
+        assert not proof(repo, layout)
+        assert text(repo, "test_first").startswith(f'"""{docstring}\n"""\n')
 
 
 class TestALocalAnnotationsNames:

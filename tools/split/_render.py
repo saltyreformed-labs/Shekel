@@ -70,15 +70,16 @@ def _checked(lines: list[str], limit: int, what: str) -> list[str]:
 
 
 def docstring_lines(text: str, limit: int, what: str) -> list[str]:
-    """A module docstring as written: one line when it fits on one, a one-paragraph text
-    that does not fit wrapped to the limit, and a text with its own line breaks kept as the
-    plan wrote it (refused if any of its lines is too wide)."""
+    """A module docstring as written: one line when it fits on one with both its quotes,
+    else its closing quotes on a line of their own, after a one-paragraph text wrapped to
+    the width its opening quotes leave or a text with its own line breaks kept as the plan
+    wrote it (refused if any of its lines is too wide)."""
     body = text.strip("\n").split("\n")
-    if len(body) == 1 and len(f'"""{body[0]}"""') > limit:
+    if len(body) == 1 and len(f'"""{body[0]}"""') <= limit:
+        return [f'"""{body[0]}"""']
+    if len(body) == 1:
         body = textwrap.wrap(body[0], width=limit - len('"""'), break_long_words=False,
                              break_on_hyphens=False)
-    if len(body) == 1:
-        return _checked([f'"""{body[0]}"""'], limit, what)
     return _checked([f'"""{body[0]}', *body[1:], '"""'], limit, what)
 
 

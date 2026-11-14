@@ -121,8 +121,14 @@ from app.models.amount_ownership import AmountOwnership
 # distinct so a correct interest figure proves the walk's anchor reset); see
 # SPLIT_LOAN in tests/_test_helpers/_loans.py.  _P1/_P2/_P3 are the seed_periods indices
 # (payment_day=1) due 02-01 / 03-01 / 04-01, in distinct months after the anchor.
-(_ORIGINATION_PRINCIPAL, _ORIGINATION_DATE, _RATE, _ANCHOR_BALANCE,
- _ANCHOR_DATE, _P1, _P2, _P3) = SPLIT_LOAN
+_ORIGINATION_PRINCIPAL = SPLIT_LOAN.origination_principal
+_ORIGINATION_DATE = SPLIT_LOAN.origination_date
+_RATE = SPLIT_LOAN.rate
+_ANCHOR_BALANCE = SPLIT_LOAN.anchor_balance
+_ANCHOR_DATE = SPLIT_LOAN.anchor_date
+_P1 = SPLIT_LOAN.p1
+_P2 = SPLIT_LOAN.p2
+_P3 = SPLIT_LOAN.p3
 _AS_OF = date(2026, 12, 31)
 # The origination a case takes when a payment is walked BEFORE its true-up: the
 # month before P1's 02-01 installment (plan step recurrence:R16-c-2, ruling

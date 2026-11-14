@@ -172,7 +172,8 @@ EVT_SESSIONS_INVALIDATED = _register(
 )
 EVT_OTHER_SESSIONS_INVALIDATED = _register(
     "other_sessions_invalidated", AUTH,
-    "Background helper invalidated every session except the current one.",
+    "A backup-code sign-in at /mfa/verify ended every earlier sign-in and "
+    "every trust of the user.",
 )
 EVT_REAUTH_FAILED = _register(
     "reauth_failed", AUTH,

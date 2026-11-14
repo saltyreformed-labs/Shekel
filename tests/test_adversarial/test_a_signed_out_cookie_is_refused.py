@@ -19,6 +19,8 @@ nginx's half of the finding, plan#2169.)
 
 from datetime import datetime, timedelta, timezone
 
+import pytest
+
 from app.extensions import db
 from app.services import sign_in_service
 from app.utils.bearer_tokens import token_hash
@@ -46,7 +48,8 @@ def _sign_out(browser):
 class TestACopyDiesWithTheSignOut:
     """A copy taken before the sign-out is refused after it, and only it."""
 
-    def test_a_copy_works_until_the_sign_out_and_never_after(self, app, seed_user):
+    @pytest.mark.usefixtures("seed_user")
+    def test_a_copy_works_until_the_sign_out_and_never_after(self, app):
         """The control is the same copy signed in a request before the sign-out."""
         browser = log_in_seed_user(app.test_client())
         copy = copy_of(app, browser)
@@ -72,7 +75,8 @@ class TestACopyDiesWithTheSignOut:
         assert is_signed_in(other)
         assert trusted_device_ids(user_id) == trusted
 
-    def test_a_session_whose_record_is_gone_is_refused(self, app, seed_user):
+    @pytest.mark.usefixtures("seed_user")
+    def test_a_session_whose_record_is_gone_is_refused(self, app):
         """However good its cookie: the record, not the cookie, answers.
 
         The record is deleted as a sign-out on another copy would delete it.
@@ -133,7 +137,14 @@ class TestTheRecord:
     def test_a_sign_in_purges_the_users_records_past_thirty_days(
         self, app, seed_user,
     ):
-        """Thirty days to the second is dead, and goes; a second younger stays."""
+        """A sign-in deletes its user's records past thirty days, and keeps one a minute short.
+
+        The clock runs, so the first record is past thirty days by the sign-in
+        and the second a minute short of it.  The purge reads the one
+        statement of when a record is live (``sign_in_service._live``), whose
+        boundary to the second is graded with the clock frozen in
+        ``tests/test_utils/test_session_helpers.py::TestSignInIsLive``.
+        """
         user_id = seed_user["user"].id
         now = datetime.now(timezone.utc)
         dead = sign_in_service.record_sign_in(user_id, None, now=now - _THIRTY_DAYS)

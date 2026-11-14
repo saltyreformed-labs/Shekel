@@ -134,7 +134,8 @@ class TestThirtyDaysAfterItsSignIn:
 
             assert is_signed_in(browser) is still_signed_in
 
-    def test_a_session_without_its_sign_in_token_is_refused(self, app, seed_user):
+    @pytest.mark.usefixtures("seed_user")
+    def test_a_session_without_its_sign_in_token_is_refused(self, app):
         """Every session open at the release has none, so each signs in once then.
 
         The control is the same session with its token, a request before.

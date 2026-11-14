@@ -54,7 +54,7 @@ class UserScopedMixin:
 
     Applied to the user-owned tables whose ``user_id`` is exactly this
     shape: a NOT NULL CASCADE FK with no ``unique`` qualifier and
-    PostgreSQL's default constraint name.  Five ``user_id`` columns are
+    PostgreSQL's default constraint name.  Six ``user_id`` columns are
     deliberately EXCLUDED because their DDL differs:
 
       * ``ref.*`` per-user override rows (``AccountType``) -- the FK is

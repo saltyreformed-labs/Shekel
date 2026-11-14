@@ -58,9 +58,8 @@ class TestExecuteRotation:
         timestamp at or after the call time, and the return value
         equals the row count (3 in this case).
 
-        Uses three users so the test catches any bug that updates only
-        the first row matched (a common SQLAlchemy ``update()`` pitfall
-        when ``synchronize_session`` is not set).
+        Uses three users so the test catches a rotation that signs out
+        only the first user it reads.
         """
         _make_user("u1@example.com")
         _make_user("u2@example.com")
@@ -77,18 +76,18 @@ class TestExecuteRotation:
         assert len(users) == 3
         for user in users:
             assert user.trusts_ended_at is not None
-            # The bump timestamp must be at or after the call time.
-            # Allow microsecond drift -- ``datetime.now`` and the
-            # SQL bump can differ by a single ULP.
-            assert user.trusts_ended_at >= start - timedelta(seconds=1)
+            # The bump is at or after the call: the script reads its one
+            # instant after ``start``, and a timestamptz keeps a
+            # datetime's microseconds.
+            assert user.trusts_ended_at >= start
 
     def test_rotate_sessions_preserves_other_columns(self, app, db, seed_user):
-        """The bump must not touch other user columns.
+        """The rotation must not touch the user's other columns.
 
-        Regression guard: an UPDATE that mistakenly omits the WHERE
-        clause or names too many columns could trash ``email`` or
-        ``password_hash``.  We snapshot every observable column on
-        ``seed_user`` before the bump and compare after.
+        Regression guard: an act that wrote more than
+        ``trusts_ended_at`` could trash ``email`` or ``password_hash``.
+        We snapshot every observable column on ``seed_user`` before the
+        rotation and compare after.
         """
         user_id = seed_user["user"].id
         before = {

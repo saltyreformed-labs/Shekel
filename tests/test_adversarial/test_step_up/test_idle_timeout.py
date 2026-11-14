@@ -207,7 +207,8 @@ class TestTheOneIdleRule:
     not see it; these date the cookie too (:func:`_idle_for`).
     """
 
-    def test_a_longer_idle_window_is_honoured(self, app, client, seed_user, monkeypatch):
+    @pytest.mark.usefixtures("seed_user")
+    def test_a_longer_idle_window_is_honoured(self, app, client, monkeypatch):
         """With a 24-hour window, a browser idle for 13 hours is still signed in."""
         monkeypatch.setitem(app.config, "IDLE_TIMEOUT_MINUTES", _A_DAY_IN_MINUTES)
         with app.app_context():
@@ -243,7 +244,8 @@ class TestTheOneIdleRule:
                 with later.app_context():
                     db.engine.dispose()
 
-    def test_past_the_default_window_shekels_rule_refuses_it(self, app, client, seed_user):
+    @pytest.mark.usefixtures("seed_user")
+    def test_past_the_default_window_shekels_rule_refuses_it(self, app, client):
         """At the default 12 hours, a browser idle for 13 hours is refused by ``load_user``.
 
         Flask opened the cookie, so the refusal is Shekel's: the session it

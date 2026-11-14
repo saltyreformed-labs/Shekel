@@ -93,7 +93,7 @@ class TestTheActualHalfAsksTheAmountModel:
 
     **The kernel was public, documented as the shared "what did this row
     actually cost" rule, and reached by exactly one settled-only caller** -- so
-    every case in this file drove it through the arm that returns a settlement,
+    every case in this package drove it through the arm that returns a settlement,
     and the arm below ran nowhere in the suite.  Two neutral adversarial reviews
     of plan step X-bu found what was hiding there: it read the row's own
     ``estimated_amount`` column and REFUSED a row carrying none, which is
@@ -111,7 +111,7 @@ class TestTheActualHalfAsksTheAmountModel:
     coordinator's ruling, 10-15; not an R-BAL167 class).  A transfer LEG
     takes the fall-through's other arm --
     :func:`~app.services.cash_ledger.resolve_amount` prices it off its
-    parent -- and
+    parent -- and ``test_the_scope_and_the_cash_flow_set.py``'s
     :meth:`TestATransferIsALegOfItsParent.test_a_leg_reads_its_record_when_settled_else_its_plan`
     grades that arm (an unsettled leg's actual is its plan, ``$75.00``).
     """
@@ -259,7 +259,7 @@ class TestASettledRowWhosePlanIsDerivedIsPriced:
         resolver's own OWN arm, so the one-token answer this list reached for is
         gone.  X-bu also took the ACTUAL half's fall-through onto the same
         resolver, which is the sibling case ``TestTheActualHalfAsksTheAmountModel``
-        below pins.*
+        above pins.*
 
         **It asserts the FIGURE, not the absence of an exception.**  A test that
         only proved this returns at all would pass against a fix that priced the

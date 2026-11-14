@@ -104,7 +104,9 @@ def _append_period(seed_user, seed_periods):
     Reproduces exactly what ``pay_period_admin.extend_pay_periods`` returns: a
     flushed batch of new, EMPTY periods, and nothing else changed.  The
     repopulation is the caller's second call since ruling **R-R38**, which is
-    what :func:`_populate` runs.
+    what
+    :func:`~app.services.period_population.populate_periods_from_active_templates`
+    runs.
 
     Args:
         seed_user: The ``seed_user`` fixture dict.

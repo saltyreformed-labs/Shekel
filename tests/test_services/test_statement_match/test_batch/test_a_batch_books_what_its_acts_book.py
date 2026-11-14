@@ -30,7 +30,7 @@ from ._helpers import _match, _creation
 class TestABatchBooksWhatTheSameActsBookOneAtATime:
     """**The firing control for the whole step**, and it was missing.
 
-    Everything else in this module grades COUNTS, refusal sentences and row
+    Everything else in this package grades COUNTS, refusal sentences and row
     existence.  None of that can see the thing the step actually risks: one
     derivation is shared across every act, and a candidate's price from that
     derivation feeds exactly one consumer -- ``_accept._reject_unbalanced``,
@@ -213,7 +213,8 @@ class TestABatchBooksWhatTheSameActsBookOneAtATime:
                 # registry and both create zero envelopes.  Two adversarial
                 # reviews measured that independently 2026-08-20.  What does
                 # measure it is
-                # ``TestConvergingMovesTheSameMoneyAsNotConverging`` below,
+                # ``test_one_envelope_per_answer.py``'s
+                # ``TestConvergingMovesTheSameMoneyAsNotConverging``,
                 # which needs its own fixture and its own comparison because
                 # the row-count comparison here is exactly what convergence is
                 # SUPPOSED to change.

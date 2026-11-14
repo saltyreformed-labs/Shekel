@@ -125,7 +125,8 @@ class TestResolveObservationDay:
         plan step X-f1c4c demonstrated: ``tests/test_services/conftest.py``
         applies a directory-wide autouse ``freeze_today`` that pins BOTH clocks
         to the same civil day, so a mutant reading ``date.today()`` passed all
-        30 tests in this file.  It was caught only by the route suite, and only
+        30 tests in the one file these parts were split from.  It was caught
+        only by the route suite, and only
         under CI's ``TZ=Pacific/Kiritimati`` -- invisible on the developer's own
         machine.
 

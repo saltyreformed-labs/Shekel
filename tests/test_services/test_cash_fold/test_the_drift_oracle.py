@@ -456,9 +456,11 @@ class TestTheDriftOracleWalksFiftyTwoPeriods:
     stated so the boundary is known instead of discovered.**  (1) Ignoring
     ``due_date`` entirely lands every ordinary planned row on its own period's
     start, invisible at period-END grain; the day a row lands on is graded at
-    day grain by :class:`TestThePlannedTier` above.  (2) Shifting every
+    day grain by ``test_the_planned_tier.py``'s :class:`TestThePlannedTier`.
+    (2) Shifting every
     assertion's ``visible_on`` by a day moves neither assertion out of its own
-    period; that is :class:`TestEveryAssertionIsReplayed`'s subject.  (3) The
+    period; that is ``test_an_assertion_covers_what_preceded_it.py``'s
+    :class:`TestEveryAssertionIsReplayed`'s subject.  (3) The
     four zero-worth rows cannot be leaked by any SINGLE-point defect: the SQL
     clause pair (``balance_contributing_clause`` / ``is_projected_clause``), the
     Python predicate ``sum_projected`` re-applies, and

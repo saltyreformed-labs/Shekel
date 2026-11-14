@@ -177,8 +177,9 @@ def _post(auth_client, seed_user, fields, page, pane=None, opened=None):
 def _apply_action(page):
     """Return the Apply form's ``action``, exactly as the page emits it.
 
-    Scraped rather than composed, which is :func:`_undo_control`'s rule for
-    the Undo form one door over.
+    Scraped rather than composed, which is the rule
+    ``test_the_settled_tabs.py``'s :func:`_undo_control` follows for the Undo
+    form one door over.
 
     Args:
         page: The rendered page or body.
@@ -292,7 +293,8 @@ def _consent_options(pane, line_id):
     Plan step ``bank_import:X-gp``.  :func:`~tests.test_routes._statement_forms
     .reconcile_offerable` keeps what a browser could SUBMIT, which leaves out
     a disabled option -- and whether a refused landing is still SHOWN is one
-    of the things this file grades.  This reads the options' values in
+    of the things ``test_where_a_difference_goes.py`` and
+    ``test_the_scriptless_pane.py`` grade.  This reads the options' values in
     document order, hidden fields excluded.
 
     **The scriptless PLACEHOLDER is not an option and is not returned.**  The

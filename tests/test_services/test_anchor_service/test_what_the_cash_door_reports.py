@@ -119,7 +119,8 @@ class TestTheCashDoorReportsWhatGovernsEitherSide:
     owner's lock, and twice after it.  The report carries both records, read
     inside the lock; these grade its three shapes with hand-computed figures.
     Every day is derived backward from ``display_today()`` and checked against
-    the schedule's floor, as ``TestBackDatedCashTrueUp`` does.
+    the schedule's floor, as ``test_the_day_an_assertion_is_for.py``'s
+    ``TestBackDatedCashTrueUp`` does.
     """
 
     @staticmethod
@@ -358,8 +359,8 @@ class TestTheStagerReadsTheDaysRecordOnlyBeforeTheLatest:
           row itself, equal in both.  This is the arm the separate read
           exists for: compared against the latest, (O+20, $900.00), no
           back-dated re-save could ever be equal, and each would append a
-          duplicate (the defect ``TestBackDatedCashTrueUp`` grades through
-          the door).
+          duplicate (the defect ``test_the_day_an_assertion_is_for.py``'s
+          ``TestBackDatedCashTrueUp`` grades through the door).
 
         Each call is rolled back, so nothing is written and the second arm
         reads what the first did.  Before each rollback, inside the stager's

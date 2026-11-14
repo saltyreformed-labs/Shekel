@@ -152,10 +152,11 @@ class TestTheFiveAnswersRoundTrip:
     mapping fails here on the day it is added.
 
     **It did exactly that on 2026-08-31**, when ruling **R-HT(a)**'s
-    :attr:`~._rules.RuleAnswer.INCOME_CATEGORY` was added: all three cases
-    failed on their ``set(fields) == set(RuleAnswer)`` guard before any of them
-    reached a database, which is the cheapest place to learn it.  That guard is
-    why the maps below stay literal rather than derived from the enum.
+    :attr:`~app.services.statement_match._rules.RuleAnswer.INCOME_CATEGORY`
+    was added: all three cases failed on their ``set(fields) == set(RuleAnswer)``
+    guard before any of them reached a database, which is the cheapest place to
+    learn it.  That guard is why the maps below stay literal rather than
+    derived from the enum.
     """
 
     def test_every_answer_reads_back_as_itself(self, app, db, seed_user):

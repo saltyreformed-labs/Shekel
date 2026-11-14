@@ -477,7 +477,8 @@ class TestANewEnvelopeAnswerReusesOneOfThatNameHere:
 
         A rule comparing against the label would be comparing against the span
         too, so it would never match -- and the convergence would silently do
-        nothing while every test above still passed if they compared labels.
+        nothing while every other test in this package still passed if they
+        compared labels.
         """
         category = seed_user["categories"]["Groceries"]
         existing = a_one_off_envelope(

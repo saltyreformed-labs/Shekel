@@ -158,7 +158,9 @@ def _grid_value(ctx):
     PLAIN -- but for a modelled kind they now answer differently BY DESIGN
     (ruling R-W), and a reader on the wrong one would prove nothing about the
     grid while looking like it did.  One reader, on the entry the route uses,
-    for the cash matrix and both modelled locks below.
+    for the cash matrix and both modelled locks (``test_the_asset_surfaces_agree.py``
+    and ``test_the_locks_catch_an_injected_divergence.py``'s
+    ``TestPerKindSeamInjectionLock``).
     """
     view = balance_at.grid_balance_view(
         CashFlowSet.single(ctx["account"]), _bctx(ctx),
@@ -169,7 +171,9 @@ def _grid_value(ctx):
 def _grid_current_period_value(ctx):
     """Read the grid's balance for the CURRENT period.
 
-    The modelled per-kind locks below compare every surface at the current
+    The modelled per-kind locks (``test_the_asset_surfaces_agree.py`` and
+    ``test_the_locks_catch_an_injected_divergence.py``'s
+    ``TestPerKindSeamInjectionLock``) compare every surface at the current
     period (``_modelled_current_balance``), where the cash matrix compares at
     the anchor -- so the grid needs a reader at each convention rather than one
     that silently answers the wrong column.  Both go through the same
@@ -346,7 +350,8 @@ def _assert_surfaces_equal(surface_values, expected, label):
 
 # ── Per-kind cross-page locks: loan / property / investment / secured ──
 #
-# The cash matrix above locks the five checking surfaces.  These classes
+# The cash matrix above locks the five checking surfaces.  The classes of
+# ``test_the_loan_surfaces_agree.py`` and ``test_the_asset_surfaces_agree.py``
 # extend the same cross-page contract to the recompute-at-read kinds the
 # balance_at seam (Level 1) will reroute -- loan, property (appreciating),
 # investment -- plus the property<->mortgage home-equity relationship.  Each

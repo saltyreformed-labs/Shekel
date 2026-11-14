@@ -13,11 +13,12 @@ def _batch(seed_user, matches=(), creations=(), incomes=(), skips=()):
 
     Args:
         seed_user: The seeded user bundle.
-        matches: :class:`MatchSubmission` values.
+        matches: :class:`~app.services.statement_match.MatchSubmission` values.
         creations: :class:`PurchaseCreation` values.
-        incomes: :class:`IncomeCreation` values (ruling **bank_import:R-GW**).
-        skips: :class:`SkipRequest` values (ruling **bank_import:R-JG**, plan
-            step ``bank_import:X-gj-4b``).
+        incomes: :class:`~app.services.statement_match.IncomeCreation` values
+            (ruling **bank_import:R-GW**).
+        skips: :class:`~app.services.statement_match.SkipRequest` values
+            (ruling **bank_import:R-JG**, plan step ``bank_import:X-gj-4b``).
 
     Returns:
         The :class:`~app.services.statement_match.BatchOutcome`.
@@ -45,7 +46,7 @@ def _match(seed_user, lines=(), transactions=(), entries=(), residual=None):
     the figure and revision the owner was looking at, and the door refuses one
     whose row has moved since.  Deriving here rather than taking the caller's
     scope keeps the helper's contract the same as it was -- a case that wants
-    a STALE item builds one deliberately, and several below do.
+    a STALE item builds one deliberately, and several in this package do.
     """
     return a_submission(
         a_scope(seed_user),

@@ -14,7 +14,8 @@ def test_the_frozen_clock_is_strictly_inside_its_month():
     """The precondition the module's expectations rest on, asserted.
 
     A fixture that silently stops exercising what it names is this codebase's
-    signature defect.  Without this, a future edit to the freeze above could put
+    signature defect.  Without this, a future edit to the freeze in this
+    package's ``conftest.py`` could put
     the clock back on a month boundary and every ``expected_balance`` would be
     graded against the wrong day again -- silently for 11 months of the year.
     """
@@ -64,7 +65,7 @@ class TestCrossPageBalanceEquality:
         """C11-1..C11-4: every surface returns the case's expected Decimal.
 
         Hand-computed arithmetic for each case is in the case dict's
-        comment block above.  The assertion is dual: (a) every surface
+        comment block in ``_helpers.py``.  The assertion is dual: (a) every surface
         equals the case's ``expected_balance``, (b) the surfaces all
         equal each other (the cross-page invariant E-04 / HIGH-01
         governs).  Asserting both catches the failure mode "every
@@ -115,7 +116,8 @@ class TestCrossPageBalanceEquality:
             # the symptom-tuple data even when the Decimal is negative or zero
             # (the empty-state / falsy guards the routes used to have are not
             # silently zeroing the balance).  ``GET /accounts/<id>/details`` is
-            # exercised AND value-checked by ``_accounts_checking_value`` above,
+            # exercised AND value-checked by ``_helpers.py``'s
+            # ``_accounts_checking_value``,
             # so it is not re-fetched here.
             resp = auth_client.get("/grid")
             assert resp.status_code == 200, (

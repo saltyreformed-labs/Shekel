@@ -79,7 +79,8 @@ def _record(seed_user, line, minted=None, applied_by_rule=False, **destination):
         line: The recorded bank line to record.
         minted: What this REQUEST has already created.  ``None`` gives each
             call its OWN empty registry, which is the HAND path -- one line,
-            one request -- and is what every case here means unless it says
+            one request -- and is what every case in this package means unless
+            it says
             otherwise.  A case about a SWEEP passes one registry to several
             calls, because that is what one press is.
         applied_by_rule: Which consent this act had (ruling **R-GT**).
@@ -87,7 +88,7 @@ def _record(seed_user, line, minted=None, applied_by_rule=False, **destination):
             itself argues for: the production signature is keyword-only with no
             default, so no writer can claim consent by omission, and a HELPER
             that spelled it at 40 call sites would say nothing at any of them.
-            Every case in this module is the review screen's own destination
+            Every case in this package is the review screen's own destination
             select unless it says otherwise, which is ``False``.
         **destination: The ``PurchaseCreation`` destination fields.
 
@@ -104,7 +105,7 @@ def _record(seed_user, line, minted=None, applied_by_rule=False, **destination):
         minted if minted is not None else _create.MintedEnvelopes.none_yet(),
         # ...and the ANSWERS this test has staged, for the same reason: a
         # helper handing the door an empty ``CreationBars`` would make every
-        # case below blind to ruling R-GJ's refusal.
+        # case in this package blind to ruling R-GJ's refusal.
         an_answers(seed_user),
         applied_by_rule=applied_by_rule,
     )

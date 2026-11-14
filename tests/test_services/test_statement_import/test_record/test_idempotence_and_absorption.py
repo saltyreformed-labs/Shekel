@@ -127,7 +127,8 @@ class TestItAbsorbsWhatALaterExportAdds:
         transaction day carries NULL, and a match writes that day onto a
         matched purchase's ``purchased_on`` (ruling **R-FW**).  Without this
         arm a re-import of the very same file left the column NULL forever --
-        the running-balance defect above, on a column that feeds a date write.
+        the running-balance defect (the case below), on a column that feeds a
+        date write.
         Found by adversarial financial review 2026-08-18, which measured the
         re-import leaving it untouched.
         """

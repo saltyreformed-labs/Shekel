@@ -461,8 +461,8 @@ class TestAStandingNeverAnswerIsNotADisposition:
         A line with no available act is a holding state; this one keeps MATCH,
         so it is work.  And unlike a card payment it has a door worth naming:
         the owner gave this answer and can give another, which
-        :attr:`~._bars.BarredLine.answer_door` withholds for a bar no answer
-        lifts.
+        :attr:`~app.services.statement_match._bars.BarredLine.answer_door`
+        withholds for a bar no answer lifts.
         """
         a_transaction(seed_user, name="Groceries", is_envelope=True)
         self._a_never_answered_swipe(seed_user, db)
@@ -487,8 +487,8 @@ class TestAnUNANSWEREDInflowIsNeverPreFilled:
     **What R-HX bounded was an app that could not DEFEND a destination**, and
     plan step ``bank_import:X-gj-2a`` shipped the one it named -- so this class
     now grades the half that is unchanged: a deposit no standing rule answers
-    for still asks.  Its sibling
-    :class:`TestAnANSWEREDInflowIsPreFilledByItsRule` grades the other half.
+    for still asks.  Its sibling, ``test_the_pre_fill_and_pane.py``'s
+    :class:`TestAnANSWEREDInflowIsPreFilledByItsRule`, grades the other half.
     """
 
     def test_a_deposit_asks_rather_than_proposing(self, app, db, seed_user):

@@ -194,7 +194,8 @@ class TestALinePayingAnAccountTheyHoldIsNotExplainedByNothing:
     """
 
     #: What SECU files a card payment under, verbatim, which is the one string
-    #: :data:`~._vocabulary.ACCOUNT_PAYMENT_CATEGORIES` holds for that adapter.
+    #: :data:`~app.services.statement_match._vocabulary.ACCOUNT_PAYMENT_CATEGORIES`
+    #: holds for that adapter.
     CARD_PAYMENT = "Financial Services/Credit Card Payment"
 
     def test_the_door_refuses_it(self, app, db, seed_user):
@@ -279,9 +280,9 @@ class TestTheExclusivityRunsBOTHWays:
     admits is silent**: the line carries a match AND a skip, renders a card on
     the Explained tab and another on the Skipped tab, is absent from the inbox
     for two independent reasons, and nothing raises.  It is refused in
-    :func:`~._resolve.load_lines`, which is the ONE place all three match
-    doors resolve a submitted line, so a fourth door inherits it by calling
-    that function.
+    :func:`~app.services.statement_match._resolve.load_lines`, which is the ONE
+    place all three match doors resolve a submitted line, so a fourth door
+    inherits it by calling that function.
     """
 
     def _skipped_line_and_a_row(self, db, seed_user):
@@ -346,15 +347,15 @@ class TestTheExclusivityRunsBOTHWays:
     ):
         """The claim that this lives in ONE place, MEASURED at a second door.
 
-        :func:`~._resolve.load_lines` is called by
-        :func:`~._accept.accept_match`, by
-        :func:`~._create.create_purchase_from_line`, by the income door and by
-        the preview.  The class docstring says a door inherits the refusal by
-        calling it; asserting that of only ``accept_match`` leaves the claim
-        untested at every other door.  ADD is one of ruling **R-HP**'s own four
-        verbs, so *a skipped line becomes a purchase* is exactly the
-        two-answers state this class forbids.  Named by adversarial
-        test-quality review 2026-09-02.
+        :func:`~app.services.statement_match._resolve.load_lines` is called by
+        :func:`~app.services.statement_match._accept.accept_match`, by
+        :func:`~app.services.statement_match._create.create_purchase_from_line`,
+        by the income door and by the preview.  The class docstring says a door
+        inherits the refusal by calling it; asserting that of only
+        ``accept_match`` leaves the claim untested at every other door.  ADD is
+        one of ruling **R-HP**'s own four verbs, so *a skipped line becomes a
+        purchase* is exactly the two-answers state this class forbids.  Named by
+        adversarial test-quality review 2026-09-02.
         """
         envelope = an_envelope(seed_user)
         line = an_unexplained_outflow(seed_user)

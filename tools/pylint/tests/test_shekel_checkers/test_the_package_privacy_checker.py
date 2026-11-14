@@ -516,9 +516,10 @@ class TestShekelPackagePrivacyChecker(CheckerTestCase):
         rootdir cannot import -- so the resolution failed, the checker
         fail-CLOSED as designed, and the assertion fired whenever this class
         ran alone (measured: 1 failed / 30 passed).  It read green in a
-        whole-file run only because ``TestShekelBalanceSeamChecker`` parses a
-        synthetic module under the real name ``app.services.balance_at._context``
-        earlier in the file and warmed astroid's cache.  The plan's proposed
+        whole-file run only because ``TestShekelBalanceSeamChecker`` (now
+        ``test_the_balance_seam_checker.py``'s) parses a synthetic module under
+        the real name ``app.services.balance_at._context`` earlier in the one
+        file the two classes shared then, and warmed astroid's cache.  The plan's proposed
         fix -- give the synthetic importer a real ``path=`` -- was measured and
         does NOT work: ``_importer_file_inside`` has to resolve the same
         unresolvable name, so the message is emitted with or without the path.

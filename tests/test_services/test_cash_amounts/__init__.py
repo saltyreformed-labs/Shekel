@@ -26,7 +26,7 @@ What did NOT move, and why the split is not "the whole file":
   its two arms calls the shared reduction -- so they stayed with that module and
   died with it at plan step X-g4b.
 
-**Plan step X-g4b then moved C5-8 here too** --
+**Plan step X-g4b then moved C5-8 here too** -- ``test_the_reservation.py``'s
 :meth:`TestTheEntriesRelationshipIsNotASeam.test_the_silent_degrade_seam_is_absent_from_source`,
 the STATIC guard that the CRIT-01 short-circuit has not been re-introduced.  It
 lived in ``test_balance_resolver.py``, which died with ``balances_for``; its

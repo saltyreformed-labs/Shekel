@@ -192,7 +192,7 @@ together.  Traced, the four misclassifications split three to one:
   existed, *"answer the newest version, ignore supersession"* passed every
   perturbation;
 * the LOAN_PAYMENT rule prices **0 rows** here, so it is graded by
-  ``test_amount_source`` and by nothing in this file;
+  ``test_amount_source`` and by nothing in this harness;
 * ``budget.transfers.amount`` -- the second column ruling R-FI's CHECK covers --
   is never priced or graded here at all: this harness walks transaction rows,
   and it reached a transfer only THROUGH its shadows, which plan step
@@ -362,7 +362,8 @@ def _superseded(txn):
 def _resolves_to_newest_version(txn):
     """Whether *txn*'s answer comes from the LATEST version its template states.
 
-    The partition :func:`_expect_newest_transaction_version` grades, and it is
+    The partition ``_amount_resolver_perturbations.py``'s
+    :func:`_expect_newest_transaction_version` grades, and it is
     **NOT** ``not _superseded(txn)``.  A first draft used that and it is wrong
     for a row whose due date PRECEDES every version its template holds:
     ``template_amount_service.amount_as_of`` back-projects and holds FLAT at the
@@ -513,7 +514,8 @@ def _score(perturbation, records, after):
     """Grade one perturbation's re-resolution against every row's expectation.
 
     Args:
-        perturbation: The :class:`_Perturbation` that was applied.
+        perturbation: The ``_amount_resolver_perturbations.py``'s :class:`_Perturbation`
+            that was applied.
         records: Every pass-1 record; each gains this perturbation's answer.
         after: ``{transaction id: (amount, refusal)}`` from the re-resolution.
 
@@ -637,7 +639,8 @@ def _report_perturbation(perturbation, sources, score):
     nothing", which would be finding N-445 one layer up.
 
     Args:
-        perturbation: The :class:`_Perturbation` that was applied.
+        perturbation: The ``_amount_resolver_perturbations.py``'s :class:`_Perturbation`
+            that was applied.
         sources: How many source rows it mutated.
         score: The :class:`_Score` :func:`_score` returned.
     """
@@ -743,8 +746,9 @@ def _stamp_control_raise(records):
     """Stamp which rows the ``salary_raise`` perturbation must reach.
 
     Read from :func:`_control_raise_month` -- the SAME producer
-    :func:`_apply_salary_raise` lands the raise with, called twice rather than
-    spelled twice, so the perturbation and its expectation cannot come to
+    ``_amount_resolver_perturbations.py``'s :func:`_apply_salary_raise` lands
+    the raise with, called twice rather than spelled twice, so the
+    perturbation and its expectation cannot come to
     disagree about which month it landed on.
 
     Args:

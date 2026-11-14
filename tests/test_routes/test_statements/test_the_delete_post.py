@@ -101,8 +101,9 @@ class TestTheDeletePost:
         # The imports table renders each evidence sentence in a ``title``
         # attribute, so a bare ``in body`` has passed here against a receipt
         # that said nothing at all -- and the 2026-08-23 review measured that
-        # flipping every category to ``success`` left all 32 cases in this file
-        # green.  Named by adversarial test-quality review 2026-09-02.
+        # flipping every category to ``success`` left all 32 cases of the one
+        # file these parts were split from green.  Named by adversarial
+        # test-quality review 2026-09-02.
         toasts = _flash_toasts(response.get_data(as_text=True))
         assert any(
             "1 line(s) you had skipped went with them" in message

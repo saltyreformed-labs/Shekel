@@ -385,8 +385,9 @@ class TestTheMatchPaneIsReachableWithNoScript(
 class TestTheScriptlessPathRECORDSTheMatch:
     """The ACT plan step ``bank_import:X-gi-1`` exists to restore.
 
-    **Every other case in this file reads BYTES.**  Both adversarial reviews
-    of 2026-09-05 said the same thing about that: nothing asserted the parked
+    **Every other case in its file read BYTES when this one was added.**
+    Both adversarial reviews of 2026-09-05 said the same thing about that:
+    nothing asserted the parked
     card payment could actually be explained again, and a page that renders
     the right markup while the door records nothing is precisely the failure
     this package has shipped before -- a primary arm dead in a browser with

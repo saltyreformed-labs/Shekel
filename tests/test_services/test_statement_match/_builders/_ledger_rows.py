@@ -87,8 +87,9 @@ def a_transaction(
             **A case needs this where the ACCOUNT is the variable** rather than
             the row -- an account whose books open INSIDE the pay calendar is
             a shape the seeded one cannot be restated into, so a destination on
-            it has to be built here.  ``a_scope`` and ``an_import`` beside this
-            already take the same parameter for the same reason.
+            it has to be built here.  ``_filing_and_the_pass.py``'s ``a_scope``
+            and ``_statement_rows.py``'s ``an_import`` already take the same
+            parameter for the same reason.
 
     Returns:
         The staged :class:`~app.models.transaction.Transaction`.

@@ -312,7 +312,8 @@ class TestApplyLoanAnchorTrueUpUnchanged:
 class TestApplyLoanAnchorTrueUpReraisesUnknownIntegrityError:
     """An unexpected ``IntegrityError`` propagates rather than being swallowed.
 
-    The loan twin of the checking class above.  Its ``except IntegrityError``
+    The loan twin of ``test_the_cash_true_up.py``'s checking class.  Its
+    ``except IntegrityError``
     lived in ``loan_posting_service.sync_all_scenarios_or_duplicate``, which the
     loan anchor path stopped calling at plan step X-f1c4b (the ARM rate change kept that
     translation, its EDITABLE table's unique key being a real business rule, and holds it

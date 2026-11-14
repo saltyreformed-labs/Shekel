@@ -36,7 +36,8 @@ class TestARuleNamingAOneOffEnvelopePlacesItsRowFromThisPage:
     line falls in a paycheck holding no row of it.  The card offers ONE
     option for that -- the placement's own token -- and OK then Apply places
     the definition's row there and records the purchase into it.  Kept in
-    its own class: ``bank_import:X-gz`` lands its cases in this module too.
+    its own class: ``bank_import:X-gz`` lands its cases in this package too,
+    in ``test_the_match_pane.py``.
     """
 
     def test_the_card_offers_the_place_option_and_apply_places_the_row(
@@ -305,7 +306,7 @@ class TestANeverAnswerReturnsItsLineToTheInbox:
     **The staging is deliberately an ORDINARY swipe merchant.**  A merchant a
     source ALSO files as paying an account the owner holds is a transfer
     whatever they answered, stays parked, and is graded by
-    :class:`TestAVerbWithNoDoorRendersNoControl`.
+    ``test_the_doors.py``'s :class:`TestAVerbWithNoDoorRendersNoControl`.
     """
 
     @staticmethod

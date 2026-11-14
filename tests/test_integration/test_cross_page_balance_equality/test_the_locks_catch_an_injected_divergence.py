@@ -29,7 +29,7 @@ class TestSeamInjectionLock:
     HIGH-01's value comes from the lock bites when a consumer
     bypasses the balance-at seam.  This test PROVES the lock is real
     -- it monkey-patches one consumer to short-circuit to a divergent
-    Decimal and asserts that
+    Decimal and asserts that ``test_the_cash_surfaces_agree.py``'s
     :class:`TestCrossPageBalanceEquality.test_all_surfaces_equal`'s
     inner assertion now FAILS.  Without this negative control a
     silently-broken equality test (e.g. one that read the same value
@@ -45,7 +45,7 @@ class TestSeamInjectionLock:
     ):
         """C11-6: monkey-patching one surface produces a divergence the lock catches.
 
-        The patch target is :func:`_savings_value` -- the /savings
+        The patch target is ``_helpers.py``'s :func:`_savings_value` -- the /savings
         surface reader.  Replacing it with a function that returns a
         Decimal known to differ from the canonical producer's output
         (the pre-Commit-5 silent-degrade value, in fact, for the

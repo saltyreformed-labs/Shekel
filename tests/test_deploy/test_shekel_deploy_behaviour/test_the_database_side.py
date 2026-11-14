@@ -58,7 +58,8 @@ class TestInitDatabaseStillRaises:
 class TestTheStampReadWaitsForAStep3StillEnding:
     """Plan step balance:X-cv, ruling R-BAL115: the re-read's SQL, on real PostgreSQL.
 
-    The stub above can pin only how the stamp question is SPELLED.  This runs
+    The stub (``_helpers.py``'s ``_write_fake_docker``) can pin only how the
+    stamp question is SPELLED.  This runs
     the script's own statement against the test database while another
     connection holds an uncommitted stamp UPDATE -- the state a stopped
     container's entrypoint step 3 leaves when its COMMIT is still on the

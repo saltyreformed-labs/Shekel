@@ -38,7 +38,8 @@ def _outstanding_debit(txn, seed_user, amount="50.00",
                        purchased_on=date(2026, 1, 5)):
     """Attach one debit purchase with NO recorded posting day.
 
-    Kept here for the helper-guard class below when the outstanding-set tests
+    Kept here for ``test_a_settled_rows_purchases_are_closed.py``'s
+    helper-guard class when the outstanding-set tests
     moved to ``test_reconcile_service`` at plan step X-f2-c1: that class grades
     ``tests._test_helpers.mark_purchase_settled``, which is about a purchase
     with no settle day, and building one is all it needs from the reconcile

@@ -7,7 +7,11 @@ periods, so every schedule extend re-read every rule as though the owner's pay
 history began at the new batch.
 
 Three measured consequences, all live on production (2026-08-08, against a
-streamed clone of ``shekel-prod-db``), one class each below:
+streamed clone of ``shekel-prod-db``), one class each in this package's parts
+(``test_the_window.py``'s ``TestAnExtendDoesNotDuplicateAMonthlyFirstRow`` for
+D22 and ``TestTheStartPeriodBoundSurvivesTheWindow`` for D2,
+``test_the_owners_schedule.py``'s ``TestThePaycheckSeesTheWholeSchedule`` for
+D25):
 
 * **D22** -- a ``Monthly First`` rule re-fired in a month it had already
   covered: 3 spurious ``Phone Allowance`` rows, $118.62, one per extend landing
@@ -33,7 +37,7 @@ salary rows disagreeing with a
   whole-schedule recompute       1 ($502.45)     0
 ```
 
-Two of the classes below were additionally ported back onto the old
+Two of the classes in ``test_the_window.py`` were additionally ported back onto the old
 ``periods``-list signature and run at ``HEAD``, where they fail on their own
 assertions: ``TestTheStartPeriodBoundSurvivesTheWindow`` generates two rows
 into paychecks the rule's start period excludes, and

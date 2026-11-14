@@ -13,13 +13,14 @@ measured through these very doors before a line of the remedy was written:
 * recording the same `-$57.96` line again moved the balance **`-$115.92`** and
   left two purchases and two budget lines for one swipe.
 
-Every test below is a FIRING CONTROL over one of those, written so it fails if
-the remedy is removed.
+Every test in this package is a FIRING CONTROL over one of those, written so
+it fails if the remedy is removed.
 
 **The arithmetic the root-cause half rests on was measured, not argued.**
 Removing a POSTED purchase from a ``purchases``-basis close leaves that row's
 own cash leg at ``0.00`` before and after and reverses only the purchase's own
 leg (``822.04 -> 880.00`` on the account); removing an UNPOSTED one moves the
 leg ``-57.96 -> 0.00``, which is the close re-pricing itself on a past day.
+``test_what_the_undo_refuses.py``'s
 :class:`TestTheSettledParentRuleIsTheArithmetic` pins both.
 """

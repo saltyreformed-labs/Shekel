@@ -21,7 +21,7 @@ period's contractual payment under ``principal + interest == payment +
 extra_payment``.  A reader can check every number without running the code.
 
 **The fold is TOTAL, so what the partial posting reader refused, this
-answers** -- pinned below, not hidden: a what-if scenario with no postings
+answers** -- pinned in ``test_the_guards.py``, not hidden: a what-if scenario with no postings
 answers from the loan's anchors rather than falling back to the resolver's
 money-blind replay.  (The reader's other refusal, a loan with no opening
 posting, finding B-12, is no state at all for a walk that reads no posting.)
@@ -29,7 +29,8 @@ posting, finding B-12, is no state at all for a walk that reads no posting.)
 And one thing it is BLIND to: a raw transaction typed onto a loan account moves
 the posted balance but not the walk (finding N-11).  That shape is forbidden at
 every write source by step BG, which is why the fold is complete by
-construction; the divergence is demonstrated at the end of this file so the
+construction; the divergence is demonstrated in ``test_what_the_walk_reads.py``
+(``TestRawLoanTransactionIsInvisibleToTheWalk``) so the
 guard's value is visible, and the guard's own home is
 ``test_transaction_guards.py``.
 

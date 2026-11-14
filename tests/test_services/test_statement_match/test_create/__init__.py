@@ -10,7 +10,7 @@ outflows** remain that no match can ever explain, 74 of them card swipes worth
 `$3,383.49` -- the app records a
 period's groceries as one envelope and the bank records every swipe.
 
-**What the door promises, and what each class below pins:**
+**What the door promises, and what each class in this package pins:**
 
 * the account's recorded outflow GROWS by exactly what the bank took;
 * the purchase is born carrying BOTH of the bank's days (**R-FW**);
@@ -21,6 +21,6 @@ period's groceries as one envelope and the bank records every swipe.
 * a new envelope is CLOSED from its own purchases, because a projected row in a
   past period is carry-forward bait.
 
-Every refusal below is a FIRING CONTROL, written to fail if the refusal were
-deleted.
+Every refusal in ``test_what_the_door_refuses.py`` is a FIRING CONTROL,
+written to fail if the refusal were deleted.
 """

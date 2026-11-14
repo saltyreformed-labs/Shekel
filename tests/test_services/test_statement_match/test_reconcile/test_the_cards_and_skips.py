@@ -32,10 +32,10 @@ class TestWhichKindOfCARDAPageHoldsIsSTATEDByWhatBuiltThem:
     because a test said so.  One case drove the table from the enum and
     another paired the table against the cards a real page held; both were
     scaffolding around the defect that the two could differ at all.
-    :func:`~._reconcile._tab_sections` returns the kind BESIDE the sections it
-    just built, so the disagreement is unrepresentable and the reconciler has
-    nothing left to reconcile (``CLAUDE.md`` rule 14: delete a home, do not
-    keep two in step).
+    :func:`~app.services.statement_match._reconcile._tab_sections` returns the
+    kind BESIDE the sections it just built, so the disagreement is
+    unrepresentable and the reconciler has nothing left to reconcile
+    (``CLAUDE.md`` rule 14: delete a home, do not keep two in step).
 
     **What replaced them is stronger and lives at the ROUTE**:
     ``test_statement_reconcile.test_the_doors
@@ -396,8 +396,8 @@ class TestTheSettledBoundIsLIFTABLE:
 
         Lifting the bound may not move the caption, and the caption must equal
         rendered plus withheld at both -- which is the same equality
-        :class:`TestACaptionCountsOnlyWhatItsTabCanDraw` grades from the other
-        side.
+        ``test_the_hero.py``'s :class:`TestACaptionCountsOnlyWhatItsTabCanDraw`
+        grades from the other side.
         """
         filed_acts(seed_user, REGISTER_LIMIT + 1, by_rule=False)
 

@@ -36,9 +36,9 @@ def _add_expense(
 
     Placed through the producer since plan step balance:X-bi-7c, so
     ``due_date=None`` means the paycheck's start (ruling R-BAL22), never an
-    undated row: the undated shape is the LEGACY one, and a case about it
-    builds :func:`_legacy_undated_expense` instead.  Returns the created
-    Transaction (flushed).
+    undated row: the undated shape is the LEGACY one, whose builder
+    ``_legacy_undated_expense`` went with plan step balance:X-bi-7d-2's
+    cutover.  Returns the created Transaction (flushed).
     """
     status_id = ref_cache.status_id(status_enum)
     txn = one_off_row_of(

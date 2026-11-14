@@ -10,7 +10,8 @@ ledger worked out from the records, which is what settling, editing,
 reverting, deleting and carrying forward a transaction still move (plan step
 plan#2914).
 
-The load-bearing properties, each pinned by a test below (until plan task plan#3097
+The load-bearing properties, each pinned by a test in this package (until plan
+task plan#3097
 the store's sync held the first and third by running LAST and gated):
 
   * a manual ``actual_amount`` books the ACTUAL not the estimate, and a
@@ -32,6 +33,6 @@ the seed Checking's $1000.00 opening the day before its origination assertion, a
 settle in this suite is stamped at SERVER now (the seam's ``db.func.now()``,
 including carry-forward's ``settle_from_entries`` default) -- after the
 origination assertion -- so the settled effects ride on top of the opening
-and the Checking totals below are ``1000.00 + effect``.  All money is
+and the Checking totals the parts assert are ``1000.00 + effect``.  All money is
 ``Decimal`` from strings, with the arithmetic shown per the testing standard.
 """

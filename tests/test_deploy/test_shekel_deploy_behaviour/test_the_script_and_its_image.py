@@ -47,7 +47,7 @@ class TestTheScriptIsInTheRepository:
     It lived only on the host, so it sat outside every linter in the polyglot
     gate and nobody could review it -- which is why F-8 survived unnoticed.
     Kept from the retired source-level file; everything else that file
-    asserted is now observed behaviourally above.
+    asserted is now observed behaviourally by this package's other parts.
     """
 
     def test_the_canonical_copy_is_present_and_executable(self):

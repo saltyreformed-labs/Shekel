@@ -374,7 +374,7 @@ class TestOnlyTheInboxSweeps:
         """The whole control, through the real producer rather than by hand.
 
         Without this, ``_sweeps`` returning ``()`` unconditionally passes the
-        suite: every other sweep assertion in this module is ``== ()``.
+        suite: every other sweep assertion in this package is ``== ()``.
         """
         self._a_clean_line_and_a_WITHHELD_one(seed_user, db)
 

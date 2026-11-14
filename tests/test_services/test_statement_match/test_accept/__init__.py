@@ -6,7 +6,7 @@ refusals is a FIRING CONTROL here -- written to fail if the refusal were
 deleted, which is the standard ``docs/plans/verification.md`` sets and which
 this project has twice measured the absence of.
 
-**What the door promises, and what each class below pins:**
+**What the door promises, and what each class in this package pins:**
 
 * a group's two sides SUM, or nothing is written and the difference is named;
 * every member row takes the bank's day -- settling a Projected row and

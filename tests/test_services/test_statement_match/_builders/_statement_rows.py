@@ -126,7 +126,8 @@ def a_bank_line(
             ``None`` for a source stating none -- which is the DEFAULT here
             because it is the majority case on the developer's own statement
             (179 of 361 lines) and because a fixture that always states one
-            would never exercise :attr:`~._offers.BankLine.happened_on`'s
+            would never exercise
+            :attr:`~app.services.statement_match._offers.BankLine.happened_on`'s
             fallback.
         merchant: What the source NAMES the merchant, as a string, or ``None``
             for a source naming none -- which is the DEFAULT, and it is a

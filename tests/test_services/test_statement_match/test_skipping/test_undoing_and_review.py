@@ -145,7 +145,7 @@ class TestTheReviewPassStopsAsking:
     def test_a_skipped_line_leaves_the_undisposed_list(
         self, app, db, seed_user,
     ):
-        """FIRING CONTROL for :func:`~._undisposed.undisposed`'s second term.
+        """FIRING CONTROL for ``statement_match._undisposed.undisposed``'s second term.
 
         Delete that ``NOT IN`` and this reads 1: the line is back, the card is
         drawn again, and the owner's answer has bought them nothing.
@@ -164,8 +164,9 @@ class TestTheReviewPassStopsAsking:
     ):
         """Ruling **R-HP**: a line with an answer is not inbox work.
 
-        **Asked through** :meth:`~._reads.ReviewSet.card_subject`, which is the
-        pass's own membership question and the UNION of ``unmatched`` and every
+        **Asked through**
+        :meth:`~app.services.statement_match._reads.ReviewSet.card_subject`,
+        which is the pass's own membership question and the UNION of ``unmatched`` and every
         proposal's lines -- so one assertion covers both sets a card can be
         drawn from, and it cannot go stale as those lists change.
 
@@ -173,7 +174,8 @@ class TestTheReviewPassStopsAsking:
         skip.*  Three of them were empty BEFORE it too, so they read the same
         on the broken tree and the fixed one; the fixture line has exactly one
         shape and could only ever have reappeared in ``creatable``.  It also
-        claimed three lists where :class:`~._reads.ReviewSet` carries five.
+        claimed three lists where
+        :class:`~app.services.statement_match._reads.ReviewSet` carries five.
         Named by adversarial test-quality review 2026-09-02.
         """
         an_envelope(seed_user)
@@ -240,10 +242,11 @@ class TestTheReviewPassStopsAsking:
         """One owner's answer may not narrow another's pass.
 
         **NOT a firing control, and saying so is the point.**  It targets
-        nothing: :func:`~._undisposed.skipped`'s ``account_id`` term is
-        redundant with the outer ``BankStatementLine.account_id`` filter every
-        caller of :func:`~._undisposed.undisposed` applies, and bank line ids
-        come from one sequence, so deleting that term leaves this case GREEN.
+        nothing: :func:`~app.services.statement_match._undisposed.skipped`'s
+        ``account_id`` term is redundant with the outer
+        ``BankStatementLine.account_id`` filter every caller of
+        :func:`~app.services.statement_match._undisposed.undisposed` applies, and
+        bank line ids come from one sequence, so deleting that term leaves this case GREEN.
         The term is a narrowed subquery and defence in depth, not a control
         this grades.  What this states is the end-to-end property -- two
         accounts, two skips, no leakage -- which is worth stating even where no

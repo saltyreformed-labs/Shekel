@@ -385,8 +385,8 @@ class TestTheScopeIsDerivedONCE:
 
     12.88 minutes of derivation became 5.80 s because the account is derived
     once per PASS rather than once per ACT.  A later change that gave a door
-    its own scope again would restore the cost silently -- every test above
-    would still pass, and the only thing that would move is the wall clock.
+    its own scope again would restore the cost silently -- every other test
+    in this package would still pass, and the only thing that would move is the wall clock.
     """
 
     def test_the_offer_set_is_built_once_however_many_items_run(

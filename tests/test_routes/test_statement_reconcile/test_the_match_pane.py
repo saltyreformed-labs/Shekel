@@ -300,7 +300,7 @@ class TestAProposedCardAppliesFromThisPageAndItsPaneLoads:
         """The control the mutation deleted, asserted by name and value.
 
         It is a HIDDEN input, so it is not something a case can discover by
-        pressing: nothing else in this file would notice it going away.
+        pressing: nothing else in this package would notice it going away.
         """
         line, _ = self._near_miss(seed_user, db)
 

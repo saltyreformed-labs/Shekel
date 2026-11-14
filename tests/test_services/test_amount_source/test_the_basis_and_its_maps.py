@@ -212,9 +212,10 @@ class TestTheBasisIsOneDerivationPerReadPass:
 
         The "fast no-op when there are no candidates" property the row-set
         producers had, KEPT rather than traded away for the sharing: both
-        derivations are lazy and each half of :func:`live_override` answers
-        ``None`` from the row's own columns before it touches one.  Without that
-        the salary projection would run on every read pass in the app.
+        derivations are lazy, so a row set that names neither kind resolves
+        neither (``live_override``, whose two halves answered ``None`` from the
+        row's own columns, went at plan step X-au-d).  Without that the salary
+        projection would run on every read pass in the app.
 
         **The BASIS is built inside the capture, and that is what makes this a
         control.**  Built outside it, an eagerly-loading derivation issues its

@@ -116,7 +116,7 @@ def _make_loan_account(seed_user, name="Helper Loan",
     Builds the minimal loan inventory the loan-anchor true-up tests
     need: an account, a :class:`LoanParams` row, and an origination
     :class:`LoanAnchorEvent`.  Mirrors the production setup in
-    :func:`app.routes.loan.create_params` so the same anchor-event
+    :func:`app.routes.loan.params.create_params` so the same anchor-event
     invariants the resolver relies on are satisfied.
 
     Returns the Account ORM instance.

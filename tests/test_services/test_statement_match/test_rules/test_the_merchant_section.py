@@ -164,8 +164,8 @@ class TestTheSectionTheScreenRenders:
 
         The other half of the old sweep rule -- a rule that does not reach
         this line's pay period places nothing either -- is graded by
-        ``TestWhatARuleResolvesTo``'s two UNRESOLVED cases, which is where
-        that partition lives.
+        ``test_what_a_rule_places.py``'s ``TestWhatARuleResolvesTo``'s two
+        UNRESOLVED cases, which is where that partition lives.
         """
         envelope = a_transaction(
             seed_user, name="Groceries", is_envelope=True,

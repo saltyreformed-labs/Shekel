@@ -24,7 +24,7 @@ from ._helpers import _url, _release_url, _page, _a_swipe_a_rule_files
 def _undo_control(page):
     """Return the first Undo form's ``(action, match_id)``, as the page emits it.
 
-    **Scraped rather than composed**, which is this module's own rule: the
+    **Scraped rather than composed**, which is this package's own rule: the
     action carries the tab and the bound in its query string, and a case that
     rebuilt that URL would grade the route while the card pointed somewhere
     else.

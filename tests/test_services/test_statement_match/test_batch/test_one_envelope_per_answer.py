@@ -67,10 +67,12 @@ class TestOnePressMintsOneEnvelopePerAnswerPerPeriod:
     ``RECORD_IN`` against an envelope of that name already in the period and is
     printed where the owner can override it.
 
-    **It moves NO money**, which the batch-vs-one-at-a-time control above now
-    measures: each purchase carries its own posting day and is its own cash
-    movement, so an envelope's own leg is `0.00` whether one envelope holds
-    four purchases or four hold one each.
+    **It moves NO money**, which the batch-vs-one-at-a-time control
+    (``test_a_batch_books_what_its_acts_book.py``'s
+    ``TestABatchBooksWhatTheSameActsBookOneAtATime``) now measures: each
+    purchase carries its own posting day and is its own cash movement, so an
+    envelope's own leg is `0.00` whether one envelope holds four purchases or
+    four hold one each.
     """
 
     def test_two_lines_in_ONE_period_share_one_envelope(

@@ -130,7 +130,7 @@ class TestTheOpeningEquityIsTheSeed:
         # before the assertion", which stopped being true when the default
         # became backward-only -- and it had to, because the unconditional
         # forward restatement shoved the books past the account's own
-        # origination everywhere else in this file.
+        # origination everywhere else in this package.
         _opened_at(
             account, _instant(2026, 2, 1), books_open_on=date(2026, 1, 31),
         )
@@ -326,7 +326,7 @@ class TestTheOpeningEquityIsTheSeed:
         (2026-03-01), and a -$250.00 record after that (2026-04-01).
         Hand-computed: $1,000.00 on 01-14, $500.00 from 01-15 -- a record
         BETWEEN the books and the first assertion, which is the state this
-        file's default ``_BOOKS_OPEN_ON`` exists to build and is not a
+        package's default ``_BOOKS_OPEN_ON`` (``_helpers.py``'s) exists to build and is not a
         pre-opening row at all -- $1,000.00 from 02-01, $2,000.00 from 03-01
         and $1,750.00 from 04-01.  **The three at-and-after figures are unchanged from before this
         step**, which is the evidence the assembly moved and the money did not.

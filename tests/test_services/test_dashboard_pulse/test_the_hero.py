@@ -477,9 +477,10 @@ class TestOneClockPerRender:
     **They could not be written against the merge base at all**, and that is
     the finding rather than a gap in the evidence: ``compute_pulse_section``
     took a ``user_id`` and built its own read pass, so no caller had a day to
-    pin.  What CAN be graded on both sides is the period itself, and
-    :class:`TestPeriodIsDerivedNotStored` below is that case -- run against
-    ``5ab457b7`` it fails with the whole region ``None``.
+    pin.  What CAN be graded on both sides is the period itself, which
+    ``TestPeriodIsDerivedNotStored`` did until plan step ``pay_calendar:C4-c``
+    deleted it (the note above this class says why) -- run against
+    ``5ab457b7`` it failed with the whole region ``None``.
     """
 
     def test_the_street_marker_follows_the_pass_day(

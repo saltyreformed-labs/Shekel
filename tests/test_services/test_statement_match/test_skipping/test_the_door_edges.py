@@ -78,10 +78,11 @@ class TestTheDoorsAreLogged:
 class TestSkippedAmongAnswersAnEmptySubmission:
     """The early return, which no door exercises and every door reaches.
 
-    :func:`~._undisposed.skipped_among` short-circuits an empty ``line_ids``
-    rather than issuing ``IN ()``.  Every caller today passes at least one id,
-    so the branch is unreached by the cases above -- and an untested branch on
-    a refusal path is one that could return the wrong thing and stay green.
+    :func:`~app.services.statement_match._undisposed.skipped_among`
+    short-circuits an empty ``line_ids`` rather than issuing ``IN ()``.  Every
+    caller today passes at least one id, so the branch is unreached by the
+    cases above -- and an untested branch on a refusal path is one that could
+    return the wrong thing and stay green.
     """
 
     def test_an_empty_submission_answers_an_empty_set(

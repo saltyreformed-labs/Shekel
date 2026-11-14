@@ -158,7 +158,8 @@ def _running_balance(account, scenario):
     ``test_cash_fold/test_the_opening_equity_is_the_seed.py``'s
     :class:`TestTheOpeningEquityIsTheSeed` does.
 
-    :class:`TestTheStepsReconstructTheReplay` proves this equals the replay's
+    ``test_the_steps_and_shapes.py``'s :class:`TestTheStepsReconstructTheReplay`
+    proves this equals the replay's
     own terminal balance by reconstructing that balance INDEPENDENTLY from the
     last assertion FACT + the post-assertion ``source_facts``, so this helper
     is a convenience rather than the only statement of the total.

@@ -298,7 +298,8 @@ class TestTheRowsClearingLinkStaysOnTheRowsAccount:
         checking line and now a card line beside it.
         """
         # Pylint: ``import-outside-toplevel`` -- the matcher's own builders,
-        # imported where used, as this module's other matcher case does.
+        # imported where used, since this is the one case in this module that
+        # reads them.
         # pylint: disable=import-outside-toplevel
         from app.services import statement_match
         from tests.test_services.test_statement_match._builders import (

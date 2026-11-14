@@ -12,7 +12,7 @@ family (``_cash_flow``), the grid's balance row (``_grid``), the modelled
 replay's cash base (``_asset_fold``) and the net-worth kernel all read this
 producer.  A test in this file that moves is a screen that moves.
 
-**Every expected figure below is HAND-COMPUTED and written out in the test that
+**Every expected figure in this package is HAND-COMPUTED and written out in the test that
 asserts it.**  None is taken from a shipping producer, and that is not a style
 preference: the shipping projection is WRONG about exactly the cases this file
 exists for (findings cash D1 / D3, and ruling R-G's absorbed past-due bill), so
@@ -30,8 +30,8 @@ implementation fails rather than a comment asserting it:
   :meth:`~TestTheOpeningMovesIntoTheSeed.test_at_and_after_the_opening_it_equals_the_zero_seeded_walk`
   is the pin on the one re-derivation the fold performs.
 * **R-G** -- a still-Projected row whose date has passed is CLAMPED FORWARD to
-  ``as_of + 1``, never absorbed (:class:`TestThePlannedTier`), with the ruling's
-  worked Checking figures.
+  ``as_of + 1``, never absorbed (``test_the_planned_tier.py``'s
+  :class:`TestThePlannedTier`), with the ruling's worked Checking figures.
 * the **instant partition** -- an assertion covers exactly the settles that
   PRECEDED it, to the second (:class:`TestSettledMoneyRidesOnTheAssertionItFollowed`),
   which is finding cash D1 and the defect the developer hit on a real Money

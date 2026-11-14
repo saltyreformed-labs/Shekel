@@ -131,7 +131,8 @@ class TestInvestmentCrossPageEquality:
             )
 
             # Route wiring: the investment detail page renders without
-            # raising (parity with the loan and property route checks above).
+            # raising (parity with the property route check above and
+            # ``test_the_loan_surfaces_agree.py``'s loan route check).
             resp = auth_client.get(f"/accounts/{ctx['account_id']}/investment")
             assert resp.status_code == 200, (
                 f"/accounts/<id>/investment returned {resp.status_code} for "

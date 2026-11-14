@@ -42,10 +42,11 @@ def _flash_toasts(body):
     """Return ``(category, message)`` for every flash toast the page rendered.
 
     **An assertion about the RECEIPT has to read the receipt**, which
-    :func:`_delete_form` next door already says about forms and which this file
-    then went on to get wrong anyway: the imports table renders each evidence
-    sentence in a ``title`` attribute, so ``sentence in response.data`` passed
-    against a receipt that said nothing at all.  Proven by isolation --
+    :func:`_delete_form` next door already says about forms and which this
+    package's receipt assertions then went on to get wrong anyway: the
+    imports table renders each evidence sentence in a ``title`` attribute, so
+    ``sentence in response.data`` passed against a receipt that said nothing
+    at all.  Proven by isolation --
     dropping the receipt sentence alone left 3 of 4 balance tests green, and
     dropping the table attribute alone left all 4 green.  Found by adversarial
     review of this step's own tests, 2026-08-23.
@@ -54,7 +55,8 @@ def _flash_toasts(body):
     message.**  ``_import_flash`` exists to say that a green tick over an
     unconfirmed balance tells the owner the opposite of what happened, and the
     same review measured that flipping every category to ``success`` -- or to
-    ``warning`` -- left all 32 tests in this file passing.
+    ``warning`` -- left all 32 tests of the one file these parts were split
+    from passing.
 
     Args:
         body: The rendered page.

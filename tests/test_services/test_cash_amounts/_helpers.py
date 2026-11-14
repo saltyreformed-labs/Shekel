@@ -152,7 +152,9 @@ class _FakeRow:  # pylint: disable=too-few-public-methods
     Deliberately missing ``entries``, and missing ``status_id`` too when
     *statusless* is set: the ordering of :func:`_entry_aware_amount`'s two
     guards is load-bearing, and that shape is what proves it (see
-    :meth:`TestTheLiveOverride.test_no_entries_short_circuits_before_the_status_read`).
+    ``test_the_projected_valuation.py``'s
+    :meth:`TestTheProjectedValuation.test_no_entries_short_circuits_before_the_status_read`,
+    the class named ``TestTheLiveOverride`` until plan step X-au-d).
 
     **It grew the pricing columns at plan step X-au-c2b and the settlement
     record's at X-au-c3**, and the reason is the restructure itself: a

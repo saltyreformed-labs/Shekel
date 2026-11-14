@@ -502,7 +502,7 @@ class TestWhatTheWriteDoorRefuses:
         Since plan step ``bank_import:X-gd-1`` this is no longer what makes a
         stored answer correct -- that is
         ``fk_merchant_rules_merchant_account``, graded by
-        :meth:`TestTheTableRefusesWhatIsNotAnAnswer
+        ``test_the_answer_set.py``'s :meth:`TestTheTableRefusesWhatIsNotAnAnswer
         .test_ANOTHER_ACCOUNTS_merchant_is_unwritable` -- so what it buys is a
         sentence rather than an ``IntegrityError`` and a logged traceback for
         what is ordinarily a stale page.  The whole submission is refused,

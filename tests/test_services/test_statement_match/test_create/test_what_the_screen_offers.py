@@ -371,7 +371,11 @@ class TestWhatTheScreenMayOFFER:
     def test_an_envelope_closed_at_a_FIXED_FIGURE_is_not(
         self, app, db, seed_user,
     ):
-        """THE money clause.  See the refusal test for the measurement."""
+        """THE money clause.  See the refusal test for the measurement.
+
+        That test is ``test_what_the_door_refuses.py``'s
+        ``test_an_envelope_the_screen_could_not_OFFER_is_refused``.
+        """
         with app.app_context():
             envelope = a_transaction(
                 seed_user, name="Mint Mobile", amount="132.69",

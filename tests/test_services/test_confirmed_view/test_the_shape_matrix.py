@@ -84,7 +84,8 @@ class TestConfirmedViewShapeMatrix:
 
         The rate steps to 9% (monthly 0.0075) effective 2026-02-01.  The split
         resolves each payment's rate period on its DUE date -- contract time,
-        ruling D5 (see :class:`TestSplitInputsKeyOnTheDueDate`) -- so all three
+        ruling D5 (see ``test_what_the_walk_reads.py``'s
+        :class:`TestSplitInputsKeyOnTheDueDate`) -- so all three
         installments, due 02-01 / 03-01 / 04-01, accrue at 9%:
 
           due 02-01 at 9%:  interest round(100000 x 0.0075) = 750.00, principal

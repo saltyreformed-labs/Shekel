@@ -26,7 +26,8 @@ closed here): ``amount_rule`` reads ``amount_source_id`` and no longer infers
 ownership from ``is_override`` or from having left Projected.  So every derived
 fixture DECLARES its relation, and the three arms that used to be inferences --
 overridden, non-Projected, soft-deleted -- are graded in
-:class:`TestTheDeclarationDecides` as the inversions they became: the flag and
+``test_which_rule_prices_a_row.py``'s :class:`TestTheDeclarationDecides` as
+the inversions they became: the flag and
 the status no longer move the rule in either direction.
 
 **The refusals are why most of this file exists.**  Zero rows on the 2026-08-12

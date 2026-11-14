@@ -123,7 +123,7 @@ class TestWhatEachRuleAnswers:
         written against.  **It could not, from plan step X-cf-3b until
         X-ch**: under the every-paycheck cadence the engine dates a row on
         its paycheck's start, so both readings named one day, and the only
-        thing in this file that caught the substitution on the transaction
+        thing in this package that caught the substitution on the transaction
         arm was the no-due-date refusal, which plan step X-bv-2 deletes.  The
         adversarial review of X-ch measured it on the transfer twin and the
         same mutation was run here.
@@ -362,7 +362,7 @@ class TestTheTransferRule:
     ):
         """A definition behind it does not make a transfer derived: the column does.
 
-        The transfer twin of
+        The transfer twin of ``test_which_rule_prices_a_row.py``'s
         :meth:`TestWhichRulePricesARow.test_a_row_that_took_its_figure_back_owns_it_again`,
         and the shape a re-priced transfer and a frozen one both leave.  Its
         definition still states ``$178.00`` on this due date, and the transfer

@@ -26,10 +26,11 @@ status.  None of that can be satisfied by a comment.
 ``PATH`` prefix.  It answers the handful of subcommands the deploy script
 issues, logs every invocation so ordering is observable, and is scripted per
 test: which migrations each image "contains" (a listing FILE per image, since
-the regression below needs a listing past 128 KiB, the most one environment
-string may hold), and through environment variables whether the database
-container is "running", whether ``pg_dump`` writes a readable archive, and
-whether the container ever reports healthy.  Nothing here touches a real
-daemon, so these tests are NOT ``@pytest.mark.docker`` and run in CI like any
-other.
+the regression ``test_the_preflight.py``'s
+``TestAListingLargerThanAPipeIsReadWhole`` grades needs a listing past 128
+KiB, the most one environment string may hold), and through environment
+variables whether the database container is "running", whether ``pg_dump``
+writes a readable archive, and whether the container ever reports healthy.
+Nothing here touches a real daemon, so these tests are NOT
+``@pytest.mark.docker`` and run in CI like any other.
 """

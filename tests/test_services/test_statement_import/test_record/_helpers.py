@@ -124,9 +124,9 @@ def _second_account(db, seed_user):
 #: Two same-day same-amount lines: the shape whose ordinal was the only term of
 #: the identity key the bank never stated.  Measured across the developer's
 #: 2026-07-19, 2026-08-16 and 2026-08-18 exports, 0 of 1,041 real lines shared a
-#: ``(day, amount)`` with another -- so every case below is PLANTED, and each is
-#: a firing control for a refusal that used to fire on a file the bank had not
-#: restated at all.
+#: ``(day, amount)`` with another -- so every case that reads this (they are
+#: ``test_what_is_a_fact.py``'s) is PLANTED, and each is a firing control for
+#: a refusal that used to fire on a file the bank had not restated at all.
 _TWINS = [
     (date(2026, 3, 2), "-4.75",
      "POINT OF SALE DEBIT L340 STARBUCKS #123 (Starbucks)"),

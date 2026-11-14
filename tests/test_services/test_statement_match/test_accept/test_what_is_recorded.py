@@ -151,7 +151,8 @@ class TestTheGroupMustSum:
     meet, but a difference the owner ACCEPTS is closed by a member this door
     mints rather than by sending them away (ruling **R-FN**).  What is graded
     here is the refusal that stands when nobody accepts one;
-    :mod:`.test_residual` grades the other half.
+    :mod:`tests.test_services.test_statement_match.test_residual` grades the
+    other half.
     """
 
     def test_a_five_cent_shortfall_is_refused(self, app, db, seed_user):

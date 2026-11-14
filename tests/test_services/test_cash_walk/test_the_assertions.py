@@ -68,7 +68,8 @@ class TestTheClosingBalancePartition:
         Both fixture rows are PLAIN transactions, so each would move its full
         amount; on the real account the second row's purchases were entirely
         credit-card, so its confirmed cash effect is $0.00 (see
-        :class:`TestSourceFactValuation`'s credit-entry case).
+        ``test_the_sources.py``'s :class:`TestSourceFactValuation`'s credit-entry
+        case).
         """
         account, scenario = seed_user["account"], seed_user["scenario"]
         period = seed_periods[6]

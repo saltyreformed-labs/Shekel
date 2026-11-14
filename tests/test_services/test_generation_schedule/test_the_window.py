@@ -20,7 +20,7 @@ from ._helpers import (
 
 
 class TestTheScheduleShapeTheseTestsRestOn:
-    """The fixture facts every class below depends on, asserted not assumed."""
+    """The fixture facts every class in this package depends on, asserted not assumed."""
 
     def test_january_holds_three_paychecks(self, app, seed_user, seed_periods):
         """Index 2 (2026-01-30) is January's THIRD payday.
@@ -182,7 +182,7 @@ class TestTheStartPeriodBoundSurvivesTheWindow:
         """The batch-boundary shape: an explicit ``effective_from`` + a window.
 
         **This is the only shape that reproduces D2**, and getting that wrong
-        cost this file a false claim.  A window alone does not: the pre-R4b-1
+        cost an earlier draft of these tests a false claim.  A window alone does not: the pre-R4b-1
         code defaulted ``effective_from`` to the rule's start period whenever
         the caller passed ``None``, which reproduced the bound by accident.  It
         only vanished for a caller that supplied its OWN boundary -- and

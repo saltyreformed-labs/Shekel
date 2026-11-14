@@ -53,7 +53,7 @@ class TestARedatedSettleLeavesNoMovementBehind:
     docstring).  **What nobody stated was the consequence.**  Those rows held
     no ledger postings while the stored ledger lived, so a defect that left
     the OLD day's posting behind on a re-dated settle, the classic
-    double-count, was invisible to every case in this file.  X-f6a-3c-2's
+    double-count, was invisible to every case in this package.  X-f6a-3c-2's
     batch-versus-per-act control compares the two paths' ledgers, so it cannot
     see an error common to both.
 

@@ -50,7 +50,9 @@ def _fold(account, scenario, days, as_of=_LATE_AS_OF):
     return balances_at(assembled_fold(account, ctx), list(days))
 
 
-#: The day the books open for the two streams below that carry a record dated
+#: The day the books open for the two streams (in
+#: ``test_the_opening_equity_is_the_seed.py`` and ``test_scope_and_totality.py``)
+#: that carry a record dated
 #: before their opening ASSERTION.  Chosen BEFORE the 2026-01-15 record they
 #: carry, because ruling **R-HG** (plan step X-f3c-2b) makes a movement dated
 #: on or before the books unstorable -- and a record sitting between the books

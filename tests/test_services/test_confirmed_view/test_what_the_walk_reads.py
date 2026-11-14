@@ -180,7 +180,8 @@ def test_the_confirmed_view_is_the_resolvers_confirmed_slice(
     the seam's whole-loan read, so the amortization table, the band chart's
     history prefix, and the forward projection's seed all come from it.  A $2,000
     payment makes the check non-vacuous: the view's row carries the REAL 1500.00
-    principal (hand-computed above), which a contractual replay could not produce
+    principal (hand-computed in ``test_the_row_economics.py``), which a
+    contractual replay could not produce
     -- so equality here proves the production path reads this producer, not that
     two producers happen to agree on an on-schedule loan.
     """

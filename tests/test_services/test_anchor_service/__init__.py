@@ -3,7 +3,8 @@ Shekel Budget App -- Anchor Service Tests
 
 Unit tests for :mod:`app.services.anchor_service` and its loan half,
 :mod:`app.services.loan_anchor_service` (split out at plan step
-``recurrence:R20``).  Pins both outcomes of :func:`apply_anchor_true_up` and
+``recurrence:R20``).  Pins both outcomes of
+:func:`~app.services.anchor_service.apply_anchor_true_up` and
 its loan twin, ruling **R-EQ**'s duplicate rule, the cash door's report of what
 governs either side of its write (ruling **R-CC79**), the stager's one read of
 the latest assertion that the report's before now is (ruling **R-CC85**), and

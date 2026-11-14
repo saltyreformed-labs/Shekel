@@ -55,9 +55,11 @@ class TestDerivationRefusals:
 
         **``None`` left this parametrization at plan step C2-b1** and is not an
         omission: it stopped being a type error and became a MEANING -- "this
-        owner has no schedule at all" -- whose legality depends on whether they
-        have paydays.  ``TestTheCadenceIsRequiredOnlyBesideAPayday`` below owns
-        both directions of that rule.
+        owner has no schedule at all" -- whose legality depended on whether
+        they had paydays until plan step C4-d refused it beside either payday
+        set.  ``TestTheCadenceIsRequired`` below, which replaced
+        ``TestTheCadenceIsRequiredOnlyBesideAPayday`` at that step, owns the
+        refusal in both payday shapes.
         """
         with pytest.raises(PayCalendarError, match="must be a plain int"):
             derive_periods([(1, date(2026, 1, 2))], (era_of(_OPENING, cadence_days),))

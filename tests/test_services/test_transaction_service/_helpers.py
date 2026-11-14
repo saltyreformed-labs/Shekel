@@ -59,7 +59,8 @@ def _make_template(
 
     The shared builders (:func:`make_expense_template` and its income twin),
     so the definition is one the engine can generate from and its rows are
-    the engine's own (:func:`generate_row_of`, plan step balance:X-cf-3b).
+    the engine's own (:func:`~tests._test_helpers.generate_row_of`, plan step
+    balance:X-cf-3b).
     It was ``_make_envelope_template`` -- a hand-built, UNPRICED envelope
     template that half its callers then flipped to ``is_envelope = False`` --
     until that step; a case states the definition it means here instead.

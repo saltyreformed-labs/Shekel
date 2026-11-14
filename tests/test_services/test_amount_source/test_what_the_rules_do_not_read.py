@@ -150,7 +150,7 @@ class TestPricingReadsNoSTATUS:
     """Rules 2 and 4 answer whatever a row's status is, and that is the point.
 
     Plan step X-au-c2b's headline behaviour change, and an adversarial review of
-    this file found it graded by NO case: every salary and loan fixture here is
+    this package found it graded by NO case: every salary and loan fixture here is
     Projected, so planting ``if not is_projected(txn): return None`` at the top
     of either rule failed nothing.  The maps those rules used to index were
     built by the read-time REPAIR, which filters to Projected non-overridden
@@ -161,7 +161,8 @@ class TestPricingReadsNoSTATUS:
 
     Finding **N-262**'s rule one tier down: status says whether a row COUNTS,
     never what prices it.  ``routes/grid/page.py`` prices every loaded row with
-    no status predicate, and this file records that production carries 7
+    no status predicate, and ``test_which_rule_prices_a_row.py`` records that
+    production carries 7
     Cancelled and 2 Credit template-linked rows, so the arm is reachable the day
     a cutover declares that bucket derived.
     """

@@ -61,7 +61,8 @@ def _make_loan(
     """Create the SPLIT_LOAN shape, optionally overriding the anchor or rate.
 
     A case that walks a payment before its true-up passes
-    :data:`_ORIGINATION_BEFORE_P1` as *origination_date* (plan step
+    ``test_the_shape_matrix.py``'s :data:`_ORIGINATION_BEFORE_P1` as
+    *origination_date* (plan step
     recurrence:R16-c-2, ruling R-R101).
     """
     return create_loan_with_trueup(

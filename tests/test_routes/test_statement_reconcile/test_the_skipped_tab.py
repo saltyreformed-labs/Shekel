@@ -30,10 +30,10 @@ from ._helpers import (
 def _unskip_control(page):
     """Return the first skip Undo's ``(action, skip_id)``, as the page emits it.
 
-    Scraped rather than composed, which is :func:`_undo_control`'s own rule
-    one act over: the action carries the tab in its query string, and a case
-    that rebuilt that URL would grade the route while the card pointed
-    somewhere else.
+    Scraped rather than composed, which is ``test_the_settled_tabs.py``'s
+    :func:`_undo_control`'s own rule one act over: the action carries the tab
+    in its query string, and a case that rebuilt that URL would grade the
+    route while the card pointed somewhere else.
 
     Args:
         page: The rendered page.

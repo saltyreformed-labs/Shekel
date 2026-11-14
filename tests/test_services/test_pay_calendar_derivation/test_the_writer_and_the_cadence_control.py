@@ -118,8 +118,8 @@ class TestTheWritersOwnScheduleDerives:
         branch) and the LAST (the projection) by hand rather than pinning that
         the two agree.  A derivation that took the projection branch everywhere
         would still be caught, by the shapes in
-        :class:`TestIrregularShapeSweep` and by
-        :class:`TestTheCadenceControl`.
+        ``test_the_irregular_shapes_and_re_derivation.py``'s
+        :class:`TestIrregularShapeSweep` and by :class:`TestTheCadenceControl`.
 
         **Cadence 1 is one of the seven rows since plan step
         ``pay_calendar:C4-c``** (plan finding **P9**): the writer refused it
@@ -152,7 +152,9 @@ class TestTheWritersOwnScheduleDerives:
         payday falls rather than doing arithmetic of its own (plan step
         C2-f3b; the plan's own sequence since ``C17-c-2b``, the NOMINAL grid
         from ``C14-d`` until then).  This is the append that moves no
-        previously-derived end; see :class:`TestReDerivationStability`.
+        previously-derived end; see
+        ``test_the_irregular_shapes_and_re_derivation.py``'s
+        :class:`TestReDerivationStability`.
         """
         with app.app_context():
             user_id = bare_user["user"].id

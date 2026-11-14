@@ -43,7 +43,8 @@ by a same-period credit), and uncleared-floor (the
 floor that no cleared/credit drift can squeeze below).
 
 The subtotal-remainder assertion
-(:class:`TestSubtotalReconciliation`) closes Q-10 / E-25's same-formula
+(``test_the_subtotals_reconcile.py``'s :class:`TestSubtotalReconciliation`)
+closes Q-10 / E-25's same-formula
 invariant on ruling R-K's basis: for one ``GridColumn`` per period,
 ``balance[p] - balance[p-1] == net[p] + period_timing[p] + book_vs_bank[p]``
 to the penny, with

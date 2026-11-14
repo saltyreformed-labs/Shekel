@@ -267,8 +267,9 @@ class TestARefusedImportLeavesTheSessionUNTOUCHED:
         (``statement_import.delete_import``), so a row a refused upload created
         would survive with no line and no answer to justify it -- and would put
         a merchant the owner never recorded onto the screen that asks where
-        merchants go.  Hoist :func:`~._merchants.resolve_merchants` out of
-        ``_write_records`` to anywhere before ``resolve_anchor`` and this
+        merchants go.  Hoist
+        :func:`~app.services.statement_import._merchants.resolve_merchants` out
+        of ``_write_records`` to anywhere before ``resolve_anchor`` and this
         fails.
         """
         _record(seed_user, build.build(build.chained("100.00", self._ENTRIES)))

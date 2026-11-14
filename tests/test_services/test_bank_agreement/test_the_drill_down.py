@@ -200,7 +200,7 @@ class TestTheDrillDownSaysWhatIsALREADYEXPLAINED:
         A FIRING control: with the flag hardcoded ``False`` the whole
         ``matched_subjects`` claim read, both template branches and their copy
         are dead, and the screen tells the owner nothing is explained when
-        everything is.  The axis no other test in this file varies.
+        everything is.  The axis no other test in this package varies.
 
         The app-side member names the row's PAYMENT, its covering movement
         (rulings **R-CC43**, **R-CC45**): since plan step

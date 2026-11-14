@@ -11,8 +11,9 @@ By-change rows with their zero-current rider), and the empty / no-account
 contracts.  Every value assertion carries the arithmetic that produces it.
 
 **The chart's windows are DERIVED off the owner's pay calendar** since plan
-step C2-f3d; ``TestTheChartReadsTheDerivedOrdinal`` is that step's firing
-control, and it fails on the ``period_index`` queries it replaced.
+step C2-f3d; ``test_the_hero_and_the_chart.py``'s
+``TestTheChartReadsTheDerivedOrdinal`` is that step's firing control, and it
+fails on the ``period_index`` queries it replaced.
 
 The privates these tests exercise moved into the package's submodules at plan
 step X-au-c2b, when finding **N-270**'s 1000-line ceiling forced the split;

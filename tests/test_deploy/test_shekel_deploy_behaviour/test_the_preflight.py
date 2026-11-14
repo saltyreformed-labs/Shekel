@@ -19,7 +19,7 @@ from ._helpers import (
 
 
 class TestThePreflightIsHonest:
-    """The classification itself, since every branch above turns on it."""
+    """The classification itself, since every branch the other parts grade turns on it."""
 
     def test_it_reports_a_migration_bearing_release(self, stack):
         """The added revisions are named, not merely counted."""

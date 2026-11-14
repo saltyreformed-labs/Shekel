@@ -40,7 +40,7 @@ from tests._test_helpers import write_past_the_amount_seam
 # perturbation were ever flushed.  That is no longer true and the claim is
 # deleted rather than tensed: :func:`_rival_for` writes BELOW a row's answer on
 # half the rows deliberately, and the safety property is that nothing here is
-# flushed at all, which is the only one this file has ever relied on.*
+# flushed at all, which is the only one this harness has ever relied on.*
 _NUDGE = Decimal("1000.00")
 
 # The flat annual raise the period-partitioned salary control lands.  A year's
@@ -234,8 +234,8 @@ def _apply_newest_transaction_version(_records):
     resolves to it and must move; a row below it resolves to an earlier version
     and must hold to the cent.  Both sides of that partition are columns
     (``template_amount_versions.effective_date``, ``transactions.due_date``),
-    read in pass 1 by :func:`_superseded` -- so the expectation is a single date
-    comparison rather than a second implementation of
+    read in pass 1 by ``verify_amount_resolver.py``'s :func:`_superseded` -- so the
+    expectation is a single date comparison rather than a second implementation of
     ``template_amount_service.amount_as_of``'s supersession walk, which is the
     hand-rolled-replay shape this project refuses.
 
@@ -246,7 +246,8 @@ def _apply_newest_transaction_version(_records):
         The one version per template this mutated.
     """
     # ``amount_versions`` is the ONE spelling of a template's version ORDER,
-    # and it is the one :func:`_resolves_to_newest_version` reads too -- a
+    # and it is the one ``verify_amount_resolver.py``'s
+    # :func:`_resolves_to_newest_version` reads too -- a
     # second max() here would be two orderings held in step by hand, in the
     # file whose whole subject is that shape (CLAUDE.md rule 14).
     latest = list({
@@ -374,7 +375,8 @@ def _control_raise_month(records):
     degenerate to *every row* or *no row* on a clone whose calendar sits
     elsewhere, which is an arm that grades nothing wearing a passing report.
 
-    Called by :func:`_apply_salary_raise` and by the stamping in :func:`main`;
+    Called by :func:`_apply_salary_raise` and by the stamping in
+    ``verify_amount_resolver.py``'s :func:`main`;
     ONE function called twice rather than two derivations of one date.
 
     Args:
@@ -480,8 +482,9 @@ def _expect_newest_transaction_version(rec, before):
     A TEMPLATE row follows it exactly when the latest version is the one in
     effect on the row's own due date; a row pricing from an EARLIER version
     must hold to the cent, which is the half that grades supersession.  The
-    partition is :func:`_resolves_to_newest_version`, which is deliberately not
-    the negation of :func:`_superseded` -- see there.
+    partition is ``verify_amount_resolver.py``'s :func:`_resolves_to_newest_version`,
+    which is deliberately not the negation of :func:`_superseded` -- see
+    there.
     """
     if (
         rec["rule"] == AmountRule.TEMPLATE.value

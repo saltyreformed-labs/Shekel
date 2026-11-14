@@ -117,8 +117,8 @@
 # names its schedule as the trigger list spells it
 # (tools/ci/test_updates_workflow.py holds the two equal).
 #
-# THE TIME LIMITS (rulings plan#2761, plan#2762, plan#2765, plan#3721).
-# Every step of the refresh, the publish, the queue and the due job carries a
+# THE TIME LIMITS (rulings plan#2761, plan#2762, plan#2765).  Every step of
+# the refresh, the publish, the queue and the due job carries a
 # ``timeout-minutes`` of its own.  A step cut off by its own limit is marked failed (actions/runner's
 # StepsRunner.cs, read 2026-11-03), so its job fails and the alert opens its
 # issue.  A job cut off by its own limit is cancelled (GitHub's workflow
@@ -128,11 +128,9 @@
 # workflows, commit b2e9a22e68, read a timed-out job as cancelled), so a job
 # cut off first ends a stalled run in silence.  Each of those jobs' limits is
 # therefore longer than all its steps' together: its steps' total, with a step
-# that runs another repository's action counted twice, whether it names that
-# action itself or uses an action of this repository's that runs one at any
-# depth (its post step, if it has one, runs under the same limit:
-# actions/runner's ActionRunner.cs), plus 5 for GitHub's setting the job up.
-# The alert's steps carry none: nothing
+# using another repository's action counted twice (its post step, if it has
+# one, runs under the same limit: actions/runner's ActionRunner.cs), plus 5
+# for GitHub's setting the job up.  The alert's steps carry none: nothing
 # reports a stalled report, and its job's limit alone ends it.  What a stall
 # holds until then is the runner and this workflow's one run at a time (its
 # ``concurrency`` group, below); the update App's token GitHub expires an hour

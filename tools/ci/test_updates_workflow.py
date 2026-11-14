@@ -1,13 +1,11 @@
 """Controls for ``updates.yml``, the weekly dependency update (rulings plan#2448-plan#2450):
 which job holds the update App's key, whose code each runs, when each runs, and how long each
-job and step may run (rulings plan#2761, plan#2762, plan#2765, plan#3721).
+job and step may run (rulings plan#2761, plan#2762, plan#2765).
 """
 from __future__ import annotations
 
 import re
-from pathlib import Path
 
-import pytest
 import yaml
 
 from tools.ci import arcs
@@ -31,20 +29,14 @@ NO_STEP_LIMITS = "alert"
 LOCAL_ACTION = ("$/", "./")
 
 
-def _runs_an_outside_action(uses: str, root: Path = arcs.REPO) -> bool:
-    """Whether a step that ``uses`` this action runs another repository's action, whose post
-    step, if it has one, runs under the step's limit (ruling plan#2765): an action that is not
-    this repository's, or one of this repository's, read from ``root``, that runs one in any of
-    its steps, at any depth (ruling plan#3721).  An action of this repository's must be
-    composite, whose steps are all it runs: one of another kind could carry a post step of its
-    own, which this does not read."""
-    if not uses.startswith(LOCAL_ACTION):
-        return True
-    folder = root / uses.removeprefix("$/").removeprefix("./")
+def _runs_no_outside_action(uses: str) -> bool:
+    """Whether the action of this repository's that ``uses`` names is composite and runs no
+    action of another repository, in its own steps or in its own actions': so no post step."""
+    folder = arcs.REPO / uses.removeprefix("$/").removeprefix("./")
     runs = yaml.safe_load(next(folder.glob("action.y*ml")).read_text(encoding="utf-8"))["runs"]
-    assert runs["using"] == "composite", (uses, runs["using"])
-    return any(_runs_an_outside_action(step["uses"], root)
-               for step in runs["steps"] if "uses" in step)
+    return runs["using"] == "composite" and all(
+        step["uses"].startswith(LOCAL_ACTION) and _runs_no_outside_action(step["uses"])
+        for step in runs["steps"] if "uses" in step)
 
 
 class TestTheUpdateWorkflowKeepsItsKeyFromPackageCode:
@@ -185,15 +177,15 @@ class TestTheUpdateWorkflowKeepsItsKeyFromPackageCode:
 
 
 class TestAStalledUpdateRunFailsLoudly:
-    """``updates.yml``'s time limits (rulings plan#2761, plan#2762, plan#2765, plan#3721): a
-    stalled step fails its job, which the alert reports, before its job's own limit could
-    cancel it in silence."""
+    """``updates.yml``'s time limits (rulings plan#2761, plan#2762, plan#2765): a stalled step
+    fails its job, which the alert reports, before its job's own limit could cancel it in
+    silence."""
 
     def test_each_step_s_limit_cuts_it_off_before_its_job_s_limit_could(self):
         """Every job carries a limit (:func:`tools.ci.test_ci_workflow._is_a_limit`), and every
         step of each job but :data:`NO_STEP_LIMITS` one of its own, whose steps carry none; the
-        job's limit is its steps' total, a step that runs another repository's action
-        (:func:`_runs_an_outside_action`) counted twice, plus :data:`JOB_LIMIT_MARGIN`.
+        job's limit is its steps' total, a step using another repository's action counted
+        twice, plus :data:`JOB_LIMIT_MARGIN`.
 
         A step cut off by its own limit fails, so its job fails and the alert, which runs on
         ``failure()``, opens its issue; a job cut off by its own limit is cancelled, which
@@ -214,48 +206,17 @@ class TestAStalledUpdateRunFailsLoudly:
                 continue
             assert all(_is_a_limit(step) for step in limits), (name, limits)
             posts = [step["timeout-minutes"] for step in job["steps"]
-                     if "uses" in step and _runs_an_outside_action(step["uses"])]
+                     if "uses" in step and not step["uses"].startswith(LOCAL_ACTION)]
             assert limit == sum(limits) + sum(posts) + JOB_LIMIT_MARGIN, (name, limit, limits)
 
-    def test_a_step_counts_twice_when_it_runs_another_repository_s_action_at_any_depth(
-            self, tmp_path):
-        """:func:`_runs_an_outside_action`, the rule the limits above are read by (rulings
-        plan#2765, plan#3721): an action of another repository's counts twice, and one of this
-        repository's counts twice when any of its steps runs one, by either local form, at any
-        depth, and once when none does.  Read on this repository's actions as they stand
-        (``build-image`` runs ``docker/build-push-action``; ``install-lock`` runs only
-        ``dockerfile-uv``, which runs none) and on a tree of actions three deep; an action of
-        this repository's that is not composite is refused, not read."""
-        assert _runs_an_outside_action("actions/checkout@v9")
-        assert _runs_an_outside_action("$/.github/actions/build-image")
-        assert not _runs_an_outside_action("$/.github/actions/install-lock")
-        assert not _runs_an_outside_action("$/.github/actions/dockerfile-uv")
-
-        def action(name: str, runs: dict) -> None:
-            folder = tmp_path / ".github/actions" / name
-            folder.mkdir(parents=True)
-            (folder / "action.yml").write_text(yaml.safe_dump({"runs": runs}),
-                                               encoding="utf-8")
-
-        def composite(*uses: str) -> dict:
-            return {"using": "composite",
-                    "steps": [{"run": "true", "shell": "bash"}, *({"uses": u} for u in uses)]}
-
-        action("leaf", composite())
-        action("outside", composite("docker/build-push-action@v9"))
-        action("middle", composite("./.github/actions/leaf", "$/.github/actions/outside"))
-        action("top", composite("$/.github/actions/middle"))
-        action("quiet", composite("$/.github/actions/leaf", "./.github/actions/leaf"))
-        action("node", {"using": "node24", "main": "main.js", "post": "post.js"})
-        action("calls-node", composite("$/.github/actions/node"))
-        for name, twice in (("leaf", False), ("outside", True), ("middle", True),
-                            ("top", True), ("quiet", False)):
-            for form in LOCAL_ACTION:
-                uses = f"{form}.github/actions/{name}"
-                assert _runs_an_outside_action(uses, tmp_path) is twice, uses
-        for name in ("node", "calls-node"):
-            with pytest.raises(AssertionError, match="node24"):
-                _runs_an_outside_action(f"$/.github/actions/{name}", tmp_path)
+    def test_a_step_using_this_repository_s_action_has_no_post_step(self):
+        """Each action of this repository's that an update step uses is composite and runs no
+        action of another repository (:func:`_runs_no_outside_action`), so GitHub runs no post
+        step for it: such a step counts once in its job's limit (ruling plan#2765)."""
+        for name, job in _workflows()[UPDATES]["jobs"].items():
+            for step in job["steps"]:
+                if step.get("uses", "").startswith(LOCAL_ACTION):
+                    assert _runs_no_outside_action(step["uses"]), (name, step["name"])
 
     def test_no_update_job_or_step_may_fail_without_failing(self):
         """``continue-on-error`` would leave a job green after a step cut off by its own limit,

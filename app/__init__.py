@@ -10,7 +10,7 @@ import importlib
 import os
 from datetime import datetime, timedelta, timezone
 
-from flask import Flask, request, session as flask_session
+from flask import Flask, current_app, request, session as flask_session
 
 from app.config import CONFIG_MAP
 from app.context_processors import register_context_processors
@@ -155,7 +155,7 @@ def create_app(config_name=None, *, init_ref_cache=True):
         # sign-out deleted it, or its sign-in is ``KNOWN_LIFETIME`` old,
         # however active (ruling plan#3069).  Asked last, as the one check
         # that reads the database for the session itself.
-        if not _idle_session_is_fresh(app) or not sign_in_is_live(user.id):
+        if not _idle_session_is_fresh() or not sign_in_is_live(user.id):
             return None
         return user
 
@@ -395,9 +395,18 @@ def _register_blueprints(app):
         app.register_blueprint(getattr(module, f"{name}_bp"))
 
 
-def _idle_session_is_fresh(app):
+def _idle_session_is_fresh():
     """Return True iff ``_session_last_activity_at`` is within the
     configured ``IDLE_TIMEOUT_MINUTES`` window.
+
+    The window is the serving app's (``flask.current_app``), as the stamp
+    is its session's, and never an app this module captured: every
+    :func:`create_app` registers its ``load_user`` on the one module-level
+    ``login_manager``, which keeps only the last, so a loader that judged
+    by the app it was built with judged every other app's sessions by that
+    app's window (plan#2171's review, measured in the suite: a test that
+    built a second app left the session app's 24-hour window refused at 13
+    hours).  Production builds one app per worker, where the two agree.
 
     Fail-closed for unparseable input (commit C-10 / F-006).  False
     is returned -- never an exception -- for any of:
@@ -436,13 +445,6 @@ def _idle_session_is_fresh(app):
         any cookie value; rejecting future timestamps adds no
         defensive value beyond the signature itself.
 
-    Args:
-        app: The Flask application instance whose
-            ``IDLE_TIMEOUT_MINUTES`` config value drives the
-            comparison.  Passed in (not pulled from
-            ``flask.current_app``) so the helper is testable in a
-            request context bound to a specific app.
-
     Returns:
         bool: True if the session may continue; False if ``load_user``
             must reject it.
@@ -457,7 +459,7 @@ def _idle_session_is_fresh(app):
         # or (with SECRET_KEY compromise) a forged cookie.  Treat as
         # fresh -- see docstring for the threat-model rationale.
         return True
-    threshold = timedelta(minutes=app.config["IDLE_TIMEOUT_MINUTES"])
+    threshold = timedelta(minutes=current_app.config["IDLE_TIMEOUT_MINUTES"])
     return elapsed <= threshold
 
 

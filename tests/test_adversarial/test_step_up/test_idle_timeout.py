@@ -9,8 +9,11 @@ has two-factor (plan#3600), and the session, not the code, is under test.
 
 from datetime import datetime, timedelta, timezone
 
+import pytest
 import time_machine
 
+from app import create_app
+from app.extensions import db
 from app.utils.session_helpers import SESSION_LAST_ACTIVITY_KEY, SESSION_TOKEN_KEY
 from tests._seed_owner_fixtures import log_in_seed_user
 from tests._session_copies import is_signed_in
@@ -212,6 +215,33 @@ class TestTheOneIdleRule:
             _idle_for(client, _THIRTEEN_HOURS)
 
             assert is_signed_in(client)
+
+    @pytest.mark.usefixtures("seed_user")
+    def test_an_app_built_later_leaves_this_apps_window(self, app, client, monkeypatch):
+        """With a 24-hour window, 13 hours idle is still signed in after another app is built.
+
+        Every ``create_app`` registers its loader on the one ``login_manager``,
+        which keeps the last, so the loader in force here is the later app's.
+        It judges by the app serving the request, so the later app's default
+        window, shorter than the idle, decides nothing for this one.
+        """
+        monkeypatch.setitem(app.config, "IDLE_TIMEOUT_MINUTES", _A_DAY_IN_MINUTES)
+        with app.app_context():
+            later = create_app("testing")
+            try:
+                assert timedelta(
+                    minutes=later.config["IDLE_TIMEOUT_MINUTES"],
+                ) < _THIRTEEN_HOURS, (
+                    "Setup failed: the later app's window is not shorter than the "
+                    "idle, so this test cannot tell which app judged it"
+                )
+                log_in_seed_user(client)
+                _idle_for(client, _THIRTEEN_HOURS)
+
+                assert is_signed_in(client)
+            finally:
+                with later.app_context():
+                    db.engine.dispose()
 
     def test_past_the_default_window_shekels_rule_refuses_it(self, app, client, seed_user):
         """At the default 12 hours, a browser idle for 13 hours is refused by ``load_user``.

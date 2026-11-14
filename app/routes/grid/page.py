@@ -659,9 +659,11 @@ def _bank_control(account, calendar) -> "_BankControl | None":
         ``budget.account_openings`` row**, and it was MEASURED rather than
         reasoned about.  A draft of plan step balance:X-f3c-2b-2b added one --
         ``awaiting_review_count`` reaches the RAISING loader
-        (``cash_ledger.account_opening_fact``), so the concern was that a
-        broken invariant would take the app's hottest page down rather than one
-        control on it.  Deleting every opening row for the seeded account and
+        (``cash_ledger.account_opening_fact``, through
+        ``cash_ledger.required_books_start`` since card plan#2436: an account
+        this gate admits is never a configured loan), so the concern was that
+        a broken invariant would take the app's hottest page down rather than
+        one control on it.  Deleting every opening row for the seeded account and
         rendering ``/grid`` showed why that guard could never help: the request
         raises inside ``_build_grid_view`` (through
         ``balance_at.grid_balance_view`` -> ``cash_ledger.walk_cash_ledger`` ->

@@ -83,7 +83,6 @@ day readers and the one predicate beside them return a value and raise nothing.
 from __future__ import annotations
 
 from datetime import date
-from typing import TYPE_CHECKING
 
 from sqlalchemy import func, text
 
@@ -100,9 +99,6 @@ from app.opening_infrastructure import (
 )
 
 from ._openings import BooksStart, required_books_start
-
-if TYPE_CHECKING:  # pragma: no cover -- annotation only
-    from ._openings import CashOpeningFact
 
 
 def reject_movement_before_books_open(account_id: int, day: date) -> None:
@@ -242,16 +238,26 @@ def _movement_refusal(start: BooksStart, day: date) -> str:
 
 
 def reject_line_before_books_open(
-    opening: "CashOpeningFact", posted_on: date, subject: str,
+    start: BooksStart, posted_on: date, subject: str,
 ) -> None:
     """Refuse an act over a bank line the account's books cannot hold.
 
     The EVIDENCE side of the boundary (plan step **X-f3c-2b-2b**, finding
     **N-383**).  A bank line is the bank's record of money moving on the day
-    it POSTED, so a line posted on or before ``opened_on`` is already inside
-    the opening equity -- and an act that turns it into a purchase, into an
-    income row, or into the evidence for settling one, records that money a
-    second time.
+    it POSTED, so a line posted on or before the day the books start is
+    already inside what they start with -- and an act that turns it into a
+    purchase, into an income row, or into the evidence for settling one,
+    records that money a second time.
+
+    **The day is the books START** (card plan#2436, ruling **plan#3954**;
+    :func:`~._openings.required_books_start`), the one
+    :func:`reject_movement_before_books_open` judges a movement by, so a
+    configured loan's line is judged by its origination and its opening
+    record bounds nothing.  **The sentence is a cash account's, and only a
+    cash account's is read**: every door that builds the pass this start
+    comes from gates on a cash-detail account (``load_cash_account_or_404``),
+    so no owner reaches this for a loan, and the sentence names the start's
+    day and figure with no loan wording of its own.
 
     **It is NOT implied by** :func:`reject_movement_before_books_open`, and
     that gap is the reason this exists rather than a second guard on the same
@@ -267,20 +273,20 @@ def reject_line_before_books_open(
     that line's own day, which is an accident of the derivation rather than a
     rule anything states.
 
-    **The OPENING is passed in rather than loaded**, which is the opposite of
+    **The START is passed in rather than loaded**, which is the opposite of
     its twin above and is the review pass's own rule: a pass over one account
     holds what it cannot change (:class:`~app.services.statement_match
-    .ReviewScope`), and re-loading the governing opening here would be the
-    redundant producer call that package treats as a DRY violation rather than
-    a cost.  **What the pass's field buys is SHARING and not a saved read** --
-    the same correction ``ReviewScope.opening`` records against its own first
+    .ReviewScope`), and re-loading the start here would be the redundant
+    producer call that package treats as a DRY violation rather than a cost.
+    **What the pass's field buys is SHARING and not a saved read** -- the
+    same correction ``ReviewScope.books_start`` records against its own first
     draft, which claimed 378 reads that no design would have made.  What it
     makes true is that the SCREEN and the DOOR are provably one answer: both
-    read the opening the pass resolved.
+    read the start the pass resolved.
 
     Args:
-        opening: The account's governing
-            :class:`~._openings.CashOpeningFact`.  The caller proved ownership
+        start: Where the account's books start
+            (:class:`~._openings.BooksStart`).  The caller proved ownership
             when it built the pass this came from; nothing is re-scoped here.
         posted_on: The day the bank posted the line.  **The posting day and
             never the transaction day**: a swipe MADE before the books opened
@@ -295,17 +301,17 @@ def reject_line_before_books_open(
             performed.
 
     Raises:
-        ValidationError: When the line posted on or before the books opened.
+        ValidationError: When the line posted on or before the books started.
             A 400 rather than a programming error: it is reachable by an
             ordinary owner working from a page rendered before the books were
             restated forward.
     """
-    if books_hold(opening.opened_on, posted_on):
+    if books_hold(start.opened_on, posted_on):
         return
     raise ValidationError(
         f"Your bank posted this line on {posted_on.isoformat()}, and this "
-        f"account's books open on {opening.opened_on.isoformat()} holding "
-        f"${opening.opening_equity:,.2f} -- an opening equity is the closing "
+        f"account's books open on {start.opened_on.isoformat()} holding "
+        f"${start.figure:,.2f} -- an opening equity is the closing "
         "balance for its own day, so that money is already inside it.  "
         f"Recording {subject} would count it twice.  Restate the account's "
         "opening to an earlier day if your records really do start before "

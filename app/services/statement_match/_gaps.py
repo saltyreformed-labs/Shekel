@@ -60,7 +60,7 @@ if TYPE_CHECKING:  # pragma: no cover -- annotations only
     # emit a SELECT -- so the promise rests on the caller handing over loaded
     # rows, which :func:`~._undisposed.undisposed_lines` does.
     from app.models.statement_import import BankStatementLine
-    from app.services.cash_ledger import CashOpeningFact
+    from app.services.cash_ledger import BooksStart
 
 
 @dataclass(frozen=True)
@@ -90,12 +90,23 @@ class BooksBound:
     panel announcing that this pass withheld no lines -- the *nothing to see
     here* row the reconcile rebuild removed.
 
+    **Its day and figure are the books START's**
+    (:class:`~app.services.cash_ledger.BooksStart`, card plan#2436, ruling
+    **plan#3954**), which for a configured loan is its origination and the
+    principal it started owing.  **Its sentences are a cash account's, and
+    only a cash account's are read**: no door builds a pass for a loan (each
+    loads its account through ``load_cash_account_or_404``), so the bound is
+    worded as an opening balance and the template that renders it has no
+    loan branch.
+
     Attributes:
-        opened_on: The day this account's books open.
-        opening_equity: What they open holding, which is the figure those
-            lines are already inside.  Carried because the sentence is not
-            actionable without it: *4 lines are already counted* invites the
-            owner to check WHICH figure counted them.
+        opened_on: The day this account's books start
+            (:attr:`~app.services.cash_ledger.BooksStart.opened_on`).
+        opening_equity: What they start holding
+            (:attr:`~app.services.cash_ledger.BooksStart.figure`), which is
+            the figure those lines are already inside.  Carried because the
+            sentence is not actionable without it: *4 lines are already
+            counted* invites the owner to check WHICH figure counted them.
         count: How many recorded lines this pass held back for that reason.
             Always at least one where this value exists.
         last_day: The latest day any of them posted.  Bounded above by
@@ -274,16 +285,19 @@ def _split_at_calendar_open(
 
 
 def _split_at_books_open(
-    inside: "list[BankStatementLine]", opening: CashOpeningFact,
+    inside: "list[BankStatementLine]", start: BooksStart,
 ) -> "tuple[BooksBound | None, list[BankStatementLine]]":
-    """Split the calendar's lines at the day the account's books open.
+    """Split the calendar's lines at the day the account's books start.
 
     Plan step **balance:X-f3c-2b-2b**, finding **N-383**, ruling
-    **balance:R-HG**.  :func:`_split_at_calendar_open`'s twin one fact over: an
-    opening equity is the balance at the CLOSE of ``opened_on``, so a line
-    posted on or before it is ALREADY INSIDE that figure and nothing this
-    screen offers can be done with it.  Matching it settles a row for money the
-    opening already holds; recording it as spending or income does the same.
+    **balance:R-HG**.  :func:`_split_at_calendar_open`'s twin one fact over:
+    what the books start with is the balance at the CLOSE of their first day,
+    so a line posted on or before it is ALREADY INSIDE that figure and nothing
+    this screen offers can be done with it.  Matching it settles a row for
+    money the start already holds; recording it as spending or income does the
+    same.  **The day is the books START** (card plan#2436, ruling
+    **plan#3954**): a configured loan's origination, so its opening record
+    bounds nothing here.
 
     **It runs AFTER the calendar split and over what that leaves**, which is
     what makes the two bounds disjoint and their counts a sum.  On the
@@ -313,10 +327,10 @@ def _split_at_books_open(
         inside: The unmatched lines the pay calendar covers, in the order
             :func:`~._undisposed.undisposed_lines` gives -- ascending by
             posted day.
-        opening: The account's governing
-            :class:`~app.services.cash_ledger.CashOpeningFact`, off the pass
-            (:attr:`~._scope.ReviewScope.opening`), so the screen and the
-            doors judge every line against ONE opening.
+        start: Where the account's books start
+            (:class:`~app.services.cash_ledger.BooksStart`), off the pass
+            (:attr:`~._scope.ReviewScope.books_start`), so the screen and the
+            doors judge every line against ONE start.
 
     Returns:
         ``(bound, remaining)``.  The bound is ``None`` where the books hold
@@ -324,14 +338,14 @@ def _split_at_books_open(
     """
     held = [
         line for line in inside
-        if not books_hold(opening.opened_on, line.posted_on)
+        if not books_hold(start.opened_on, line.posted_on)
     ]
     if not held:
         return None, inside
     held_ids = {line.id for line in held}
     bound = BooksBound(
-        opened_on=opening.opened_on,
-        opening_equity=opening.opening_equity,
+        opened_on=start.opened_on,
+        opening_equity=start.figure,
         count=len(held),
         last_day=max(line.posted_on for line in held),
     )
@@ -370,7 +384,7 @@ class BoundedLines:
 def bounded_lines(
     recorded: "list[BankStatementLine]",
     opens: "date | None",
-    opening: "CashOpeningFact",
+    start: "BooksStart",
 ) -> BoundedLines:
     """Narrow a pass's recorded lines to the ones it may offer acts on.
 
@@ -399,15 +413,15 @@ def bounded_lines(
             match explains" until plan step ``bank_import:X-gj-4a``.*
         opens: The first day the owner's pay calendar covers, or ``None`` for
             an owner with no periods at all.
-        opening: The account's governing
-            :class:`~app.services.cash_ledger.CashOpeningFact`, off the pass
-            (:attr:`~._scope.ReviewScope.opening`).
+        start: Where the account's books start
+            (:class:`~app.services.cash_ledger.BooksStart`), off the pass
+            (:attr:`~._scope.ReviewScope.books_start`).
 
     Returns:
         The :class:`BoundedLines`.
     """
     before, inside = _split_at_calendar_open(recorded, opens)
-    books, inside = _split_at_books_open(inside, opening)
+    books, inside = _split_at_books_open(inside, start)
     return BoundedLines(inside=inside, before_calendar=before, books=books)
 
 

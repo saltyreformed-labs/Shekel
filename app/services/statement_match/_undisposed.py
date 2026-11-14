@@ -47,7 +47,7 @@ from app.extensions import db
 from app.models.statement_import import BankStatementLine
 from app.models.statement_line_skip import StatementLineSkip
 from app.models.statement_match import StatementMatchMember
-from app.services.cash_ledger import account_opening_fact
+from app.services.cash_ledger import required_books_start
 
 from ._bars import CreationBars, is_a_holding_state
 from ._gaps import bounded_lines
@@ -56,7 +56,7 @@ from ._rules import rules_for
 if TYPE_CHECKING:  # pragma: no cover -- annotations only
     from datetime import date
 
-    from app.services.cash_ledger import CashOpeningFact
+    from app.services.cash_ledger import BooksStart
 
     from ._gaps import BooksBound
     from ._rules import StandingRule
@@ -265,7 +265,7 @@ class InboxPartition:
             counted as outstanding work.
         before_calendar: The lines older than the owner's first payday, which
             nothing can ever match.
-        books: What this account's opening equity already accounts for
+        books: What this account's books start already accounts for
             (:class:`~._gaps.BooksBound`), or ``None`` where it accounts for
             none.
 
@@ -285,7 +285,7 @@ class InboxPartition:
 def inbox_partition(
     account_id: int,
     opens: "date | None",
-    opening: "CashOpeningFact",
+    start: "BooksStart",
     rules: "dict[int, StandingRule]",
     bars: CreationBars,
 ) -> InboxPartition:
@@ -353,8 +353,9 @@ def inbox_partition(
         opens: The first day the owner's pay calendar covers, or ``None`` for
             an owner with no periods at all -- in which case nothing is before
             the calendar (:func:`~._gaps.bounded_lines`).
-        opening: The account's governing
-            :class:`~app.services.cash_ledger.CashOpeningFact`.
+        start: Where the account's books start
+            (:class:`~app.services.cash_ledger.BooksStart`): a configured
+            loan's origination, every other account's opening record.
         rules: What the owner has answered about this account's merchants
             (:func:`~._rules.rules_for`).
         bars: Which of those merchants may not become purchases
@@ -369,7 +370,7 @@ def inbox_partition(
     Returns:
         The :class:`InboxPartition`.
     """
-    bounded = bounded_lines(undisposed_lines(account_id), opens, opening)
+    bounded = bounded_lines(undisposed_lines(account_id), opens, start)
     inbox: "list[BankStatementLine]" = []
     parked: "list[BankStatementLine]" = []
     for line in bounded.inside:
@@ -431,23 +432,27 @@ def awaiting_review_count(
             read this replaced was a second ``budget.pay_periods`` scan on the
             app's hottest render path.
 
-            **The BOOKS opening is NOT a parameter beside it, and the asymmetry
+            **The BOOKS start is NOT a parameter beside it, and the asymmetry
             is that same reason applied honestly rather than copied.**  The
-            grid route holds a memoized calendar and holds no opening, so
+            grid route holds a memoized calendar and holds no books start, so
             taking one would make every caller derive a fact only this function
             needs -- and the point of the parameter was to consume a derivation
-            the caller already had, never to push work outward.
+            the caller already had, never to push work outward.  It is read
+            from :func:`~app.services.cash_ledger.required_books_start`, the
+            producer :meth:`~._scope.ReviewScope.build` reads, so the badge and
+            the page split at one day (card plan#2436, ruling **plan#3954**).
 
     Returns:
         The count, ``0`` when the account has nothing recorded.
 
     Raises:
         RuntimeError: From
-            :func:`~app.services.cash_ledger.account_opening_fact`, when the
-            account carries no opening row at all -- a broken invariant, and
-            the same fail-loud policy :meth:`~._scope.ReviewScope.build`
-            inherits.  Answering "then every line is work" would put a badge on
-            the grid for lines the review screen cannot show.
+            :func:`~app.services.cash_ledger.required_books_start`, when the
+            account is no configured loan and carries no opening row at all
+            -- a broken invariant, and the same fail-loud policy
+            :meth:`~._scope.ReviewScope.build` inherits.  Answering "then every
+            line is work" would put a badge on the grid for lines the review
+            screen cannot show.
     """
     # **The two facts the walk asks for and no more.**  A whole
     # :class:`~._bars.MerchantAnswers` would carry a
@@ -461,7 +466,7 @@ def awaiting_review_count(
     return len(inbox_partition(
         account_id,
         opens,
-        account_opening_fact(account_id),
+        required_books_start(account_id),
         rules,
         CreationBars.build(owner_id, account_id, rules),
     ).inbox)

@@ -685,3 +685,52 @@ def create_loan_with_trueup(
         )
     db_session.commit()
     return loan
+
+
+def create_loan_with_a_late_opening_record(
+    seed_user, db_session, *, principal, originated, recorded,
+):
+    """Create a configured loan whose opening RECORD is later than its origination.
+
+    Production's shape (card plan#2436, ruling plan#3954): the Van Loan
+    originated 2023-02-14, and its governing ``budget.account_openings`` row
+    says 2026-04-22, dated by migration ``d3b6f1c8a274`` from the app's own
+    records.  A reader of the record and a reader of the loan's start answer
+    differently on every day after *originated* up to and including
+    *recorded*, which is the window each caller's cases sit in or on the edge
+    of.
+
+    :func:`create_loan_account` opens the record before the origination; the
+    later record is appended with no door in front of it, since the restate
+    door refuses a loan.  The database accepts it: the loan records no money,
+    and its books open on its origination anyway (plan task plan#3960).
+    Commits, so the loan is fully resolvable.
+
+    Args:
+        seed_user: The ``seed_user`` fixture dict.
+        db_session: The test ``db.session``.
+        principal: What the loan originated owing.  The account takes
+            :func:`create_loan_account`'s default name.
+        originated: The loan's origination date, the day its books start.
+        recorded: The later day its governing opening record names.
+
+    Returns:
+        The committed loan :class:`~app.models.account.Account`.
+    """
+    # Pylint: ``import-outside-toplevel`` -- same circular-dep avoidance as the
+    # loan helpers above: the models package must not load at import time.
+    from app.models.account_opening import AccountOpening  # pylint: disable=import-outside-toplevel
+    # Pylint: ``import-outside-toplevel`` -- the services package, likewise.
+    from app.services.cash_ledger import account_opening_fact  # pylint: disable=import-outside-toplevel
+
+    loan = create_loan_account(
+        seed_user, db_session, principal=principal, origination_date=originated,
+    )
+    db_session.add(AccountOpening(
+        account_id=loan.id,
+        opened_on=recorded,
+        opening_equity=Decimal("0.00"),
+        source_id=account_opening_fact(loan.id).source_id,
+    ))
+    db_session.commit()
+    return loan

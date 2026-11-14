@@ -675,7 +675,7 @@ def review_set(scope: ReviewScope) -> ReviewSet:
     # **bank_import:R-HQ** made structural rather than restated per surface,
     # since nothing should propose a match for a line nobody can act on.
     lines = inbox_partition(
-        account_id, opens, scope.opening, answers.view.rules, answers.bars,
+        account_id, opens, scope.books_start, answers.view.rules, answers.bars,
     )
 
     # **What is already CLAIMED is read HERE, not carried in the scope.**  The

@@ -39,6 +39,7 @@ from ._loans import (
     loan_params_for,
     add_escrow_line,
     create_loan_with_trueup,
+    create_loan_with_a_late_opening_record,
 )
 from ._accounts import (
     create_savings_account,

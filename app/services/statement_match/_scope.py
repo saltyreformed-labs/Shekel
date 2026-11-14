@@ -13,7 +13,8 @@ end of this step, applying that same statement end to end against ONE of these:
 rule for what this holds:
 
 * the owner's pay CALENDAR -- nothing here writes a payday;
-* the account's governing OPENING -- nothing here restates one;
+* where the account's books START -- nothing here restates an opening or
+  writes a loan's terms;
 * every row the account could offer, PRICED (:class:`~._subjects.Candidates`);
 * every budget line a bank line could become a purchase against.
 
@@ -60,10 +61,10 @@ from app.exceptions import ValidationError
 from app.services import pay_calendar
 from app.services.cash_ledger import (
     AmountBasis,
-    CashOpeningFact,
-    account_opening_fact,
+    BooksStart,
     baseline_amount_basis,
     reject_line_before_books_open,
+    required_books_start,
 )
 
 from ._candidates import candidates_for
@@ -247,15 +248,22 @@ class ReviewScope:
             no act this package performs writes a salary profile, a payday, a
             loan parameter or an escrow line.  It holds no per-row answer, so
             :func:`~._valuation.repriced` still re-reads every row it values.
-        opening: The account's governing
-            :class:`~app.services.cash_ledger.CashOpeningFact` -- the day its
-            books open and the equity they open holding (plan step
-            **balance:X-f3c-2b-2b**).  **On the scope by its own rule**: no
-            act this package performs writes ``budget.account_openings``.
+        books_start: Where the account's books start
+            (:class:`~app.services.cash_ledger.BooksStart`) -- the day, and
+            the figure that day holds (plan step **balance:X-f3c-2b-2b**).
+            **The START and not the opening record** since card plan#2436
+            (ruling **plan#3954**): a configured loan's books start on its
+            origination, so the pass bounds its lines where its movements
+            are bounded, and the loan's opening record is read by nothing
+            here.  No door builds a pass for a loan today (each loads its
+            account through ``load_cash_account_or_404``), so that half is
+            structural rather than reached.  **On the scope by its own
+            rule**: no act this package performs writes
+            ``budget.account_openings`` or a loan's terms.
             **What it buys is SHARING rather than a saved read**, and a
             first draft of this line said 378 reads, which nothing would
             have made: :func:`~._gaps._split_at_books_open` takes the
-            opening as a parameter and would hoist one read whatever this
+            start as a parameter and would hoist one read whatever this
             field did.  What the field buys is that the split and every
             door read the SAME one, which makes the SCREEN and the DOORS
             provably one answer about which lines the books can hold:
@@ -273,7 +281,7 @@ class ReviewScope:
     account_id: int
     calendar: "pay_calendar.PayCalendar"
     basis: AmountBasis
-    opening: CashOpeningFact
+    books_start: BooksStart
     candidates: Candidates
     destinations: "tuple[PurchaseDestination, ...]"
 
@@ -353,14 +361,14 @@ class ReviewScope:
 
         **This pass's spelling of the boundary**
         (:func:`app.services.cash_ledger.reject_line_before_books_open`, plan
-        step **balance:X-f3c-2b-2b**, finding **N-383**), bound to the opening
-        this pass resolved -- the same relationship
+        step **balance:X-f3c-2b-2b**, finding **N-383**), bound to the books
+        start this pass resolved -- the same relationship
         :meth:`~._reads.ReviewSet.search_gap_for` has with
         :func:`~._gaps.search_gap`.
 
         **It is a method for the reason** :meth:`period_holding` **is one**:
-        the opening it must use is THIS pass's, and a door loading a second
-        one could judge a line against an opening the screen never saw.  Under
+        the start it must use is THIS pass's, and a door loading a second
+        one could judge a line against a start the screen never saw.  Under
         READ COMMITTED that is a real difference and not a theoretical one --
         both the GET that offers a line and the POST that records it are their
         own snapshots, and a restatement can commit between them.
@@ -380,10 +388,10 @@ class ReviewScope:
 
         Raises:
             ValidationError: When the line posted on or before the day this
-                account's books open.  A 400, for the reason
+                account's books start.  A 400, for the reason
                 :meth:`period_holding`'s is.
         """
-        reject_line_before_books_open(self.opening, posted_on, subject)
+        reject_line_before_books_open(self.books_start, posted_on, subject)
 
     @classmethod
     def build(cls, owner_id: int, account_id: int) -> "ReviewScope":
@@ -416,14 +424,15 @@ class ReviewScope:
                 there is no honest figure to publish when nobody can say
                 which.
             RuntimeError: From
-                :func:`~app.services.cash_ledger.account_opening_fact`, when
-                the account carries no ``budget.account_openings`` row at all
-                -- a broken invariant rather than an empty state, and one this
-                pass inherits rather than softens.  Every account gets one at
-                creation and migration ``a7c41f9d2b60`` backfilled the rest;
-                answering "then every line is recordable" would offer acts on
-                money whose level nothing states, which is the fabrication
-                that loader exists to refuse.
+                :func:`~app.services.cash_ledger.required_books_start`, when
+                the account is no configured loan and carries no
+                ``budget.account_openings`` row at all -- a broken invariant
+                rather than an empty state, and one this pass inherits rather
+                than softens.  Every account gets one at creation and
+                migration ``a7c41f9d2b60`` backfilled the rest; answering
+                "then every line is recordable" would offer acts on money
+                whose level nothing states, which is the fabrication that
+                loader exists to refuse.
         """
         calendar = pay_calendar.calendar_for(owner_id)
         # ONE basis for the pass (plan step X-au-j, finding **N-309**).  The
@@ -444,11 +453,11 @@ class ReviewScope:
             account_id=account_id,
             calendar=calendar,
             basis=basis,
-            # ONE read of the governing opening for the whole pass (plan step
-            # **balance:X-f3c-2b-2b**).  The screen splits its lines on it and
-            # every door refuses on it, so the two cannot disagree about which
-            # lines the books hold.
-            opening=account_opening_fact(account_id),
+            # ONE read of where the books start for the whole pass (plan step
+            # **balance:X-f3c-2b-2b**; the start since ruling plan#3954).  The
+            # screen splits its lines on it and every door refuses on it, so
+            # the two cannot disagree about which lines the books hold.
+            books_start=required_books_start(account_id),
             candidates=candidates_for(account_id, calendar, basis),
             # **The CALENDAR rather than the owner id** since pay-calendar
             # plan step C4-a-4: it IS the ownership scope, and it is where each

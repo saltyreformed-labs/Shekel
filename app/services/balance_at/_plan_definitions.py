@@ -38,13 +38,14 @@ from app.services._recurrence_common import (
     rows_claiming,
 )
 from app.services.cash_ledger import DefinitionRow, definition_cash
+from app.services.loan_ledger import projection_visible_on
 from app.services.recurrence import (
     compute_due_date,
     projected_occurrence_placements,
 )
 
 from ._context import BalanceContext
-from ._plan_records import _ONE_DAY, PlannedPayment
+from ._plan_records import PlannedPayment
 from ._resolution import ResolvedLoan
 
 
@@ -248,7 +249,6 @@ def estimated_from_definitions(
             not resolve) -- exactly where its written row would refuse.
     """
     basis = ctx.amounts()
-    clamp_floor = as_of + _ONE_DAY
     estimated: list[PlannedPayment] = []
     for template in resolved.definitions:
         for placement, due in _unanswered_placements(template, ctx, through):
@@ -267,7 +267,7 @@ def estimated_from_definitions(
             )
             estimated.append(PlannedPayment(
                 due_date=due,
-                effective_date=max(due, clamp_floor),
+                effective_date=projection_visible_on(due, as_of),
                 cash=cash,
                 is_estimated=True,
             ))

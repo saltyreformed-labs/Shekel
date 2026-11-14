@@ -40,6 +40,18 @@ calendar, one pure function, a later last event), and the plan's own charge
 list and the ``seed_slots`` partition that kept it apart from the facts' are
 deleted.
 
+**The CONTRACT line is the same facts with a third cash source** (plan step
+recurrence:R16-f, ruling **R-R53**): every installment the contract still
+bills after the record's last event, at its level P&I and escrow, the term's
+last closing the loan (:func:`~app.services.loan_ledger.contract_projections`),
+in place of the plan's payments (:func:`contract_line`).  It is composed HERE,
+beside the plan's timeline, because the facts it extends are the pass's, and
+the leaf builds a loan's calendar through ``loan_resolver.resolve_periods``,
+so the resolver's composer, which the contract line replaces, could not reach
+the replay without an import cycle.  The contract from ORIGINATION is the same
+line over the opening alone, read on the origination day
+(:func:`origination_contract_line`).
+
 Boundary discipline (``CLAUDE.md``): no Flask symbol, no writes; all money is
 :class:`~decimal.Decimal`.  Seam-PRIVATE -- W9910 refuses an import of it from
 outside :mod:`app.services.balance_at`.
@@ -47,6 +59,7 @@ outside :mod:`app.services.balance_at`.
 
 from collections.abc import Sequence
 from dataclasses import replace
+from datetime import date
 from decimal import Decimal
 
 from app.models.account import Account
@@ -54,6 +67,7 @@ from app.services.loan_ledger import (
     LoanCashEvent,
     LoanEventStream,
     LoanLedgerWalk,
+    contract_projections,
     replay_loan_stream,
     with_contract_charges,
 )
@@ -145,6 +159,86 @@ def projection_events(
             key=lambda record: (record.due_date, record.effective_date),
         )
     ]
+
+
+def contract_line(facts: LoanEventStream, as_of: date) -> LoanLedgerWalk:
+    """Return the loan's CONTRACT line: its facts, then each installment it still owes as billed.
+
+    What the loan is charged and pays if every installment the contract
+    still bills is paid as the contract bills it: *facts* with the contract's
+    remaining installments as its projections
+    (:func:`~app.services.loan_ledger.contract_projections`), charged by the
+    leaf's one composer from the calendar the facts were charged on
+    (:func:`~app.services.loan_ledger.with_contract_charges`, ruling
+    **R-R100**) and replayed once
+    (:func:`~app.services.loan_ledger.replay_loan_stream`).  The fact prefix
+    is the pass's facts walk exactly, as the plan's timeline's is
+    (:func:`merged_stream`), so the contract line, the plan and the history
+    agree on every recorded payment by construction, and the term's last
+    installment closes the loan on whatever balance the walk reached.  An
+    installment due before the read that nothing paid counts from the day
+    after it and splits as its installment would (ruling plan#4029).
+
+    Made-up figures (ruling plan#4029's): $3,000.00 at 5% over three months
+    from Jan 15, nothing paid, read on Mar 20.  Feb 15's $1,008.34 and Mar
+    15's both count from Mar 21, paying $12.50 and $8.35 of interest; Apr 15
+    closes it for $1,008.35, $25.03 of interest in all.
+
+    Args:
+        facts: The loan's recorded stream as the pass sees it
+            (:attr:`~app.services.loan_ledger.LoanLedgerWalk.stream` of the
+            pass's memoized walk).
+        as_of: The read pass's as-of.
+
+    Returns:
+        The contract line's :class:`~app.services.loan_ledger.LoanLedgerWalk`
+        -- the facts' outcomes, then the contract's as projected outcomes.
+        The facts replayed as they stand when they carry no calendar (an
+        account that is not a configured loan, whose stream is empty), as
+        :func:`merged_stream` answers it.
+    """
+    calendar = facts.calendar
+    if calendar is None:
+        return replay_loan_stream(facts)
+    return replay_loan_stream(with_contract_charges(
+        replace(
+            facts, projections=contract_projections(facts, calendar, as_of),
+        ),
+        calendar,
+    ))
+
+
+def origination_contract_line(facts: LoanEventStream) -> LoanLedgerWalk:
+    """Return the loan's contract FROM ORIGINATION: its opening, then every installment as billed.
+
+    The contract the loan's terms state on its origination day, whatever its
+    record says since: :func:`contract_line` over *facts*' opening assertion
+    alone, read as of the origination, so every installment from the first
+    counts on its own due date (none is due before the read) and the term's
+    last closes the loan.  It is what the loan would owe on any date had every
+    installment been paid as billed, for a reader that has no record to go on
+    (a mid-life import's months before tracking).
+
+    Args:
+        facts: The loan's recorded stream; its opening assertion and its
+            calendar are read, and nothing else.
+
+    Returns:
+        The from-origination contract's
+        :class:`~app.services.loan_ledger.LoanLedgerWalk`.
+    """
+    calendar = facts.calendar
+    if calendar is None:
+        return replay_loan_stream(facts)
+    return contract_line(
+        replace(
+            facts,
+            payments=(),
+            resets=[reset for reset in facts.resets if reset.is_opening],
+            projections=(),
+        ),
+        calendar.origination_date,
+    )
 
 
 def loan_timeline(account: Account, ctx: BalanceContext) -> LoanLedgerWalk:

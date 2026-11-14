@@ -136,6 +136,7 @@ from ._walk import (
 )
 from ._charges import AccrualCharge, LoanCalendar
 from ._calendars import LoanCalendars
+from ._contract import contract_projections
 from ._replay import (
     ClosingCash,
     LoanCashEvent,
@@ -152,6 +153,7 @@ from ._replay import (
 from ._visible import (
     anchor_visible_on,
     payment_visible_on,
+    projection_visible_on,
 )
 
 __all__ = [
@@ -170,12 +172,14 @@ __all__ = [
     "anchor_visible_on",
     "compute_loan_payment_splits",
     "confirmed_shadows_through",
+    "contract_projections",
     "dated_deltas",
     "latest_recorded_on",
     "load_loan_stream",
     "loan_event_stream",
     "payment_visible_on",
     "projection_boundary",
+    "projection_visible_on",
     "replay_loan_events",
     "replay_loan_stream",
     "walk_loan_ledger",

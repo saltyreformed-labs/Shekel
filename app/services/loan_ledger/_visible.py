@@ -49,6 +49,11 @@ carries in ``journal_entries.entry_date``:
 * an **ANCHOR** is visible from its **own civil date** (``anchor_date``) -- the one
   date it ever asserts, and the ``entry_date`` the anchor correction is posted at
   (:func:`app.services._posting_reconcile.emit_correction_entry`).
+* a **PROJECTED** payment -- one that has not happened: a planned row, an
+  estimated occurrence, or a contract installment -- is visible from its due
+  date or the day after the read, whichever is later (ruling **D1**, "a plan
+  cannot have already happened"; :func:`projection_visible_on`).  No posting
+  carries it, so it is a reader's day rather than the ledger's.
 
 **This is step C2 -- the one clock that replaced the two boundary predicates the
 old rule used.**  Before it, a payment counted from its pay period's ``start_date``
@@ -76,9 +81,9 @@ with one clamp on
 take it through :func:`app.services._posting_reconcile.filing_calendar_for`,
 and all three names are deleted.
 
-**Chronology only, and now PURE.**  The two names left here each return a
-``date``; neither yields a balance-at-T, which is why both are ruled
-non-producers of the balance fence.  No clock, no writes and -- since C2-d
+**Chronology only, and now PURE.**  The three names here each return a
+``date``; none yields a balance-at-T, which is why each is ruled a
+non-producer of the balance fence.  No clock, no writes and -- since C2-d
 removed the one calendar query -- no database session anywhere in this package.
 That also retires a caveat this paragraph used to carry: a returned
 ``PayPeriod`` was an ORM row, so money was reachable from it by relationship,
@@ -89,11 +94,13 @@ prefer, because claiming it before it was true is how
 ``LoanState.current_balance`` shipped.
 """
 
-from datetime import date
+from datetime import date, timedelta
 
 from app.services.installment_calendar import installment_paid_by
 from app.services.loan_loaders import loan_payment_due_date
 from app.services.transfer_legs import TransferLeg
+
+_ONE_DAY = timedelta(days=1)
 
 
 def anchor_visible_on(anchor_date: date) -> date:
@@ -203,3 +210,35 @@ def payment_visible_on(
             loan_payment_due_date(leg, payment_day),
         )
     return leg.settled_on
+
+
+def projection_visible_on(due: date, as_of: date) -> date:
+    """Return the date a PROJECTED payment due on *due* counts from, read as of *as_of*.
+
+    **Ruling D1: a plan cannot have already happened.**  A payment that has
+    not settled counts from its own due date, or -- when that date is on or
+    before the read -- from the day after the read: a payment due last week
+    that nothing has paid is money still to move.  The ONE statement of that
+    clamp for every projection a read builds (plan step recurrence:R16-f): a
+    loan's planned rows and its estimated occurrences
+    (:mod:`app.services.balance_at._plan`,
+    :mod:`app.services.balance_at._plan_definitions`) and the contract's
+    remaining installments (:func:`.._contract.contract_projections`), so
+    the contract line counts a missed installment on the day the plan counts
+    a missed payment (ruling plan#4029).
+
+    **Only the day it COUNTS moves**, never the day it is walked: the
+    projection keeps *due* as its contract-time date, so it splits as its
+    installment would (ruling plan#4029), unless a later recorded fact
+    pushes it (:func:`.._replay.projection_boundary`).  Made-up figures,
+    read on Mar 20: a payment due Feb 15 counts from Mar 21, one due Mar 20
+    from Mar 21, and one due Mar 22 from Mar 22.
+
+    Args:
+        due: The payment's due date in contract time.
+        as_of: The read's as-of.
+
+    Returns:
+        The later of *due* and the day after *as_of*.
+    """
+    return max(due, as_of + _ONE_DAY)

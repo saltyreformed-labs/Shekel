@@ -16,12 +16,10 @@ Boundary discipline (``CLAUDE.md``): no Flask symbol, no writes; all money is
 """
 
 from dataclasses import dataclass
-from datetime import date, timedelta
+from datetime import date
 from decimal import Decimal
 
 from app.services.loan_ledger import LoanCalendar
-
-_ONE_DAY = timedelta(days=1)
 
 
 @dataclass(frozen=True)

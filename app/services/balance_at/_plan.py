@@ -174,7 +174,7 @@ from decimal import Decimal
 
 from app.models.account import Account
 from app.services import escrow_calculator, loan_loaders
-from app.services.loan_ledger import LoanCalendar
+from app.services.loan_ledger import LoanCalendar, projection_visible_on
 from app.services.cash_ledger import (
     AmountBasis,
     resolve_amount,
@@ -190,7 +190,7 @@ from app.utils.money import round_money
 from ._context import BalanceContext
 from ._memoize import _memoize_once, require_scenario
 from ._plan_definitions import estimated_from_definitions
-from ._plan_records import _ONE_DAY, LoanForwardPlan, PlannedPayment
+from ._plan_records import LoanForwardPlan, PlannedPayment
 from ._resolution import (
     contractual_schedule_from_origination,
     resolved_loan,
@@ -376,7 +376,6 @@ def _planned_from_legs(
         One :class:`PlannedPayment` per projected leg (``is_estimated=False``).
     """
     planned: list[PlannedPayment] = []
-    clamp_floor = fwd.as_of + _ONE_DAY
     for leg in legs:
         due = loan_payment_due_date(leg, fwd.calendar.payment_day)
         # ONE producer, no fallback.  The ``is None`` dance this replaced
@@ -387,7 +386,7 @@ def _planned_from_legs(
         # is the leg's only answer.
         planned.append(PlannedPayment(
             due_date=due,
-            effective_date=max(due, clamp_floor),
+            effective_date=projection_visible_on(due, fwd.as_of),
             cash=resolve_amount(parent_of(leg), basis),
             is_estimated=False,
         ))
@@ -471,7 +470,6 @@ def _estimated_from_contract(
         (``is_estimated=True``), plus the post-contractual extension installments.
     """
     estimated: list[PlannedPayment] = []
-    clamp_floor = fwd.as_of + _ONE_DAY
     calendar = fwd.calendar
     extension = _extension_dates(contractual, calendar)
 
@@ -497,7 +495,7 @@ def _estimated_from_contract(
         )
         estimated.append(PlannedPayment(
             due_date=due,
-            effective_date=max(due, clamp_floor),
+            effective_date=projection_visible_on(due, fwd.as_of),
             cash=round_money(contractual_pi + escrow),
             is_estimated=True,
         ))

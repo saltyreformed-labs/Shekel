@@ -570,6 +570,11 @@ _FENCED_MODULE_RULINGS = {
             #   * ``with_contract_charges`` (recurrence:R16-c-2, ruling R-R100)
             #     returns a stream with its charges attached -- the stream
             #     ruling above plus ``contract_charges``' -- before any replay.
+            #   * ``contract_projections`` (recurrence:R16-f) returns cash
+            #     EVENTS -- each installment the contract still bills, at its
+            #     level P&I and escrow, the last closing -- before any replay:
+            #     what the loan WILL be paid, never what it owes on a date.
+            "contract_projections",
             "latest_recorded_on",
             "projection_boundary",
             "replay_loan_stream",
@@ -618,8 +623,11 @@ _FENCED_MODULE_RULINGS = {
             #     to carry a caveat ("a ``PayPeriod`` is an ORM row, so money is
             #     reachable by relationship; a period is not an account's
             #     balance") that the two survivors do not need.
+            # ``projection_visible_on`` (plan step recurrence:R16-f) is the
+            # third: ruling D1's clamp for a payment that has not happened.
             "anchor_visible_on",
             "payment_visible_on",
+            "projection_visible_on",
             # The walk's events re-keyed by their visible dates (plan step
             # E1a): what ONE event contributed and when it counts -- dated
             # FACTS a consumer can already read off the public splits and

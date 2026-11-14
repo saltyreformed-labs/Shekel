@@ -193,6 +193,14 @@ def _create_opening_func_sql(arms: "tuple[str, ...]") -> str:
     alone regenerates this dispatcher without the matched-line term, so there
     is nothing to keep in step by hand.
 
+    **Two tables' triggers run it**: ``budget.account_openings``'s, and,
+    with the loan-origination arm, ``budget.loan_params``'s
+    (:data:`._loan_origination._CREATE_LOAN_TERMS_TRIGGER_SQL`).  Both are a
+    row naming an account by ``account_id`` whose INSERT, UPDATE or DELETE can
+    move that account's books day, so the dispatch is the same and is stated
+    once.  Its SQL comment speaks of "this event" for that reason, and its
+    body did not change when the second table joined.
+
     Args:
         arms: The arms being installed -- see :data:`ALL_ARMS`.
 

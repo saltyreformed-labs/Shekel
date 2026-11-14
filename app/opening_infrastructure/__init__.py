@@ -45,7 +45,18 @@ a reader to assume more:
   have refused; the CONSTRAINT is not re-validated afterwards, only future
   writes are.
 
-The invariant spans FIVE tables and two directions, so PostgreSQL cannot
+**The day the books open is one SQL function, ``budget.account_books_opened_on``,
+and every predicate below asks it.**  For a CONFIGURED LOAN -- an account whose
+type has ``has_amortization`` and that carries a ``budget.loan_params`` row,
+the two halves ``balance_at._resolution.configured_loan`` tests -- it is the
+loan's ``origination_date`` (ruling plan#3954): the loan's balance starts there
+(``loan_loaders._terms.synthesize_origination_anchor``), so its books do too,
+and its ``budget.account_openings`` row decides nothing.  For every other
+account it is the GOVERNING ``account_openings.opened_on``.  That loan rule is
+the LOAN-ORIGINATION arm, and a revision declares it like any other
+(:data:`LOAN_ORIGINATION_ARM`).
+
+The invariant spans EIGHT tables and two directions, so PostgreSQL cannot
 state it as a row-level CHECK:
 
 * a MOVEMENT may not move back past its account's opening
@@ -79,7 +90,23 @@ state it as a row-level CHECK:
   two predicates are separate functions**, because the two states have
   different repairs -- re-date the movement, or undo the match -- and a
   refusal that names the wrong one sends the owner to a door that will not
-  help.
+  help;
+* an account may not BECOME, or stop being, a configured loan in a way that
+  moves its books day onto or past a movement or a matched line it already
+  records: loan terms set up with an origination on or after a payment the
+  account records (the setup door accepts payments recorded before setup),
+  an origination or ``account_id`` changed, terms deleted (the account then
+  opens on its opening record), an account re-typed, or a type's
+  ``has_amortization`` flipped (``budget.loan_params``, ``budget.accounts``,
+  ``ref.account_types``; :mod:`._loan_origination`).  Each of the three is
+  DISPATCH to the two openings-side predicates, so the rule is still stated
+  once.  **Setting up terms is the one of these a door reaches with the
+  state possible** (``routes/loan/params.py``).  The rest are backstops:
+  ``origination_date`` is not editable after setup
+  (``LoanParamsUpdateSchema``), the one door deleting terms is the account's
+  own hard delete, which deletes the account in the same transaction (so
+  the predicates find no books day at COMMIT), and the re-type doors refuse a
+  crossing once the account holds a ledger line.
 
 **A FOURTH rule is enforced at the DOOR and deliberately NOT here**, and the
 reason is worth stating because this module's whole claim is structural: a
@@ -114,16 +141,18 @@ The bulk writer is not hypothetical: ``reconcile_service.record_settled_days``
 stamps a statement's day onto ticked purchases with ``query.update()`` and has
 no ORM instance for the service rule to fire on.
 
-FIVE call sites in four files use these builders, exactly as
+SIX files call these builders (a grep of the three builders' names under
+``migrations/`` and ``scripts/``, plan task plan#3960), exactly as
 :mod:`app.audit_infrastructure` and :mod:`app.posting_infrastructure` are used
 -- but they do **not** all produce identical infrastructure, and that
 difference is deliberate:
 
 1. Each Alembic revision that installs an ARM, naming the arms it declared and
    censused: ``d3b6f1c8a274`` passes ``arms=(MOVEMENT_ARM,)`` AFTER its
-   restatement, and ``d1f6a83c9e47`` passes both arms after its own census.  A
-   revision names a LITERAL tuple, never :data:`ALL_ARMS` -- see that constant
-   for what letting the module choose was measured to cost.
+   restatement, ``d1f6a83c9e47`` passes the movement and matched-line arms
+   after its own census, and ``e5b2c8a41f73`` passes all three after its own.
+   A revision names a LITERAL tuple, never :data:`ALL_ARMS` -- see that
+   constant for what letting the module choose was measured to cost.
 2. A revision that installs NO arm and only re-states function BODIES:
    ``c9f4b1e78d02`` calls :func:`apply_opening_functions` with
    ``arms=(MOVEMENT_ARM,)``, which is the arm set of its own point in history.
@@ -184,9 +213,10 @@ Order the DDL first, or drain with ``SET CONSTRAINTS ALL IMMEDIATE``.  The same 
 been true of ``ck_account_postings_balanced`` since it shipped; this module
 states it because a second deferred trigger makes it twice as likely to be met.
 
-**Caller contract: all FIVE tables must already exist**, and that now includes
+**Caller contract: all EIGHT tables must already exist**, and that includes
 ``budget.bank_statement_lines`` -- ``apply_opening_functions`` creates a body
-naming it.
+naming it -- and, with the loan-origination arm, ``budget.loan_params``,
+``budget.accounts`` and ``ref.account_types``.
 
 **The contract is MOSTLY the CALLER's to keep, and the claim that the server
 kept it was false.**  This paragraph used to say ``check_function_bodies``
@@ -200,11 +230,13 @@ budget.no_such_table; END $$ LANGUAGE plpgsql`` **succeeds**, while the same
 reference in a ``LANGUAGE sql`` body **errors** with ``relation ... does not
 exist``.
 
-So the five tables split into two groups, and saying which is the point:
+So the tables split into two groups, and saying which is the point:
 
-* ``budget.account_openings`` IS checked.  :data:`_CREATE_OPENED_ON_SQL` is
-  ``LANGUAGE sql STABLE`` and selects from it, so applying this module without
-  that table fails loudly at the second statement -- the right signal.
+* ``budget.account_openings`` IS checked, and so are the three the
+  loan-origination arm reads.  The books-day body
+  (``_base._create_opened_on_sql``) is ``LANGUAGE sql STABLE`` and selects
+  from them, so applying this module without one of them fails loudly at the
+  second statement -- the right signal.
 * ``budget.transactions``, ``budget.transaction_entries``,
   ``budget.statement_match_members`` and ``budget.bank_statement_lines`` are
   NOT.  Every body naming them is ``plpgsql``, so applying early succeeds
@@ -236,15 +268,31 @@ from typing import Callable
 
 from ._base import (
     ALL_ARMS,
+    LOAN_ORIGINATION_ARM,
     MATCHED_LINE_ARM,
     MOVEMENT_ARM,
     GOVERNING_ORDER_SQL,
     _BOOKS_HOLD_FUNCTION,
     _CREATE_BOOKS_HOLD_SQL,
-    _CREATE_OPENED_ON_SQL,
     _OPENED_ON_FUNCTION,
     _OPENINGS_TABLE,
+    _create_opened_on_sql,
     _drop_trigger_sql,
+)
+from ._loan_origination import (
+    _ACCOUNT_KIND_FUNCTION,
+    _ACCOUNT_KIND_TRIGGER,
+    _ACCOUNT_TYPES_TABLE,
+    _ACCOUNTS_TABLE,
+    _CREATE_ACCOUNT_KIND_TRIGGER_SQL,
+    _CREATE_LOAN_TERMS_TRIGGER_SQL,
+    _CREATE_TYPE_KIND_TRIGGER_SQL,
+    _LOAN_PARAMS_TABLE,
+    _LOAN_TERMS_TRIGGER,
+    _TYPE_KIND_FUNCTION,
+    _TYPE_KIND_TRIGGER,
+    _create_account_kind_func_sql,
+    _create_type_kind_func_sql,
 )
 from ._matched_line import (
     MATCHED_LINE_DAYS_SQL,
@@ -278,11 +326,13 @@ from ._openings import (
     _OPENING_PREDICATE_FUNCTION,
     _OPENING_TRIGGER,
     _create_opening_func_sql,
+    _openings_predicates_for,
 )
 
 __all__ = [
     "ALL_ARMS",
     "GOVERNING_ORDER_SQL",
+    "LOAN_ORIGINATION_ARM",
     "MATCHED_LINE_ARM",
     "MATCHED_LINE_DAYS_SQL",
     "MOVEMENT_ARM",
@@ -309,11 +359,13 @@ def apply_opening_infrastructure(
     remain.
 
     Executes, in order: the two BASE functions and the declared arms' functions
-    (:func:`apply_opening_functions`), then each declared arm's constraint
-    triggers, then the openings trigger, then the drops for every arm NOT
-    declared.  Every statement is idempotent (``CREATE OR REPLACE FUNCTION``
-    swaps the body; ``DROP TRIGGER IF EXISTS`` + ``CREATE`` re-pins each
-    trigger; every drop is ``IF EXISTS``), so a second run with the same arms
+    (:func:`apply_opening_functions`), then each declared row-set arm's
+    constraint triggers, then the openings trigger, then the loan-origination
+    arm's three when it is declared (one of which runs the openings
+    dispatcher), then the drops for every arm NOT declared.  Every statement
+    is idempotent (``CREATE OR REPLACE FUNCTION`` swaps the body;
+    ``DROP TRIGGER IF EXISTS`` + ``CREATE`` re-pins each trigger; every drop
+    is ``IF EXISTS``), so a second run with the same arms
     is indistinguishable from the first.
 
     **Triggers are dropped before the functions they name.**  Every arm's
@@ -345,10 +397,11 @@ def apply_opening_infrastructure(
             revision was measured to cost.
 
     Raises:
-        ValueError: When *arms* is empty, or names an arm this module does not
-            build.  An empty set would generate an openings dispatcher with an
-            empty ``IF`` block, which is not valid PL/pgSQL; a database with no
-            boundary at all is :func:`remove_opening_infrastructure`.
+        ValueError: When *arms* names no arm with a row set, or names an arm
+            this module does not build.  A set without one would generate an
+            openings dispatcher with an empty ``IF`` block, which is not valid
+            PL/pgSQL; a database with no boundary at all is
+            :func:`remove_opening_infrastructure`.
     """
     apply_opening_functions(executor, arms=arms)
     for table in _MOVEMENT_TABLES:
@@ -362,10 +415,17 @@ def apply_opening_infrastructure(
         executor(_CREATE_LINE_DAY_TRIGGER_SQL)
     executor(_drop_trigger_sql(_OPENING_TRIGGER, _OPENINGS_TABLE))
     executor(_CREATE_OPENING_TRIGGER_SQL)
+    _drop_loan_origination_triggers(executor)
+    if LOAN_ORIGINATION_ARM in arms:
+        executor(_CREATE_LOAN_TERMS_TRIGGER_SQL)
+        executor(_CREATE_ACCOUNT_KIND_TRIGGER_SQL)
+        executor(_CREATE_TYPE_KIND_TRIGGER_SQL)
     if MOVEMENT_ARM not in arms:
         _drop_movement_functions(executor)
     if MATCHED_LINE_ARM not in arms:
         _drop_matched_line_functions(executor)
+    if LOAN_ORIGINATION_ARM not in arms:
+        _drop_loan_origination_functions(executor)
 
 
 def apply_opening_functions(
@@ -390,9 +450,13 @@ def apply_opening_functions(
     whether it touched one.
 
     **The BASE is ``budget.books_hold`` and
-    ``budget.account_books_opened_on``, and it is arm-independent** -- every
-    arm's predicate asks both, so they are installed whatever is declared and
-    survive an arm's withdrawal.  That is what makes a downgrade behaviourally
+    ``budget.account_books_opened_on``, and it is installed whatever is
+    declared** -- every arm's predicate asks both, so they survive an arm's
+    withdrawal.  The books day's BODY follows one arm: with
+    :data:`LOAN_ORIGINATION_ARM` a configured loan's books open on its
+    origination, without it on its opening record
+    (``_base._create_opened_on_sql``), so withdrawing that arm regenerates the
+    body rather than dropping anything.  That is what makes a downgrade behaviourally
     exact rather than byte-exact: the movement bodies restored by withdrawing
     the matched-line arm still ask ``books_hold``, which is the same rule
     ruling **R-HG** states, spelled in the one place this tier spells it.
@@ -408,8 +472,9 @@ def apply_opening_functions(
         arms: The arms whose functions to create.  See :data:`ALL_ARMS`.
 
     Raises:
-        ValueError: When *arms* is empty or names an arm this module does not
-            build.
+        ValueError: When *arms* names no arm with a row set (an empty set, or
+            :data:`LOAN_ORIGINATION_ARM` alone) or names an arm this module
+            does not build.
     """
     unknown = tuple(arm for arm in arms if arm not in ALL_ARMS)
     if unknown:
@@ -417,15 +482,18 @@ def apply_opening_functions(
             f"apply_opening_functions: unknown books-boundary arm(s) "
             f"{unknown}; this module builds {ALL_ARMS}."
         )
-    if not arms:
+    if not _openings_predicates_for(arms):
         raise ValueError(
-            "apply_opening_functions: at least one arm is required.  An empty "
-            "set would generate an openings dispatcher with an empty IF "
-            "block, which is not valid PL/pgSQL; to leave a database with no "
-            "books boundary at all, call remove_opening_infrastructure."
+            "apply_opening_functions: at least one arm with a row set "
+            f"({MOVEMENT_ARM!r} or {MATCHED_LINE_ARM!r}) is required, and "
+            f"{arms!r} names none.  Without one the openings dispatcher would "
+            "have an empty IF block, which is not valid PL/pgSQL, and "
+            f"{LOAN_ORIGINATION_ARM!r} alone would ask nothing; to leave a "
+            "database with no books boundary at all, call "
+            "remove_opening_infrastructure."
         )
     executor(_CREATE_BOOKS_HOLD_SQL)
-    executor(_CREATE_OPENED_ON_SQL)
+    executor(_create_opened_on_sql(arms))
     if MOVEMENT_ARM in arms:
         executor(_CREATE_MOVEMENT_FUNC_SQL)
         executor(_CREATE_OPENING_PREDICATE_SQL)
@@ -435,6 +503,9 @@ def apply_opening_functions(
         executor(_CREATE_LINE_DAY_FUNC_SQL)
         executor(_CREATE_MATCHED_LINES_PREDICATE_SQL)
     executor(_create_opening_func_sql(arms))
+    if LOAN_ORIGINATION_ARM in arms:
+        executor(_create_account_kind_func_sql(arms))
+        executor(_create_type_kind_func_sql(arms))
 
 
 def _drop_movement_functions(executor: Callable[[str], object]) -> None:
@@ -467,19 +538,47 @@ def _drop_matched_line_functions(executor: Callable[[str], object]) -> None:
     executor(f"DROP FUNCTION IF EXISTS {_MATCHED_LINE_PREDICATE}(INTEGER)")
 
 
+def _drop_loan_origination_triggers(executor: Callable[[str], object]) -> None:
+    """Drop the LOAN-ORIGINATION arm's three triggers.
+
+    Args:
+        executor: Same contract as :func:`apply_opening_infrastructure`.
+    """
+    executor(_drop_trigger_sql(_LOAN_TERMS_TRIGGER, _LOAN_PARAMS_TABLE))
+    executor(_drop_trigger_sql(_ACCOUNT_KIND_TRIGGER, _ACCOUNTS_TABLE))
+    executor(_drop_trigger_sql(_TYPE_KIND_TRIGGER, _ACCOUNT_TYPES_TABLE))
+
+
+def _drop_loan_origination_functions(executor: Callable[[str], object]) -> None:
+    """Drop the LOAN-ORIGINATION arm's two trigger functions.
+
+    Only two: its ``budget.loan_params`` attachment runs the openings
+    dispatcher, which is no arm's and goes only with the whole boundary.  The
+    loan-aware books day is not dropped either; it is a BODY of a base
+    function, regenerated without the loan term by
+    :func:`apply_opening_functions` before this runs.
+
+    Args:
+        executor: Same contract as :func:`apply_opening_infrastructure`.
+    """
+    executor(f"DROP FUNCTION IF EXISTS {_ACCOUNT_KIND_FUNCTION}()")
+    executor(f"DROP FUNCTION IF EXISTS {_TYPE_KIND_FUNCTION}()")
+
+
 def remove_opening_infrastructure(executor: Callable[[str], object]) -> None:
     """Inverse of :func:`apply_opening_infrastructure` for a migration downgrade.
 
-    Drops the five triggers first and then the nine functions, innermost
+    Drops the eight triggers first and then the eleven functions, innermost
     caller last, so nothing is dropped while something still references it.
     **The dependency chain, stated because the ORDER is the only thing this
-    function has to get right:** the five triggers name FOUR trigger functions
-    (one per movement attachment pair, one per matched-line attachment, and the
-    openings dispatcher); the dispatcher ``PERFORM``s the TWO openings-side
-    predicates; the matched-line trigger functions both ``PERFORM`` the
-    per-line predicate; all four predicates read
-    ``budget.account_books_opened_on``; and every one of them asks
-    ``budget.books_hold``, which is why it is dropped LAST.  Every statement
+    function has to get right:** the eight triggers name SIX trigger functions
+    (one per movement attachment pair, one per matched-line attachment, the
+    openings dispatcher, which the loan-terms attachment runs too, and one per
+    re-type attachment); the openings dispatcher and the two re-type
+    dispatchers ``PERFORM`` the TWO openings-side predicates; the matched-line
+    trigger functions both ``PERFORM`` the per-line predicate; all four
+    predicates read ``budget.account_books_opened_on``; and every one of them
+    asks ``budget.books_hold``, which is why it is dropped LAST.  Every statement
     uses ``IF EXISTS``, so this is idempotent and a clean no-op on a database
     that never carried the infrastructure.
 
@@ -492,7 +591,9 @@ def remove_opening_infrastructure(executor: Callable[[str], object]) -> None:
     executor(_drop_trigger_sql(_MATCH_MEMBER_TRIGGER, _MATCH_MEMBERS_TABLE))
     executor(_drop_trigger_sql(_LINE_DAY_TRIGGER, _BANK_LINES_TABLE))
     executor(_drop_trigger_sql(_OPENING_TRIGGER, _OPENINGS_TABLE))
+    _drop_loan_origination_triggers(executor)
     executor(f"DROP FUNCTION IF EXISTS {_OPENING_FUNCTION}()")
+    _drop_loan_origination_functions(executor)
     _drop_movement_functions(executor)
     _drop_matched_line_functions(executor)
     executor(f"DROP FUNCTION IF EXISTS {_OPENED_ON_FUNCTION}(INTEGER)")

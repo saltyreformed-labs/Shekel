@@ -186,11 +186,13 @@ def init_fresh_database(connection):
        registry, so ``db.create_all`` (which made the
        ``budget.account_postings`` table) does not create them.
     4. ``apply_opening_infrastructure`` -- materialise
-       ``budget.account_books_opened_on`` and the five deferred
+       ``budget.account_books_opened_on`` and the eight deferred
        constraint triggers of every arm in ``ALL_ARMS`` that make a
        settled movement (plan step X-f3c-2b) or a matched bank line dated
        on or before its account's books open unstorable, graded from the
-       row's side and from the opening's.  Raw SQL outside the model
+       row's side, from the opening's and from the writes that make an
+       account a configured loan, whose books open on its origination
+       (ruling plan#3954).  Raw SQL outside the model
        registry, exactly like the two above, so ``db.create_all`` does not
        produce it.  There is nothing to legalise on this path: the
        database is empty.

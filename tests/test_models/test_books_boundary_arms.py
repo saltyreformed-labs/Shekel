@@ -41,6 +41,7 @@ from app.models.account_opening import AccountOpening
 
 from app.opening_infrastructure import (
     ALL_ARMS,
+    LOAN_ORIGINATION_ARM,
     MATCHED_LINE_ARM,
     MOVEMENT_ARM,
     apply_opening_functions,
@@ -67,6 +68,26 @@ _MOVEMENT_OBJECTS = (
     "budget.assert_movement_after_books_open",
     "budget.assert_account_books_hold_its_movements",
     "ck_movement_after_books_open",
+)
+
+#: The loan-origination arm's own object names (plan task plan#3960).  Its
+#: ``budget.loan_params`` trigger runs the openings dispatcher, which is no
+#: arm's, so that function is not here.
+_LOAN_ORIGINATION_OBJECTS = (
+    "budget.assert_books_hold_after_account_retype",
+    "budget.assert_books_hold_after_type_retype",
+    "ck_books_open_after_loan_terms",
+    "ck_books_open_after_account_retype",
+    "ck_books_open_after_type_retype",
+)
+
+#: The revision that declares every arm the module knows, which the two
+#: scripts' :data:`ALL_ARMS` must equal.
+_HEAD_ARMS_REVISION = "e5b2c8a41f73_a_set_up_loans_books_open_on_its_origination.py"
+
+#: The books day, as the CREATE that installs its body names it.
+_BOOKS_DAY_CREATE = (
+    "CREATE OR REPLACE FUNCTION budget.account_books_opened_on("
 )
 
 #: The BASE, which belongs to no arm and must survive every arm set.
@@ -121,6 +142,20 @@ def _creates(statements):
         The subset that creates a function or a trigger.
     """
     return [s for s in statements if "CREATE" in s]
+
+
+def _books_day_body(statements):
+    """Return the one ``budget.account_books_opened_on`` body *statements* create.
+
+    Args:
+        statements: Emitted SQL.
+
+    Returns:
+        The single CREATE statement for the books day.
+    """
+    bodies = [s for s in statements if _BOOKS_DAY_CREATE in s]
+    assert len(bodies) == 1, f"{len(bodies)} books-day bodies emitted"
+    return bodies[0]
 
 
 def _drops(statements):
@@ -189,12 +224,50 @@ class TestAnArmSetInstallsExactlyItself:
                     f"{name} is BASE and was dropped for arms={arms}"
                 )
 
-    def test_both_arms_create_both_arms_objects(self):
+    def test_every_arm_creates_every_arms_objects(self):
         """The head configuration the two scripts materialise."""
         created = " ".join(_creates(_statements(ALL_ARMS)))
 
-        for name in _MOVEMENT_OBJECTS + _MATCHED_LINE_OBJECTS:
+        for name in (
+            _MOVEMENT_OBJECTS + _MATCHED_LINE_OBJECTS
+            + _LOAN_ORIGINATION_OBJECTS
+        ):
             assert name in created, f"{name} missing from a full install"
+
+    def test_without_the_loan_arm_the_books_day_reads_no_loan_terms(self):
+        """FIRING CONTROL for the BODY axis on the books day (plan#3960).
+
+        Every revision before ``e5b2c8a41f73`` names its arms without
+        :data:`LOAN_ORIGINATION_ARM`, so each must install the day its own
+        point in history had: the governing opening record, and no loan
+        object at all.  Generate the loan-aware body unconditionally and
+        ``d3b6f1c8a274`` would judge loans by their origination four revisions
+        before any census asked whether the rows allowed it.
+        """
+        statements = _statements((MOVEMENT_ARM, MATCHED_LINE_ARM))
+        created = " ".join(_creates(statements))
+        day = _books_day_body(statements)
+
+        for name in _LOAN_ORIGINATION_OBJECTS:
+            assert name not in created, f"{name} created without its arm"
+        assert "budget.loan_params" not in day
+        assert "ORDER BY id DESC" in day
+
+    def test_with_the_loan_arm_a_configured_loan_opens_on_its_origination(
+        self,
+    ):
+        """The other direction: the day reads the loan's terms, BOTH halves.
+
+        ``has_amortization`` is half of ``configured_loan``'s test: a
+        ``loan_params`` row on an account whose type does not amortize is a
+        data defect the balance refuses to amortize, so the boundary must not
+        either.  The governing lookup stays, for every other account.
+        """
+        day = _books_day_body(_statements(ALL_ARMS))
+
+        assert "params.origination_date" in day
+        assert "types.has_amortization" in day
+        assert "ORDER BY id DESC" in day
 
     def test_the_dispatcher_names_only_the_installed_predicates(self):
         """The openings trigger function is GENERATED from the arm set.
@@ -314,6 +387,39 @@ class TestTheStatementIsTotalRatherThanAdditive:
                 f"{predicate} is created after the dispatcher that calls it"
             )
 
+    def test_withdrawing_the_loan_arm_drops_its_objects_in_order(self):
+        """``e5b2c8a41f73``'s downgrade: triggers, then the books day without
+        the loan term, then the two re-type dispatchers.
+
+        Dropping a dispatcher before the trigger that executes it leaves every
+        loan edit raising ``function does not exist``, and leaving the
+        loan-aware day standing would keep judging loans by their origination
+        on a database that reported the arm withdrawn.
+        """
+        statements = _statements((MOVEMENT_ARM, MATCHED_LINE_ARM))
+        dropped = " ".join(_drops(statements))
+
+        for name in (
+            "budget.assert_books_hold_after_account_retype",
+            "budget.assert_books_hold_after_type_retype",
+        ):
+            assert name in dropped, f"withdrawing the arm left {name} behind"
+        trigger_drop = next(
+            i for i, s in enumerate(statements)
+            if "DROP TRIGGER" in s
+            and "ck_books_open_after_account_retype" in s
+        )
+        function_drop = next(
+            i for i, s in enumerate(statements)
+            if "DROP FUNCTION" in s
+            and "budget.assert_books_hold_after_account_retype" in s
+        )
+        assert trigger_drop < function_drop
+        assert not any(
+            "CREATE CONSTRAINT TRIGGER ck_books_open_after" in s
+            for s in statements
+        )
+
     def test_a_full_install_drops_no_function(self):
         """Naming every arm withdraws none of them."""
         assert _drops(_statements(ALL_ARMS)) == []
@@ -327,6 +433,14 @@ class TestTheArmSetIsValidated:
         block, which is not valid PL/pgSQL."""
         with pytest.raises(ValueError, match="at least one arm"):
             apply_opening_functions(lambda _: None, arms=())
+
+    def test_the_loan_arm_alone_is_refused(self):
+        """It adds no row set, so alone it would ask nothing, and the openings
+        dispatcher it shares would have an empty ``IF`` block."""
+        with pytest.raises(ValueError, match="at least one arm with a row set"):
+            apply_opening_functions(
+                lambda _: None, arms=(LOAN_ORIGINATION_ARM,),
+            )
 
     def test_an_unknown_arm_is_refused(self):
         """A typo would otherwise install a boundary quietly missing an arm."""
@@ -455,10 +569,7 @@ class TestAFromScratchDatabaseMatchesAMigratedOne:
 
     def test_the_NEWEST_revision_installs_every_arm_the_module_knows(self):
         """FIRING CONTROL for a divergence no stamp can see."""
-        head = (
-            _MIGRATIONS
-            / "d1f6a83c9e47_a_matched_bank_line_cannot_predate_the_books.py"
-        ).read_text()
+        head = (_MIGRATIONS / _HEAD_ARMS_REVISION).read_text()
         tree = ast.parse(head)
         declared = None
         for node in ast.walk(tree):
@@ -477,7 +588,9 @@ class TestAFromScratchDatabaseMatchesAMigratedOne:
             "the head revision no longer declares _ARMS_AFTER; this case "
             "cannot grade what it names"
         )
-        assert declared == {"MOVEMENT_ARM", "MATCHED_LINE_ARM"}, declared
+        assert declared == {
+            "MOVEMENT_ARM", "MATCHED_LINE_ARM", "LOAN_ORIGINATION_ARM",
+        }, declared
         assert len(declared) == len(ALL_ARMS), (
             f"the head revision installs {len(declared)} arm(s) while the "
             f"module knows {len(ALL_ARMS)} -- a database built by the SCRIPTS "
@@ -569,7 +682,10 @@ class TestRemoveTakesEverything:
         remove_opening_infrastructure(emitted.append)
         text = " ".join(emitted)
 
-        for name in _MOVEMENT_OBJECTS + _MATCHED_LINE_OBJECTS:
+        for name in (
+            _MOVEMENT_OBJECTS + _MATCHED_LINE_OBJECTS
+            + _LOAN_ORIGINATION_OBJECTS
+        ):
             assert name in text, f"{name} survives a full removal"
         assert "budget.books_hold" in text
         assert "budget.account_books_opened_on" in text
@@ -729,3 +845,4 @@ class TestTheCensusRefusesAnUpgradeItCannotMake:
             "own rollback removes"
         )
         assert "posted_on <=" in message_text
+

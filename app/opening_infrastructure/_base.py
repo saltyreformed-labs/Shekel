@@ -23,6 +23,23 @@ MOVEMENT_ARM = "movement"
 #: censuses the matched lines already in the way before turning it on.
 MATCHED_LINE_ARM = "matched_line"
 
+#: The LOAN-ORIGINATION arm: a CONFIGURED LOAN's books open on its
+#: origination (ruling plan#3954), and the writes that decide whether an
+#: account is one are graded too.  Installed by revision ``e5b2c8a41f73``,
+#: which censuses the movements and matched lines already in the way before
+#: turning it on.
+#:
+#: **It is an arm in the sense the vocabulary already has -- a part of the
+#: boundary a revision declares -- and not a third row set.**  The movement and
+#: matched-line arms each add rows the boundary grades; this one changes the
+#: DAY they are graded against, in :func:`_create_opened_on_sql`, and attaches
+#: the boundary to the three tables that decide it (``budget.loan_params``,
+#: ``budget.accounts.account_type_id``, ``ref.account_types.has_amortization``;
+#: :mod:`._loan_origination`).  So it adds no predicate, and an arm set naming
+#: it ALONE asks nothing: :func:`~app.opening_infrastructure.apply_opening_functions`
+#: refuses one.
+LOAN_ORIGINATION_ARM = "loan_origination"
+
 #: Every arm this module currently knows how to build, **for the two SCRIPTS
 #: that materialise a database at HEAD** and for nothing else.
 #:
@@ -56,14 +73,22 @@ MATCHED_LINE_ARM = "matched_line"
 #:
 #: The name is deliberately not something a revision would reach for: a
 #: revision declares, a script materialises.
-ALL_ARMS = (MOVEMENT_ARM, MATCHED_LINE_ARM)
+#:
+#: *The BODY axis is closed for one function since plan task plan#3960:*
+#: ``budget.account_books_opened_on`` is generated from the arm set
+#: (:func:`_create_opened_on_sql`), so a revision naming no
+#: :data:`LOAN_ORIGINATION_ARM` installs the governing-opening day it always
+#: had, never the loan-aware one.  Every other body is still read live.
+ALL_ARMS = (MOVEMENT_ARM, MATCHED_LINE_ARM, LOAN_ORIGINATION_ARM)
 
-#: The governing-row lookup, stated ONCE in SQL so every trigger below reads
-#: "which opening record governs" the same way -- and the same way
-#: ``cash_ledger.account_opening_fact`` reads it in Python.  The order is
-#: :data:`GOVERNING_ORDER_SQL`, whose own note records why it lost its
-#: ``created_at`` term at plan step X-f3c-2b-2a: the table is append-only and
-#: the latest restatement governs (ruling **R-HE**).
+#: The day an account's books open, stated ONCE in SQL so every trigger below
+#: reads it the same way.  Without :data:`LOAN_ORIGINATION_ARM` it is the
+#: GOVERNING opening record's day, the way ``cash_ledger.account_opening_fact``
+#: reads it in Python; the order is :data:`GOVERNING_ORDER_SQL`, whose own note
+#: records why it lost its ``created_at`` term at plan step X-f3c-2b-2a: the
+#: table is append-only and the latest restatement governs (ruling **R-HE**).
+#: With that arm, a configured loan's day is its origination instead
+#: (:func:`_create_opened_on_sql`).
 _OPENED_ON_FUNCTION = "budget.account_books_opened_on"
 
 #: THE COMPARISON, in SQL, so this tier states it exactly once -- the same
@@ -139,20 +164,100 @@ RETURNS BOOLEAN AS $$
 $$ LANGUAGE sql IMMUTABLE
 """
 
-_CREATE_OPENED_ON_SQL = f"""
-CREATE OR REPLACE FUNCTION {_OPENED_ON_FUNCTION}(p_account_id INTEGER)
-RETURNS DATE AS $$
+#: The GOVERNING opening record's day for ``p_account_id``, as one ``SELECT``:
+#: no row when the account carries none.  Stated once and used by both bodies
+#: :func:`_create_opened_on_sql` generates, so the arm set decides only whether
+#: a loan's origination comes first, never how the governing row is found.
+_GOVERNING_OPENED_ON_SQL = f"""SELECT opened_on
+      FROM {_OPENINGS_TABLE}
+     WHERE account_id = p_account_id
+     ORDER BY {GOVERNING_ORDER_SQL}
+     LIMIT 1"""
+
+#: A CONFIGURED LOAN's origination day for ``p_account_id``, as one scalar
+#: subquery: NULL unless the account's kind amortizes AND it carries loan terms.
+#:
+#: **Both halves are the two ``balance_at._resolution.configured_loan``
+#: tests, and neither implies the other** (that function's docstring argues it):
+#: a ``budget.loan_params`` row on an account whose type does not amortize is a
+#: data defect the balance refuses to amortize, and an amortizing account
+#: whose terms were never entered is cash to the balance.  The boundary follows
+#: the balance's dispatch, so it reads both, and nothing else:
+#: ``loan_params.account_id`` is unique, so this is one row or none, and
+#: ``origination_date`` is NOT NULL, so NULL here means "not a configured loan"
+#: and nothing more.
+_CONFIGURED_LOAN_ORIGINATION_SQL = """(
+            SELECT params.origination_date
+              FROM budget.loan_params AS params
+              JOIN budget.accounts AS accounts
+                ON accounts.id = params.account_id
+              JOIN ref.account_types AS types
+                ON types.id = accounts.account_type_id
+             WHERE params.account_id = p_account_id
+               AND types.has_amortization)"""
+
+
+def _create_opened_on_sql(arms: "tuple[str, ...]") -> str:
+    """Return ``budget.account_books_opened_on`` for the arm set *arms*.
+
+    **The day an account's books open, which every predicate of every arm
+    asks.**  Without :data:`LOAN_ORIGINATION_ARM` it is the governing opening
+    record's day.  With it, a configured loan's books open on its origination
+    and every other account's on its governing opening (ruling plan#3954): a
+    loan's balance starts from its origination
+    (``loan_loaders._terms.synthesize_origination_anchor``), so the boundary
+    starts there too, and a configured loan's ``budget.account_openings`` row
+    decides nothing.
+
+    **Generated from the arm set, so the BODY follows the revision** (the axis
+    :data:`ALL_ARMS` records as open for every other body): a revision before
+    the loan arm installs the governing-opening day it always had.  **Without
+    the loan arm the body is byte-for-byte the one every revision installed
+    before plan task plan#3960**, so withdrawing the arm restores the
+    database's bytes and not only its behaviour (measured: ``md5(prosrc)``
+    on a production copy, before the upgrade and after its downgrade).
+
+    ``COALESCE`` is exact here and not a fallback: the loan subquery is NULL
+    precisely when the account is not a configured loan
+    (:data:`_CONFIGURED_LOAN_ORIGINATION_SQL`).  NULL overall still means an
+    account with no opening record and no loan terms, which every predicate
+    reads as "bounds nothing" (the movement function argues why).
+
+    ``LANGUAGE sql STABLE``, so the planner may inline it, and so
+    ``check_function_bodies`` resolves every table it names at ``CREATE`` time:
+    applied before ``budget.loan_params``, ``budget.accounts`` or
+    ``ref.account_types`` exists, the loan-aware body fails loudly there.
+
+    Args:
+        arms: The arms being installed -- see :data:`ALL_ARMS`.
+
+    Returns:
+        The ``CREATE OR REPLACE FUNCTION`` statement.
+    """
+    if LOAN_ORIGINATION_ARM in arms:
+        body = f"""\
+    -- A CONFIGURED LOAN's books open on its origination (ruling
+    -- plan#3954), every other account's on its GOVERNING opening record's
+    -- day; NULL when the account has neither.  ``budget.account_openings``
+    -- is append-only and the latest RECORDING instant governs (ruling R-HE);
+    -- ``id`` breaks a same-instant tie, exactly as the Python loader does.
+    SELECT COALESCE(
+        {_CONFIGURED_LOAN_ORIGINATION_SQL},
+        ({_GOVERNING_OPENED_ON_SQL}));
+"""
+    else:
+        body = f"""\
     -- The GOVERNING opening record's day, or NULL when the account carries
     -- none.  ``budget.account_openings`` is append-only and the latest
     -- RECORDING instant governs (ruling R-HE); ``id`` breaks a same-instant
     -- tie, exactly as the Python loader does, so the two cannot disagree
     -- about which restatement is in force.
-    SELECT opened_on
-      FROM budget.account_openings
-     WHERE account_id = p_account_id
-     ORDER BY {GOVERNING_ORDER_SQL}
-     LIMIT 1;
-$$ LANGUAGE sql STABLE
+    {_GOVERNING_OPENED_ON_SQL};
+"""
+    return f"""
+CREATE OR REPLACE FUNCTION {_OPENED_ON_FUNCTION}(p_account_id INTEGER)
+RETURNS DATE AS $$
+{body}$$ LANGUAGE sql STABLE
 """
 
 def _drop_trigger_sql(trigger: str, table: str) -> str:

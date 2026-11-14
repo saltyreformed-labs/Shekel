@@ -315,6 +315,71 @@ class TestASplitClassIsRefused:
         assert "needs a docstring" in refusal(tmp_path, source)
 
 
+def _renamed(name: str) -> tuple[str, dict]:
+    """The sample and its plan with TestBig named ``name``."""
+    plan = plan_dict()
+    for part in plan["parts"][1:]:
+        part["nodes"][0]["class"] = name
+    return sample_with("class TestBig:", f"class {name}:"), plan
+
+
+class TestAGeneratedLineTooWideIsRefused:
+    """A line the writer composes that the limit (99 in the sample) cannot hold is refused
+    when the plan renders, before anything is written.  Rendered unmeasured, it was written
+    with the package, the source deleted, and refused only by the pylint arm."""
+
+    def test_a_slice_docstring_that_fits(self, tmp_path):
+        """89 characters make the 99-column line ``    \"\"\"<docstring>\"\"\"``."""
+        plan = plan_dict()
+        plan["parts"][1]["nodes"][0]["docstring"] = "x" * 89
+        root = build(tmp_path)
+        texts = render_all(layout_of(root, plan), line_limit(root))
+        assert f'    """{"x" * 89}"""' in texts["test_big_early.py"].splitlines()
+
+    def test_a_slice_docstring_one_column_too_wide(self, tmp_path):
+        """90 characters would make a 100-column line."""
+        plan = plan_dict()
+        plan["parts"][1]["nodes"][0]["docstring"] = "x" * 90
+        assert refusal(tmp_path, plan=plan) == (
+            "test_big_early: a generated line exceeds 99 columns: "
+            f"'    \"\"\"{'x' * 90}\"\"\"'")
+
+    def test_a_split_class_name_that_fits_its_header(self, tmp_path):
+        """``class N(_NMembers):`` is twice the name's length and 17: 41 characters fit."""
+        name = "TestBig" + "x" * 34
+        source, plan = _renamed(name)
+        root = build(tmp_path, source)
+        texts = render_all(layout_of(root, plan), line_limit(root))
+        assert f"class {name}(_{name}Members):" in texts["test_big_early.py"].splitlines()
+
+    def test_a_split_class_name_too_long_for_its_header(self, tmp_path):
+        """42 characters would make a 101-column header, so such a class is kept whole."""
+        name = "TestBig" + "x" * 35
+        source, plan = _renamed(name)
+        assert refusal(tmp_path, source, plan) == (
+            "test_big_early: a generated line exceeds 99 columns: "
+            f"'class {name}(_{name}Members):'")
+
+    def test_an_import_filtered_from_the_source(self, tmp_path):
+        """A filtered import is the writer's line, not a copy: a name too long for
+        ``    <name>,``, the narrowest layout a ``from`` import has, is refused."""
+        name = "x" * 95
+        source = sample_with(", unused_thing\n", f", unused_thing, {name}\n") + (
+            EXTRA_TOP.format(body=f'def test_long_name():\n    """L."""\n    assert {name}'))
+        assert refusal(tmp_path, source, with_test_first("test_long_name")) == (
+            f"test_first: a generated line exceeds 99 columns: '    {name},'")
+
+    def test_a_copied_line_wider_than_the_limit(self, tmp_path):
+        """A source line over the limit is the source's own, copied verbatim, so it is not
+        the writer's to refuse."""
+        wide = "    assert " + " + ".join(["1"] * 40) + " == 40"
+        assert len(wide) > 99
+        source = appended(f'def test_wide():\n    """W."""\n{wide}')
+        root = build(tmp_path, source)
+        texts = render_all(layout_of(root, with_test_first("test_wide")), line_limit(root))
+        assert wide in texts["test_first.py"].splitlines()
+
+
 class TestThePlanIsRead:
     """A malformed plan is refused before any source is read."""
 

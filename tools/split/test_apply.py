@@ -180,7 +180,7 @@ class TestAPartsDocstring:
             96: [f'"""{source}', '"""'],
             97: ['"""' + "x" * 94, "yz", '"""'],
         }[width]
-        assert docstring_lines(source, 99, "test_first") == expected
+        assert docstring_lines(source, 99) == expected
 
     def test_one_the_wrap_width_holds_alone_splits_and_proves(self, tmp_path):
         """test_first under a 95-character docstring is written on two lines, and the

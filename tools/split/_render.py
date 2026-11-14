@@ -6,7 +6,8 @@ line number; the only text it generates is what the layout requires and the prov
 by shape: module docstrings, import statements filtered from the source's own (in the
 source's order and blank-line groups), a split class's ``class`` line and one-line
 docstring, and its mixin's ``class`` line.  Nothing is written until every output has
-rendered under the line budget, so a refusal leaves the tree as it was.
+rendered, each line the writer generated within the line limit and each file under the line
+budget, so a refusal leaves the tree as it was.
 
 Every line it renders carries its :class:`Origin`: the source line it copies, the source
 statement an import was filtered from, or nothing for a line it composed.  The prover judges
@@ -61,26 +62,18 @@ def line_limit(root: Path) -> int:
         raise Refusal(".pylintrc states no [FORMAT] max-line-length") from exc
 
 
-def _checked(lines: list[str], limit: int, what: str) -> list[str]:
-    """``lines``, refused if any generated line is wider than ``limit``."""
-    wide = [line for line in lines if len(line) > limit]
-    if wide:
-        raise Refusal(f"{what}: a generated line exceeds {limit} columns: {wide[0]!r}")
-    return lines
-
-
-def docstring_lines(text: str, limit: int, what: str) -> list[str]:
+def docstring_lines(text: str, limit: int) -> list[str]:
     """A module docstring as written: one line when it fits on one with both its quotes,
     else its closing quotes on a line of their own, after a one-paragraph text wrapped to
     the width its opening quotes leave or a text with its own line breaks kept as the plan
-    wrote it (refused if any of its lines is too wide)."""
+    wrote it.  A line still too wide is refused with its output (:func:`output_lines`)."""
     body = text.strip("\n").split("\n")
     if len(body) == 1 and len(f'"""{body[0]}"""') <= limit:
         return [f'"""{body[0]}"""']
     if len(body) == 1:
         body = textwrap.wrap(body[0], width=limit - len('"""'), break_long_words=False,
                              break_on_hyphens=False)
-    return _checked([f'"""{body[0]}', *body[1:], '"""'], limit, what)
+    return [f'"""{body[0]}', *body[1:], '"""']
 
 
 def _from_lines(module: str, names: list[str], limit: int) -> list[str]:
@@ -112,10 +105,10 @@ def import_lines(layout: Layout, output: Output, limit: int
             lines = [ast.unparse(ast.Import(names=kept))]
         else:
             lines = _from_lines(stmt.node.module, [ast.unparse(a) for a in kept], limit)
-        found.append((stmt, _checked(lines, limit, output.module)))
+        found.append((stmt, lines))
     if output.helpers:
-        found.extend(([(None, [""])] if found else []) + [(None, _checked(
-            _from_lines(f".{HELPERS}", output.helpers, limit), limit, output.module))])
+        found.extend(([(None, [""])] if found else []) + [
+            (None, _from_lines(f".{HELPERS}", output.helpers, limit))])
     return found
 
 
@@ -154,8 +147,10 @@ def _piece_lines(layout: Layout, piece: Piece) -> list[Line]:
 
 
 def output_lines(layout: Layout, output: Output, limit: int) -> list[Line]:
-    """One output module's lines, each with its origin."""
-    found = _generated(docstring_lines(output.docstring, limit, output.module))
+    """One output module's lines, each with its origin, refused if any line wider than
+    ``limit`` is not a verbatim copy of a source line: a copy keeps the source's own width,
+    which pylint judges the same before and after, and every other line is the writer's."""
+    found = _generated(docstring_lines(output.docstring, limit))
     imports: list[Line] = []
     for stmt, lines in import_lines(layout, output, limit):
         origin = None if stmt is None else Origin(stmt.node.lineno, stmt.node.end_lineno,
@@ -165,6 +160,11 @@ def output_lines(layout: Layout, output: Output, limit: int) -> list[Line]:
         found += [("", None), *imports]
     for piece in output.pieces:
         found += [("", None), ("", None), *_piece_lines(layout, piece)]
+    wide = [line for line, origin in found
+            if len(line) > limit and (origin is None or not origin.copied)]
+    if wide:
+        raise Refusal(f"{output.module}: a generated line exceeds {limit} columns: "
+                      f"{wide[0]!r}")
     return found
 
 

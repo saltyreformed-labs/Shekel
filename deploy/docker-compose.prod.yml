@@ -18,10 +18,12 @@
 # WHAT IT CHANGES
 # ---------------
 # 1. shekel-prod-app joins the dedicated ``shekel-frontend`` bridge
-#    (instead of the shared ``homelab`` network) so the only container
-#    that reaches the app is the shared /opt/docker/nginx, attached to
-#    ``shekel-frontend`` from /opt/docker/docker-compose.yml.  This
-#    isolates the app from co-tenants like jellyfin / immich / unifi.
+#    (instead of the shared ``homelab`` network), where its one peer is
+#    the shared /opt/docker/nginx, attached to ``shekel-frontend`` from
+#    /opt/docker/docker-compose.yml.  This isolates the app from
+#    co-tenants like jellyfin / immich / unifi.  Its other network,
+#    ``backend``, holds only the database and the monitoring stack's
+#    postgres exporter.
 #    cloudflared is not on this bridge: it reaches nginx over a bridge
 #    of its own, ``edge-tunnel`` (ruling plan#3942), so it has no path
 #    to the app around nginx.  Audit findings F-020, F-129, F-063,

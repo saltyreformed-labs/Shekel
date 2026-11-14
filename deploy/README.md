@@ -89,9 +89,9 @@ In shared mode:
   `disabled` profile, so `docker compose up -d` starts only `db`, `valkey`, and `app`.
 - The shared Nginx (managed under `/opt/docker/nginx/` on the host) proxies traffic to
   `shekel-prod-app:8000` over the `shekel-frontend` bridge, using the vhost in
-  `deploy/nginx-shared/conf.d/shekel.conf`. Co-tenants like Jellyfin, Immich, and UniFi remain on
-  `homelab` and cannot reach the Shekel app directly (audit findings F-020/F-129 closed in Commit
-  C-33).
+  `deploy/nginx-shared/conf.d/shekel.conf`. Co-tenants like Jellyfin, Immich, and UniFi sit on edge
+  bridges of their own and cannot reach the Shekel app directly (audit findings F-020/F-129 closed
+  in Commit C-33).
 - `deploy/nginx-shared/nginx.conf` is the main config for the shared Nginx. The repo file is the
   source of truth; the host copy at `/opt/docker/nginx/nginx.conf` must match.
 
@@ -116,8 +116,9 @@ and Alloy alone, and nginx trusts `CF-Connecting-IP` from its one address there 
 peer (rulings plan#3942, plan#4066).
 
 `/opt/docker/cloudflared/config.yml` must also be updated so the Shekel ingress rule routes through
-`http://nginx:80` instead of straight at `http://shekel-prod-app:8000` (audit finding F-063 closed
-in C-33). See the bundled-mode `cloudflared/config.yml` template for the example shared-mode rule.
+`https://nginx:443`, with `originServerName` naming the Shekel hostname, instead of straight at
+`http://shekel-prod-app:8000` (audit finding F-063 closed in C-33). See the bundled-mode
+`cloudflared/config.yml` template for the example shared-mode rule.
 
 ## Sync Procedure (Shared Mode)
 

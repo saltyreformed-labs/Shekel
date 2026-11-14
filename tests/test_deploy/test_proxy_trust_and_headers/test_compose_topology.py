@@ -224,11 +224,14 @@ class TestCloudflaredTemplate:
         assert "service: http://shekel-prod-app:8000" not in text
 
     def test_documents_shared_mode_rule(self, text: str) -> None:
-        """The template must document the shared-mode service URI
-        (``service: http://nginx:80``) in a comment so a homelab
-        operator switching modes has the right snippet inline.
+        """The template must document the shared-mode rule in a comment
+        so a homelab operator switching modes has the right snippet
+        inline: production's form, nginx's TLS listener with the vhost
+        named, so cloudflared verifies nginx's certificate (ruling
+        plan#4114).
         """
-        assert "service: http://nginx:80" in text
+        assert "service: https://nginx:443" in text
+        assert "originServerName: <DOMAIN>" in text
 
     def test_documents_wan_chokepoint_rationale(
         self, text: str

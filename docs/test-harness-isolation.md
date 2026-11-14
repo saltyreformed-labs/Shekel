@@ -97,7 +97,7 @@ correct; they just have nowhere isolated to run locally.
 | Images pulled onto the daemon | `NGINX_TEST_IMAGE` = the compose's bundled nginx tag, read by `tests/test_deploy/_compose.py`; stub `python:3.14-alpine` (:175) |
 | Publishes port, curls host loopback | `-p 0:443` (:193) → `docker port` (:209) → `curl https://localhost:<port>` (:231, :265) |
 | Teardown = `docker rm -f` (→ exit 137) | `test_proxy_trust_and_headers/test_shared_nginx_runtime.py:250-252` (`finally`) |
-| Skips when docker absent (`docker info`) | `_docker_available()` (`test_proxy_trust_and_headers/_helpers.py:63`, and `test_container_hardening.py:60`) |
+| Skips when docker absent (`docker info`) | `_docker_available()` (`test_proxy_trust_and_headers/_helpers.py:106`, and `test_container_hardening.py:60`) |
 
 **Two facts drive the whole solution:**
 
@@ -355,7 +355,7 @@ actually keeps test containers off the production daemon (and out of cadvisor/al
 
 - Spawning fixture:
   `tests/test_deploy/test_proxy_trust_and_headers/test_shared_nginx_runtime.py:103-252`
-- Docker helper / gate: `…/test_shared_nginx_runtime.py:133` (`_docker`), `…/_helpers.py:63`
+- Docker helper / gate: `…/test_shared_nginx_runtime.py:133` (`_docker`), `…/_helpers.py:106`
   (`_docker_available`)
 - Test config: `pytest.ini` (`addopts … -n 12`, `markers =` :47)
 - Entrypoint: `scripts/test.sh`

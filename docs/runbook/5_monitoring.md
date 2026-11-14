@@ -40,8 +40,10 @@ Docker volume that lived in the same trust boundary as the app was removed in Co
 findings F-082, F-150). For an absolute tamper-evident trail (off-site, write-once), see the
 deferred S3-with-Object-Lock option in the C-15 architectural decision notes.
 
-The full collector and dashboard configuration is documented in `observability.md`. This runbook
-section assumes Phase 0 -- 5 of that plan are complete.
+The stack was built to the plan in `observability.md` (2026-05-06). The configuration as it runs is
+`/opt/docker/monitoring/docker-compose.yml` and `/opt/docker/monitoring/alloy/config/config.alloy`
+on the host, which have moved on since: each public app has its own edge bridge, and cloudflared has
+`edge-tunnel` (plan#2181). This runbook section assumes Phase 0 -- 5 of that plan are complete.
 
 ### 5.1 Checking Application Logs
 
@@ -124,9 +126,10 @@ clickable -- it copies the value into a prefilled trace-a-request query so a use
 
 ### 5.4 Monitoring Stack Management
 
-The Loki / Grafana / Alloy stack runs from `/opt/docker/monitoring/` per `observability.md`. The
-Shekel stack does NOT need to share a Docker network with it -- Alloy reads container logs via the
-docker socket, which works regardless of the source container's network membership.
+The Loki / Grafana / Alloy stack runs from `/opt/docker/monitoring/`, built to the
+`observability.md` plan. The Shekel stack does NOT need to share a Docker network with it -- Alloy
+reads container logs via the docker socket, which works regardless of the source container's network
+membership.
 
 ```bash
 # Check monitoring stack status.

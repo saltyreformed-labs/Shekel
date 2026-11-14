@@ -32,9 +32,9 @@
 #            tunnel --config /etc/cloudflared/config.yml run shekel
 #
 #   4. Run it as a service container from the host compose stack,
-#      attached to a bridge it shares with the reverse proxy alone
-#      (shared mode: edge-tunnel, ruling plan#3942; see
-#      deploy/README.md).
+#      attached to a bridge it shares only with the reverse proxy and
+#      the metrics collector (shared mode: edge-tunnel, with nginx and
+#      Alloy, ruling plan#3942; see deploy/README.md).
 #
 #   A bare-host install (cloudflared binary + service manager) also
 #   works with this same file; adjust the config path accordingly.
@@ -73,7 +73,7 @@ credentials-file: /root/.cloudflared/<TUNNEL_ID>.json
 # the maintainer's deployment).  An attacker landing in any sibling
 # container could poll /metrics for tunnel health, request counts,
 # and connection state -- operational data that should not leak
-# laterally even within the trusted homelab subnet.
+# laterally to any sibling container.
 #
 # Pinning to 127.0.0.1 keeps the endpoint reachable only from inside
 # the cloudflared container itself, where the operator's
@@ -114,13 +114,16 @@ ingress:
   # Shared mode (operator's homelab):
   #   cloudflared runs as a Docker container on the
   #   ``edge-tunnel`` bridge, which it shares with the shared
-  #   /opt/docker/nginx container (and Alloy) alone, ruling
-  #   plan#3942.  Replace ``localhost:80`` with ``nginx:80``
-  #   (Docker DNS resolves the service name).
+  #   /opt/docker/nginx container and Alloy alone (ruling
+  #   plan#3942).  Each rule targets nginx's TLS listener by its
+  #   service name and names the vhost, so cloudflared verifies
+  #   nginx's certificate and no hop is cleartext.
   #   Example shared-mode rule:
   #
   #     - hostname: <DOMAIN>
-  #       service: http://nginx:80
+  #       service: https://nginx:443
+  #       originRequest:
+  #         originServerName: <DOMAIN>
   #
   #   See deploy/docker-compose.prod.yml for the matching topology.
   #   Audit finding F-063, Commit C-33.
@@ -129,11 +132,9 @@ ingress:
     originRequest:
       # Nginx listens on plain HTTP -- no TLS on the origin.
       # cloudflared and Nginx are colocated on loopback (bundled
-      # mode) or on the dedicated edge-tunnel bridge (shared
-      # mode), so the cleartext hop is bounded to a single trust
-      # zone -- there is no path through which a network adversary
-      # can intercept it.  Audit finding F-061 (bundled mode) /
-      # F-063 (shared mode) / Commit C-33.
+      # mode), so the cleartext hop never leaves the host -- there
+      # is no path through which a network adversary can intercept
+      # it.  Audit finding F-061 / Commit C-33.
       noTLSVerify: true
       # ── Cloudflare Access policy (audit finding F-061 / C-37) ─
       # Require that every public request first authenticate

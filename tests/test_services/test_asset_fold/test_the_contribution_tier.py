@@ -3,7 +3,7 @@
 from datetime import date, timedelta
 from decimal import Decimal
 
-from app.services.balance_at import _asset_contributions
+from app.services.balance_at import _asset_contributions, _cash_fold
 from app.services.investment_projection import AccountPayrollFeed
 from app.services.cash_ledger import ReconciledThrough
 from app.services.pay_calendar import DerivedPeriod, PeriodWindow
@@ -330,12 +330,13 @@ class TestTheContributionTier:
         # two lines are what fails on that revert: a linked all-zero feed now
         # builds a plan where it used to build none, and an unlinked one still
         # builds none.
+        cash = _cash_fold.assembled_fold(account, ctx)
         assert _asset_contributions._plan_for(
-            account, ctx.amounts(),
-            _inputs(params, _flat_feed("0")),
+            account, cash, _inputs(params, _flat_feed("0")),
+            periods[-1].start_date,
         ) is not None
         assert _asset_contributions._plan_for(
-            account, ctx.amounts(), _inputs(params),
+            account, cash, _inputs(params), periods[-1].start_date,
         ) is None
 
 
@@ -398,7 +399,7 @@ class TestTheContributionWalksLimit:  # pylint: disable=protected-access
             feed=_flat_feed("500.00"),
             employer_params=None,
             annual_limit=Decimal("1200.00"),
-            recorded_by_period={},
+            transferred_by_payday={},
         )
         events = _asset_contributions._dated_events(
             plan, periods, ReconciledThrough(date(2026, 1, 1)),
@@ -440,7 +441,7 @@ class TestTheContributionWalksLimit:  # pylint: disable=protected-access
             feed=_flat_feed("500.00"),
             employer_params=None,
             annual_limit=Decimal("1200.00"),
-            recorded_by_period={},
+            transferred_by_payday={},
         )
         chronological = _asset_contributions._dated_events(
             plan, periods, ReconciledThrough(date(2026, 1, 1)),
@@ -500,7 +501,7 @@ class TestTheContributionWalksLimit:  # pylint: disable=protected-access
             feed=_flat_feed("500.00"),
             employer_params=None,
             annual_limit=Decimal("1200.00"),
-            recorded_by_period={periods[0].period_id: Decimal("900.00")},
+            transferred_by_payday={periods[0].start_date: Decimal("900.00")},
         )
         events = _asset_contributions._dated_events(
             plan, periods, ReconciledThrough(date(2026, 1, 1)),
@@ -520,7 +521,7 @@ class TestTheContributionWalksLimit:  # pylint: disable=protected-access
                 feed=_flat_feed("500.00"),
                 employer_params=None,
                 annual_limit=Decimal("600.00"),
-                recorded_by_period={},
+                transferred_by_payday={},
             ),
             periods,
             ReconciledThrough(date(2026, 12, 3)),

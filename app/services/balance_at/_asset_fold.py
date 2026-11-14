@@ -436,7 +436,10 @@ def resolve(
     The argument is GONE and the value is read off the record clamped by it, so
     the mis-pairing is unrepresentable rather than refused.  Since plan step
     **C9** (superseding ruling R-AG) the tier walks its projection axis through
-    *horizon_end*, past the saved schedule as far as the accrual runs (**P7**).
+    *horizon_end*, past the saved schedule as far as the accrual runs (**P7**),
+    and since task plan#3943 it takes the whole fold and derives that axis
+    itself: its limit and match base read the fold's estimated transfers into
+    the account.
 
     Args:
         account: The account to value.
@@ -481,12 +484,7 @@ def resolve(
     return _resolve(
         cash,
         _asset_contributions.contribution_events(
-            account, cash.plan.basis, inputs, reconciled_through,
-            # Every paycheck from the FIRST payday through the read's end,
-            # projected past the saved horizon as the accrual runs (ruling
-            # plan#3930): ``projection_axis`` raises ``date.min`` to the first
-            # payday, the opening the calendar-year limit needs.
-            cash.calendar.projection_axis(date.min, horizon_end),
+            account, cash, inputs, reconciled_through, horizon_end,
         ),
         window,
         horizon_end,

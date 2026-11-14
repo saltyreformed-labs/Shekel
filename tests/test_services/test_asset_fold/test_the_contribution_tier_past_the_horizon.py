@@ -26,8 +26,12 @@ later date; the one that cannot is said to be a guard, not a control.
 from datetime import date
 from decimal import Decimal
 
-from app.services.balance_at import _asset_fold
-from tests._test_helpers import make_salary_profile
+from app.services.balance_at import _asset_fold, _cash_estimate
+from tests._test_helpers import (
+    generate_transfer_of,
+    make_salary_profile,
+    make_transfer_template,
+)
 
 from ._helpers import (
     _ctx,
@@ -184,3 +188,137 @@ class TestTheContributionTierPastTheHorizon:
         assert _contributed_through(
             account, ctx, date(2025, 12, 31), params, feed,
         ) == Decimal("0.00")
+
+
+def _a_recurring_transfer_into(db, seed_user, account, seed_periods, amount):
+    """Author a transfer of *amount* from checking into *account* every paycheck.
+
+    Its rows are generated on all ten saved paychecks, as a generate pass
+    writes them, so inside the saved schedule the contribution base reads
+    each as a recorded row and past it the cash fold estimates the rest.
+
+    Returns:
+        The transfer template.
+    """
+    template = make_transfer_template(
+        db.session, seed_user, account, amount=amount,
+    )
+    for period in seed_periods:
+        generate_transfer_of(template, period)
+    db.session.commit()
+    return template
+
+
+class TestTheBaseCountsTheEstimatedTransfers:
+    """Ruling R-R consequence (a) past the horizon (task plan#3943).
+
+    A recurring transfer into a 401(k) is cash the fold already moves, so it
+    is never contributed again; it is read for how much of the year's limit
+    is consumed and for the employee total the match sizes off.  Inside the
+    saved schedule its rows say so.  Past it no row exists, and the base
+    read nothing there until this task, so a projected year's limit and
+    match ignored every recurring transfer.  Each case fails on that base.
+    """
+
+    def test_the_limit_is_reached_on_the_deduction_and_the_transfer_together(
+        self, db, seed_user, seed_periods,
+    ):
+        """$500 deducted and $300 transferred each payday against a $9,700.00 limit.
+
+        Hand-computed with the cap rule ``min(amount, limit - ytd)``, never
+        below zero.  The transfer consumes the limit on every payday,
+        01-02 included (it is cash, not modelled, so the assertion's cover
+        does not drop it); the deduction is modelled from 01-16.  Through
+        the horizon: ``ytd = 300 + 9 * (300 + 500) = $7,500.00``, and the
+        nine saved deductions contribute ``9 * $500.00 = $4,500.00``, the
+        control that nothing inside the saved schedule moved.  Past it:
+        05-22 ``7,800 -> 500``, 06-05 ``8,600 -> 500``, 06-19
+        ``9,400 -> min(500, 300) = 300``, and from 07-03 (``ytd`` at
+        $10,000.00) every 2026 payday pays $0.00.  Through 2026-12-31 that
+        is ``4,500 + 500 + 500 + 300 = $5,800.00``.  2027-01-01 opens a new
+        year: ``ytd = 300``, so the deduction pays $500.00 and the total is
+        $6,300.00.
+
+        A base blind to the estimated transfers reads ``7,500`` growing by
+        $500.00 alone: 05-22 through 07-03 pay $500.00 each and 07-17 pays
+        ``min(500, 200) = 200``, so $6,700.00 through 2026-12-31 and
+        $7,200.00 through 2027-01-01.
+        """
+        account = _401k(
+            seed_user, seed_periods[0], Decimal("20000.00"),
+            opened_on=date(2026, 1, 2),
+        )
+        _salaried_deduction(seed_user, account, "500.00")
+        _a_recurring_transfer_into(
+            db, seed_user, account, seed_periods, "300.00",
+        )
+        params = _params_for(account)
+        params.annual_contribution_limit = Decimal("9700.00")
+        db.session.commit()
+        ctx = _ctx(seed_user)
+        feed = _feed_for(seed_user, account, params)
+
+        assert _contributed_through(
+            account, ctx, _HORIZON, params, feed,
+        ) == Decimal("4500.00")
+        assert _contributed_through(
+            account, ctx, date(2026, 12, 31), params, feed,
+        ) == Decimal("5800.00")
+        assert _contributed_through(
+            account, ctx, date(2027, 1, 1), params, feed,
+        ) == Decimal("6300.00")
+
+    def test_the_match_sizes_off_the_deduction_and_the_transfer_from_one_walk(
+        self, db, seed_user, seed_periods, monkeypatch,
+    ):
+        """A 50% match capped at 6% of $3,019.23 sees $100 deducted and $300 transferred.
+
+        Hand-computed, the existing tier test's arithmetic carried past the
+        horizon: the matchable salary is ``round(3019.23 * 0.06) =
+        $181.15``, the employee total ``100.00 + 300.00 = $400.00``, the
+        match ``round(min(400.00, 181.15) * 0.50) = round(90.575) =
+        $90.58``, so each payday's modelled contribution is ``100.00 +
+        90.58 = $190.58``, the transfer itself never among it.  Through the
+        horizon nine paydays: ``9 * $190.58 = $1,715.22`` (the control).
+        Through 2026-06-30 three projected paydays (05-22, 06-05, 06-19)
+        more: ``12 * $190.58 = $2,286.96``.  A base blind to the estimate
+        matches $100.00 alone there, ``round(100.00 * 0.50) = $50.00``, and
+        reads ``1,715.22 + 3 * 150.00 = $2,165.22``.
+
+        Read on a pass dated 2026-03-01, inside the saved schedule, so the
+        cash fold estimates the same transfer the base reads: the template
+        is walked ONCE for both (``BalanceContext.estimates``).
+        """
+        account = _401k(
+            seed_user, seed_periods[0], Decimal("20000.00"),
+            opened_on=date(2026, 1, 2),
+            employer_type="match", match_pct=Decimal("0.5000"),
+            match_cap_pct=Decimal("0.0600"),
+        )
+        _salaried_deduction(seed_user, account, "100.00")
+        template = _a_recurring_transfer_into(
+            db, seed_user, account, seed_periods, "300.00",
+        )
+        params = _params_for(account)
+        feed = _feed_for(seed_user, account, params)
+        walks = []
+        real_walk = _cash_estimate.unwritten_occurrences
+
+        def counting_walk(definition, *args, **kwargs):
+            """Record which definition is walked, then walk it."""
+            walks.append(definition.id)
+            return real_walk(definition, *args, **kwargs)
+
+        monkeypatch.setattr(
+            _cash_estimate, "unwritten_occurrences", counting_walk,
+        )
+        as_of = date(2026, 3, 1)
+
+        assert _contributed_through(
+            account, _ctx(seed_user, as_of), _HORIZON, params, feed,
+        ) == Decimal("1715.22")
+        assert walks == []
+        assert _contributed_through(
+            account, _ctx(seed_user, as_of), date(2026, 6, 30), params, feed,
+        ) == Decimal("2286.96")
+        assert walks == [template.id]

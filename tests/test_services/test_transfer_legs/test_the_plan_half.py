@@ -338,7 +338,7 @@ class TestTheContributionFeedsReadTheParent:
                 for r in feed.records
             ] == [(account.id, period.start_date, _AMOUNT, False)]
             assert feed.linked_account_ids == frozenset({account.id})
-            assert recorded == {period.id: _AMOUNT}
+            assert recorded == {period.start_date: _AMOUNT}
 
     def test_a_cancelled_contribution_links_the_account_and_counts_nothing(
         self, app, db, seed_user, seed_periods,
@@ -389,7 +389,7 @@ class TestTheContributionFeedsReadTheParent:
                 (Decimal("240.00"), True),
             ]
             assert _recorded_contributions(basis, account.id) == {
-                period.id: Decimal("240.00"),
+                period.start_date: Decimal("240.00"),
             }
 
 

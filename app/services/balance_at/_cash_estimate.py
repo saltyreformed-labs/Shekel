@@ -18,7 +18,7 @@ Three rulings say what replaces the freeze:
 * **plan#4036**: the estimate runs as far as each read asks.  No date is
   refused and none freezes, and no page states a range up front: a reader of
   the fold names the last day it samples
-  (:meth:`~._cash_fold.AssembledCashFold.steps_through`) and the tier is
+  (:meth:`~._cash_fold.AssembledCashFold.through`) and the tier is
   worked out through that day.
 
 **What an occurrence is, and what it is worth, are each asked of the code
@@ -49,7 +49,11 @@ as excess.
 **One walk per definition per read pass** (:attr:`~._context.BalanceContext
 .estimates`): a transfer's two accounts each read the one priced walk, so
 their legs cannot disagree, and a later reader asking past the farthest day
-walked so far re-walks that definition once to the new day.
+walked so far re-walks that definition once to the new day.  The modelled
+fold's contribution tier reads the same walk for the transfers into an
+investment account (:meth:`EstimatedCashTier.transfers_in_by_payday`, task
+plan#3943), so its annual limit and its employer match count the figure the
+account is credited.
 
 Boundary discipline (``CLAUDE.md``): no Flask symbol, no writes; all money is
 :class:`~decimal.Decimal`.  Seam-PRIVATE.
@@ -375,6 +379,55 @@ class EstimatedCashTier:
             if lands_on <= last_day:
                 nets[lands_on] = nets.get(lands_on, _ZERO_MONEY) + signed
         return nets
+
+    def transfers_in_by_payday(self, last_day: date) -> "dict[date, Decimal]":
+        """Return ``{payday: total}`` of the estimated transfers INTO the account.
+
+        The estimated half of the contribution tier's base (ruling R-R
+        consequence (a), task plan#3943): what an investment account's annual
+        limit and its employer match count as already contributed on a
+        projected paycheck.  Each occurrence files under the payday of the
+        paycheck its row would live in, as a written transfer files under its
+        own paycheck (``_asset_contributions._recorded_contributions``), and
+        never under the day its cash lands: a payday at or before ``as_of``
+        still files its estimate there, as a still-Projected row does inside
+        the saved schedule, though ruling R-G lands its cash on ``as_of + 1``.
+
+        The occurrences and their worth are the ones the cash tier credits
+        the account (:meth:`day_nets_through`, each on the day it lands),
+        read through the same :meth:`_transfer_occurrences` and so the same
+        walk (:func:`priced_occurrences`).  The walk reaches the end of the
+        paycheck holding *last_day*, which covers every occurrence placed on a
+        paycheck whose payday falls by *last_day*: an occurrence is placed on
+        the paycheck containing it or the first one starting on or after it.
+
+        Args:
+            last_day: The last day the reader samples.
+
+        Returns:
+            One entry per projected payday on or before *last_day* that an
+            estimated transfer into the account files under, and ``{}`` when
+            *last_day* is inside the saved schedule.
+
+        Raises:
+            AmountUnresolvable: When a definition states no price for an
+                occurrence -- exactly where its written row would refuse.
+        """
+        calendar = self.ctx.calendar()
+        horizon = calendar.horizon()
+        if horizon is None or last_day <= horizon:
+            return {}
+        through = calendar.span_containing(last_day).end_date
+        _transactions, transfers = self._loaded_definitions()
+        totals: "dict[date, Decimal]" = {}
+        for template in transfers:
+            if template.to_account_id != self.account.id:
+                continue
+            for priced in self._transfer_occurrences(template, through):
+                payday = priced.unwritten.period.start_date
+                if payday <= last_day:
+                    totals[payday] = totals.get(payday, _ZERO_MONEY) + priced.cash
+        return totals
 
     def _signed_occurrences(
         self, through: date,

@@ -20,7 +20,10 @@ the scalar
 that folds both feeds into one number and so makes them indistinguishable.  The
 recorded feed IS read here, for the two things a cash delta cannot say: how much
 of the calendar year's contribution limit is already consumed, and what employee
-total the employer match sizes off (ruling R-R consequence (a)).
+total the employer match sizes off (ruling R-R consequence (a)).  Past the last
+saved paycheck no transfer has a row, so the same two read the cash fold's
+ESTIMATED transfers into the account (plan step ``pay_calendar:C9``, task
+plan#3943), which the fold credits as cash exactly as it does a recorded one.
 
 Boundary discipline (``CLAUDE.md``): no Flask symbol, no writes; all money is
 :class:`~decimal.Decimal`.
@@ -52,9 +55,11 @@ from app.services.loan_loaders import (
     projected_income_legs,
     settled_income_legs,
 )
-from app.services.pay_calendar import DerivedPeriod, PeriodWindow
+from app.services.pay_calendar import DerivedPeriod
 from app.services.row_valuation import settled_contribution
 from app.services.transfer_legs import parent_of
+
+from ._cash_fold import AssembledCashFold
 
 _ZERO = Decimal("0")
 
@@ -132,9 +137,9 @@ class _ContributionPlan:
     """What an INVESTMENT account's modelled contributions are made of.
 
     A cohesive assembly record (:func:`_plan_for`): the modelled payroll feed,
-    the employer configuration, the annual limit, and the RECORDED
-    contributions per pay period -- which are read for the limit and the
-    match base and never contributed again (ruling R-R).
+    the employer configuration, the annual limit, and the TRANSFERRED
+    contributions per payday, recorded and estimated -- which are read for
+    the limit and the match base and never contributed again (ruling R-R).
 
     Attributes:
         feed: The account's
@@ -152,20 +157,25 @@ class _ContributionPlan:
             gross; the period's own comes off :attr:`feed`.
         annual_limit: The account's annual employee-contribution ceiling, or
             ``None`` for an account with no IRS limit.
-        recorded_by_period: pay_period_id -> the summed CONTRIBUTION of the
-            transfer-linked rows actually recorded in that period.
+        transferred_by_payday: payday -> the summed CONTRIBUTION of the
+            transfers into the account filed under that paycheck
+            (:func:`_transferred_contributions`): the rows recorded on a
+            saved paycheck, the cash fold's estimate on a projected one.
+            **Keyed by payday since task plan#3943**, because a projected
+            paycheck has no ``pay_period_id``; it was ``recorded_by_period``,
+            keyed by that id and holding the rows alone, until then.
     """
 
     feed: AccountPayrollFeed
     employer_params: dict | None
     annual_limit: Decimal | None
-    recorded_by_period: dict[int, Decimal]
+    transferred_by_payday: dict[date, Decimal]
 
 
 def _recorded_contributions(
     basis: AmountBasis, account_id: int,
-) -> dict[int, Decimal]:
-    """Return the transfer-linked contributions recorded per pay period.
+) -> dict[date, Decimal]:
+    """Return the transfer-linked contributions recorded per payday.
 
     The RECORDED half of ruling R-R's partition, loaded through the loan
     loaders' ONE settled/projected partition -- the app's one definition of "a
@@ -184,7 +194,11 @@ def _recorded_contributions(
     (:func:`~app.services.cash_ledger.resolve_amount`).  The settled
     half was the income-shadow row, read from ``budget.transactions``, from
     plan step balance:X-bi-6a until then.  Both file under their transfer's
-    period, the one the fold lands them in.
+    period, the one the fold lands them in, by its PAYDAY (the eager-loaded
+    ``pay_period.start_date`` both loaders sort by): the key a projected
+    paycheck's estimate files under too (:func:`_transferred_contributions`,
+    task plan#3943).  It was the period's id until then, which a projected
+    paycheck does not have.
 
     These rows are NOT contributed by this module: they are ordinary ACTUAL /
     PLANNED events in the cash fold underneath it, which is exactly why the
@@ -218,31 +232,72 @@ def _recorded_contributions(
         account_id: The account receiving the contributions.
 
     Returns:
-        ``{pay_period_id: total}`` over what each contribution is WORTH -- the
+        ``{payday: total}`` over what each contribution is WORTH -- the
         realized actual for a settled leg, the parent's resolved amount for
         a projected one.  ``{}`` for an account with none.
     """
-    totals: dict[int, Decimal] = {}
+    totals: dict[date, Decimal] = {}
     for leg in settled_income_legs(
         account_id, basis.scenario_id, options=(),
     ):
-        totals[leg.pay_period_id] = (
-            totals.get(leg.pay_period_id, _ZERO)
-            + settled_contribution(parent_of(leg))
+        payday = leg.pay_period.start_date
+        totals[payday] = (
+            totals.get(payday, _ZERO) + settled_contribution(parent_of(leg))
         )
     for leg in projected_income_legs(
         account_id, basis.scenario_id,
         options=transfer_pricing_load_options(),
     ):
-        totals[leg.pay_period_id] = (
-            totals.get(leg.pay_period_id, _ZERO)
-            + resolve_amount(parent_of(leg), basis)
+        payday = leg.pay_period.start_date
+        totals[payday] = (
+            totals.get(payday, _ZERO) + resolve_amount(parent_of(leg), basis)
         )
     return totals
 
 
+def _transferred_contributions(
+    account: Account, cash: AssembledCashFold, horizon_end: date,
+) -> dict[date, Decimal]:
+    """Return every transfer into *account* per payday, recorded and estimated.
+
+    The base ruling R-R consequence (a) reads: the rows recorded on a saved
+    paycheck (:func:`_recorded_contributions`) and, past the last saved
+    paycheck, the cash fold's ESTIMATED transfers into the account
+    (:meth:`~._cash_estimate.EstimatedCashTier.transfers_in_by_payday`, task
+    plan#3943).  The estimate is the fold's own, the occurrences and figures
+    it credits the account, so the limit and the match count the figures
+    the fold credits and no second walk of a definition prices them again.
+    A row lives on a saved paycheck and an estimate on a projected one, so
+    no payday holds both.
+
+    Args:
+        account: The investment account.
+        cash: Its assembled cash fold, carrying the pass's amount basis and
+            the estimated tier.
+        horizon_end: The last day the read samples, as far as the estimate
+            is read.
+
+    Returns:
+        ``{payday: total}``; ``{}`` for an account no transfer pays into.
+
+    Raises:
+        AmountUnresolvable: When a definition states no price for an
+            occurrence the estimate reaches -- exactly where its written row
+            would refuse.
+    """
+    totals = _recorded_contributions(cash.plan.basis, account.id)
+    for payday, amount in cash.estimate.transfers_in_by_payday(
+        horizon_end,
+    ).items():
+        totals[payday] = totals.get(payday, _ZERO) + amount
+    return totals
+
+
 def _plan_for(
-    account: Account, basis: AmountBasis, inputs: ContributionInputs,
+    account: Account,
+    cash: AssembledCashFold,
+    inputs: ContributionInputs,
+    horizon_end: date,
 ) -> "_ContributionPlan | None":
     """Assemble *account*'s modelled contribution plan, or ``None`` if it has none.
 
@@ -271,11 +326,14 @@ def _plan_for(
 
     Args:
         account: The investment account.
-        basis: The read pass's amount basis, carrying the scenario the recorded
-            contributions live in and the derivations pricing them.
+        cash: Its assembled cash fold, carrying the pass's amount basis (the
+            scenario the recorded contributions live in and the derivations
+            pricing them) and the estimated tier past the last saved paycheck.
         inputs: The account's :class:`ContributionInputs`.  Its
             ``investment_params`` is not ``None`` -- :func:`contribution_events`
             guards that.
+        horizon_end: The last day the read samples, as far as the estimated
+            transfers into the account are read.
 
     Returns:
         The :class:`_ContributionPlan`, or ``None``.
@@ -306,16 +364,18 @@ def _plan_for(
         feed=inputs.feed,
         employer_params=employer_params if models_employer else None,
         annual_limit=inputs.investment_params.annual_contribution_limit,
-        recorded_by_period=_recorded_contributions(basis, account.id),
+        transferred_by_payday=_transferred_contributions(
+            account, cash, horizon_end,
+        ),
     )
 
 
 def contribution_events(
     account: Account,
-    basis: AmountBasis,
+    cash: AssembledCashFold,
     inputs: ContributionInputs,
     reconciled_through: ReconciledThrough,
-    periods: PeriodWindow,
+    horizon_end: date,
 ) -> "list[tuple[date, Decimal]]":
     """Return *account*'s modelled CONTRIBUTION events, dated.
 
@@ -329,16 +389,19 @@ def contribution_events(
     no :class:`~app.models.investment_params.InvestmentParams` to carry the
     limit and the employer configuration.
 
-    **The pay periods are the READ PASS'S, handed in** (plan step **C2-f2a**,
-    ledger row **P37**).  This function issued its own
+    **The pay periods are the READ PASS'S, read off the fold** (plan step
+    **C2-f2a**, ledger row **P37**).  This function issued its own
     ``pay_period_service.get_all_periods`` until then -- a SECOND read of the
     owner's schedule inside a pass that already holds it, and the last reader
-    of that module anywhere under :mod:`app.services.balance_at`.  Its ONE
-    caller, :func:`._asset_fold.resolve`, now derives the window from the
-    pass's own :class:`~app.services.pay_calendar.PayCalendar` -- the same
-    derivation every other per-period seam entry reports over, so the
-    contribution tier and the cash columns beside it cannot be resolved
-    against two readings of one schedule, and no caller states a window at all.
+    of that module anywhere under :mod:`app.services.balance_at`.  The
+    window is derived from the
+    :class:`~app.services.pay_calendar.PayCalendar` the cash fold was
+    clamped by (``cash.calendar``) -- the same derivation every other
+    per-period seam entry reports over, so the contribution tier and the cash
+    columns beside it cannot be resolved against two readings of one
+    schedule, and no caller states a window at all.  :func:`._asset_fold
+    .resolve` derived it and handed it in until task plan#3943 gave this
+    tier the fold itself, for the estimated transfers it carries.
 
     **The explicit sort went with the query, and the ORDER did not become an
     assumption -- it became a type.**  This door used to sort by ``start_date``
@@ -350,7 +413,7 @@ def contribution_events(
     is frozen, so payday order is a property of the value rather than a step
     at this door that a second door could forget.  :func:`_dated_events` stays
     ORDER-SENSITIVE by design -- a calendar-year limit is an accumulation --
-    which is why it takes the looser sequence type and this entry takes the
+    which is why it takes the looser sequence type and this entry derives the
     window.
 
     Args:
@@ -359,13 +422,21 @@ def contribution_events(
             is the pass owner's too, since plan step C2-f2a took the AXIS off
             the context's calendar rather than off this account (the seam's
             standing contract makes them one owner).
-        basis: The read pass's amount basis, carrying the scenario the
-            recorded contributions live in and the derivations pricing them.
+        cash: The account's
+            :class:`~app.services.balance_at._cash_fold.AssembledCashFold`,
+            already paired with *account* by its caller
+            (:meth:`~app.services.balance_at._cash_fold.AssembledCashFold
+            .require_account`).  It carries the pass's amount basis (the
+            scenario the recorded contributions live in and the derivations
+            pricing them), the pay calendar the axis is read from, and the
+            ESTIMATED transfers into the account past the last saved paycheck
+            that the base reads (task plan#3943).
         inputs: The account's :class:`ContributionInputs`.
         reconciled_through: The account's coverage boundary -- the assertion
             :func:`_dated_events` admits an event strictly after (ruling R-Z).
-        periods: The owner's paychecks from the FIRST payday through the
-            read's end, saved and projected past the horizon, as
+        horizon_end: The last day the read samples.  The tier walks the
+            owner's paychecks from the FIRST payday through it, saved and
+            projected past the horizon, as
             :meth:`~app.services.pay_calendar.PayCalendar.projection_axis`
             yields them (plan step **C9**, ruling plan#3930).  They were
             :meth:`~app.services.pay_calendar.PayCalendar.saved` until then,
@@ -373,21 +444,31 @@ def contribution_events(
             ran on (ledger row **P7**).  Never a slice that opens later than
             the first payday: the year-boundary reset and the limit accounting
             are wrong over one (see :func:`_dated_events`).  That is a
-            precondition no window type can carry, which is why
-            :func:`._asset_fold.resolve` takes the CALENDAR and derives this
-            rather than accepting one.
+            precondition no window type can carry, which is why this tier
+            takes the day and derives the window rather than accepting one.
 
     Returns:
         ``[(payday, amount), ...]`` in payday order, one entry per period that
         contributes a non-zero amount.  ``[]`` when the account models none.
+
+    Raises:
+        AmountUnresolvable: When a definition states no price for an
+            occurrence the estimate reaches -- exactly where its written row
+            would refuse.
     """
     if (classify_account(account) is not AccountProjectionKind.INVESTMENT
             or inputs.investment_params is None):
         return []
-    plan = _plan_for(account, basis, inputs)
+    plan = _plan_for(account, cash, inputs, horizon_end)
     if plan is None:
         return []
-    return _dated_events(plan, periods, reconciled_through)
+    return _dated_events(
+        plan,
+        # ``projection_axis`` raises ``date.min`` to the first payday, the
+        # opening the calendar-year limit needs.
+        cash.calendar.projection_axis(date.min, horizon_end),
+        reconciled_through,
+    )
 
 
 def _dated_events(
@@ -426,14 +507,18 @@ def _dated_events(
     that either is or is not inside the assertion.
 
     **The annual limit is a calendar-year recurrence over BOTH feeds.**  Every
-    period's RECORDED contributions consume the year's limit whether or not the
-    period is modelled -- they happened, so they are never capped or dropped --
-    and the modelled amount is then capped against what is left, through the
-    same :func:`~app.services.growth_engine.cap_contribution_at_limit` the
-    growth engine applies.  The employer amount is sized off the RESOLVED
-    employee total for the period, recorded plus modelled (ruling R-R
-    consequence (a)), and is not itself charged against the employee limit --
-    the growth engine's own rule.
+    period's TRANSFERRED contributions consume the year's limit whether or not
+    the period is modelled -- they are cash the fold already moves, so they are
+    never capped or dropped -- and the modelled amount is then capped against
+    what is left, through the same
+    :func:`~app.services.growth_engine.cap_contribution_at_limit` the growth
+    engine applies.  The employer amount is sized off the RESOLVED employee
+    total for the period, transferred plus modelled (ruling R-R consequence
+    (a)), and is not itself charged against the employee limit -- the growth
+    engine's own rule.  A transferred contribution is a recorded row on a
+    saved paycheck and the cash fold's estimate on a projected one (task
+    plan#3943), so a projected year's limit and match count every
+    contribution the projection makes.
 
     **Both figures are now the PERIOD's own** (plan step **salary:R14-b**,
     ruling **R-SAL2**).  The employee amount was one scalar repeated across
@@ -465,7 +550,9 @@ def _dated_events(
     hold rule never engaged here; the feed prices any period on demand now,
     a projected one included, and there is no hold rule to engage.*  A
     projected period's ``period_id`` is ``None`` and no row can file under
-    it, so it reads no recorded contribution.
+    it, so it reads the estimated transfers into the account instead, by its
+    payday (task plan#3943); it read nothing until then, so the limit and the
+    match past the horizon ignored every recurring transfer.
 
     Args:
         plan: The account's :class:`_ContributionPlan`.
@@ -476,7 +563,7 @@ def _dated_events(
             ``PayCalendar.filing_period`` measures parting company with date
             order on 800 of 872 probed days; C2-c made the caller sort, and
             plan step **C2-f2a** replaced the sort with the ordered type --
-            :func:`contribution_events` takes a
+            :func:`contribution_events` hands this a
             :class:`~app.services.pay_calendar.PeriodWindow`, which sorts at
             construction.  **This parameter stays the looser sequence, and
             that is deliberate**: the walk below is order-SENSITIVE, and a
@@ -501,8 +588,8 @@ def _dated_events(
             ytd = _ZERO
         prev_year = period_year
 
-        recorded = plan.recorded_by_period.get(period.period_id, _ZERO)
-        ytd += recorded
+        transferred = plan.transferred_by_payday.get(period.start_date, _ZERO)
+        ytd += transferred
         if reconciled_through.covers(period.start_date):
             continue
 
@@ -510,7 +597,7 @@ def _dated_events(
             plan.feed.employee_at(period), plan.annual_limit, ytd,
         )
         employer = growth_engine.calculate_employer_contribution(
-            plan.employer_params, recorded + employee,
+            plan.employer_params, transferred + employee,
             plan.feed.gross_at(period),
         )
         ytd += employee

@@ -44,7 +44,7 @@ from datetime import date
 from decimal import Decimal
 from typing import Any
 
-from flask import abort, flash, redirect, render_template, request, url_for
+from flask import abort, flash, render_template, request
 from flask.typing import ResponseReturnValue
 from flask_login import current_user
 from marshmallow import Schema
@@ -138,7 +138,7 @@ def new_stub(profile_id: int) -> ResponseReturnValue:
     held = pay_stub_service.stub_on(profile, payday)
     if held is not None:
         flash(f"Your {payday.isoformat()} stub is already entered; here it is.", "info")
-        return redirect(url_for("salary.view_stub", stub_id=held.id))
+        return _stub_page(held.id).to_response()
     ctx = BalanceContext.build(current_user.id)
     refusal = pay_stub_service.payday_refusal(ctx, payday, display_today())
     if refusal is not None:
@@ -208,7 +208,7 @@ def record_stub(profile_id: int) -> ResponseReturnValue:
                 user_id, stub.id, stub.payday.isoformat(), profile_id,
             )
             flash(f"Pay stub for {stub.payday.isoformat()} saved.", "success")
-            return redirect(url_for("salary.view_stub", stub_id=stub.id))
+            return _stub_page(stub.id).to_response()
     payday = _posted_payday(figures)
     return render_template(
         "salary/stub_form.html",
@@ -267,7 +267,7 @@ def edit_stub(stub_id: int) -> ResponseReturnValue:
         else:
             logger.info("user_id=%d edited pay stub %d", user_id, stub_id)
             flash(f"Pay stub for {stub.payday.isoformat()} saved.", "success")
-            return redirect(url_for("salary.view_stub", stub_id=stub_id))
+            return _stub_page(stub_id).to_response()
     return render_template(
         "salary/stub_form.html",
         **_form_page(profile, ctx, stub.payday, stub),

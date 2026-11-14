@@ -71,11 +71,6 @@ from app.services.salary_paydays import payday_refusal_for_door
 if TYPE_CHECKING:
     from app.services.balance_at import BalanceContext
 
-#: What the pay list's doors take, as their payday refusal words it (ruling
-#: **R-SAL93**, "Each door names its own"): "Pay can be recorded up to your
-#: next payday, ...".
-_RECORD_DOOR_WORDS = "Pay can be recorded"
-
 
 @dataclass(frozen=True)
 class PayRow:
@@ -172,26 +167,6 @@ def pay_rows(basis: PayrollBasis) -> list[PayRow]:
     return rows
 
 
-def _refuse_payday(ctx: "BalanceContext", payday: date, today: date) -> None:
-    """Raise when *payday* is not a payday, or is later than the owner's next one.
-
-    Args:
-        ctx: The route's pass, read for the owner's calendar.
-        payday: The day an entry would take effect on.
-        today: The owner's civil today, as the stub door is handed it.
-
-    Raises:
-        ValidationError: With :func:`~app.services.salary_paydays
-            .payday_refusal_for_door`'s message in this door's words
-            (ruling **R-SAL93**).
-    """
-    refusal = payday_refusal_for_door(
-        ctx, payday, today, door_words=_RECORD_DOOR_WORDS,
-    )
-    if refusal is not None:
-        raise ValidationError(refusal)
-
-
 def held_payday_refusal(payday: date) -> str:
     """Return the one sentence a pay door refuses a payday another entry holds in.
 
@@ -199,7 +174,7 @@ def held_payday_refusal(payday: date) -> str:
     held payday, or a Fix moving an entry onto one, would replace pay the
     owner can see with pay typed unseen, and the remedy is to Fix that entry,
     which is what the words say.  Its one home, so the refusal before the
-    write (:func:`_refuse_held_payday`) and the report of a Record or a Fix
+    write (:func:`_payday_refusal`) and the report of a Record or a Fix
     that met the key in a race past it (the routes' guarded flush) word one
     state alike.
 
@@ -219,7 +194,7 @@ def entry_on(profile_id: int, payday: date) -> SalaryPayEntry | None:
     """Return the pay entry that starts on *payday*, or ``None``.
 
     **The one read of "the entry a payday holds"**: the held-payday refusal
-    (:func:`_refuse_held_payday`) and the Pay Stub page's offer, which fixes
+    (:func:`_payday_refusal`) and the Pay Stub page's offer, which fixes
     that entry where a Record would be refused (ruling **plan#3962**), both
     ask it.  At most one, by ``uq_pay_entries_profile_payday``.
 
@@ -236,26 +211,40 @@ def entry_on(profile_id: int, payday: date) -> SalaryPayEntry | None:
     ).one_or_none()
 
 
-def _refuse_held_payday(
-    profile_id: int, payday: date, moving_entry_id: int | None,
-) -> None:
-    """Raise when another of the profile's entries already holds *payday*.
+def _payday_refusal(
+    profile_id: int, ctx: "BalanceContext", payday: date, today: date,
+    moving_entry_id: int | None,
+) -> str | None:
+    """Return why the pay list cannot take an entry on *payday*, or ``None``.
 
-    One entry per payday (``uq_pay_entries_profile_payday``), refused in words
-    before the key could refuse it, in :func:`held_payday_refusal`'s.
+    **The one statement of which paydays the pay list's doors take** (module
+    docstring), in their order: a day that is not a payday or is later than
+    the owner's next one, in this door's words (rulings **R-SAL90** and
+    **R-SAL93**), then a payday another of the profile's entries holds, in
+    :func:`held_payday_refusal`'s, before the unique key could refuse it.  A
+    Record asks it of its payday (:func:`record_refusal`), a Fix of a CHANGED
+    one (:func:`fix_entry`).
 
     Args:
         profile_id: The pay list's profile.
+        ctx: The route's pass, read for the owner's calendar.
         payday: The payday the door would write an entry on.
+        today: The owner's civil today, as the stub door is handed it.
         moving_entry_id: The entry a Fix is moving, which does not hold
             *payday* against itself; ``None`` for a Record, which moves none.
 
-    Raises:
-        ValidationError: Another entry holds *payday*.
+    Returns:
+        The refusal, or ``None`` when the doors take *payday*.
     """
+    refusal = payday_refusal_for_door(
+        ctx, payday, today, door_words="Pay can be recorded",
+    )
+    if refusal is not None:
+        return refusal
     held = entry_on(profile_id, payday)
     if held is not None and held.id != moving_entry_id:
-        raise ValidationError(held_payday_refusal(payday))
+        return held_payday_refusal(payday)
+    return None
 
 
 def record_refusal(
@@ -264,10 +253,10 @@ def record_refusal(
     """Return why a Record from *payday* would be refused, or ``None`` when it would not.
 
     **The Record door's refusals, as one answer** (:func:`record_entry`
-    raises from it): a day that is not a payday or is later than the owner's
-    next one, then a payday another entry holds.  The Pay Stub page asks it
-    before it offers a Record (plan step salary:X-av-4), so the page never
-    shows a button the door refuses and never spells the rules again.
+    raises from it): :func:`_payday_refusal` of a payday no entry is moving
+    onto.  The Pay Stub page asks it before it offers a Record (plan step
+    salary:X-av-4), so the page never shows a button the door refuses and
+    never spells the rules again.
 
     Args:
         profile: The profile, its ownership checked by the caller.
@@ -278,14 +267,7 @@ def record_refusal(
     Returns:
         The refusal in the door's words, or ``None``.
     """
-    refusal = payday_refusal_for_door(
-        ctx, payday, today, door_words=_RECORD_DOOR_WORDS,
-    )
-    if refusal is not None:
-        return refusal
-    if entry_on(profile.id, payday) is not None:
-        return held_payday_refusal(payday)
-    return None
+    return _payday_refusal(profile.id, ctx, payday, today, None)
 
 
 def record_entry(
@@ -391,8 +373,11 @@ def fix_entry(
             holds.
     """
     if payday != entry.payday:
-        _refuse_payday(ctx, payday, today)
-        _refuse_held_payday(entry.salary_profile_id, payday, entry.id)
+        refusal = _payday_refusal(
+            entry.salary_profile_id, ctx, payday, today, entry.id,
+        )
+        if refusal is not None:
+            raise ValidationError(refusal)
     entry.amount = amount
     entry.payday = payday
     return entry

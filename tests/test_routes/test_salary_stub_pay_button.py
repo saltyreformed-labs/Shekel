@@ -12,7 +12,10 @@ page RENDERS, read off it by :func:`tests._salary_forms.rendered_page_form`:
 * each refusal writes nothing and says why: a raise that now starts inside
   the paycheck, a gap another tab closed, a stub changed since the page
   rendered, a Fix whose amount changed, an offer that changed kind in either
-  direction, and a Record racing another onto the payday at the flush;
+  direction, a Record another tab commits between the offer and the write,
+  and a Record racing another onto the payday at the flush;
+* where a raise starts inside the paycheck, the page links the stub of the
+  first paycheck paid wholly at the new pay only when the stub flow opens it;
 * another owner's stub is a 404, paired with the owner's own stub routing.
 
 Every figure is made up.  Today is pinned to 2026-03-20, inside the seeded
@@ -148,6 +151,11 @@ def _another_tab_records(profile_id, user_id, amount, payday):
     db.session.commit()
 
 
+def _flashed(message):
+    """*message* as the page's flash toast renders it (``base.html``), unescaped."""
+    return f'<div class="toast-body">{message}</div>'
+
+
 def _entry_on(profile_id, payday):
     """The pay entry starting on *payday*, freshly read."""
     db.session.expire_all()
@@ -253,8 +261,9 @@ class TestWhatItRefuses:
         Without the raise the app pays $2,000.00 on 03-27, so a $2,010.00
         stub offers a Record.  The raise starts inside 03-27's paycheck
         (03-08..03-21), so the press is refused in the offer's words
-        (ruling plan#3959), and the page links the 04-10 stub, the first
-        paid wholly at the new pay.
+        (ruling plan#3959), flashed.  The page names 04-10, the first paid
+        wholly at the new pay, as a stub to use once it is paid, and links
+        none: the stub flow refuses 04-10 until 03-27 has passed.
         """
         with app.app_context():
             profile = _profile(auth_client, seed_user, seed_periods)
@@ -267,7 +276,8 @@ class TestWhatItRefuses:
 
             # The words are the offer's, graded in the service's suite
             # (``tests/test_services/test_stub_pay_offer.py``); here, that the
-            # door says them whole, and that they name this raise.
+            # door flashes them whole, in the toast and not only the page's
+            # own copy below it, and that they name this raise.
             refusal = stub_pay_offer.offer(
                 db.session.get(SalaryProfile, profile.id),
                 BalanceContext.build(seed_user["user"].id),
@@ -275,12 +285,10 @@ class TestWhatItRefuses:
             )
             assert refusal.button is False
             assert refusal.reason.startswith("Your Merit +5% raise from 2026-03-11 starts")
-            assert refusal.reason in after
+            assert "Once your 2026-04-10 paycheck is paid" in refusal.reason
+            assert _flashed(refusal.reason) in after
             assert f'action="{_door(stub.id)}"' not in after
-            assert (
-                f'href="/salary/{profile.id}/stubs/new?payday=2026-04-10">'
-                f"Open your 2026-04-10 stub</a>"
-            ) in after
+            assert "/stubs/new?payday=" not in after
             assert _entries(profile.id) == [(date(2026, 1, 2), Decimal("2000.00"))]
 
     def test_a_gap_another_tab_closed(
@@ -397,6 +405,44 @@ class TestWhatItRefuses:
             assert _PAY_CHANGED in after
             assert _entries(profile.id) == [(date(2026, 1, 2), Decimal("2000.00"))]
 
+    def test_a_record_another_tab_commits_after_the_offer_is_refused_not_a_500(
+        self, app, auth_client, seed_user, seed_periods,
+    ):
+        """Another tab's 03-13 Record lands after the offer's read: the Record door's words.
+
+        The offer reads 03-13 free and offers a Record; the other entry lands
+        before ``record_entry`` asks the held payday again, which reads it
+        live and refuses.  Planted by inserting the other entry just before
+        the service runs.  The door flashes the refusal, back on the stub.
+        """
+        with app.app_context():
+            profile = _profile(auth_client, seed_user, seed_periods)
+            profile_id = profile.id
+            stub = _stub(profile, date(2026, 3, 13), "2010.00")
+            controls = _button_form(auth_client, stub.id)
+            real_record = pay_list_service.record_entry
+
+            def another_tab_records_first(*args, **kwargs):
+                db.session.execute(sqlalchemy.text(
+                    "INSERT INTO salary.pay_entries "
+                    "(salary_profile_id, payday, amount) "
+                    "VALUES (:profile, '2026-03-13', 2050.00)"
+                ), {"profile": profile_id})
+                return real_record(*args, **kwargs)
+
+            with patch.object(
+                pay_list_service, "record_entry", side_effect=another_tab_records_first,
+            ):
+                after = _press(auth_client, stub.id, controls)
+
+            assert _flashed(
+                "Your pay from 2026-03-13 is already recorded; fix that entry "
+                "instead."
+            ) in after
+            # This request wrote nothing.  The planted entry shares its
+            # transaction, so the door's rollback takes it too.
+            assert _entries(profile_id) == [(date(2026, 1, 2), Decimal("2000.00"))]
+
     def test_a_record_racing_another_onto_the_payday_is_reported_not_a_500(
         self, app, auth_client, seed_user, seed_periods,
     ):
@@ -454,6 +500,37 @@ class TestThePage:
 
             assert "(the same)" in page
             assert f'action="{_door(stub.id)}"' not in page
+
+    def test_a_raise_inside_links_a_stub_the_stub_flow_opens(
+        self, app, auth_client, seed_user, seed_periods,
+    ):
+        """A 5% raise from Monday 03-02 inside 03-13's paycheck: 03-27's stub linked, and it opens.
+
+        03-13 pays 02-22..03-07: five weekdays at $2,000.00 and five at
+        $2,100.00, 1,000.00 + 1,050.00 = $2,050.00, so a $2,050.02 stub
+        differs and offers no button.  03-27 (03-08..03-21) is paid wholly at
+        the new pay and is the next payday, so the stub flow takes it: the
+        link leads to its entry form, not to a refusal.
+        """
+        with app.app_context():
+            profile = _profile(auth_client, seed_user, seed_periods)
+            make_recurring_raise(profile.id, db.session, effective_date=date(2026, 3, 2))
+            db.session.commit()
+            stub = _stub(profile, date(2026, 3, 13), "2050.02")
+
+            page = _page_text(auth_client, stub.id)
+
+            assert "a gap of $0.02" in page
+            assert f'action="{_door(stub.id)}"' not in page
+            assert (
+                "Use your 2026-03-27 stub, the first paycheck paid entirely at "
+                "the new pay."
+            ) in page
+            link = f"/salary/{profile.id}/stubs/new?payday=2026-03-27"
+            assert f'href="{link}">Open your 2026-03-27 stub</a>' in page
+            opened = auth_client.get(link)
+            assert opened.status_code == 200
+            assert "has not been paid yet" not in unescape(opened.get_data(as_text=True))
 
 
 class TestOwnership:

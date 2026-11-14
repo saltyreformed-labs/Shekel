@@ -11,11 +11,12 @@ the three rulings asked at this step settle it:
   (:meth:`~app.services.payroll_basis.PayrollBasis.raises_inside`): its
   stub's base mixes the pay before and after the raise, and pay recorded from
   its payday would take the raise a second time.  The page says so and points
-  to the first later payday paid entirely at the new pay.  On the owner's own
-  stubs: 07-16 pays 06-27..07-10, eight of its ten weekdays after a 3% raise
-  from 07-01, base $3,610.56; recorded from 07-16 it would price every
-  paycheck from 07-30 at 3,610.56 x 1.03 = $3,718.88, where the employer pays
-  $3,631.70;
+  to the first later payday paid entirely at the new pay.  Made-up: $2,000.00
+  a paycheck and 5% from Wednesday 03-11; 03-27 pays 03-08..03-21, two of its
+  ten weekdays before the raise, so its stub's base is 2,000.00 x 2/10 +
+  2,100.00 x 8/10 = $2,080.00; recorded from 03-27 it would price every
+  paycheck from 04-10 at 2,080.00 x 1.05 = $2,184.00, where the new pay is
+  $2,100.00;
 * **plan#3962** -- on a payday a pay amount already starts on, the button
   FIXES that amount, since a Record there is refused;
 * **plan#3965** -- no check of the stub's own figures beyond the confirm,
@@ -25,8 +26,12 @@ Otherwise the button is a Record, offered only where the Record door would
 take it (:func:`~app.services.pay_list_service.record_refusal`).  The write
 is the pay list's own (:func:`~app.services.pay_list_service.record_entry` or
 :func:`~app.services.pay_list_service.fix_entry`): this module decides only
-what is offered, and the door asks it again when the button is pressed, so a
-page left open while the pay list changed cannot write what it showed.
+what is offered.  The door asks it again when the button is pressed and
+writes nothing where the stub, the offer's kind, or the version of the amount
+a Fix corrects has changed since the page rendered.  A Record's reach is not
+pinned: an amount another tab records later than the stub's payday meanwhile
+narrows the paychecks the Record moves, and the figure written is still the
+stub's base.
 
 Flask-free and read-only: plain values and ORM rows in, a value out.
 """
@@ -38,7 +43,7 @@ from typing import TYPE_CHECKING, ClassVar
 
 from app.models.salary_pay_entry import SalaryPayEntry
 from app.models.salary_profile import SalaryProfile
-from app.services import pay_list_service
+from app.services import pay_list_service, pay_stub_service
 from app.services.pay_banner import ForecastRaise
 from app.services.pay_calendar import PayCalendar, span_starting_on_or_after
 from app.services.pay_list_service import PayReach
@@ -104,9 +109,10 @@ class PayOffer:
 
         It names the old figure, the new one and the paychecks that move
         (:func:`_moves`), the check ruling plan#3965 chose over holding the
-        button back: "$3,525.96 to $3,626.00, every paycheck from 03-26 on"
-        is what the owner reads before a stub typed with an allowance folded
-        into its base reprices every paycheck.
+        button back.  Made-up: "$2,000.00 to $2,100.00, every paycheck from
+        2026-01-02 on, and every one before 2026-01-02" is what the owner
+        reads before a stub typed with a $100.00 allowance folded into its
+        base reprices every paycheck.
         """
         payday = self.payday.isoformat()
         question = (
@@ -125,13 +131,15 @@ class NoPayOffer:
 
     Attributes:
         reason: The sentence the page shows.
-        whole_payday: The first later payday paid entirely at the new pay, for
-            the page's link to its stub, when a raise starts inside this
-            paycheck (ruling **plan#3959**); else ``None``.
+        link_payday: The payday whose stub the page links to: the first later
+            payday paid entirely at the new pay, when a raise starts inside
+            this paycheck (ruling **plan#3959**) and the stub flow takes that
+            payday today; else ``None``, and the reason names it as one to use
+            once it is paid (:func:`_raise_inside`).
     """
 
     reason: str
-    whole_payday: date | None = None
+    link_payday: date | None = None
 
     #: Whether the page renders a button (see :attr:`PayOffer.button`).
     button: ClassVar[bool] = False
@@ -181,7 +189,7 @@ def offer(
         return None
     inside = basis.raises_inside(payday)
     if inside:
-        return _raise_inside(basis, calendar, payday, inside)
+        return _raise_inside(basis, ctx, payday, inside, today)
     held = pay_list_service.entry_on(profile.id, payday)
     if held is None:
         refusal = pay_list_service.record_refusal(profile, ctx, payday, today)
@@ -193,7 +201,7 @@ def offer(
 
 
 def _dollars(amount: Decimal) -> str:
-    """Word a pay figure as the page prints one: ``$3,631.70``.
+    """Word a pay figure as the page prints one: ``$2,061.50``.
 
     Every figure here is above zero (the schema's bound on a pay amount and
     a stub's base, and the columns' CHECKs), so there is no sign to word.
@@ -232,8 +240,8 @@ def _moves(reach: PayReach) -> str:
 
 
 def _raise_inside(
-    basis: PayrollBasis, calendar: PayCalendar, payday: date,
-    inside: "tuple[tuple[date, RaiseTerms], ...]",
+    basis: PayrollBasis, ctx: "BalanceContext", payday: date,
+    inside: "tuple[tuple[date, RaiseTerms], ...]", today: date,
 ) -> NoPayOffer:
     """Say why a paycheck a raise starts inside offers no button, and where to look instead.
 
@@ -244,13 +252,23 @@ def _raise_inside(
     opens on a Sunday leaves every weekday at the new pay, and pay recorded
     from that payday would still take the raise again.
 
+    The first later payday paid entirely at the new pay is linked only when
+    the stub flow takes it today (:func:`~app.services.pay_stub_service
+    .payday_refusal`, that flow's one rule): a raise starting inside the next
+    payday's paycheck points past the next payday, which the flow refuses as
+    not paid yet until that payday has passed.  Made-up: on 03-20, with
+    03-27 the next payday, a raise from 03-11 inside 03-27's paycheck
+    (03-08..03-21) names 04-10 as a stub to use once that paycheck is paid,
+    with no link; on 03-28 the same page links it.
+
     Args:
         basis: The read pass's walk for the profile.
-        calendar: The owner's calendar.
+        ctx: The route's pass, read for the owner's calendar.
         payday: The stub's payday.
         inside: The raises starting inside its paycheck, as
             :meth:`~app.services.payroll_basis.PayrollBasis.raises_inside`
             answers them.
+        today: The owner's civil today.
 
     Returns:
         The :class:`NoPayOffer`.
@@ -265,13 +283,19 @@ def _raise_inside(
         f"paycheck covers, so this stub's base pay can't be used as your pay "
         f"from this payday: the app would add the raise to it a second time."
     )
-    whole = _first_whole_payday(basis, calendar, payday)
-    if whole is not None:
-        reason += (
-            f"  Use your {whole.isoformat()} stub, the first paycheck paid "
-            f"entirely at the new pay."
+    whole = _first_whole_payday(basis, ctx.calendar(), payday)
+    if whole is None:
+        return NoPayOffer(reason)
+    if pay_stub_service.payday_refusal(ctx, whole, today) is not None:
+        return NoPayOffer(
+            f"{reason}  Once your {whole.isoformat()} paycheck is paid, use its "
+            f"stub: the first paycheck paid entirely at the new pay."
         )
-    return NoPayOffer(reason, whole)
+    return NoPayOffer(
+        f"{reason}  Use your {whole.isoformat()} stub, the first paycheck paid "
+        f"entirely at the new pay.",
+        whole,
+    )
 
 
 def _first_whole_payday(

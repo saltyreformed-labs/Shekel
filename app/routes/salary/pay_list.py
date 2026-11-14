@@ -111,11 +111,13 @@ def _reprice_or_report(
 ) -> Response | None:
     """Re-price the paychecks a staged pay-list write moves and commit, or report why not.
 
-    **The pay list doors' one report of a failed commit**: Record, Fix and
-    the Pay Stub page's button each called
-    :func:`~app.routes._commit_helpers.regenerate_commit_or_report` with
-    the same three reports until plan step salary:X-av-4, which would have
-    spelled them a third time.  A lost version race is flashed as
+    **The one report of a failed commit for the doors that stage a pay
+    entry**: Record and Fix each handed
+    :func:`~app.routes._commit_helpers.regenerate_commit_or_report` the
+    same three reports until plan step salary:X-av-4, whose Pay Stub page
+    button would have spelled them a third time.  Remove stages no entry, so
+    no race onto a payday is its to report, and it keeps its own two.  A
+    lost version race is flashed as
     *write*'s stale message; a Record or a Fix racing another onto one payday
     meets ``uq_pay_entries_profile_payday`` at the guarded flush and is
     reported in :func:`~app.services.pay_list_service.held_payday_refusal`'s
@@ -391,9 +393,10 @@ def use_stub_as_pay(stub_id):
 
     Then the write is the pay list's own act at the stub's payday,
     :func:`~app.services.pay_list_service.record_entry` or
-    :func:`~app.services.pay_list_service.fix_entry`, re-priced and reported
-    through :func:`_reprice_or_report` as Record and Fix are.  Every answer
-    lands back on the stub, where the gap then reads "the same".
+    :func:`~app.services.pay_list_service.fix_entry`, refused in the
+    service's words and re-priced and reported through
+    :func:`_reprice_or_report`, as Record and Fix are.  Every answer lands
+    back on the stub, where the gap then reads "the same".
 
     **One read pass for the POST, handed to the regeneration too.**  The
     offer prices the profile on it before the write, so the pass's pricer
@@ -429,12 +432,19 @@ def use_stub_as_pay(stub_id):
     if refused is not None:
         return refused
 
-    # The offer asked the Record door's refusals in this pass, of this payday
-    # and this day, and offered a Record only where they answered nothing, so
-    # ``record_entry``'s own asking cannot refuse here; a Fix keeps its payday,
-    # which is the only change ``fix_entry`` refuses.
+    # ``record_entry`` asks the Record door's refusals again.  Its payday half
+    # answers as the offer's did, off the pass's one calendar, but it reads
+    # the held payday live: another tab's Record of this payday, committed
+    # after the offer's read, is refused here in the Record door's words, and
+    # one committed after this read meets the unique key at the guarded
+    # flush.  A Fix keeps its payday, the only change ``fix_entry`` refuses.
     if offer.entry is None:
-        pay_list_service.record_entry(profile, ctx, stub.base_pay, payday, today)
+        try:
+            pay_list_service.record_entry(profile, ctx, stub.base_pay, payday, today)
+        except ValidationError as refused:
+            db.session.rollback()
+            flash(str(refused), "danger")
+            return stub_page.to_response()
         done = f"Pay recorded from {payday.isoformat()}."
     else:
         pay_list_service.fix_entry(offer.entry, ctx, stub.base_pay, payday, today)

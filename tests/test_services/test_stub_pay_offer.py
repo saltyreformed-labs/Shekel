@@ -33,15 +33,15 @@ def _freeze_today(monkeypatch):
     freeze_today(monkeypatch, _TODAY)
 
 
-def _profile(seed_user, seed_periods):
-    """$2,000.00 a paycheck from 2026-01-02, committed in the caller's app context.
+def _profile(seed_user, seed_periods, pay_from=None):
+    """$2,000.00 a paycheck from *pay_from* (2026-01-02 unless given), committed.
 
     Built inside the test's own context, as the pay list's door suite builds
     it, so every write below lands in the session the offer reads.
     """
     profile = make_salary_profile(
         seed_user, db.session, pay=Decimal("2000.00"),
-        pay_from=seed_periods[0].start_date,
+        pay_from=seed_periods[0].start_date if pay_from is None else pay_from,
     )
     db.session.commit()
     return profile
@@ -55,10 +55,10 @@ def _record(profile, amount, payday):
     db.session.commit()
 
 
-def _offer(profile, payday, base):
+def _offer(profile, payday, base, today=_TODAY):
     """The page's offer for a stub of *base* on *payday*, in a fresh read pass."""
     return stub_pay_offer.offer(
-        profile, BalanceContext.build(profile.user_id), payday, Decimal(base), _TODAY,
+        profile, BalanceContext.build(profile.user_id), payday, Decimal(base), today,
     )
 
 
@@ -126,6 +126,53 @@ class TestARecord:
                 "2026-03-27, where your next pay amount starts."
             )
 
+    def test_the_nearer_of_two_later_amounts_bounds_what_it_reaches(
+        self, app, seed_user, seed_periods,
+    ):
+        """Amounts from 03-13 and 03-27 too: a 02-27 Record reaches 02-27 up to 03-13, not 03-27.
+
+        The amount from 03-13 is the first after 02-27, so 03-13 is the first
+        paycheck the Record does not price; the app pays $2,000.00 on 02-27,
+        from the 01-02 amount.
+        """
+        with app.app_context():
+            profile = _profile(seed_user, seed_periods)
+            _record(profile, "2100.00", date(2026, 3, 13))
+            _record(profile, "2200.00", date(2026, 3, 27))
+            offer = _offer(profile, date(2026, 2, 27), "2010.00")
+            assert offer.reach == PayReach(
+                date(2026, 2, 27), and_before=False, until=date(2026, 3, 13),
+            )
+            assert offer.confirm == (
+                "Use $2,010.00 as your pay from 2026-02-27? $2,000.00 to "
+                "$2,010.00, every paycheck from 2026-02-27 to the one before "
+                "2026-03-13, where your next pay amount starts."
+            )
+
+    def test_a_record_before_the_first_amount_reaches_every_paycheck_before_it(
+        self, app, seed_user, seed_periods,
+    ):
+        """Pay from 03-13 only: a 02-27 Record becomes the first, reaching each paycheck before it.
+
+        Paychecks before the first amount use it (ruling R-SAL59), so the app
+        pays $2,000.00 on 02-27, and an amount recorded there prices 02-27
+        and every paycheck before it, up to 03-13.
+        """
+        with app.app_context():
+            profile = _profile(seed_user, seed_periods, pay_from=date(2026, 3, 13))
+            offer = _offer(profile, date(2026, 2, 27), "2010.00")
+            assert offer.entry is None
+            assert offer.old_figure == Decimal("2000.00")
+            assert offer.reach == PayReach(
+                date(2026, 2, 27), and_before=True, until=date(2026, 3, 13),
+            )
+            assert offer.confirm == (
+                "Use $2,010.00 as your pay from 2026-02-27? $2,000.00 to "
+                "$2,010.00, every paycheck from 2026-02-27 to the one before "
+                "2026-03-13, where your next pay amount starts, and every one "
+                "before 2026-02-27."
+            )
+
     def test_a_payday_the_record_door_refuses_offers_its_refusal(
         self, app, seed_user, seed_periods,
     ):
@@ -143,7 +190,7 @@ class TestARecord:
                 "2026-04-10 has not been paid yet.  Pay can be recorded up to "
                 "your next payday, 2026-03-27."
             )
-            assert offer.whole_payday is None
+            assert offer.link_payday is None
 
 
 class TestAFix:
@@ -201,14 +248,16 @@ _RAISE_DAY = date(2026, 3, 11)
 class TestARaiseInside:
     """A paycheck a raise starts inside offers no button (ruling plan#3959)."""
 
-    def test_it_says_why_and_names_the_first_paycheck_at_the_new_pay(
+    def test_it_says_why_and_names_a_paycheck_not_paid_yet_without_a_link(
         self, app, seed_user, seed_periods,
     ):
-        """A 03-27 stub of $2,080.02: no button, and 04-10 named.
+        """A 03-27 stub of $2,080.02 on 03-20: no button, and 04-10 named as one to use once paid.
 
         03-27's weekdays: 03-09 and 03-10 before the raise, eight after.
         2,000.00 x 2/10 = 400.00; 2,100.00 x 8/10 = 1,680.00; the app pays
-        2,080.00.  04-10 pays 03-22..04-04, wholly after the raise.
+        2,080.00.  04-10 pays 03-22..04-04, wholly after the raise, but it is
+        later than the next payday, 03-27, so the stub flow refuses it today
+        and the page links nothing.
         """
         with app.app_context():
             profile = _profile(seed_user, seed_periods)
@@ -221,10 +270,32 @@ class TestARaiseInside:
                 "Your Merit +5% raise from 2026-03-11 starts during the pay "
                 "period this paycheck covers, so this stub's base pay can't be "
                 "used as your pay from this payday: the app would add the raise "
-                "to it a second time.  Use your 2026-04-10 stub, the first "
-                "paycheck paid entirely at the new pay."
+                "to it a second time.  Once your 2026-04-10 paycheck is paid, "
+                "use its stub: the first paycheck paid entirely at the new pay."
             )
-            assert offer.whole_payday == date(2026, 4, 10)
+            assert offer.link_payday is None
+
+    def test_once_that_paycheck_is_the_next_payday_it_is_linked(
+        self, app, seed_user, seed_periods, monkeypatch,
+    ):
+        """The same 03-27 stub on 03-28: 04-10 is the next payday, so the page links its stub.
+
+        On 03-28 the stub flow takes paydays up to 04-10, the first opening
+        on or after today.
+        """
+        later = date(2026, 3, 28)
+        freeze_today(monkeypatch, later)
+        with app.app_context():
+            profile = _profile(seed_user, seed_periods)
+            make_recurring_raise(profile.id, db.session, effective_date=_RAISE_DAY)
+            db.session.commit()
+            offer = _offer(profile, date(2026, 3, 27), "2080.02", today=later)
+            assert offer.button is False
+            assert offer.reason.endswith(
+                "a second time.  Use your 2026-04-10 stub, the first paycheck "
+                "paid entirely at the new pay."
+            )
+            assert offer.link_payday == date(2026, 4, 10)
 
     def test_a_held_payday_a_raise_starts_inside_offers_no_fix(
         self, app, seed_user, seed_periods,
@@ -242,4 +313,4 @@ class TestARaiseInside:
             _record(profile, "2000.00", date(2026, 3, 27))
             offer = _offer(profile, date(2026, 3, 27), "2080.02")
             assert offer.button is False
-            assert offer.whole_payday == date(2026, 4, 10)
+            assert "Once your 2026-04-10 paycheck is paid" in offer.reason

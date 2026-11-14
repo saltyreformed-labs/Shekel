@@ -315,8 +315,8 @@ class TestMfaSetupSecretIsServerSide:
         """
         with app.app_context():
             # Capture the original primary that the setup call will
-            # use: the one key the ``set_totp_key`` autouse fixture
-            # holds for the test process (ruling plan#3625).
+            # use: the suite's one key, which ``tests/conftest.py``
+            # writes before the app is imported (ruling plan#3890).
             old_primary = mfa_service.get_encryption_key()
             # Perform setup under the original primary.
             no_two_factor_client.get("/mfa/setup")

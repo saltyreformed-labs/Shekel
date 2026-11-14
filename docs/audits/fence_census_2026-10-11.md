@@ -152,7 +152,7 @@ for a fence, the kind is this record's reading.
 
 | id | where | what it guards | why it stays |
 |---|---|---|---|
-| T-39 | `tests/test_arch/test_a_seeded_start_state_is_built_once.py:141` | a shared seed leaking writes between tests | a test-infrastructure contract |
+| T-39 | `tests/test_arch/test_a_seeded_start_state_is_built_once.py:141` | a shared seed leaking writes between tests | a test-infrastructure contract; deleted by plan#2954 on the developer's word (ruling plan#3870), no seed taking connections and no test database outliving its test |
 | T-96 | `tests/test_integration/test_posting_ledger_loan_reconciliation.py:1957` | the parallel-run oracle reading the code it grades | oracle independence; `G1` rewrites it when the allowlist it parses goes |
 | T-209 | `scripts/build_test_db_image.py:248` (`cache_key`), `:130`; `tests/test_scripts/test_build_test_db_image.py:102` | a stale baked test template | the key is derived and the image verified |
 | T-226 | `scripts/_template_checks.py` (on the held branch `e5e46fd6e` only) | a template missing a trigger family or a count | each count is read from its producer's constant |

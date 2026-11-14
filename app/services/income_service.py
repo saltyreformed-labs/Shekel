@@ -258,6 +258,21 @@ class ProfilePaychecks:
         """
         return self._profile
 
+    @property
+    def basis(self) -> PayrollBasis:
+        """The :class:`~app.services.payroll_basis.PayrollBasis` this prices through.
+
+        Published so a reader asking the walk a question beside a paycheck --
+        the Pay Stub page's offer, which asks whether a raise starts inside
+        the paycheck whose base it set beside the stub's (plan step
+        salary:X-av-4) -- asks the walk that priced it, under the same raise
+        set and in the same memo, rather than building a second one.
+
+        Returns:
+            The basis built at construction.
+        """
+        return self._basis
+
     def law(self, tax_year: int) -> dict[str, object]:
         """Return the tax law that applies to *tax_year* for this profile.
 

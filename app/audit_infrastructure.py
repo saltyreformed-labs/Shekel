@@ -417,12 +417,13 @@ $$ LANGUAGE plpgsql
 """
 
 # Conditional GRANT block: if the ``shekel_app`` role exists (created
-# by ``scripts/init_db.sql`` in the production Docker entrypoint),
-# grant USAGE/SELECT/INSERT on the audit infrastructure so the
-# least-privilege app role can write audit_log rows through the
-# trigger and read them for forensic queries.  When the role does
-# not exist (developer laptop, CI test container), the block is a
-# no-op -- the migration must still succeed.
+# by ``scripts/init_db_role.sql`` at the entrypoint's step 2b, before
+# step 3 migrates, and by ``scripts/build_test_db_image.py`` before the
+# test template is built), grant USAGE/SELECT/INSERT on the audit
+# infrastructure so the least-privilege app role can write audit_log
+# rows through the trigger and read them for forensic queries.  When
+# the role does not exist (a cluster nobody provisioned it on), the
+# block is a no-op -- the migration must still succeed.
 _GRANT_APP_ROLE_SQL = """
 DO $$
 BEGIN
@@ -593,7 +594,7 @@ def apply_audit_infrastructure(executor: Callable[[str], object]) -> None:
     5. A guarded ``GRANT`` block that gives the ``shekel_app`` role
        (when present) the USAGE/SELECT/INSERT it needs to write audit
        rows through the trigger; the block is a no-op when the role
-       has not been provisioned (developer laptop, CI container).
+       has not been provisioned on the cluster.
 
     All statements are idempotent: running the function twice in a row
     must be indistinguishable from running it once.  This invariant is

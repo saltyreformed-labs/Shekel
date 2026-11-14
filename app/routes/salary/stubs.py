@@ -13,8 +13,10 @@ yours" alike):
 * ``POST /salary/<profile_id>/stubs`` -- record a NEW stub; a payday that
   already holds one is refused with a link to it (**R-SAL52**).
 * ``GET  /salary/stubs/<stub_id>`` -- the stub: what it adds up to, each line
-  beside the app's figure for that payday (fork 2), the base-pay gap (fork 5),
-  and its form.
+  beside the app's figure for that payday (fork 2), the base-pay gap (fork 5)
+  and, under it, the button that makes the stub's base your pay from its
+  payday or the reason there is none (plan step salary:X-av-4; the button's
+  door is the pay list's, :func:`.pay_list.use_stub_as_pay`), and its form.
 * ``POST /salary/stubs/<stub_id>/edit`` -- rewrite it (version-checked); the
   payday rules apply only to a date the edit changes (**R-SAL53**).
 * ``POST /salary/stubs/<stub_id>/pricing`` -- its "Use for pricing" switch
@@ -42,7 +44,7 @@ from datetime import date
 from decimal import Decimal
 from typing import Any
 
-from flask import abort, flash, redirect, render_template, request, url_for
+from flask import abort, flash, render_template, request
 from flask.typing import ResponseReturnValue
 from flask_login import current_user
 from marshmallow import Schema
@@ -63,9 +65,10 @@ from app.routes._commit_helpers import (
     handle_stale_form_conflict,
     regenerate_commit_or_report,
 )
-from app.routes._redirect_target import RedirectTarget
 from app.routes.salary._bp import salary_bp
-from app.routes.salary._helpers import _edit_page, _regenerate_salary_transactions
+from app.routes.salary._helpers import (
+    _edit_page, _regenerate_salary_transactions, _stub_page,
+)
 from app.schemas.validation import (
     PayStubFigureSchema,
     PayStubLineSchema,
@@ -74,7 +77,8 @@ from app.schemas.validation import (
     PayStubSchema,
 )
 from app.services import (
-    paycheck_line_kinds, pay_stub_gross, pay_stub_service, withholding_kinds,
+    paycheck_line_kinds, pay_stub_gross, pay_stub_service, stub_pay_offer,
+    withholding_kinds,
 )
 from app.services.balance_at import BalanceContext
 from app.utils.auth_helpers import get_or_404, get_owned_via_parent, require_owner
@@ -134,7 +138,7 @@ def new_stub(profile_id: int) -> ResponseReturnValue:
     held = pay_stub_service.stub_on(profile, payday)
     if held is not None:
         flash(f"Your {payday.isoformat()} stub is already entered; here it is.", "info")
-        return redirect(url_for("salary.view_stub", stub_id=held.id))
+        return _stub_page(held.id).to_response()
     ctx = BalanceContext.build(current_user.id)
     refusal = pay_stub_service.payday_refusal(ctx, payday, display_today())
     if refusal is not None:
@@ -204,7 +208,7 @@ def record_stub(profile_id: int) -> ResponseReturnValue:
                 user_id, stub.id, stub.payday.isoformat(), profile_id,
             )
             flash(f"Pay stub for {stub.payday.isoformat()} saved.", "success")
-            return redirect(url_for("salary.view_stub", stub_id=stub.id))
+            return _stub_page(stub.id).to_response()
     payday = _posted_payday(figures)
     return render_template(
         "salary/stub_form.html",
@@ -258,12 +262,12 @@ def edit_stub(stub_id: int) -> ResponseReturnValue:
                 log_message="user_id=%d failed to edit pay stub %d",
                 log_args=(user_id, stub_id),
                 flash_message="Failed to save the pay stub. Please try again.",
-                redirect=RedirectTarget("salary.view_stub", {"stub_id": stub_id}),
+                redirect=_stub_page(stub_id),
             ))
         else:
             logger.info("user_id=%d edited pay stub %d", user_id, stub_id)
             flash(f"Pay stub for {stub.payday.isoformat()} saved.", "success")
-            return redirect(url_for("salary.view_stub", stub_id=stub_id))
+            return _stub_page(stub_id).to_response()
     return render_template(
         "salary/stub_form.html",
         **_form_page(profile, ctx, stub.payday, stub),
@@ -362,11 +366,7 @@ def _stale_ctx(
     label: str, stub_id: int, *, to_profile: int | None = None,
 ) -> StaleConflictContext:
     """The stale-conflict report: back to the stub, or to the profile's card."""
-    redirect_to = (
-        _edit_page(to_profile)
-        if to_profile is not None
-        else RedirectTarget("salary.view_stub", {"stub_id": stub_id})
-    )
+    redirect_to = _edit_page(to_profile) if to_profile is not None else _stub_page(stub_id)
     return StaleConflictContext(
         logger=logger, log_label=label, log_id=stub_id,
         flash_message=_STALE_MESSAGE, redirect=redirect_to,
@@ -577,6 +577,9 @@ def _form_page(
 
     ``gross_counts`` words which earnings the printed-gross check adds on this
     job (ruling **R-SAL102**), the phrase the check's own refusals use.
+    ``pay_offer`` is a saved stub's pay button, or why there is none
+    (:func:`~app.services.stub_pay_offer.offer`, plan step salary:X-av-4),
+    read in the pass the report's gap is, so the two read one pricing.
 
     Args:
         profile: The owned profile.
@@ -594,6 +597,10 @@ def _form_page(
         "stub": stub,
         "report": (
             pay_stub_service.stub_report(profile, stub, ctx) if stub is not None else None
+        ),
+        "pay_offer": (
+            stub_pay_offer.offer(profile, ctx, stub.payday, stub.base_pay, display_today())
+            if stub is not None else None
         ),
         "lines": lines,
         "kind_options": paycheck_line_kinds.kind_options(),

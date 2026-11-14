@@ -443,6 +443,48 @@ class PayrollBasis:
         """
         return self._in_force_on(day).raised
 
+    def raises_inside(self, payday: date) -> "tuple[tuple[date, RaiseTerms], ...]":
+        """Return the forecast raises that start inside *payday*'s paycheck.
+
+        **The one statement of "a raise starts inside this paycheck"** (ruling
+        **plan#3959**): each application landing after the first day the
+        paycheck pays for and on or before its last priced weekday
+        (:func:`_priced_days`), read from that first day as pay recorded from
+        *payday* would read it, never from the entry in force.  Pay recorded
+        from *payday* holds only the raises landing on or before its first day
+        (:func:`~app.services.salary_raises.recorded_pay_holds`, ruling
+        **plan#3091**), so the walk raises it again by each of these, inside
+        its own paycheck: no single figure recorded from *payday* is what that
+        paycheck pays.  So the Pay Stub page offers no stub's base from such a
+        payday as the pay (:mod:`app.services.stub_pay_offer`).
+
+        Made-up, as :class:`~app.services.pay_rate.BasePay` works it: a
+        paycheck paying Saturday 2027-02-20 through Friday 03-05, and 5% from
+        Wednesday 03-03.  Its stub prints $2,030.00, seven weekdays at
+        $2,000.00 and three at $2,100.00; recorded from that payday, the
+        walk pays seven at $2,030.00 and three at $2,131.50.  **The test is
+        where the raise lands, never whether the base is a blend**: 5% from
+        Monday 02-22 pays all ten weekdays at $2,100.00, one pay, yet $2,100.00
+        recorded from that payday is raised to $2,205.00 on each of them.  A
+        raise landing on the first day itself is held by recorded pay, and one
+        after the last weekday is paid by no day of the paycheck.
+
+        Args:
+            payday: The day a paycheck arrives: saved, projected, or below the
+                record.
+
+        Returns:
+            ``(landing day, raise)`` for each such application, in the order
+            they apply; empty for a paycheck no raise starts inside.
+        """
+        return tuple(
+            (landed, raise_obj)
+            for landed, _rank, raise_obj in applications_between(
+                self.raises, self._paid_days_of(payday).first,
+                self._last_priced_day(payday),
+            )
+        )
+
     @cached_property
     def _base_pays(self) -> "dict[date, BasePay]":
         """Every payday priced so far, keyed by payday, as :attr:`_in_force` keys its days."""

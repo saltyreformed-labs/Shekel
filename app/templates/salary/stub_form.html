@@ -48,6 +48,36 @@
             <span class="text-muted">(a gap of {{ money(report.base_gap) }}).</span>
           {% endif %}
         </p>
+        {# The stub's base as your pay from its payday (plan step
+           salary:X-av-4, ruling R-SAL61): a Record, or a Fix of the amount
+           the payday holds (ruling plan#3962), or the reason there is none
+           (a raise starting inside the paycheck, ruling plan#3959).  The
+           form posts no figure: the door reads the stub's base and asks the
+           offer again, against the versions posted here.  The confirm names
+           the old figure, the new one and the paychecks that move (ruling
+           plan#3965). #}
+        {% if pay_offer is not none %}
+        {% if pay_offer.button %}
+        <form method="POST" class="mb-3"
+              action="{{ url_for('salary.use_stub_as_pay', stub_id=stub.id) }}"
+              data-confirm="{{ pay_offer.confirm }}">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <input type="hidden" name="version_id" value="{{ stub.version_id }}">
+          {% if pay_offer.entry is not none %}
+          <input type="hidden" name="entry_version_id" value="{{ pay_offer.entry.version_id }}">
+          {% endif %}
+          <button type="submit" class="btn btn-sm btn-outline-primary">
+            <i class="bi bi-arrow-right-circle" aria-hidden="true"></i> {{ pay_offer.label }}
+          </button>
+        </form>
+        {% else %}
+        <p class="mb-3 text-muted"><i class="bi bi-info-circle"></i> {{ pay_offer.reason }}
+          {% if pay_offer.link_payday is not none %}
+          <a href="{{ url_for('salary.new_stub', profile_id=profile.id, payday=pay_offer.link_payday.isoformat()) }}">Open your {{ pay_offer.link_payday.isoformat() }} stub</a>
+          {% endif %}
+        </p>
+        {% endif %}
+        {% endif %}
         {% endif %}
 
         {% if report.lines %}

@@ -117,7 +117,10 @@ def _percent(day, pct):
 
 
 def _recurring(day, pct, terminal_year=None):
-    """A merit raise of *pct* from *day*, every year on its month and day through *terminal_year*."""
+    """A merit raise of *pct* from *day*, every year on that month and day through *terminal_year*.
+
+    ``None`` for *terminal_year* believes it with no end.
+    """
     return RaiseTerms(
         effective_date=day, is_recurring=True, percentage=Decimal(pct),
         flat_amount=None, terminal_year=terminal_year, raise_type_name="merit",
@@ -293,6 +296,72 @@ class TestRecordedPayOpensOnItsPaychecksFirstDay:
         assert _pay(basis, date(2027, 3, 25)) == Decimal("2100.00")
 
 
+class TestWhichRaisesStartInsideAPaycheck:
+    """``raises_inside``: the raises pay recorded from a payday would still take (plan#3959).
+
+    Those landing after the first day the paycheck pays for and on or before
+    its last priced weekday, read from that first day, so the Pay Stub page
+    offers no stub's base from such a payday as the pay (plan step
+    salary:X-av-4).
+    """
+
+    def test_a_raise_on_a_weekday_inside_is_named_and_no_other_paycheck_names_it(self):
+        """5% from Wednesday 03-03, inside 03-11's 02-20..03-05: 03-11 alone names it.
+
+        02-25 (02-06..02-19) is wholly before the raise and 03-25
+        (03-06..03-19) wholly after it.
+        """
+        basis = _basis(_biweekly(), [(_OPENS, "2000.00")], _WEDNESDAY_RAISE)
+        assert basis.raises_inside(date(2027, 3, 11)) == (
+            (date(2027, 3, 3), _WEDNESDAY_RAISE[0]),
+        )
+        assert not basis.raises_inside(date(2027, 2, 25))
+        assert not basis.raises_inside(date(2027, 3, 25))
+
+    def test_one_on_the_first_weekday_is_inside_though_the_paycheck_pays_one_pay(self):
+        """5% from Monday 02-22: 03-11 pays all ten weekdays at $2,100.00, yet names it.
+
+        Its base equals its rate, so "is the base a blend" answers no, and
+        recording that $2,100.00 from 03-11 (opening Saturday 02-20) would be
+        raised again on every weekday: 2,100.00 x 1.05 = 2,205.00.
+        """
+        monday = (_percent(date(2027, 2, 22), "0.05"),)
+        base = _basis(_biweekly(), [(_OPENS, "2000.00")], monday)
+        assert base.base_pay_on(date(2027, 3, 11)).per_paycheck == Decimal("2100.00")
+        assert base.base_pay_on(date(2027, 3, 11)).rate.per_paycheck == Decimal("2100.00")
+        assert base.raises_inside(date(2027, 3, 11)) == ((date(2027, 2, 22), monday[0]),)
+        recorded = _basis(
+            _biweekly(), [(_OPENS, "2000.00"), (date(2027, 3, 11), "2100.00")], monday,
+        )
+        assert _pay(recorded, date(2027, 3, 11)) == Decimal("2205.00")
+
+    def test_one_on_the_first_day_or_after_the_last_weekday_is_not_inside(self):
+        """Sunday-to-Saturday periods: 07-07 pays 2028-06-18..07-01, 07-21 pays 07-02..07-15.
+
+        3% from Saturday 07-01, after 07-07's last weekday (06-30), is paid by
+        no day of 07-07 and lands before 07-21 opens; from Sunday 07-02,
+        07-21's first day, pay recorded from 07-21 holds it already.
+        """
+        for landed in (date(2028, 7, 1), date(2028, 7, 2)):
+            basis = _basis(
+                _friday_paydays(), [(_FRIDAYS, "2000.00")], (_percent(landed, "0.03"),),
+            )
+            assert not basis.raises_inside(date(2028, 7, 7))
+            assert not basis.raises_inside(date(2028, 7, 21))
+
+    def test_it_reads_from_the_paycheck_not_from_the_entry_in_force(self):
+        """The only entry, $2,100.00 from 03-25, holds the 03-03 raise; 03-11 still names it.
+
+        03-11 is priced from that entry and raised by nothing (R-SAL59), but
+        pay recorded from 03-11 itself would open on 02-20 and take the raise.
+        """
+        basis = _basis(_biweekly(), [(date(2027, 3, 25), "2100.00")], _WEDNESDAY_RAISE)
+        assert _pay(basis, date(2027, 3, 11)) == Decimal("2100.00")
+        assert basis.raises_inside(date(2027, 3, 11)) == (
+            (date(2027, 3, 3), _WEDNESDAY_RAISE[0]),
+        )
+
+
 class TestTheBannerComparesPayWithPay:
     """A recorded pay change's banner: the entry against the pay in force before it opens."""
 
@@ -414,7 +483,7 @@ class TestARaiseBadgesTheFirstPaycheckItReaches:
         assert [payday for payday in paydays if _badge(basis, payday)] == []
 
     def test_raises_reaching_one_paycheck_are_named_in_the_order_they_apply(self):
-        """A cola from Thursday 03-04 given first, a merit from Wednesday 03-03 second: merit first.
+        """A cola from Thursday 03-04 given first, a merit from Wednesday 03-03 next: merit first.
 
         03-11 pays both for the first time; the merit lands a day earlier, so
         it compounds first and is named first, whatever order the set lists
@@ -555,7 +624,7 @@ class TestARhythmSeam:
             [(_OPENS, "2000.00"), (date(2027, 4, 8), "1100.00")],
         )
         assert _badge(basis, date(2027, 4, 8)) == "Pay +$5,200.00 a year"
-        assert basis.rhythm_changes_without_pay() == []
+        assert not basis.rhythm_changes_without_pay()
 
 
 class TestAPeriodHoldingNoWeekday:
@@ -604,7 +673,9 @@ class TestThePayListReadsTheRate:
         52,780.00.
         """
         basis = _basis(_biweekly(), [(date(2027, 3, 11), "2000.00")], _WEDNESDAY_RAISE)
-        (row,) = pay_rows(basis)
+        rows = pay_rows(basis)
+        assert len(rows) == 1
+        row = rows[0]
         assert row.paychecks_a_year == 26
         assert row.yearly == Decimal("54600.00")
 

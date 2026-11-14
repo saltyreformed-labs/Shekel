@@ -13,6 +13,12 @@ This script builds the artifact that makes that affordable: an image whose
 PGDATA already contains the template, so starting a run costs a container
 boot rather than a migration replay.
 
+The cluster holds one thing beside the template: the ``shekel_app`` role,
+created BEFORE the template is built (:data:`_APP_ROLE`, plan#3636), as
+production's entrypoint creates it before it migrates.  A role belongs to the
+cluster rather than to a database, so every run's cluster holds it from its
+start and no test creates or drops it.
+
 THREE THINGS HERE WERE MEASURED, NOT ASSUMED, and each would have produced a
 silently wrong image:
 
@@ -104,18 +110,27 @@ _IMAGE_REPO = "shekel-test-db"
 # forever.  ``tests/_worker_database.py`` and ``scripts/build_test_template.py``
 # spell the same constant; all THREE must agree.
 _TEMPLATE_DATABASE = "shekel_test_template"
+# The copy of the template :func:`_verify_image` asks its questions of.  The
+# template takes no connections (``scripts/build_test_template.py``'s last
+# step, ruling plan#3870), so the verifier reads what a test reads: a clone.
+_VERIFY_COPY_DATABASE = "shekel_test_template_verify"
 
 # Inputs the key covers no matter what the builder imports.  These shape the
 # template without being reachable by reading its import block: the migration
 # chain itself, alembic's own configuration (``migrations/env.py`` sets
-# ``version_table_schema``), the ORM classes ``ref_seeds`` seeds THROUGH, and
-# the builder script.
+# ``version_table_schema``), the ORM classes ``ref_seeds`` seeds THROUGH, the
+# builder script, and THIS file, whose bake makes the cluster the template is
+# built in -- the role the template's grants name among it (:data:`_APP_ROLE`).
+# Without it, two trees whose bakes differ derive one tag and share one image:
+# a tree whose role fixture still drops the role would then meet a template
+# holding grants to it, which refuse the drop.
 _FIXED_KEY_INPUTS = (
     "migrations/versions",
     "migrations/env.py",
     "alembic.ini",
     "app/models",
     "scripts/build_test_template.py",
+    "scripts/build_test_db_image.py",
 )
 
 _TEMPLATE_BUILDER = "scripts/build_test_template.py"
@@ -189,6 +204,19 @@ KEY_INPUTS = key_inputs()
 _READY_TIMEOUT_SECONDS = 60
 _BUILD_USER = "shekel_user"
 _BUILD_PASSWORD = "shekel_pass"
+
+# The least-privilege runtime role, created in the bake cluster before the
+# template exists (:func:`build`), as ``entrypoint.sh`` creates it at step 2b
+# (``scripts/init_db_role.sql``) before step 3 migrates.  Created first, the
+# migration replay and the template's re-applied grants take their
+# role-present branch as a deploy's do, so the template ships the audit log's
+# grants to it.  Each test grants it anything more only inside its own clone,
+# which goes with that clone.  ``WITH LOGIN PASSWORD`` is ``init_db_role.sql``'s
+# form; no test signs in with it, as each reaches the role by ``SET ROLE``.
+_APP_ROLE = "shekel_app"
+_CREATE_APP_ROLE_SQL = (
+    f"CREATE ROLE {_APP_ROLE} WITH LOGIN PASSWORD 'test-shekel-app-password'"
+)
 # How much of the template builder's own log a failure report quotes: enough to
 # show the last migration revision it ran and whatever it logged after that.
 _FAILED_BUILD_LOG_LINES = 40
@@ -532,6 +560,11 @@ def _verify_image(tag: str) -> None:
     simply absent and nothing else would notice until a suite run failed
     confusingly.
 
+    The template takes no connections, so every question about its contents
+    is asked of a copy (:data:`_VERIFY_COPY_DATABASE`), made as each test's
+    database is made.  The copy goes with the container, which the
+    ``finally`` removes with its volume, so nothing drops it.
+
     Args:
         tag: Image reference to verify.
 
@@ -564,9 +597,9 @@ def _verify_image(tag: str) -> None:
         _wait_ready(container)
 
         def ask(database: str, sql: str) -> str:
-            """Return one scalar from the committed image.
+            """Return one scalar from the committed image, or run one statement.
 
-            Re-raises a failed query as :class:`BuildError`.  ``_run`` cannot
+            Re-raises a failed statement as :class:`BuildError`.  ``_run`` cannot
             draw this line: it sees an exit status, and `docker exec` exits
             non-zero both when the DAEMON is unreachable (a fault) and when
             psql rejects the SQL because a relation is missing (a verdict --
@@ -575,10 +608,11 @@ def _verify_image(tag: str) -> None:
 
             Args:
                 database: Database to query inside the committed image.
-                sql: Statement returning exactly one scalar.
+                sql: A query returning exactly one scalar, or a statement
+                    returning none.
 
             Returns:
-                The scalar, stripped.
+                The scalar, stripped; for a statement, psql's command tag.
 
             Raises:
                 BuildError: When the query fails, which means the image does
@@ -611,6 +645,13 @@ def _verify_image(tag: str) -> None:
                 "the declared VOLUME and that the cluster was shut down "
                 "cleanly before committing."
             )
+        # A clone of the template, as each test's database is; ``ask`` reports
+        # a refused copy as a verdict on the image.
+        ask(
+            "postgres",
+            f"CREATE DATABASE {_VERIFY_COPY_DATABASE} "
+            f"TEMPLATE {_TEMPLATE_DATABASE}",
+        )
 
         # EXISTENCE IS NOT ENOUGH, and an earlier draft of this function
         # stopped there while the module docstring claimed it "re-runs the
@@ -625,14 +666,14 @@ def _verify_image(tag: str) -> None:
         # raw `relation "alembic_version" does not exist`, which is true but
         # tells the reader nothing about what to do; measured on a
         # deliberately empty probe image.
-        if ask(_TEMPLATE_DATABASE, "SELECT to_regclass('alembic_version')") == "":
+        if ask(_VERIFY_COPY_DATABASE, "SELECT to_regclass('alembic_version')") == "":
             raise BuildError(
                 f"{tag} has a template database with no alembic_version "
                 "table, so it was never migrated. The template is empty -- "
                 "check that build_test_template.py actually ran, and rebuild "
                 "with --force."
             )
-        stamped = ask(_TEMPLATE_DATABASE, "SELECT version_num FROM alembic_version")
+        stamped = ask(_VERIFY_COPY_DATABASE, "SELECT version_num FROM alembic_version")
         if stamped != head:
             raise BuildError(
                 f"{tag} is stamped {stamped!r} but the migration chain's head "
@@ -649,14 +690,14 @@ def _verify_image(tag: str) -> None:
         # for each of them, and the list itself has one home too
         # (:func:`template_checks`), which a first boot is graded by as well.
         for label, sql, expected in template_checks():
-            answer = ask(_TEMPLATE_DATABASE, sql)
+            answer = ask(_VERIFY_COPY_DATABASE, sql)
             if answer != str(expected):
                 raise BuildError(
                     f"{tag} failed verification ({label}): got {answer!r}, "
                     f"expected {expected}. The image does not match this "
                     "tree -- rebuild with --force."
                 )
-        log_rows = ask(_TEMPLATE_DATABASE, "SELECT count(*) FROM system.audit_log")
+        log_rows = ask(_VERIFY_COPY_DATABASE, "SELECT count(*) FROM system.audit_log")
         if log_rows != "0":
             raise BuildError(
                 f"{tag} ships {log_rows} audit_log rows; the template must "
@@ -718,6 +759,15 @@ def build(tag: str) -> None:
                 f"different port.  docker said: {exc}"
             ) from exc
         _wait_ready(container)
+        # The role before the template: see :data:`_APP_ROLE`.  Through
+        # `docker exec`, as every question `_verify_image` asks goes.
+        _run(
+            [
+                "docker", "exec", container, "psql", "-U", _BUILD_USER,
+                "-d", "postgres", "-v", "ON_ERROR_STOP=1",
+                "-c", _CREATE_APP_ROLE_SQL,
+            ]
+        )
         # Asked back from docker rather than reused from ``host_port``: the
         # point is to confirm the publish actually happened, and a value this
         # process already holds cannot confirm anything.
@@ -756,7 +806,7 @@ def build(tag: str) -> None:
         # build that somehow produced nothing would still exit 0 if its
         # assertions were skipped, and this is the cheapest place to notice.
         for line in builder.stdout.splitlines():
-            if line.startswith(("  Step 3/3", "DONE:")):
+            if line.startswith(("  Step 3/4", "  Step 4/4", "DONE:")):
                 print(f"  builder: {line.strip()}")
         print("  template built; shutting the cluster down cleanly")
         # See point 2 in the module docstring: `docker stop` alone is a race.

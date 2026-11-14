@@ -54,7 +54,6 @@ def _seed_line(seed_user, kind_name, name="Phone Allowance", amount="45.00") -> 
     return line.id
 
 
-@pytest.mark.xdist_group("recurrence_rules_ddl")
 class TestTheKindsAndTheirRoundTrip:
     """Head carries this revision's kinds; down removes its two; up restores them; the enum matches."""
 

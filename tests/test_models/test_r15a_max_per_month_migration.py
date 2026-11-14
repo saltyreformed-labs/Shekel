@@ -80,7 +80,6 @@ def _ceilinged_rule(db, seed_user):
 
 
 @pytest.mark.usefixtures("seed_periods")
-@pytest.mark.xdist_group("recurrence_rules_ddl")
 class TestTheRoundTrip:
     """Down then up restores exactly the column and the CHECK, on an empty ceiling set."""
 
@@ -121,7 +120,6 @@ class TestTheRoundTrip:
 
 
 @pytest.mark.usefixtures("seed_periods")
-@pytest.mark.xdist_group("recurrence_rules_ddl")
 class TestTheDowngradeRefusesWhileACeilingExists:
     """A rollback that silently widened a cadence would move money; it refuses instead."""
 

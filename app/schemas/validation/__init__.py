@@ -145,6 +145,7 @@ from app.schemas.validation.pay_stubs import (
     PayStubOneOffSchema,
     PayStubPaydaySchema,
     PayStubSchema,
+    PayStubUseAsPaySchema,
 )
 from app.schemas.validation.retirement import (
     PensionProfileCreateSchema,
@@ -219,6 +220,7 @@ __all__ = [
     "PayStubOneOffSchema",
     "PayStubPaydaySchema",
     "PayStubSchema",
+    "PayStubUseAsPaySchema",
     "EntryCreateSchema",
     "EntryUpdateSchema",
     "EscrowComponentSchema",

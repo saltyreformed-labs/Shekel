@@ -140,7 +140,6 @@ def _list_exists(db) -> bool:
     )).scalar_one()
 
 
-@pytest.mark.xdist_group("loan_params_ddl")
 class TestTheMigration:
     """``08fda2e0b18b`` over this test's own clone, in both directions."""
 

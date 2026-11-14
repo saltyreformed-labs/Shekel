@@ -44,7 +44,7 @@ plan#4010), so every copy of its old cookie dies with the rest.  Nothing on
 the account and nothing else in the cookie can keep a session alive past its
 record.
 
-**A session ends** :data:`~app.models.known_device.KNOWN_LIFETIME` **after
+**A session ends** :data:`~app.utils.sign_in_lifetimes.KNOWN_LIFETIME` **after
 its sign-in, however active** (ruling plan#3069), read from the row's
 ``signed_in_at``, which nothing after the sign-in moves: the act that keeps
 the pressing browser replaces its record's token and not its instant.  The
@@ -213,7 +213,7 @@ def sign_in_is_live(user_id: int) -> bool:
     one rule for whether a session is signed in (rulings plan#3925,
     plan#3927): the server's record answers, never the cookie, so a session
     whose record a sign-out deleted is refused however good its cookie looks.
-    The record is live for :data:`~app.models.known_device.KNOWN_LIFETIME`
+    The record is live for :data:`~app.utils.sign_in_lifetimes.KNOWN_LIFETIME`
     after its sign-in, however active (ruling plan#3069), at the boundary the
     browser's record keeps: a sign-in thirty days old to the second is too old
     (``app.services.sign_in_service._live``).

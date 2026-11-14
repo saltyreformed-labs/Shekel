@@ -37,7 +37,6 @@ from marshmallow import ValidationError as MarshmallowValidationError
 
 from app.db_transaction import bind_sign_in_owner, write_transaction
 from app.extensions import db
-from app.models.known_device import TRUST_LIFETIME
 from app.models.user import MfaConfig, User
 from app.schemas.validation import (
     MfaConfirmSchema,
@@ -74,6 +73,7 @@ from app.utils.security_events import (
     SecurityEventKind,
     record_security_event,
 )
+from app.utils.sign_in_lifetimes import TRUST_LIFETIME
 
 logger = logging.getLogger(__name__)
 
@@ -105,7 +105,7 @@ def _render_verify_form():
     """Render the code form, from its three render sites.
 
     Passes the trust's length in days, so the "Trust this device" box states
-    :data:`~app.models.known_device.TRUST_LIFETIME` rather than a second
+    :data:`~app.utils.sign_in_lifetimes.TRUST_LIFETIME` rather than a second
     spelling of it.
 
     Returns:

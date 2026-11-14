@@ -4,8 +4,9 @@ Shekel Budget App -- Known Device Model (auth schema)
 One browser a user has finished a sign-in on (plan#2772, ruling plan#2994).
 The row holds two separate standings, and neither ever signs anyone in:
 
-**Known**: the user finished a sign-in here within :data:`KNOWN_LIFETIME`.  A
-known browser is not stopped by the lock strangers' wrong guesses put on the
+**Known**: the user finished a sign-in here within
+:data:`~app.utils.sign_in_lifetimes.KNOWN_LIFETIME`.  A known browser is not
+stopped by the lock strangers' wrong guesses put on the
 account, at any door, and its own wrong passwords and codes count on
 :attr:`KnownDevice.failed_login_count` rather than on the account (OWASP's
 "Slow Down Online Guessing Attacks with Device Cookies").  It still needs the
@@ -18,7 +19,7 @@ the browser guesses wrong too many times in a row, which deletes the row
 **Trusted**: the user typed a two-factor code here and asked to be trusted
 (plan#2173, ruling plan#2406).  What trust skips is the code, and only that.
 A device is trusted while :attr:`KnownDevice.trusted_at` is less than
-:data:`TRUST_LIFETIME` ago AND not before its user's
+:data:`~app.utils.sign_in_lifetimes.TRUST_LIFETIME` ago AND not before its user's
 ``trusts_ended_at``, so the one act that writes that column
 (``app.services.sign_in_service.sign_out_everywhere``, ruling plan#3927) ends
 every trust with no write of its own, whichever door runs it: log out all
@@ -42,30 +43,11 @@ as useless as this table's copy without the token.
 Related service: app/services/known_device_service.py
 """
 
-from datetime import timedelta
-
 from app.extensions import db
 from app.models.mixins import BrowserTokenMixin
 from app.utils.bearer_tokens import TOKEN_HASH_CHECK
+from app.utils.sign_in_lifetimes import TRUST_LIFETIME
 
-
-#: How long a device stays trusted after the code was typed on it (ruling
-#: plan#2406).  The one statement of the length: the trust's bound
-#: (``app.services.known_device_service._trusted``),
-#: :attr:`KnownDevice.trust_expires_at` and every sentence that names it read
-#: this.
-TRUST_LIFETIME = timedelta(days=30)
-
-#: How long a browser stays known after its last finished sign-in: the same
-#: length as trust (ruling plan#2995), so it is stated once and named twice.
-#: A trust begins at a finished sign-in, which renews this too, so the
-#: browser's cookie, which lasts this long, can never die before a trust does.
-#: A session ends this long after its sign-in too, however active (ruling
-#: plan#3069, ``app.utils.session_helpers.sign_in_is_live``): the sign-in that
-#: starts it renews the record from the same instant, so a browser that is
-#: signed in is known, unless ten wrong guesses on its cookie, its own or a
-#: copy's, removed its record.
-KNOWN_LIFETIME = TRUST_LIFETIME
 
 #: The longest User-Agent a record keeps.  It is kept only to name the device
 #: on the Security page, and a browser chooses the header's length, so the
@@ -115,8 +97,10 @@ class KnownDevice(BrowserTokenMixin, db.Model):
     def trust_expires_at(self):
         """Return the moment this device stops being trusted by age.
 
-        :attr:`trusted_at` plus :data:`TRUST_LIFETIME`, in Python, for display,
-        and so asked only of a device holding a trust, as Settings' list is.
+        :attr:`trusted_at` plus
+        :data:`~app.utils.sign_in_lifetimes.TRUST_LIFETIME`, in Python, for
+        display, and so asked only of a device holding a trust, as Settings'
+        list is.
         A device is alive by age while this is strictly later than now, so at
         exactly thirty days it is dead; the service's bound says the same as
         ``trusted_at > now - TRUST_LIFETIME``, its exact inverse.

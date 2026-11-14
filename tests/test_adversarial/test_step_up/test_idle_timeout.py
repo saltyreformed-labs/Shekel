@@ -1,5 +1,6 @@
 """C-10's idle-timeout tests (F-006): load_user accepts a session active within the timeout and
-rejects one past it, and the before_request hook refreshes the activity stamp.
+rejects one past it, the before_request hook refreshes the activity stamp, and that timeout is
+the one idle rule, Flask's cookie age never cutting in first (ruling plan#3926).
 
 Each test signs the seed owner in through the shared sign-in, on a browser
 the owner trusts (``tests._seed_owner_fixtures.log_in_seed_user``): the owner
@@ -8,8 +9,45 @@ has two-factor (plan#3600), and the session, not the code, is under test.
 
 from datetime import datetime, timedelta, timezone
 
-from app.utils.session_helpers import SESSION_LAST_ACTIVITY_KEY
+import time_machine
+
+from app.utils.session_helpers import SESSION_LAST_ACTIVITY_KEY, SESSION_TOKEN_KEY
 from tests._seed_owner_fixtures import log_in_seed_user
+from tests._session_copies import is_signed_in
+
+#: Past the default 12-hour idle window, and past the 12 hours Flask's
+#: cookie age was until ruling plan#3926.
+_THIRTEEN_HOURS = timedelta(hours=13)
+
+#: An idle window longer than thirteen hours, in minutes.
+_A_DAY_IN_MINUTES = 24 * 60
+
+
+def _idle_for(browser, idle):
+    """Date *browser*'s session as its last request, *idle* ago, would have.
+
+    Both of what that request left: the activity stamp, and the cookie's
+    signature, which Flask dates.  The session is written with the clock
+    moved back, so Flask signs the cookie at that moment, as the activity
+    hook's write on that request did.  A stamp written now would leave a
+    freshly signed cookie, which no limit on the cookie's own age can refuse.
+
+    The session is read first, now: with the clock moved back, Flask cannot
+    open the cookie signed a moment ago, since itsdangerous refuses a
+    signature dated in its future, and opens an empty session instead.  So
+    every key is written back with the stamp.
+
+    Args:
+        browser: A signed-in test client.
+        idle: How long ago its last request was.
+    """
+    last_request = datetime.now(timezone.utc) - idle
+    with browser.session_transaction() as sess:
+        keys = dict(sess)
+    keys[SESSION_LAST_ACTIVITY_KEY] = last_request.isoformat()
+    with time_machine.travel(last_request, tick=False):
+        with browser.session_transaction() as sess:
+            sess.update(keys)
 
 
 # ---------------------------------------------------------------------------
@@ -154,6 +192,48 @@ class TestIdleTimeoutRejection:
                 "A clock-skew rejection here would log every active "
                 "user out after an NTP correction."
             )
+
+
+class TestTheOneIdleRule:
+    """``IDLE_TIMEOUT_MINUTES`` is the one idle rule (ruling plan#3926).
+
+    Flask refuses a session cookie signed longer ago than
+    ``PERMANENT_SESSION_LIFETIME``, permanent or not.  At 12 hours it was a
+    second idle rule: a longer window still ended at 12 hours.  The tests
+    above rewrite the stamp in a cookie signed a moment ago, so they could
+    not see it; these date the cookie too (:func:`_idle_for`).
+    """
+
+    def test_a_longer_idle_window_is_honoured(self, app, client, seed_user, monkeypatch):
+        """With a 24-hour window, a browser idle for 13 hours is still signed in."""
+        monkeypatch.setitem(app.config, "IDLE_TIMEOUT_MINUTES", _A_DAY_IN_MINUTES)
+        with app.app_context():
+            log_in_seed_user(client)
+            _idle_for(client, _THIRTEEN_HOURS)
+
+            assert is_signed_in(client)
+
+    def test_past_the_default_window_shekels_rule_refuses_it(self, app, client, seed_user):
+        """At the default 12 hours, a browser idle for 13 hours is refused by ``load_user``.
+
+        Flask opened the cookie, so the refusal is Shekel's: the session it
+        reads still holds the sign-in's token.  The read leaves the cookie as
+        it was (Flask re-signs a non-permanent session only when it is
+        modified), so the request after it sends the 13-hour-old one.
+        """
+        name = app.config["SESSION_COOKIE_NAME"]
+        with app.app_context():
+            log_in_seed_user(client)
+            _idle_for(client, _THIRTEEN_HOURS)
+            idle_cookie = client.get_cookie(name).value
+            with client.session_transaction() as sess:
+                opened = dict(sess)
+
+            assert SESSION_TOKEN_KEY in opened, (
+                "Flask refused the 13-hour-old cookie itself"
+            )
+            assert client.get_cookie(name).value == idle_cookie
+            assert not is_signed_in(client)
 
 
 class TestActivityRefreshHook:

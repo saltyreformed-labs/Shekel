@@ -22,7 +22,6 @@ from flask_login import current_user
 from marshmallow import ValidationError as MarshmallowValidationError
 
 from app.extensions import db
-from app.models.known_device import TRUST_LIFETIME
 from app.schemas.validation import ChangePasswordSchema, ReauthSchema
 from app.services import auth_service, known_device_service
 from app.exceptions import AuthError, ValidationError
@@ -52,6 +51,7 @@ from app.utils.security_events import (
     record_security_event,
 )
 from app.utils.session_helpers import end_every_other_sign_in, stamp_reauth_session
+from app.utils.sign_in_lifetimes import TRUST_LIFETIME
 
 logger = logging.getLogger(__name__)
 

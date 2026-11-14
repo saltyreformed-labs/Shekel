@@ -26,7 +26,7 @@ names read as one user's.
 **Its flags.**  HttpOnly, so no script reads it.  SameSite=Strict, so only
 this app's own pages send it, the sign-in form among them.  Path=/, and as
 long-lived as the browser stays known
-(:data:`~app.models.known_device.KNOWN_LIFETIME`), so it never outlives the
+(:data:`~app.utils.sign_in_lifetimes.KNOWN_LIFETIME`), so it never outlives the
 record or dies before it.  Wherever the session cookie is Secure
 (``SESSION_COOKIE_SECURE``, the one source), this one is Secure too and takes
 the ``__Host-`` prefix, which a browser honours only for a Secure, Path=/
@@ -36,8 +36,8 @@ cookie with no Domain: the cookie is then pinned to this exact origin.
 from flask import current_app, request
 from werkzeug.wrappers import Response
 
-from app.models.known_device import KNOWN_LIFETIME
 from app.utils.digit_strings import parse_row_id
+from app.utils.sign_in_lifetimes import KNOWN_LIFETIME
 
 #: The cookie's name before its user's id and any prefix.
 _NAME = "shekel_device"

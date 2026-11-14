@@ -14,8 +14,8 @@ already read, so no caller spells the token's hash; how a token is made and
 hashed is :mod:`app.utils.bearer_tokens`'s alone.
 
 **Each standing is stated once**: :func:`_known`, a finished sign-in less than
-:data:`~app.models.known_device.KNOWN_LIFETIME` ago, and :func:`_trusted`, a
-trust less than :data:`~app.models.known_device.TRUST_LIFETIME` old and not
+:data:`~app.utils.sign_in_lifetimes.KNOWN_LIFETIME` ago, and :func:`_trusted`, a
+trust less than :data:`~app.utils.sign_in_lifetimes.TRUST_LIFETIME` old and not
 before its user's ``trusts_ended_at``.  Ending a trust is that comparison
 and nothing else: the one sign-out-everywhere act
 (``app.services.sign_in_service.sign_out_everywhere``, ruling plan#3927), the
@@ -44,14 +44,10 @@ from sqlalchemy import ColumnElement, and_, delete, or_, select, tuple_
 
 from app.exceptions import NotFoundError
 from app.extensions import db
-from app.models.known_device import (
-    KNOWN_LIFETIME,
-    TRUST_LIFETIME,
-    USER_AGENT_MAX_LENGTH,
-    KnownDevice,
-)
+from app.models.known_device import USER_AGENT_MAX_LENGTH, KnownDevice
 from app.models.user import User
 from app.utils.bearer_tokens import new_token, token_hash
+from app.utils.sign_in_lifetimes import KNOWN_LIFETIME, TRUST_LIFETIME
 
 
 class BrowserStanding(NamedTuple):
@@ -70,7 +66,7 @@ def _known(now: datetime) -> ColumnElement[bool]:
     """Return the ONE statement of when a browser is known, as SQL.
 
     Its last finished sign-in is strictly after *now* less
-    :data:`~app.models.known_device.KNOWN_LIFETIME`, so a browser thirty days
+    :data:`~app.utils.sign_in_lifetimes.KNOWN_LIFETIME`, so a browser thirty days
     old to the second is a stranger.  The bound is computed here, in Python,
     for the reason :func:`_trusted` gives.  The negation is exact, because
     ``last_signed_in_at`` is NOT NULL.
@@ -88,7 +84,7 @@ def _trusted(now: datetime) -> ColumnElement[bool]:
     """Return the ONE statement of when a device is trusted, as SQL.
 
     Trusted while it was trusted strictly after *now* less
-    :data:`~app.models.known_device.TRUST_LIFETIME` (so a device thirty days
+    :data:`~app.utils.sign_in_lifetimes.TRUST_LIFETIME` (so a device thirty days
     old to the second is dead), AND its user's ``trusts_ended_at`` is
     NULL or not later than the device's ``trusted_at``.  The age bound is
     computed here, in Python, where subtracting a ``timedelta`` is exact;

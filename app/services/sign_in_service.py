@@ -19,7 +19,7 @@ trust of theirs.  So nothing in the cookie but the token decides whether a
 session is signed in, and nothing on the account does.
 
 **When a row is live is stated once**, in :func:`_live`: its sign-in is less
-than :data:`~app.models.known_device.KNOWN_LIFETIME` ago (ruling plan#3069), at
+than :data:`~app.utils.sign_in_lifetimes.KNOWN_LIFETIME` ago (ruling plan#3069), at
 the boundary the browser's record keeps
 (``app.services.known_device_service._known``), so a sign-in thirty days old to
 the second is dead.  The sign-in's instant is its caller's, handed to
@@ -38,17 +38,17 @@ from datetime import datetime
 from sqlalchemy import ColumnElement, and_, delete, exists, or_, select, update
 
 from app.extensions import db
-from app.models.known_device import KNOWN_LIFETIME
 from app.models.sign_in import SignIn
 from app.models.user import User
 from app.utils.bearer_tokens import new_token, token_hash
+from app.utils.sign_in_lifetimes import KNOWN_LIFETIME
 
 
 def _live(now: datetime) -> ColumnElement[bool]:
     """Return the ONE statement of when a sign-in is live, as SQL.
 
     Its sign-in is strictly after *now* less
-    :data:`~app.models.known_device.KNOWN_LIFETIME`, so one thirty days old
+    :data:`~app.utils.sign_in_lifetimes.KNOWN_LIFETIME`, so one thirty days old
     to the second is dead.  The bound is computed in Python, where subtracting
     a ``timedelta`` is exact, as ``known_device_service._known`` does.  The
     negation is exact, because ``signed_in_at`` is NOT NULL.

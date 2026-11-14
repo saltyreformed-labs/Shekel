@@ -10,10 +10,20 @@ from decimal import Decimal
 import pytest
 
 from app.enums import AcctTypeEnum
-from app.services import balance_at, liability_sign
+from app.services import balance_at, liability_sign, property_equity_chart
 from app.services.balance_at import BalanceContext
 from app.services.balance_at._resolution import resolved_loan
-from tests._test_helpers import create_loan_account
+from app.services.balance_at._secured_debt import _back_projection_by_month
+from app.services.installment_calendar import final_installment_date
+from tests._test_helpers import (
+    create_account_of_type,
+    create_loan_account,
+    create_settled_transfer,
+    freeze_today,
+    insert_tracking_start_event,
+    insert_trueup_event,
+    loan_params_for,
+)
 
 from ._helpers import (
     PAID_LOAN_LAST_CONFIRMED_REMAINING,
@@ -238,23 +248,12 @@ class TestThePreTrackingEstimateReadsTheRecordedStart:
     @pytest.fixture(autouse=True)
     def _frozen_today(self, monkeypatch):
         """Freeze today after the payment (the seed periods run through 2026-05)."""
-        # pylint: disable=import-outside-toplevel
-        from tests._test_helpers import freeze_today
         freeze_today(monkeypatch, date(2026, 3, 20))
 
     def test_an_off_day_first_payment_does_not_move_the_start(
         self, app, db, seed_user, seed_periods,
     ):
         """February stays estimated at $292,068.11 though the first row reads Feb 22."""
-        # pylint: disable=import-outside-toplevel
-        from app.services.balance_at._resolution import resolved_loan
-        from app.services.balance_at._secured_debt import _back_projection_by_month
-        from tests._test_helpers import (
-            create_loan_account,
-            create_settled_transfer,
-            insert_tracking_start_event,
-            loan_params_for,
-        )
         with app.app_context():
             loan = create_loan_account(
                 seed_user, db.session, name="Imported Mortgage",
@@ -273,25 +272,23 @@ class TestThePreTrackingEstimateReadsTheRecordedStart:
             )
             db.session.commit()
 
-            resolved = resolved_loan(
-                loan, BalanceContext.build(seed_user["user"].id, date(2026, 3, 20)),
-            )
+            ctx = BalanceContext.build(seed_user["user"].id, date(2026, 3, 20))
+            resolved = resolved_loan(loan, ctx)
             assert resolved.recorded_start == date(2026, 3, 1)
             assert resolved.state.schedule[0].payment_date == date(2026, 2, 22)
-            estimated = _back_projection_by_month(resolved)
+            estimated = _back_projection_by_month(
+                ctx.loan_walk(loan).stream, resolved.recorded_start,
+            )
             assert (estimated[(2026, 1)], estimated[(2026, 2)]) == (
                 Decimal("292404.74"), Decimal("292068.11"),
             )
             assert (2026, 3) not in estimated
 
+    @pytest.mark.usefixtures("seed_periods")
     def test_a_loan_tracked_from_origination_estimates_nothing(
-        self, app, db, seed_user, seed_periods,
-    ):  # pylint: disable=unused-argument
+        self, app, db, seed_user,
+    ):
         """No tracking start: the record starts at origination, so no month is estimated."""
-        # pylint: disable=import-outside-toplevel
-        from app.services.balance_at._resolution import resolved_loan
-        from app.services.balance_at._secured_debt import _back_projection_by_month
-        from tests._test_helpers import create_loan_account
         with app.app_context():
             loan = create_loan_account(
                 seed_user, db.session, name="In-app Mortgage",
@@ -300,11 +297,85 @@ class TestThePreTrackingEstimateReadsTheRecordedStart:
             )
             db.session.commit()
 
-            resolved = resolved_loan(
-                loan, BalanceContext.build(seed_user["user"].id, date(2026, 3, 20)),
-            )
+            ctx = BalanceContext.build(seed_user["user"].id, date(2026, 3, 20))
+            resolved = resolved_loan(loan, ctx)
             assert resolved.recorded_start == date(2026, 1, 22)
-            assert _back_projection_by_month(resolved) == {}
+            assert _back_projection_by_month(
+                ctx.loan_walk(loan).stream, resolved.recorded_start,
+            ) == {}
+
+    @pytest.mark.parametrize(
+        ("tracked_from", "tracked_at", "trued_up_on", "estimated_months"),
+        [
+            # Tracked after the term's last installment (Jan 15).
+            (date(2026, 2, 1), Decimal("1000.00"), None,
+             [(2025, 11), (2025, 12), (2026, 1)]),
+            # Tracked before Dec 15, then trued up after the term's last
+            # installment: the true-up is the latest statement.
+            (date(2025, 12, 1), Decimal("2500.00"), date(2026, 2, 1),
+             [(2025, 11)]),
+        ],
+        ids=["tracked-after-the-term", "trued-up-after-the-term"],
+    )
+    @pytest.mark.usefixtures("seed_periods")
+    def test_a_statement_past_the_term_with_no_payment_estimates_the_contract(
+        self, app, db, seed_user,
+        tracked_from, tracked_at, trued_up_on, estimated_months,
+    ):
+        """No payment and a latest statement past the term: the months before tracking are estimated.
+
+        Made-up figures: ``$3,000.00`` at 5% over three months from
+        2025-10-15, due the 15th, level payment ``$1,008.34``.  From
+        origination each installment charges the balance times 0.05 / 12,
+        rounded to the cent: Nov 15 ``12.50`` of interest and ``995.84`` of
+        principal leave ``$2,004.16``; Dec 15 ``8.35`` and ``999.99`` leave
+        ``$1,004.17``; Jan 15 closes it, ``4.18`` of interest, ``$0.00``.
+
+        Until plan step recurrence:R16-f the estimate returned nothing for a
+        loan whose resolved schedule was empty, and this loan's is: no
+        payment, and no installment left after its latest statement.  So
+        those months read the fold's untracked ``$3,000.00`` origination
+        principal, tiered ``confirmed``.
+        """
+        with app.app_context():
+            loan = create_loan_account(
+                seed_user, db.session, name="Matured Loan",
+                principal=Decimal("3000.00"), rate=Decimal("0.05000"),
+                term=3, origination_date=date(2025, 10, 15), payment_day=15,
+            )
+            house = create_account_of_type(
+                seed_user, db.session, AcctTypeEnum.PROPERTY.value, "House",
+                anchor_balance=Decimal("400000.00"),
+            )
+            db.session.flush()
+            loan.collateral_account_id = house.id
+            db.session.commit()
+            params = loan_params_for(db.session, loan.id)
+            insert_tracking_start_event(params, tracked_at, tracked_from)
+            if trued_up_on is not None:
+                insert_trueup_event(params, Decimal("1000.00"), trued_up_on)
+            db.session.commit()
+
+            ctx = BalanceContext.build(seed_user["user"].id)
+            # The state this pins (non-vacuity): no payment is recorded, and
+            # the latest statement is past the term's last installment.
+            assert ctx.loan_walk(loan).settled_splits == []
+            latest = trued_up_on or tracked_from
+            assert latest > final_installment_date(
+                date(2025, 10, 15), 15, 3,
+            ) == date(2026, 1, 15)
+
+            (series,) = balance_at.secured_loan_series(house, ctx)
+            contract = {
+                (2025, 11): Decimal("2004.16"),
+                (2025, 12): Decimal("1004.17"),
+                (2026, 1): Decimal("0.00"),
+            }
+            estimated = property_equity_chart.TIER_ESTIMATED
+            assert {
+                month: entry for month, entry in series.month_balances.items()
+                if entry[1] == estimated
+            } == {month: (contract[month], estimated) for month in estimated_months}
 
 
 class TestNoPaymentMovesTheRecordedStart:
@@ -355,15 +426,6 @@ class TestNoPaymentMovesTheRecordedStart:
         period_index, settled_on, due_date, settled_amount,
     ):
         """The record starts Mar 1 and Dec-Feb keep the contract's estimates."""
-        # pylint: disable=import-outside-toplevel
-        from app.services.balance_at._secured_debt import _back_projection_by_month
-        from tests._test_helpers import (
-            create_loan_account,
-            create_settled_transfer,
-            freeze_today,
-            insert_tracking_start_event,
-            loan_params_for,
-        )
         freeze_today(monkeypatch, date(2026, 3, 25))
         with app.app_context():
             loan = create_loan_account(
@@ -394,7 +456,9 @@ class TestNoPaymentMovesTheRecordedStart:
                 "precondition: the payment is recorded"
             )
             assert resolved.recorded_start == date(2026, 3, 1)
-            estimated = _back_projection_by_month(resolved)
+            estimated = _back_projection_by_month(
+                ctx.loan_walk(loan).stream, resolved.recorded_start,
+            )
             assert (
                 estimated[(2025, 12)], estimated[(2026, 1)], estimated[(2026, 2)],
             ) == (
@@ -404,13 +468,6 @@ class TestNoPaymentMovesTheRecordedStart:
     @staticmethod
     def _corrected_loan(db, seed_user, seed_periods):
         """Ruling R-R113's loan with its three payments, corrected by a TRUE-UP on Apr 1."""
-        # pylint: disable=import-outside-toplevel
-        from tests._test_helpers import (
-            create_loan_account,
-            create_settled_transfer,
-            insert_trueup_event,
-            loan_params_for,
-        )
         loan = create_loan_account(
             seed_user, db.session, name="Kept in the app",
             principal=Decimal("20000.00"), rate=Decimal("0.06000"), term=24,
@@ -437,16 +494,16 @@ class TestNoPaymentMovesTheRecordedStart:
         self, app, db, seed_user, seed_periods, monkeypatch,
     ):
         """The record starts at 2025-12-22; Jan-Mar read the ledger, April the correction."""
-        # pylint: disable=import-outside-toplevel
-        from app.services.balance_at._secured_debt import _back_projection_by_month
-        from tests._test_helpers import freeze_today
         freeze_today(monkeypatch, date(2026, 4, 20))
         with app.app_context():
             loan = self._corrected_loan(db, seed_user, seed_periods)
             bctx = BalanceContext.build(seed_user["user"].id)
 
-            assert resolved_loan(loan, bctx).recorded_start == date(2025, 12, 22)
-            assert _back_projection_by_month(resolved_loan(loan, bctx)) == {}
+            recorded_start = resolved_loan(loan, bctx).recorded_start
+            assert recorded_start == date(2025, 12, 22)
+            assert _back_projection_by_month(
+                bctx.loan_walk(loan).stream, recorded_start,
+            ) == {}
             assert [
                 liability_sign.owed(balance_at.balance_at(loan, bctx, day))
                 for day in (
@@ -467,9 +524,6 @@ class TestNoPaymentMovesTheRecordedStart:
         the months before Apr 1 would read the contract's estimate:
         ``$19,213.59`` / ``$18,423.25`` / ``$17,628.96``, tiered ``estimated``.
         """
-        # pylint: disable=import-outside-toplevel
-        from app.services import property_equity_chart
-        from tests._test_helpers import create_account_of_type, freeze_today
         freeze_today(monkeypatch, date(2026, 4, 20))
         with app.app_context():
             loan = self._corrected_loan(db, seed_user, seed_periods)

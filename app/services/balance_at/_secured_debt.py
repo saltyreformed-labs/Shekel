@@ -26,18 +26,25 @@ month.
 mid-life-imported loan has no payment record before its tracking-start assertion,
 so the fold holds the origination principal FLAT across those months (a balance
 does not move without a recorded event).  That flat plateau is not what the loan
-owed while it amortized unseen, so those months instead carry the CONTRACTUAL
-back-projection (:func:`._resolution.contractual_schedule_from_origination`,
-rendered as the visually-distinct ``estimated`` tier) -- a prediction that fills a
-gap in the record, never overwriting one.  The honest step where the estimate meets
-the recorded opening is kept, not smoothed.
+owed while it amortized unseen, so those months instead carry the CONTRACT from
+origination (:func:`._loan_stream.origination_contract_line`, rendered as the
+visually-distinct ``estimated`` tier) -- a prediction that fills a gap in the
+record, never overwriting one.  It is the one replay the loan's balance, plan and
+contract figures read, over the loan's opening alone, so the estimate and the
+months beside it are charged and allocated by one rule (plan step
+recurrence:R16-f, ruling **R-R53**); until that step it was a walk of its own
+(``amortization_engine.project_forward``).  The honest step where the estimate
+meets the recorded opening is kept, not smoothed.
 
-**The empty-schedule clip is gone (finding FU-8).**  The pre-C5 back-projection
-clip keyed on the schedule: an EMPTY schedule made ``tracking_start`` ``None`` and
-admitted the loan's ENTIRE contractual walk as ``estimated`` -- a 30-year mortgage's
-worth of phantom debt beside an equity hero reporting ``$0.00``.  Now an empty
-schedule draws NO back-projection, and the loan's real balance comes from the fold,
-which answers ``$0.00`` after payoff rather than a contractual walk nobody owes.
+**The estimate is clipped at the loan's RECORDED start, which every loan has
+(finding FU-8, ruling R-R111).**  The pre-C5 clip keyed on the schedule: an EMPTY
+schedule made ``tracking_start`` ``None`` and admitted the loan's ENTIRE
+contractual walk as ``estimated`` -- a 30-year mortgage's worth of phantom debt
+beside an equity hero reporting ``$0.00``.  The clip is a date that cannot be
+``None`` now (its tracking start, else its origination), so no state admits the
+whole contract, and the emptiness test that guarded the ``None`` went at plan
+step recurrence:R16-f.  The loan's real balance from that date on is the fold's,
+which answers ``$0.00`` after payoff rather than a contract nobody owes.
 
 **The series carries a tiered per-month debt MAP, and no scalar balance.**  It used
 to carry ``current_balance`` for one purpose: re-deriving an ``is_retired`` test
@@ -67,18 +74,15 @@ from datetime import date, timedelta
 from decimal import Decimal
 
 from app.models.account import Account
-from app.services.loan_loaders import load_rate_changes
+from app.services.loan_ledger import LoanEventStream
 from app.utils.dates import add_months, months_between
 
 from ._context import BalanceContext
 from ._loan_figures import LoanFigures, loan_figures
+from ._loan_stream import origination_contract_line
 from ._plan import memoized_plan
 from ._positions import positions, window_sample_date
-from ._resolution import (
-    ResolvedLoan,
-    contractual_schedule_from_origination,
-    resolved_loan,
-)
+from ._resolution import ResolvedLoan, resolved_loan
 
 # ``debt_tier`` values: the per-month confidence of the summed debt line, so the
 # renderer can style the pre-tracking contractual estimate apart from recorded
@@ -143,25 +147,25 @@ class SecuredLoanSeries:
 
 
 def _back_projection_by_month(
-    resolved: ResolvedLoan,
+    facts: LoanEventStream, recorded_start: date,
 ) -> dict[tuple[int, int], Decimal]:
     """Return the pre-tracking contractual balance per calendar month (ruling D2).
 
-    The ``estimated`` tier: a mid-life-imported loan's resolved schedule opens at
-    its tracking-start assertion, so across the origination-to-tracking-start
+    The ``estimated`` tier: a mid-life-imported loan's record starts at its
+    tracking-start assertion, so across the origination-to-tracking-start
     months the fold carries the origination principal forward, moved only by
     what the ledger holds dated there (a true-up, a ``$0.00`` close, or a
     payment whose money moved there: recorded after the tracking start with
     an earlier day, or already held when a tracking start was written before
     plan step recurrence:R16-c-2 made its doors refuse).
-    This supplies the honest contractual estimate for those months instead
-    -- the
-    :func:`~app.services.balance_at._resolution.contractual_schedule_from_origination`
-    balance (amortized from the origination terms on the SAME monthly grid the
-    resolved schedule uses), clipped to the months strictly before the tracking
-    start and keyed by calendar month.
+    This supplies the honest contractual estimate for those months instead:
+    the balance each installment leaves on the loan's contract from
+    origination (:func:`~._loan_stream.origination_contract_line`, every
+    installment paid as billed from the origination principal, the term's
+    last closing the loan), keyed by its installment's calendar month and
+    clipped to the installments due strictly before the record starts.
 
-    **The tracking start is the loan's RECORDED start** (ruling **R-R111**,
+    **The clip is the loan's RECORDED start** (ruling **R-R111**,
     :attr:`~app.services.balance_at._resolution.ResolvedLoan.recorded_start`):
     its ``tracking_start`` assertion's date, else its origination; no payment
     moves it (ruling **R-R114**).  It was the
@@ -173,31 +177,40 @@ def _back_projection_by_month(
     Feb 22, so February read the untracked origination principal as
     ``confirmed`` where it had read this estimate.
 
-    Empty ``{}`` in the two cases with no pre-tracking gap to estimate:
+    **Every loan has that date, so no emptiness test guards it** (plan step
+    recurrence:R16-f).  Until that step this returned ``{}`` for a loan
+    whose resolved schedule was empty, a guard against the pre-C5 clip's
+    ``None`` tracking start, which admitted the loan's whole contract
+    (finding FU-8); a date that cannot be ``None`` leaves nothing for it to
+    guard.  The one state it still changed was a loan imported mid-life
+    with no payment whose LATEST balance statement -- its tracking start, or
+    a true-up after it -- falls on or after its term's last installment, so
+    the schedule had no installment left to project: its months before the
+    tracking start read the fold's flat origination principal, and now read
+    the contract's estimate as ruling D2 says.  A retired loan's estimate
+    is computed and never drawn: the chart drops the loan
+    (:attr:`SecuredLoanSeries.is_retired`).
 
-    * an IN-APP loan, whose record starts at its origination, so no contractual
-      row falls strictly before it; and
-    * a loan with an EMPTY resolved schedule (a retired loan the producer drops, or
-      a degenerate zero-remaining-term one) -- drawing NO back-projection rather
-      than, as the pre-C5 clip did, admitting the loan's ENTIRE contractual walk
-      because ``tracking_start`` was ``None`` (finding FU-8, closed here).
+    Empty ``{}`` for an IN-APP loan, whose record starts at its origination:
+    every installment is due after it.
 
     Args:
-        resolved: The loan's :class:`~app.services.balance_at._resolution.ResolvedLoan`.
+        facts: The loan's recorded stream as the pass sees it
+            (:attr:`~app.services.loan_ledger.LoanLedgerWalk.stream` of the
+            pass's memoized walk); its opening assertion and its calendar are
+            all the contract from origination reads.
+        recorded_start: The day the loan's record starts
+            (:attr:`~app.services.balance_at._resolution.ResolvedLoan.recorded_start`).
 
     Returns:
         ``{(year, month): contractual balance}`` for the pre-tracking months, or
         ``{}`` when there is no pre-tracking gap.
     """
-    if not resolved.state.schedule:
-        return {}
-    tracking_start = resolved.recorded_start
     return {
-        (row.payment_date.year, row.payment_date.month): row.remaining_balance
-        for row in contractual_schedule_from_origination(
-            resolved.params, load_rate_changes(resolved.params.account_id),
-        )
-        if row.payment_date < tracking_start
+        (outcome.due_date.year, outcome.due_date.month):
+            outcome.split.balance_after
+        for outcome in origination_contract_line(facts).projected_splits
+        if outcome.due_date < recorded_start
     }
 
 
@@ -342,7 +355,9 @@ def _loan_month_balances(
         for month_first in month_firsts
     }
     valued = positions(loan, ctx, list(sample_on.values()))
-    estimated = _back_projection_by_month(resolved)
+    estimated = _back_projection_by_month(
+        ctx.loan_walk(loan).stream, resolved.recorded_start,
+    )
 
     result: dict[tuple[int, int], tuple[Decimal, str]] = {}
     for month_first in month_firsts:

@@ -118,9 +118,12 @@ def resolve_loan(
     to PAY is the balance seam's plan fold, and no reader takes a balance
     off this schedule.  Nor a date since plan step recurrence:R16-c-2: the
     net-worth trend's gate and the property chart's tracking start read the
-    loan's recorded start instead (rulings **R-R111**, **R-R112**), and the
-    one app reader left, the property chart's pre-tracking estimate, asks
-    only whether it is empty (a retired loan).  The loan's BALANCE is not here
+    loan's recorded start instead (rulings **R-R111**, **R-R112**).  No app
+    code reads it at all since plan step recurrence:R16-f: its last reader,
+    the property chart's pre-tracking estimate, asked only whether it was
+    empty, and reads the contract from origination off the one replay
+    (:func:`app.services.balance_at._loan_stream.origination_contract_line`).
+    The loan's BALANCE is not here
     (plan step D2a): the ``balance_at`` seam folds it from the loan's recorded
     events (see the :class:`LoanState` docstring).
 

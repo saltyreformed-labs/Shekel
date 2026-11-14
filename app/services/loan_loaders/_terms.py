@@ -361,8 +361,8 @@ def synthesize_origination_anchor(params: LoanParams) -> LoanAnchorFact:
     consequence of the data, and every ``is_opening`` reader in ``app/`` already
     scans for the flag.  This function
     stays the loan's ONE definition of the origination anchor, reused there and by
-    the callers that need JUST it -- the contractual back-projection that fills a
-    tracking-start loan's pre-tracking months
+    the callers that need JUST it -- the from-origination contractual schedule
+    the forward plan reads
     (:func:`app.services.balance_at._resolution.contractual_schedule_from_origination`)
     seeds from origination alone, without the loan's true-up assertions.
 

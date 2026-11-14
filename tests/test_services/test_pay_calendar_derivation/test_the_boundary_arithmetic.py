@@ -10,6 +10,7 @@ import pytest
 
 from app.enums import BusinessDayShiftEnum
 from app.services.pay_calendar import (
+    MAX_CADENCE_DAYS,
     DerivedPeriod,
     PayCalendarError,
     PeriodWindow,
@@ -460,8 +461,12 @@ class TestOneNeighbourEitherSideIsEnough:
         *A first form of this swept a LOCAL re-implementation of the estimate
         and the true index, so it graded the theorem and not the code, while
         its docstring claimed "every cadence from the floor up" over eight
-        sampled ones.  An adversarial review of ``C14-c`` caught both.*  It now
-        calls :func:`~app.services.pay_calendar._projection.project_period_after`
+        sampled ones.  An adversarial review of ``C14-c`` caught both.*  *Its
+        fix widened the sample to every cadence from the floor to 45 and five
+        above it, and kept the claim; plan#3878 made the sweep the claim, its
+        ceiling READ from* :data:`~app.services.pay_calendar.MAX_CADENCE_DAYS`
+        *as the floor is.*  It now calls
+        :func:`~app.services.pay_calendar._projection.project_period_after`
         under the producer ``C14-e`` will ship, and asserts three things of the
         answer: it COVERS the day, its span is the two projected paydays either
         side, and the neighbour arms were actually exercised in both
@@ -469,7 +474,7 @@ class TestOneNeighbourEitherSideIsEnough:
         a probe offering no neighbours at all.
         """
         floor = shortest_collision_free_cadence()
-        cadences = (*range(floor, 46), 60, 90, 180, 364, 365)
+        cadences = range(floor, MAX_CADENCE_DAYS + 1)
         seen_low = seen_high = 0
 
         for shift in (BusinessDayShiftEnum.PRIOR, BusinessDayShiftEnum.NEXT):

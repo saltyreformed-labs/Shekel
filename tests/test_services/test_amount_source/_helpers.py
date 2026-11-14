@@ -16,6 +16,7 @@ from app.services.cash_ledger import derived_amount_basis, resolve_transaction_a
 from tests._test_helpers import (
     add_escrow_line,
     create_loan_account,
+    create_savings_account,
     current_pay_period,
     generate_row_of,
     generate_transfer_of,
@@ -226,21 +227,26 @@ def _legs_of(xfer):
     ]
 
 
-def _priced_transfer_template(
-    seed_user, to_account, *, cadence=EVERY_PERIOD, fires_on_day=None,
-):
-    """A transfer template, checking to *to_account*, whose series states two prices.
+def _priced_transfer_template(seed_user, *, cadence=EVERY_PERIOD, fires_on_day=None):
+    """A transfer template, checking to its own savings, whose series states two prices.
 
-    The transfer twin of :func:`_priced_template`.  The price is stated
-    through ``template_amount_service.set_amount``, the one write door, at
-    the two dates the module's constants name.  Every-paycheck by default;
-    the one case whose subject is the transfer's OWN date against its
-    period's start states a MONTHLY *cadence* and the day.
+    The transfer twin of :func:`_priced_template`.  It builds its destination,
+    a ``Money Market`` savings account at ``$5,000.00``, because no case
+    varies it: each built that same account by hand and passed it in until
+    plan#4145, and a case that names it reads the template's
+    ``to_account_id``.  The price is stated through
+    ``template_amount_service.set_amount``, the one write door, at the two
+    dates the module's constants name.  Every-paycheck by default; the one
+    case whose subject is the transfer's OWN date against its period's start
+    states a MONTHLY *cadence* and the day.
     """
+    savings = create_savings_account(
+        seed_user, db.session, "Money Market", Decimal("5000.00"),
+    )
     template = TransferTemplate(
         user_id=seed_user["user"].id,
         from_account_id=seed_user["account"].id,
-        to_account_id=to_account.id,
+        to_account_id=savings.id,
         name="Money Market Contribution",
     )
     db.session.add(template)

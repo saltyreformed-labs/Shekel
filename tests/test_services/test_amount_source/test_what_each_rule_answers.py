@@ -231,10 +231,7 @@ class TestWhatEachRuleAnswers:
         is its LEG, priced by ``amounts_by_key``; the shadow's empty column
         went with the shadow, and the parent's empty column stands.
         """
-        savings = create_savings_account(
-            seed_user, db.session, "Money Market", Decimal("5000.00"),
-        )
-        template = _priced_transfer_template(seed_user, savings)
+        template = _priced_transfer_template(seed_user)
         xfer = _template_transfer(seed_periods[_PAYCHECK_UNDER_OLD_PRICE], template)
         expense_leg, _income_leg = _legs_of(xfer)
         assert xfer.amount is None
@@ -259,14 +256,11 @@ class TestWhatEachRuleAnswers:
         that transfer each, so they cannot answer two figures: what is
         asserted is that BOTH sides are priced, each at the parent's rule.
         """
-        savings = create_savings_account(
-            seed_user, db.session, "Money Market", Decimal("5000.00"),
-        )
-        template = _priced_transfer_template(seed_user, savings)
+        template = _priced_transfer_template(seed_user)
         xfer = _template_transfer(seed_periods[_PAYCHECK_UNDER_OLD_PRICE], template)
         assert amounts_by_key(_legs_of(xfer), _basis_for(seed_user)) == {
             (xfer.id, seed_user["account"].id): _OLD_PRICE,
-            (xfer.id, savings.id): _OLD_PRICE,
+            (xfer.id, template.to_account_id): _OLD_PRICE,
         }
 
     def test_a_leg_of_an_adhoc_transfer_answers_the_parents_own_figure(
@@ -318,10 +312,7 @@ class TestTheTransferRule:
         self, app, db, seed_user, seed_periods,
     ):
         """There is no stored column to bypass: the series is asked on the due date."""
-        savings = create_savings_account(
-            seed_user, db.session, "Money Market", Decimal("5000.00"),
-        )
-        template = _priced_transfer_template(seed_user, savings)
+        template = _priced_transfer_template(seed_user)
         xfer = _template_transfer(seed_periods[_PAYCHECK_UNDER_OLD_PRICE], template)
         assert xfer.amount is None
         assert resolve_transfer_amount(xfer, _basis_for(seed_user)) == _OLD_PRICE
@@ -345,12 +336,7 @@ class TestTheTransferRule:
         the same day; the adversarial review of plan step balance:X-ch caught
         the conversion disarming it exactly that way.
         """
-        savings = create_savings_account(
-            seed_user, db.session, "Money Market", Decimal("5000.00"),
-        )
-        template = _priced_transfer_template(
-            seed_user, savings, cadence=MONTHLY, fires_on_day=1,
-        )
+        template = _priced_transfer_template(seed_user, cadence=MONTHLY, fires_on_day=1)
         xfer = _template_transfer(
             seed_periods[_PAYCHECK_STRADDLING_THE_PRICE_FALL], template,
         )
@@ -368,10 +354,7 @@ class TestTheTransferRule:
         definition still states ``$178.00`` on this due date, and the transfer
         answers its own ``$111.11``.
         """
-        savings = create_savings_account(
-            seed_user, db.session, "Money Market", Decimal("5000.00"),
-        )
-        template = _priced_transfer_template(seed_user, savings)
+        template = _priced_transfer_template(seed_user)
         xfer = _template_transfer(
             seed_periods[_PAYCHECK_UNDER_OLD_PRICE], template, owns=True,
         )
@@ -394,10 +377,7 @@ class TestTheTransferRule:
         transfer never enters the settled band, so no freeze writes it a figure,
         and a status-driven OWN arm would refuse the empty column that is left.
         """
-        savings = create_savings_account(
-            seed_user, db.session, "Money Market", Decimal("5000.00"),
-        )
-        template = _priced_transfer_template(seed_user, savings)
+        template = _priced_transfer_template(seed_user)
         xfer = _template_transfer(seed_periods[_PAYCHECK_UNDER_OLD_PRICE], template)
         xfer.status_id = ref_cache.status_id(status)
         db.session.flush()
@@ -556,10 +536,7 @@ class TestTheDefinitionPriceIsTheRowsOwnRule:
         self, app, db, seed_user, seed_periods,
     ):
         """Rule 3: the definition's series as of the row's due date, $178.00."""
-        savings = create_savings_account(
-            seed_user, db.session, "Money Market", Decimal("5000.00"),
-        )
-        template = _priced_transfer_template(seed_user, savings)
+        template = _priced_transfer_template(seed_user)
         xfer = _template_transfer(seed_periods[_PAYCHECK_UNDER_OLD_PRICE], template)
         basis = _basis_for(seed_user)
         row = _row_of(xfer)

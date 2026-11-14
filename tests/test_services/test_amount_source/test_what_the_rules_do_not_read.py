@@ -17,7 +17,7 @@ from app.services.cash_ledger import (
     resolve_transaction_amount,
     resolve_transfer_amount,
 )
-from tests._test_helpers import write_past_the_amount_seam, add_txn, create_savings_account
+from tests._test_helpers import write_past_the_amount_seam, add_txn
 from app.services.transfer_legs import parent_of
 
 from ._helpers import (
@@ -109,10 +109,7 @@ class TestTheRulesDoNotReadTheColumnTheyReplace:
         re-price to ``$199.00`` stand, and the shadow's own rival
         ``$4,242.42`` went with the shadow, which has no column to hold it.
         """
-        savings = create_savings_account(
-            seed_user, db.session, "Money Market", Decimal("5000.00"),
-        )
-        template = _priced_transfer_template(seed_user, savings)
+        template = _priced_transfer_template(seed_user)
         xfer = _template_transfer(seed_periods[_PAYCHECK_UNDER_OLD_PRICE], template)
         expense_leg, _income_leg = _legs_of(xfer)
         basis = _basis_for(seed_user)

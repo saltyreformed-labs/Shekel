@@ -2,6 +2,7 @@
 {% from "_form_macros.html" import form_card %}
 {% from "_amount_macros.html" import amount_field, amount_history with context %}
 {% from "_recurrence_fields.html" import recurrence_cadence_controls, recurrence_end_bound, recurrence_preview, recurrence_starts_on, start_period_field with context %}
+{% from "_recurrence_macros.html" import recurrence_cell %}
 {% from "_nav_macros.html" import back_link %}
 {% block title %}{{ 'Edit' if template else 'New' }} Transfer -- Shekel{% endblock title %}
 
@@ -61,23 +62,47 @@
              schema and an absent key means "not moving", so the form still
              submits, and the door (_loan_destination.settle_destination_for_update)
              still refuses a crafted move -- disabling is the affordance, the
-             refusal is the rule. #}
+             refusal is the rule.
+
+             A card's worked-out payment is pinned the same way, with the
+             update door's own sentence (task plan#4046,
+             transfers._helpers.CardPaymentLock; the refusal is
+             _first_template_fk_refusal's).  Never both: a card payment pays a
+             card, and a loan's pinned definitions pay a loan. #}
+          {% set pinned_reason = card_payment_lock.destination_reason if card_payment_lock is not none else loan_locks.pinned_reason %}
           <select id="to_account_id" name="to_account_id" class="form-select" required
-                  {% if loan_locks.pinned_reason is not none %}disabled aria-describedby="to-account-help"{% endif %}>
+                  {% if pinned_reason is not none %}disabled aria-describedby="to-account-help"{% endif %}>
             {# data-has-due-dates: this destination has statement due dates to
                repeat on (plan step credit_card:CC-6), so recurrence_form.js
                offers that unit while it is chosen.  The route's set, from the
-               predicate the doors refuse with; the script decides nothing. #}
+               predicate the doors refuse with; the script decides nothing.
+               data-has-a-payment: this destination is a card with a payment of
+               its own (task plan#4046), so recurrence_form.js shows the
+               extra-payment sentence below while it is chosen; the route's set
+               (card_payoff.card_ids_with_a_payment). #}
             {% for acct in accounts %}
             <option value="{{ acct.id }}"
               {{ 'data-has-due-dates' if acct.id in due_date_cards else '' }}
+              {{ 'data-has-a-payment' if acct.id in card_ids_with_a_payment else '' }}
               {{ 'selected' if (template and template.to_account_id == acct.id) or (not template and prefill_to == acct.id) else '' }}>
               {{ acct.name }} ({{ acct.account_type.name if acct.account_type else '' }})
             </option>
             {% endfor %}
           </select>
-          {% if loan_locks.pinned_reason is not none %}
-          <div id="to-account-help" class="form-text">{{ loan_locks.pinned_reason }}</div>
+          {% if pinned_reason is not none %}
+          <div id="to-account-help" class="form-text">{{ pinned_reason }}</div>
+          {% endif %}
+          {# A transfer into a card with a payment of its own is an extra
+             payment, which that payment works out what is left after (ruling
+             R-CC22; task plan#4046).  Shown from the server for the
+             destination it renders selected, and by recurrence_form.js as the
+             choice changes.  Not on a card payment's own form, which is that
+             payment. #}
+          {% if card_payment_lock is none %}
+          <div id="to-account-extra-payment"
+               class="form-text {{ '' if (template.to_account_id if template else prefill_to) in card_ids_with_a_payment else 'd-none' }}">
+            A transfer into a card is an extra payment: the card's own payment works out what is left after it, so nothing is paid twice. If you scheduled a payment with the card company, set it on the card's page, under Payment, not here.
+          </div>
           {% endif %}
         </div>
       </div>
@@ -97,6 +122,19 @@
       {# --- Recurrence (accent emphasis section) --- #}
       <div class="form-section--accent">
         <h6 class="form-section__title">Recurrence</h6>
+        {# A card's worked-out payment repeats as its card's page sets it (task
+           plan#2679), so its form renders the repeat in the Recurring page's
+           words and where it is set, and NO control (task plan#4046): nothing
+           here posts, and the update door refuses any recurrence key it is
+           sent (transfers._helpers.card_payment_repeat_refusal).  With no
+           unit select on the page, recurrence_form.js links nothing. #}
+        {% if card_payment_lock is not none %}
+        <p class="mb-1" id="card-payment-repeat">{{ recurrence_cell(card_payment_lock.repeat) }}</p>
+        <div id="card-payment-repeat-help" class="form-text mb-2">
+          {{ card_payment_lock.repeat_reason }}
+          <a href="{{ url_for('accounts.cash_detail', account_id=card_payment_lock.card_id) }}#card-payment">Open {{ card_payment_lock.card_name }}'s page</a>
+        </div>
+        {% else %}
         {{ recurrence_cadence_controls(recurrence.picker, recurrence.selected_cadence) }}
         {# Shown by recurrence_form.js beside a unit the chosen destination cannot
            take; the save door refuses that pair and writes nothing. #}
@@ -176,6 +214,7 @@
            shows this only while "Does not repeat" is selected and DISABLES it
            otherwise -- a hidden control still submits. #}
         {% if not template %}{{ start_period_field(periods, current_period) }}{% endif %}
+        {% endif %}
       </div>
 
       <div class="d-flex gap-2 mt-4">

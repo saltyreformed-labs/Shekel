@@ -132,4 +132,49 @@ def rendered_form_choices(html, action):
     return reader.choices
 
 
-__all__ = ["FormControls", "rendered_form_choices", "rendered_form_controls"]
+class EnabledFormControls(FormControls):
+    """The shared form reader, leaving out a disabled control as a browser does.
+
+    A browser posts no disabled ``<input>`` or ``<select>``, and some edit
+    forms render them: a loan's standing payment's destination (ruling
+    **R-R76**) and the recurrence controls the loan locks, and a card's
+    worked-out payment's destination (task plan#4046).  :class:`FormControls`
+    fails on any disabled control rather than model one.  This models those
+    two shapes exactly: the control is not posted, and nor are a disabled
+    select's options.  A disabled ``<fieldset>`` or ``<optgroup>`` still
+    fails, since a browser's rule there has an exception (a fieldset's first
+    legend) these forms do not need.  Moved here from
+    ``tests/test_routes/test_template_amount_history/_helpers.py`` when a
+    second package came to read it (task plan#4046).
+    """
+
+    def handle_starttag(self, tag, attrs):
+        """Skip a disabled input or select in the form; read the rest as the shared one does."""
+        if self._inside and tag in ("input", "select") and "disabled" in dict(attrs):
+            return
+        super().handle_starttag(tag, attrs)
+
+
+def enabled_form_controls(html, action):
+    """What the form posting to *action* submits, read off *html*, disabled controls left out.
+
+    Args:
+        html: A rendered page.
+        action: The form's ``action``, as the page renders it.
+
+    Returns:
+        ``{name: [value, ...]}``, a repeated name's values in order.
+    """
+    reader = EnabledFormControls(action)
+    reader.feed(html)
+    assert reader.controls, f"no form posts to {action}"
+    return reader.controls
+
+
+__all__ = [
+    "EnabledFormControls",
+    "FormControls",
+    "enabled_form_controls",
+    "rendered_form_choices",
+    "rendered_form_controls",
+]

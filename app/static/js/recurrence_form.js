@@ -142,6 +142,10 @@ function initRecurrenceForm() {
   // The sentence beside a unit the chosen destination cannot take.  Absent on
   // the two forms that never offer such a unit.
   var unitNeedsACardNote = document.getElementById('unit-needs-a-card');
+  // The sentence beside a destination that is a card with a payment of its
+  // own: a transfer into it is an extra payment (task plan#4046).  Absent on
+  // the transaction form and on a card payment's own form.
+  var extraPaymentNote = document.getElementById('to-account-extra-payment');
   // The controls naming where the money COMES FROM -- the transaction form's
   // account, the transfer form's source -- read by name so the preview and
   // its change listeners list them once (plan step pay_calendar:C18-a).
@@ -265,12 +269,13 @@ function initRecurrenceForm() {
     });
   }
 
-  // Whether the destination the user has CHOSEN has statement due dates: a fact
-  // the server put on its <option>, from the predicate the doors refuse with.
-  function destinationHasDueDates() {
+  // Whether the destination the user has CHOSEN carries ``attribute``: a fact
+  // the server put on its <option> -- data-has-due-dates, from the predicate
+  // the doors refuse with, or data-has-a-payment, from the card's payment.
+  function chosenDestinationHas(attribute) {
     if (!destinationSelect) return false;
     var chosenDestination = destinationSelect.options[destinationSelect.selectedIndex];
-    return !!chosenDestination && chosenDestination.hasAttribute('data-has-due-dates');
+    return !!chosenDestination && chosenDestination.hasAttribute(attribute);
   }
 
   // Offer a unit that needs a card exactly while the chosen destination is one.
@@ -286,7 +291,7 @@ function initRecurrenceForm() {
   // and choosing another unit retires the option like any other.
   function syncUnitOffer() {
     var chosenId = unitId();
-    var hasDueDates = destinationHasDueDates();
+    var hasDueDates = chosenDestinationHas('data-has-due-dates');
     Array.prototype.forEach.call(unitSelect.options, function(opt) {
       if (!unitNeedsACard(opt.value)) return;
       var mine = hasDueDates || opt.value === chosenId;
@@ -298,6 +303,16 @@ function initRecurrenceForm() {
         'd-none', hasDueDates || !unitNeedsACard(chosenId)
       );
     }
+  }
+
+  // Say a transfer into a card with a payment of its own is an extra payment,
+  // exactly while one is chosen.  The sentence and the set of cards are the
+  // server's; this tests the chosen option and nothing else.
+  function syncExtraPaymentNote() {
+    if (!extraPaymentNote) return;
+    extraPaymentNote.classList.toggle(
+      'd-none', !chosenDestinationHas('data-has-a-payment')
+    );
   }
 
   // What the box said before a unit fixed it, handed back when that unit is left.
@@ -625,6 +640,7 @@ function initRecurrenceForm() {
   function toggleFields() {
     var id = unitId();
     syncUnitOffer();
+    syncExtraPaymentNote();
 
     // An EMPTY value is "Does not repeat", the only non-recurring option on
     // either form since plan step R2e-3 retired the ONCE pattern.

@@ -32,6 +32,7 @@ from app.models.transfer_template import TransferTemplate
 from app.models.account import Account
 from app.services import (
     account_service,
+    card_payoff,
     category_service,
     template_amount_service,
 )
@@ -89,6 +90,8 @@ from app.routes.transfers._instances import (
     propagate_to_non_repeating_transfers,
 )
 from app.routes.transfers._helpers import (
+    card_payment_lock,
+    card_payment_repeat_refusal,
     due_date_repeat_refusal,
     _create_schema,
     _first_template_fk_refusal,
@@ -201,6 +204,12 @@ def new_transfer_template():
         # each one's <option> carries for ``recurrence_form.js``, from the
         # predicate the doors refuse with (plan step credit_card:CC-6).
         due_date_cards=configured_card_ids(accounts),
+        # Which destinations are cards with a payment of their own, a transfer
+        # into which is an extra payment the form says so beside (task
+        # plan#4046); and no card payment's lock, which only its own edit form
+        # carries.
+        card_ids_with_a_payment=card_payoff.card_ids_with_a_payment(accounts),
+        card_payment_lock=None,
         periods=periods,
         current_period=current_period,
         prefill_from=prefill_from,
@@ -457,6 +466,13 @@ def edit_transfer_template(template_id):
         # may change at all (ruling **R-R76**: the disabled control's help).
         loan_locks=loan_destination_locks_for_edit(template, pass_ctx),
         due_date_cards=configured_card_ids(accounts),
+        card_ids_with_a_payment=card_payoff.card_ids_with_a_payment(accounts),
+        # A card's worked-out payment pays its card only and repeats as its
+        # card's page sets it (task plan#4046): the form shows its
+        # destination disabled and its repeat in words, with no control, and
+        # the two values above go unread for it.  ``None`` for every other
+        # definition.
+        card_payment_lock=card_payment_lock(template, pass_ctx),
         # A LOAN PAYMENT's stop is the loan's payoff, resolved through the
         # composed door: its control renders disabled and displays that.
         periods=[],
@@ -595,7 +611,13 @@ def update_transfer_template(template_id):
     edit_form = RedirectTarget(
         "transfers.edit_transfer_template", {"template_id": template_id},
     )
-    refused = _first_template_fk_refusal(template, data)
+    #
+    # Then a card's worked-out payment states no part of its repeat here: its
+    # card's page sets it, and its form renders no recurrence control (task
+    # plan#4046), so a key present is refused as its destination's move is.
+    refused = _first_template_fk_refusal(
+        template, data,
+    ) or card_payment_repeat_refusal(template, data, end_bound)
     if refused is not None:
         flash(refused, "danger")
         return edit_form.to_response()

@@ -32,9 +32,9 @@ from tests._test_helpers import (
 from tests.conftest import log_in_seed_user
 from tests.oracles.recurrence_baseline import EVERY_PERIOD
 from tests._definition_price import newest_price
+from tests._form_controls import enabled_form_controls
 
 from ._helpers import (
-    _enabled_form_controls,
     _template_with_history,
     _transfer_template,
 )
@@ -723,7 +723,7 @@ class TestTheBoxLeavesOutAStandingExtra:
 
             resp = auth_client.post(
                 f"/transfers/{tid}",
-                data=_enabled_form_controls(body, f"/transfers/{tid}"),
+                data=enabled_form_controls(body, f"/transfers/{tid}"),
             )
 
             assert resp.status_code == 302

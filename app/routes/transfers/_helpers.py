@@ -18,6 +18,7 @@ from app.models.account import Account
 from app.models.category import Category
 from app.models.transfer import Transfer
 from app.schemas.validation import (
+    RECURRENCE_FORM_KEYS,
     SAME_ACCOUNT_TRANSFER_MESSAGE,
     ShownLinesSchema,
     TransferTemplateCreateSchema,
@@ -31,8 +32,17 @@ from app.routes._render_helpers import (
     render_transaction_cell,
     render_transfer_cell,
 )
+from app.services.balance_at import BalanceContext
 from app.services.card_terms import is_configured_card
-from app.services.recurrence import follows_card_due_dates, modelled_unit
+from app.services.cash_ledger import is_card_payment_definition
+from app.services.recurrence import (
+    EndBound,
+    RecurrenceDescription,
+    follows_card_due_dates,
+    modelled_unit,
+)
+from app.services.recurring_definition import resolved_definition
+from app.services.recurring_view import described
 from app.services.transfer_legs import leg_of
 from app.utils.digit_strings import parse_row_id
 from app.utils.error_fragments import designed_error
@@ -56,6 +66,20 @@ CARD_PAYMENT_CANNOT_CHANGE_DESTINATION = (
     "'{payment}' works out what to pay from its card's balance, so it pays "
     "that card only, and is archived and deleted only with it. To pay "
     "another account, set up a new transfer."
+)
+
+#: Where a worked-out card payment's repeat is set (plan step credit_card:CC-6,
+#: task plan#4046): its card's page, whose one door switches the payment
+#: between payoff rows and a payment scheduled with the card company and
+#: writes its repeat (task plan#2679), so no part of the repeat is stated on
+#: the transfer form.  The edit form shows it beside the repeat in place of the
+#: controls, and the update door refuses a submission stating any part of it
+#: (:func:`card_payment_repeat_refusal`).  Formatted with the payment's name
+#: and its card's.
+CARD_PAYMENT_REPEAT_IS_SET_ON_ITS_CARD = (
+    "'{payment}' is {card}'s own payment, so when it is paid is set on "
+    "{card}'s page, under Payment: each payday, or on each statement's due "
+    "date as you scheduled it with the card company."
 )
 
 #: The refusal of a repeat on each statement's due date into anything but a
@@ -258,7 +282,7 @@ def _first_template_fk_refusal(template, data):
     source = data.get("from_account_id", template.from_account_id)
     destination = data.get("to_account_id", template.to_account_id)
     if (
-        template.card_payment_settings is not None
+        is_card_payment_definition(template)
         and destination != template.to_account_id
     ):
         return CARD_PAYMENT_CANNOT_CHANGE_DESTINATION.format(
@@ -268,6 +292,114 @@ def _first_template_fk_refusal(template, data):
         return SAME_ACCOUNT_TRANSFER_MESSAGE
     return due_date_repeat_refusal(
         _unit_the_edit_leaves(template, data), destination,
+    )
+
+
+def card_payment_repeat_refusal(
+    template, data, end_bound: EndBound | None,
+) -> str | None:
+    """Return the flash when an edit states any part of a card payment's repeat.
+
+    A card's worked-out payment repeats each payday or on each statement's due
+    date, as its card's page sets it (task plan#2679), so its edit form shows
+    the repeat and renders none of the recurrence controls (task plan#4046):
+    it posts no recurrence key.  One present is a crafted submission or a page
+    rendered before the controls went, and it is refused as the destination's
+    move is (:data:`CARD_PAYMENT_CANNOT_CHANGE_DESTINATION`), rather than read:
+    a re-pointed repeat would leave the payment on dates the card's page did
+    not choose, and the card's page reads the payment's kind off the repeat
+    (``card_payoff.current_choice``).  Presence alone, as the loan's standing
+    payment's locked bounds are read (``LOAN_PAYMENT_BOUND_IS_DERIVED``): a
+    form that may not state the repeat states nothing about it, so a key
+    echoing the stored repeat is the same crafted submission.
+
+    Args:
+        template: The stored :class:`TransferTemplate`, owner-checked by the
+            route.
+        data: The loaded TransferTemplateUpdateSchema output (partial update),
+            its closing bound already lifted out.
+        end_bound: The closing bound the submission composed, or ``None`` when
+            it stated none.
+
+    Returns:
+        :data:`CARD_PAYMENT_REPEAT_IS_SET_ON_ITS_CARD` for a card payment's
+        edit stating any recurrence key
+        (:data:`~app.schemas.validation.RECURRENCE_FORM_KEYS`), else ``None``.
+    """
+    if not is_card_payment_definition(template):
+        return None
+    if end_bound is None and RECURRENCE_FORM_KEYS.isdisjoint(data):
+        return None
+    return CARD_PAYMENT_REPEAT_IS_SET_ON_ITS_CARD.format(
+        payment=template.name, card=template.to_account.name,
+    )
+
+
+@dataclass(frozen=True)
+class CardPaymentLock:
+    """What the edit form of a card's worked-out payment shows in its controls' place.
+
+    The form's half of the two refusals the update door makes for such a
+    payment (task plan#4046): its destination may not move, and no part of
+    its repeat is stated here.  The destination control renders disabled with
+    the move's refusal as its help, as a loan's pinned payment does
+    (``_loan_destination.LoanDestinationLocks.pinned_reason``), and the
+    recurrence section renders the repeat as the Recurring page words it, with
+    where it is set, in place of every control.
+
+    Attributes:
+        card_id: The card, whose page the form links.
+        card_name: The card's name, for the link.
+        destination_reason: :data:`CARD_PAYMENT_CANNOT_CHANGE_DESTINATION` for
+            the payment, the disabled destination's help.
+        repeat: How the payment repeats, in the Recurring page's words
+            (:func:`~app.services.recurring_view.described`); ``None`` for a
+            payment with no repeat, which no door makes.
+        repeat_reason: :data:`CARD_PAYMENT_REPEAT_IS_SET_ON_ITS_CARD` for the
+            payment, beside its repeat.
+    """
+
+    card_id: int
+    card_name: str
+    destination_reason: str
+    repeat: RecurrenceDescription | None
+    repeat_reason: str
+
+
+def card_payment_lock(
+    template, ctx: BalanceContext,
+) -> CardPaymentLock | None:
+    """Return what *template*'s edit form shows in place of its locked controls.
+
+    Args:
+        template: The owner-checked :class:`TransferTemplate` being edited.
+        ctx: The form's read pass, which resolves the repeat as the Recurring
+            page's does.
+
+    Returns:
+        The :class:`CardPaymentLock` for a card's worked-out payment, else
+        ``None``: every other definition's form renders its controls.
+
+    Raises:
+        RecurrenceResolutionError: The payment repeats and its owner has no
+            pay periods (:func:`~app.services.recurring_view.described`), the
+            state the Recurring page refuses too.
+    """
+    if not is_card_payment_definition(template):
+        return None
+    card = template.to_account
+    return CardPaymentLock(
+        card_id=card.id,
+        card_name=card.name,
+        destination_reason=CARD_PAYMENT_CANNOT_CHANGE_DESTINATION.format(
+            payment=template.name,
+        ),
+        repeat=described(
+            template.recurrence_rule, resolved_definition(template, ctx),
+        ),
+        repeat_reason=CARD_PAYMENT_REPEAT_IS_SET_ON_ITS_CARD.format(
+            payment=template.name, card=card.name,
+        ),
     )
 
 

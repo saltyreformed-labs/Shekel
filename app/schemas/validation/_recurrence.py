@@ -960,3 +960,20 @@ class RecurrenceFormFieldsMixin(RecurrenceCadenceFieldsMixin):
         composed = compose_end_bound(data)
         require_end_bound_after_start(composed)
         return composed
+
+
+#: Every key a template form's recurrence controls post: the fields the two
+#: mixins above declare, read off the declarations so a control added to
+#: either is in it the moment it exists.  What a door asks when no part of a
+#: definition's repeat is the owner's to state, such as a card's worked-out
+#: payment, whose repeat the card's page sets (plan step credit_card:CC-6,
+#: task plan#4046): one of these present is a part of the repeat stated.
+#: ``recurrence_end_mode`` arrives as the composed bound once
+#: :meth:`RecurrenceFormFieldsMixin.build_end_bound` has run, which the update
+#: route lifts out of the payload as its own value.
+RECURRENCE_FORM_KEYS: frozenset[str] = frozenset(
+    name
+    for mixin in (RecurrenceCadenceFieldsMixin, RecurrenceFormFieldsMixin)
+    for name, declared in vars(mixin).items()
+    if isinstance(declared, fields.Field)
+)

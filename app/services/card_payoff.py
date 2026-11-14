@@ -218,6 +218,33 @@ def card_payment_on(card_id: int) -> CardPaymentSettings | None:
     )
 
 
+def card_ids_with_a_payment(accounts: list[Account]) -> frozenset[int]:
+    """Return the ids of *accounts* that are cards with a payment of their own.
+
+    What the transfer forms say beside a destination (task plan#4046): a
+    transfer into such a card is an extra payment, which the card's own
+    payment works out what is left after (ruling R-CC22).  Read off the
+    settings rows, the fact the sentence states, in one query; every active
+    card has one (task plan#2933), and an archived card's payment keeps its
+    row (:func:`card_payment_on`).
+
+    Args:
+        accounts: The accounts a form offers, the owner's.
+
+    Returns:
+        The ids of those a card payment names.
+    """
+    return frozenset(
+        card_id for (card_id,) in db.session.query(
+            CardPaymentSettings.card_account_id,
+        ).filter(
+            CardPaymentSettings.card_account_id.in_(
+                [account.id for account in accounts],
+            ),
+        )
+    )
+
+
 def plan_payoff(
     user_id: int,
     card_name: str,

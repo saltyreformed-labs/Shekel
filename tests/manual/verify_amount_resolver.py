@@ -127,8 +127,8 @@ every row is re-resolved and must equal its pass-1 answer
 (:func:`_assert_restored`) -- because a leak in the derived direction would hand
 the ``m7`` mutation below a free pass, ``own_column`` running first and writing
 exactly the figure a column-reading rule 3 would then answer.  And every scored
-row must be DECLARED a mover by some perturbation except a DERIVE-mode loan
-payment (:func:`_assert_every_row_is_reachable`), so a row graded in the holding
+row must be DECLARED a mover by some perturbation, with no exception
+(:func:`_assert_every_row_is_reachable`), so a row graded in the holding
 direction alone -- N-445's shape -- cannot hide.  ``db.session.dirty`` is
 deliberately not used: this project has measured that it cannot tell a rollback
 from a flush.
@@ -862,8 +862,7 @@ def main(out_path=None):
         print(
             f"\nOK: no row refused, and every one of the {len(records)} rows "
             "followed exactly the source its declaration names -- and no "
-            "other. Every row is reachable by some perturbation except the "
-            "DERIVE-mode loan payments, which the loan prices."
+            "other. Every row is reachable by some perturbation."
         )
         if graded_nothing:
             print(

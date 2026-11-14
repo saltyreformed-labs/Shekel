@@ -587,10 +587,16 @@ _FENCED_MODULE_RULINGS = {
             # contract-time running balance, the exposure ``replay_loan_events``'s
             # ruling above already owns; ``charge_date`` / ``due_date`` /
             # ``visible_on`` are dates; ``source`` is the caller's own record
-            # handed back; the other five are the cash decomposition.
+            # handed back; the other five are the cash decomposition, ``cash``
+            # summing its split's four parts for a payment that closes the
+            # loan (plan step recurrence:R16-f), whose figure the replay
+            # resolved: the cash one payment moved, never a balance.
+            # ``LoanCashEvent.closes`` (the same step) is a ``bool``, whether
+            # an event's cash is that closing figure, and cannot yield one.
             "balance_after",
             "cash",
             "charge_date",
+            "closes",
             "due_date",
             "escrow",
             "excess",

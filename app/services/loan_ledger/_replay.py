@@ -35,7 +35,10 @@ CHARGE   (a period began)  on or before the loan's first tracking start,
                            otherwise     -> standing += (accrue(balance, rate),
                                                          escrow, extra_per_period)
 PAYMENT  (cash arrived)    allocate cash + standing.extra against standing,
-                           advance the balance, and clear standing
+                           advance the balance, and clear standing; a
+                           CLOSING payment's cash is balance +
+                           standing.interest + standing.escrow, no extra,
+                           so the loan closes at 0.00
 RESET    (an assertion)    record the balance just before, overwrite it, and
                            clear standing (R-R72 part (2)) -- save the loan's
                            first balance when that balance is a tracking
@@ -133,6 +136,21 @@ order.  The hypothetical ``extra_per_period`` joins the cash at the charges on
 or after the boundary only -- "an extra $100 a month" is money the owner has
 not paid yet, so it never reprices a recorded month.
 
+**A CLOSING payment pays what closes the loan, resolved as it walks** (plan
+step recurrence:R16-f).  The contract's last installment is not its level
+payment: $3,000.00 at 5% over three months pays $1,008.34 twice and leaves
+$1,004.17, whose last month's interest is $4.18, so the third installment is
+$1,008.35, where a third $1,008.34 would leave $0.01 owing.  Which figure
+closes the loan depends on everything walked before it (an extra, a missed
+month, a true-up), so its cash is not a figure the caller can state: the
+event says it closes (:attr:`ClosingCash.WHAT_CLOSES_THE_LOAN`), and the
+replay pays the running balance and every charge standing, arrears included.
+The hypothetical ``extra_per_period`` does not join it, since nothing is left
+for it to pay; on a loan already at 0.00 it pays nothing.  The contractual
+projection's own walk stated this rule for itself
+(``amortization_engine._projection._apply_contractual_payment``'s
+``is_last_month``) until a later task of that step deletes the walk.
+
 Pure: plain data in, plain values out.  No I/O, no clock, no Flask.  All money is
 :class:`~decimal.Decimal`.
 """
@@ -141,6 +159,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field, replace
 from datetime import date, timedelta
 from decimal import Decimal
+from enum import Enum
 
 from app.services.rate_period_engine import RatePeriod, period_for_date
 from app.utils.money import (
@@ -201,6 +220,21 @@ _KIND_ORDER = {
 }
 
 
+class ClosingCash(Enum):
+    """The cash of a payment that CLOSES the loan, which the replay resolves.
+
+    A payment's cash is either a figure its caller states or this: whatever
+    closes the loan when the replay walks the payment -- the running balance
+    and every charge standing (:func:`replay_loan_events`).  One member,
+    because a closing payment has exactly one rule; it is a type rather than
+    a flag beside a figure so a closing event cannot ALSO state cash the
+    replay would then ignore, and rather than ``None`` so a figure that is
+    missing by mistake can never close a loan.
+    """
+
+    WHAT_CLOSES_THE_LOAN = "what closes the loan"
+
+
 @dataclass(frozen=True)
 class LoanCashEvent:
     """Cash arriving against a loan, at its due date in contract time.
@@ -217,9 +251,14 @@ class LoanCashEvent:
             charges; the charge a payment walked on this date clears is the
             installment whose interval the date falls in (ruling R-R89), which
             is this date itself only for a payment due on the contractual day.
-        cash: The cash this payment moved.  Never negative: the caller reads a
-            record's own figure, and the allocation surfaces an underpayment as
-            NEGATIVE principal rather than as negative cash (plan D5).
+        cash: The cash this payment moved, or
+            :attr:`ClosingCash.WHAT_CLOSES_THE_LOAN` for a payment that closes
+            the loan (the contract's last installment), whose figure the
+            replay resolves as it walks.  A stated figure is never negative:
+            the caller reads a record's own figure, and the allocation
+            surfaces an underpayment as NEGATIVE principal rather than as
+            negative cash (plan D5).  Read the moved figure off the outcome
+            (:attr:`PaymentOutcome.cash`), which answers for both.
         source: The caller's record, carried through untouched.  The settled
             transfer's :class:`~app.services.transfer_legs.TransferLeg` for a
             recorded payment, a ``PlannedPayment`` for a projected one.
@@ -234,9 +273,14 @@ class LoanCashEvent:
     """
 
     on_date: date
-    cash: Decimal
+    cash: Decimal | ClosingCash
     source: object
     visible_on: date
+
+    @property
+    def closes(self) -> bool:
+        """Whether this payment closes the loan rather than paying a stated figure."""
+        return self.cash is ClosingCash.WHAT_CLOSES_THE_LOAN
 
 
 @dataclass(frozen=True)
@@ -463,7 +507,19 @@ class PaymentOutcome:
 
     @property
     def cash(self) -> Decimal:
-        """The cash this payment moved (:attr:`LoanCashEvent.cash`)."""
+        """The cash this payment moved.
+
+        A stated payment's own figure (:attr:`LoanCashEvent.cash`).  A CLOSING
+        payment states none (:class:`ClosingCash`): the replay resolved it as
+        it walked, so its cash is what its allocation divided, the four parts
+        of :attr:`split` -- the balance it closed, the interest and escrow
+        standing, and an ``excess`` that is ``0.00`` by construction.
+        """
+        if self.event.closes:
+            return (
+                self.split.interest + self.split.escrow
+                + self.split.principal + self.split.excess
+            )
         return self.event.cash
 
     @property
@@ -828,6 +884,11 @@ def replay_loan_events(
     that follows is a refund in full, which the allocator's own closed-loan
     arm answers.
 
+    A CLOSING payment (:class:`ClosingCash`) is allocated ``balance +
+    standing interest + standing escrow``, so its principal is the whole
+    balance, its excess ``0.00`` and the loan closes at ``0.00``; on a loan
+    already closed nothing stands, so it pays nothing.
+
     **That skip is a TRANSCRIPTION of the fold it replaced, and no current test
     distinguishes it** -- an adversarial review deleted the skip and all 101
     tests in the loan files stayed green, which is worth recording rather than
@@ -859,7 +920,8 @@ def replay_loan_events(
             money not yet paid, so it never reprices a recorded month -- and a
             month skipped behind a later settled payment is a RECORDED month
             since plan step recurrence:R16-c-2 (its charge walks with the
-            facts), so an overdue catch-up carries no hypothetical extra.
+            facts), so an overdue catch-up carries no hypothetical extra.  A
+            closing payment carries none either: it pays off the loan.
 
     Returns:
         The :class:`LoanReplay`.
@@ -892,7 +954,12 @@ def replay_loan_events(
             due = due.plus(_accrued(event, balance, extra_per_period, boundary))
         elif kind in (_PAYMENT, _PROJECTION):
             split = apply_payment_cash(
-                event.cash + due.extra, balance, due.interest, due.escrow,
+                # A closing payment pays the balance and every charge
+                # standing, arrears included, and no hypothetical extra:
+                # nothing is left for it to pay (see the module docstring).
+                balance + due.interest + due.escrow
+                if event.closes else event.cash + due.extra,
+                balance, due.interest, due.escrow,
             )
             balance = split.balance_after
             due = _NOTHING_DUE

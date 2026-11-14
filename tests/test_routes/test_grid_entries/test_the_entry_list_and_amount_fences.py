@@ -138,6 +138,9 @@ class TestTheAmountFenceIsGone:
         "grid/_mobile_card_single.html",
         "grid/_transaction_quick_edit.html",
         "grid/_transaction_full_edit.html",
+        # The full edit's delete control, moved out of it whole (plan task
+        # plan#3957): its confirm question reads ``budgets`` and ``settled``.
+        "grid/_transaction_full_edit_delete.html",
     )
 
     @staticmethod

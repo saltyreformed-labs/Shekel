@@ -1,5 +1,5 @@
 {% from "_money_macros.html" import money %}
-{% from "_withdrawal_macros.html" import frees_lines, page_refusal_banner, posted_ids, shown_line_ids %}
+{% from "_withdrawal_macros.html" import frees_lines, page_refusal_banner, shown_line_ids %}
 {# Anchored action card -- renders inside the #txn-popover container
    (rebuild decision 2, docs/design/grid_audit.md): ONE card replaces
    the old three-tier edit system.  Layout, top to bottom: header +
@@ -899,102 +899,7 @@
   </div>
   {% endif %}
 
-  {# ── Delete this row ─────────────────────────────────────────────────
-     Plan step ``bank_import:X-gb``, finding **N-344**: the route
-     ``DELETE /transactions/<id>`` shipped with full teardown logic and a
-     census of every template and script found ZERO callers, so a row the
-     app should never have held could not be removed from the app at all --
-     46 envelope shells one YTD statement pass minted, among them.
-
-     LAST on the card and outside the form, both deliberately.  Last, because
-     the frequent status actions are at the top and a destructive control does
-     not belong beside Mark Paid; outside, because htmx would otherwise send
-     the edit form's every field with the DELETE, and because a button inside
-     a form is one Enter key from being its default submit.
-
-     ``hx-confirm`` rather than ``data-confirm``: this is an htmx request, not
-     a form submit.  The ``htmx:confirm`` handler in app.js routes the question
-     through the project's own destructive-action modal, so this dialog and the
-     statement screen's Undo look the same.
-
-     Refusals are the SERVICE's sentence (``transaction_service.deletion_refusal``,
-     resolved in the route), and ``delete_transaction`` re-asks the same
-     function -- so what this card withholds and what the door refuses cannot
-     drift.  The default keeps legacy render sites without the context
-     permissive, exactly as ``amount_correctable`` above does. #}
-  {% set refusal = delete_refusal if delete_refusal is defined else none %}
-  {#- REQUIRED, not defaulted like the flags above: the dialog's permanence
-      sentence reads ``preview.soft`` (plan step balance:X-bi-7a), and a
-      renderer that omitted it would otherwise render "This cannot be undone."
-      over a recurring row.  A missing value now fails the render. -#}
-  {% set preview = delete_preview %}
-  {% set withdraws = preview.withdrawn %}
-  <hr class="my-2">
-  {% if refusal %}
-  <div class="txn-card-meta">
-    <i class="bi bi-shield-lock"></i> {{ refusal }}
-  </div>
-  {% else %}
-  {#- The dialog is built ONCE, here, so the sentence the owner reads and the
-      sentence a test asserts are the same string.  Every figure in it comes
-      from a map the card already renders from (``settled`` for what the row
-      RECORDS, ``budgets`` for what it still plans), so the dialog cannot show
-      a number this card contradicts two inches higher.  Which PERMANENCE it
-      promises is the service's own answer (``preview.soft``, the arm
-      ``delete_transaction`` will take -- keyed on ``Transaction.recurs``
-      since plan step balance:X-bi-7a) rather than a second reading of the
-      row's link here, so the dialog and the door cannot part -- and so is
-      whether the ITEM goes with the row (``preview.disposes_definition``,
-      plan step balance:X-bi-7b: a one-off's definition goes with its last
-      row, R-BAL27), the same answer step 5 of the delete acts on.
-
-      **``&quot;`` and not a literal quote**, the same spelling
-      ``accounts/statements.html`` uses for the same reason.  A ``{% set %}``
-      block is captured as Markup, so ``{{ txn.name }}`` inside it IS escaped
-      -- but a literal ``"`` typed here is template text, and it CLOSES the
-      ``hx-confirm`` attribute: the first draft of this block rendered
-      ``hx-confirm="Delete "`` with the rest of the sentence parsed as three
-      more attributes on the button, so the dialog asked "Delete" and named
-      neither the figure nor the bank lines. -#}
-  {%- set recorded = settled[txn.id] -%}
-  {#- PURCHASES only: the row's own payment record (``covers_settlement``) is
-      not a purchase filed under it, and calling it one misstated a Paid bill
-      (CC-5-4a-4's second review).  On a settled row the "Your books record"
-      sentence below names its money; a row reverted to Projected keeps its
-      record un-dated (ruling R-BAL61), which the cash fold reads in neither
-      tier, so no sentence here names it (CC-5-4a-4's third review, L1).
-      Read off the delete's own preview (``preview.purchase_ids``, the
-      ``Transaction.purchases`` reading) since ruling R-CC131: the question
-      counts the set the press is checked against, and posts it back.  Its
-      words are that ruling's picked text, "Delete Groceries and the 1
-      purchase under it?" (it read "filed under it", no ruling's words). -#}
-  {%- set purchases = preview.purchase_ids -%}
-  {#- The un-archive sentence states its exception in words (ruling R-CC112,
-      "State the condition"): un-archive restores a row of its candidate set
-      (``preview.comes_back_on_unarchive``) unless the books have moved over it
-      by then (rulings R-PC95, R-PC99), and a check made as this card opens
-      could not see a books move made after the delete. -#}
-  {%- set question -%}
-Delete &quot;{{ txn.name }}&quot;{% if purchases %} and the {{ purchases | length }} purchase{{ '' if purchases | length == 1 else 's' }} under it{% endif %}?
-{% if recorded is not none %}Your books record {{ money(recorded) }} as having {{ 'arrived in' if txn.is_income else 'left' }} your account for it.{% else %}Your balance still expects {{ money(budgets[txn.id]) }} to {{ 'arrive' if txn.is_income else 'leave' }} for it.{% endif %}
-{% if preview.paybacks %}Its CC payback{{ '' if preview.paybacks | length == 1 else 's' }} go{{ 'es' if preview.paybacks | length == 1 else '' }} with it: {% for name in preview.paybacks %}{{ name }}{{ ', ' if not loop.last }}{% endfor %}.
-{% endif %}{% if preview.soft %}This occurrence stays deleted, and the recurring transaction behind it keeps generating the others.{% if preview.comes_back_on_unarchive %} Archiving and then un-archiving that item would bring it back, empty, unless the books have moved over it by then; the un-archive names any row it keeps deleted.{% endif %}{% elif preview.disposes_definition %}This is the item's only occurrence, so the item itself goes with it. This cannot be undone.{% else %}This cannot be undone.{% endif %}
-{% if withdraws and withdraws.frees_a_line %}It also {{ frees_lines(withdraws) }}.{% if withdraws.kept_rows %} {{ withdraws.kept_rows }} row{{ '' if withdraws.kept_rows == 1 else 's' }} {{ 'that match' if withdraws.matches == 1 else 'those matches' }} created stay{{ 's' if withdraws.kept_rows == 1 else '' }} in your books.{% endif %}{% endif %}
-  {%- endset -%}
-  <button type="button" class="btn btn-sm btn-outline-danger w-100"
-          hx-delete="{{ url_for('transactions.delete_transaction', txn_id=txn.id) }}"
-          hx-target="#txn-cell-{{ txn.id }}"
-          hx-swap="innerHTML"
-          hx-disabled-elt="this"
-          hx-confirm="{{ question | trim }}"
-          {#- What the dialog NAMED, sent back with the press (htmx sends a
-              DELETE's values as its query string): the lines, from the same
-              `withdraws` its clause prints (ruling R-CC127), and the
-              purchases its question counts (ruling R-CC131, "Refuse and
-              redraw"). #}
-          hx-vals='{"shown_lines": "{{ shown_line_ids(withdraws) }}", "shown_purchases": "{{ posted_ids(purchases) }}"}'
-          aria-label="Delete {{ txn.name }}">
-    <i class="bi bi-trash"></i> Delete this row
-  </button>
-  {% endif %}
+  {#- The delete control, last on the card and outside the form:
+      ``grid/_transaction_full_edit_delete.html`` (plan task plan#3957). -#}
+  {% include "grid/_transaction_full_edit_delete.html" %}
 </div>

@@ -12,9 +12,9 @@ double-resolution DRY item is retained as D1. All findings live in
 
 **STATUS (2026-07-12): H1 / H2 / H3 + D1 are FIXED on `dev`** by the date-anchored rebuild (commits
 1 `247f8321` + 2 `4e6e63c2`); the reproductions below are now the passing regression tests in
-`tests/test_routes/test_property.py`. The rebuild is NOT yet PR'd/shipped -- 2 owed tests + the
-Fable visual (commit 5) remain. Live status, commit ledger, and the owed-test recipe:
-`docs/plans/historical/implementation_plan_property_equity_chart_rebuild.md`.
+`tests/test_routes/test_property/test_the_equity_chart_producer.py`. The rebuild is NOT yet
+PR'd/shipped -- 2 owed tests + the Fable visual (commit 5) remain. Live status, commit ledger, and
+the owed-test recipe: `docs/plans/historical/implementation_plan_property_equity_chart_rebuild.md`.
 
 ## Root cause shared by H1-H3
 

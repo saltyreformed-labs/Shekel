@@ -12,7 +12,7 @@ deploy's cash resync re-books the transfers through the go-forward writer
 (R-BAL98), graded in
 ``test_posting_service/test_the_deploy_resync.py::TestTheDeployResyncReBooksTheLegacyShape``,
 and the unlinked splits already sit at their key, so the deploy's loan hook
-writes nothing over them (graded in ``test_loan_posting_service.py``).
+writes nothing over them (graded in the package ``test_loan_posting_service/``).
 
 The migration is already at HEAD when these tests run (the template builder
 upgraded it base->head), so the per-worker DB shows the post-migration

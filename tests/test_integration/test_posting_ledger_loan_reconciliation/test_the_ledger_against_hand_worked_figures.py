@@ -98,9 +98,10 @@ def _make_tracking_start_loan(
 def _add_rate_change(loan, effective_date, rate):
     """Append a :class:`RateHistory` rate change (an ARM recast) to a loan.
 
-    Mirrors the unit suite's helper (``test_loan_posting_service._add_rate_change``)
-    so both suites drive an ARM step the same way: the rate feed the walk reads
-    picks it up, so the step governs the installment due on its day.
+    Mirrors the unit suite's helper
+    (``test_loan_posting_service._helpers._add_rate_change``) so both suites
+    drive an ARM step the same way: the rate feed the walk reads picks it up,
+    so the step governs the installment due on its day.
     """
     _db.session.add(RateHistory(
         account_id=loan.id, effective_date=effective_date, interest_rate=rate,
